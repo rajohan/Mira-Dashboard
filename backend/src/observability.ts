@@ -26,7 +26,10 @@ function pragmaNumber(name: "freelist_count" | "page_count" | "page_size"): numb
     return Number(row[name] ?? 0);
 }
 
-/** Samples SQLite health and storage without exposing SQL text or database paths. */
+/**
+ * Samples SQLite health and storage without exposing SQL text or database paths.
+ * @returns Database metrics value.
+ */
 export function getDatabaseMetrics(): DatabaseMetrics {
     const databasePath = getMiraDatabasePath();
     let isAvailable = false;
@@ -61,7 +64,10 @@ export function getDatabaseMetrics(): DatabaseMetrics {
     };
 }
 
-/** Collects the authenticated application-level observability snapshot. */
+/**
+ * Collects the authenticated application-level observability snapshot.
+ * @returns App observability metrics value.
+ */
 export async function getAppObservabilityMetrics(): Promise<AppObservabilityMetrics> {
     const runtime = getRuntimeMetrics();
     return {

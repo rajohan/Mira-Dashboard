@@ -1,8 +1,7 @@
+import { afterEach, describe, expect, it, jest } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
 import {
@@ -38,6 +37,7 @@ import {
     updateScheduledJob,
     upsertScheduledJob,
 } from "../src/services/scheduledJobs.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const testJobIds = new Set<string>();
 const testExecutionIds = new Set<string>();
@@ -142,7 +142,7 @@ describe("persistent job execution queue", () => {
     it("warns once when an orphaned cutover has no recovery handler", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
         const deploymentId = createVerifyingDeployment(startedAt);
-        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             expect(
                 reconcileOrphanedDeploymentCutovers(
@@ -158,20 +158,28 @@ describe("persistent job execution queue", () => {
                     undefined
                 )
             ).toBe(0);
-            expect(warning).toHaveBeenCalledTimes(1);
-            expect(warning).toHaveBeenCalledWith(
-                "[ScheduledJobs] Cannot recover orphaned deployment cutovers because no recovery handler is registered",
-                { cutoverIds: [deploymentId] }
-            );
+            expect(
+                structuredLogs.entries.filter(
+                    (entry) =>
+                        entry.event ===
+                        "scheduled_jobs.deployment_recovery_handler_missing"
+                )
+            ).toEqual([
+                expect.objectContaining({
+                    component: "scheduled-jobs",
+                    cutoverIds: [deploymentId],
+                    level: "warn",
+                }),
+            ]);
         } finally {
-            warning.mockRestore();
+            structuredLogs.stop();
         }
     });
 
-    it("terminalizes an inactive legacy cutover without a persisted full SHA", () => {
+    it("terminalizes an inactive cutover without a persisted full SHA", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
         const deploymentId = createVerifyingDeployment(startedAt, "c0ffee12");
-        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         const recovery = jest.fn(() => true);
         try {
             expect(
@@ -182,22 +190,24 @@ describe("persistent job execution queue", () => {
                 )
             ).toBe(1);
             expect(recovery).not.toHaveBeenCalled();
-            expect(warning).toHaveBeenCalledWith(
-                "[ScheduledJobs] Terminalized unrecoverable legacy deployment cutover",
-                {
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
                     candidateCommit: "c0ffee12",
+                    component: "scheduled-jobs",
                     cutoverId: deploymentId,
-                }
+                    event: "scheduled_jobs.deployment_cutover_terminalized",
+                    level: "warn",
+                })
             );
         } finally {
-            warning.mockRestore();
+            structuredLogs.stop();
         }
         expect(
             database
                 .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
                 .get(deploymentId)
         ).toEqual({
-            note: "Interrupted legacy deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
+            note: "Interrupted deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
             status: "failed",
         });
         expect(
@@ -262,7 +272,7 @@ describe("persistent job execution queue", () => {
             )
         ).toBe(0);
         expect(recovery).not.toHaveBeenCalled();
-        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             expect(
                 reconcileOrphanedDeploymentCutovers(
@@ -273,12 +283,19 @@ describe("persistent job execution queue", () => {
                     recovery
                 )
             ).toBe(1);
-            expect(warning).toHaveBeenCalledWith(
-                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
-                expect.any(Error)
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "scheduled-jobs",
+                    cutoverId: deploymentId,
+                    error: expect.objectContaining({
+                        message: "systemd unavailable",
+                    }),
+                    event: "scheduled_jobs.deployment_guardian_inspection_failed",
+                    level: "warn",
+                })
             );
         } finally {
-            warning.mockRestore();
+            structuredLogs.stop();
         }
         expect(recovery).toHaveBeenCalledWith({
             candidateCommit: "c".repeat(40),
@@ -310,7 +327,7 @@ describe("persistent job execution queue", () => {
         createVerifyingDeployment(startedAt);
         const originalPath = process.env.PATH;
         let fakeBin: string | undefined;
-        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             fakeBin = mkdtempSync(path.join(tmpdir(), "mira-systemctl-test-"));
             const systemctl = path.join(fakeBin, "systemctl");
@@ -332,14 +349,16 @@ printf 'LoadState=loaded\nActiveState=active\n'
                 )
             ).toBe(0);
             expect(recovery).not.toHaveBeenCalled();
-            expect(warning).toHaveBeenCalledWith(
-                "[ScheduledJobs] systemctl show reported diagnostics",
+            expect(structuredLogs.entries).toContainEqual(
                 expect.objectContaining({
+                    component: "scheduled-jobs",
+                    event: "scheduled_jobs.systemd_unit_diagnostics",
+                    level: "warn",
                     stderr: "benign diagnostic",
                 })
             );
         } finally {
-            warning.mockRestore();
+            structuredLogs.stop();
             if (originalPath === undefined) {
                 delete process.env.PATH;
             } else {
@@ -353,9 +372,11 @@ printf 'LoadState=loaded\nActiveState=active\n'
 
     it("persists worker progress and structured action failures", async () => {
         const actionKey = `test.worker-${Bun.randomUUIDv7()}`;
-        registerScheduledJobAction(actionKey, async (_job, _signal, context) => {
-            context.updateOutput({ phase: "streaming" });
-            throw new ScheduledJobActionError("expected failure", { isOk: false });
+        registerScheduledJobAction(actionKey, (_job, _signal, context) => {
+            return Promise.try(() => {
+                context.updateOutput({ phase: "streaming" });
+                throw new ScheduledJobActionError("expected failure", { isOk: false });
+            });
         });
         const queued = enqueueJobExecution({
             actionKey,
@@ -376,7 +397,7 @@ printf 'LoadState=loaded\nActiveState=active\n'
         });
     });
 
-    it("cancels queued synchronous work when its observer times out", async () => {
+    it("cancels queued synchronous work when its observer times out", () => {
         const queued = enqueueJobExecution({
             actionKey: `test.wait-timeout-${Bun.randomUUIDv7()}`,
             displayName: "Timed out synchronous wait",
@@ -385,7 +406,7 @@ printf 'LoadState=loaded\nActiveState=active\n'
         });
         testExecutionIds.add(queued.id);
 
-        await expect(
+        expect(
             waitForJobExecution(queued.id, {
                 pollIntervalMs: 10,
                 timeoutMs: 0,
@@ -400,7 +421,7 @@ printf 'LoadState=loaded\nActiveState=active\n'
         });
     });
 
-    it("keeps shared queued work when its observer times out", async () => {
+    it("keeps shared queued work when its observer times out", () => {
         const queued = enqueueJobExecution({
             actionKey: `test.shared-wait-timeout-${Bun.randomUUIDv7()}`,
             displayName: "Shared timed out wait",
@@ -409,7 +430,7 @@ printf 'LoadState=loaded\nActiveState=active\n'
         });
         testExecutionIds.add(queued.id);
 
-        await expect(
+        expect(
             waitForJobExecution(queued.id, {
                 cancelQueuedOnTimeout: false,
                 pollIntervalMs: 10,
@@ -781,8 +802,8 @@ printf 'LoadState=loaded\nActiveState=active\n'
         ).toBeNull();
     });
 
-    it("fails legacy running scheduled runs without an execution lease", () => {
-        const jobId = createScheduledTestJob("host-heavy", "Legacy running job");
+    it("fails orphaned running scheduled runs without an execution lease", () => {
+        const jobId = createScheduledTestJob("host-heavy", "Orphaned running job");
         const run = database
             .prepare(
                 `INSERT INTO scheduled_job_runs (

@@ -2,8 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { json, readJson } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import type {
+    FileContent,
+    FileEntry,
+    FileWriteResponse,
+} from "../../../contracts/files.ts";
+import { parseFileWriteRequest } from "../../../contracts/files.ts";
+import { json } from "../http.ts";
 import {
     guardedPath,
     openReadNoFollowNonblockingGuarded,
@@ -11,6 +16,7 @@ import {
     writeTextNoFollowAnchoredGuarded,
 } from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
 import {
     CONFIG_REDACTION_SENTINEL,
     redactConfigJsonText,
@@ -68,15 +74,8 @@ function configPathFromRequest(request: Request): string | undefined {
     }
 }
 
-function listConfigFiles(root: string) {
-    const files: Array<{
-        modified: string;
-        name: string;
-        path: string;
-        relativePath: string;
-        size: number;
-        type: "file";
-    }> = [];
+function listConfigFiles(root: string): FileEntry[] {
+    const files: FileEntry[] = [];
     let realRoot: string;
     try {
         realRoot = fs.realpathSync(root);
@@ -139,13 +138,25 @@ async function validateOpenFileWithinRoot(
 function guardedOpenErrorResponse(error: unknown): Response {
     const code = (error as NodeJS.ErrnoException).code;
     if (["ENOENT", "ENOTDIR"].includes(code ?? "")) {
-        return json({ error: "File not found" }, { status: 404 });
+        return routeFailureResponse({
+            context: "config-file",
+            message: "File not found",
+            status: 404,
+        });
     }
     if (code === "ENXIO") {
-        return json({ error: "Path is not a regular file" }, { status: 400 });
+        return routeFailureResponse({
+            context: "config-file",
+            message: "Path is not a regular file",
+            status: 400,
+        });
     }
     if (["ELOOP", "EACCES", "EPERM"].includes(code ?? "")) {
-        return json({ error: "Access denied" }, { status: 403 });
+        return routeFailureResponse({
+            context: "config-file",
+            message: "Access denied",
+            status: 403,
+        });
     }
     throw error;
 }
@@ -155,10 +166,11 @@ export const configFileRoutes = {
         GET: () => {
             const root = openclawRoot();
             if (!root) {
-                return json(
-                    { error: "Server misconfigured: HOME is not configured" },
-                    { status: 500 }
-                );
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Server misconfigured: HOME is not configured",
+                    status: 500,
+                });
             }
             return json({ files: listConfigFiles(root), root });
         },
@@ -168,37 +180,59 @@ export const configFileRoutes = {
         GET: async (request: Request) => {
             const relativePath = configPathFromRequest(request);
             if (relativePath === undefined) {
-                return json({ error: "Malformed config file path" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Malformed config file path",
+                    status: 400,
+                });
             }
             const root = openclawRoot();
             if (!root) {
-                return json(
-                    { error: "Server misconfigured: HOME is not configured" },
-                    { status: 500 }
-                );
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Server misconfigured: HOME is not configured",
+                    status: 500,
+                });
             }
             const fullPath = configTarget(relativePath, root);
             if (!fullPath) {
-                return json(
-                    { error: "Access denied: file not in allowed list" },
-                    { status: 403 }
-                );
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Access denied: file not in allowed list",
+                    status: 403,
+                });
             }
             const lexicalPath = path.resolve(root, relativePath);
             try {
                 if (fs.lstatSync(lexicalPath).isSymbolicLink()) {
-                    return json({ error: "File not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "config-file",
+                        message: "File not found",
+                        status: 404,
+                    });
                 }
             } catch {
-                return json({ error: "File not found" }, { status: 404 });
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "File not found",
+                    status: 404,
+                });
             }
             const realFullPath = fs.realpathSync(fullPath);
             const relativeRealPath = path.relative(root, realFullPath);
             if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
-                return json({ error: "Access denied" }, { status: 403 });
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Access denied",
+                    status: 403,
+                });
             }
             if (!fs.statSync(realFullPath).isFile()) {
-                return json({ error: "Access denied" }, { status: 403 });
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Access denied",
+                    status: 403,
+                });
             }
             let file: fs.promises.FileHandle;
             try {
@@ -217,7 +251,11 @@ export const configFileRoutes = {
                     realFullPath
                 );
                 if (!openedStat) {
-                    return json({ error: "Access denied" }, { status: 403 });
+                    return routeFailureResponse({
+                        context: "config-file",
+                        message: "Access denied",
+                        status: 403,
+                    });
                 }
                 stat = openedStat;
                 buffer = readFromOpenFile(file.fd, Math.min(stat.size, MAX_FILE_SIZE));
@@ -231,12 +269,11 @@ export const configFileRoutes = {
                 new URL(request.url).searchParams.get("reveal") !== "1";
             const responseContent =
                 shouldMask && !isBinary ? redactConfigJsonText(content) : content;
-            const maskingError =
-                shouldMask && responseContent === undefined
-                    ? stat.size > MAX_FILE_SIZE
-                        ? "truncated_json"
-                        : "invalid_json"
-                    : undefined;
+            let maskingError: "invalid_json" | "truncated_json" | undefined;
+            if (shouldMask && responseContent === undefined) {
+                maskingError =
+                    stat.size > MAX_FILE_SIZE ? "truncated_json" : "invalid_json";
+            }
             const response = json({
                 content: isBinary ? "[Binary file]" : (responseContent ?? ""),
                 isBinary,
@@ -247,7 +284,7 @@ export const configFileRoutes = {
                 relativePath,
                 size: stat.size,
                 truncated: stat.size > MAX_FILE_SIZE || undefined,
-            });
+            } satisfies FileContent);
             if (relativePath === "openclaw.json" && !shouldMask) {
                 response.headers.set("Cache-Control", "no-store");
             }
@@ -257,55 +294,57 @@ export const configFileRoutes = {
         PUT: async (request: Request) => {
             const relativePath = configPathFromRequest(request);
             if (relativePath === undefined) {
-                return json({ error: "Malformed config file path" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Malformed config file path",
+                    status: 400,
+                });
             }
             if (!ALLOWED_CONFIG_FILES.has(relativePath)) {
-                return json(
-                    { error: "Access denied: file not in allowed list" },
-                    { status: 403 }
-                );
-            }
-            let body: { content?: unknown };
-            try {
-                body = await readJson<{ content?: unknown }>(request, {
-                    maxBytes: CONFIG_WRITE_BODY_LIMIT,
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Access denied: file not in allowed list",
+                    status: 403,
                 });
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Invalid JSON") },
-                    { status: httpStatusCode(error) }
-                );
             }
-            if (!body || typeof body !== "object" || Array.isArray(body)) {
-                return json({ error: "Request body must be an object" }, { status: 400 });
-            }
-            if (body.content === undefined)
-                return json({ error: "Content required" }, { status: 400 });
-            if (
-                typeof body.content !== "string" ||
-                Buffer.byteLength(body.content, "utf8") > MAX_CONFIG_WRITE_SIZE
-            ) {
-                return json({ error: "Invalid content" }, { status: 400 });
+            const body = await readApiJsonOrError(request, parseFileWriteRequest, {
+                code: "invalid_config_file_request",
+                context: "config-file.write",
+                maxBytes: CONFIG_WRITE_BODY_LIMIT,
+                message: "Invalid config file request",
+            });
+            if (body instanceof Response) return body;
+            if (Buffer.byteLength(body.content, "utf8") > MAX_CONFIG_WRITE_SIZE) {
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Invalid content",
+                    status: 400,
+                });
             }
             if (body.content.includes(CONFIG_REDACTION_SENTINEL)) {
-                return json(
-                    {
-                        error: "Masked config cannot be saved; reveal and verify the file first",
-                    },
-                    { status: 400 }
-                );
+                return routeFailureResponse({
+                    context: "config-file",
+                    message:
+                        "Masked config cannot be saved; reveal and verify the file first",
+                    status: 400,
+                });
             }
             const root = openclawRoot();
             if (!root) {
-                return json(
-                    { error: "Server misconfigured: HOME is not configured" },
-                    { status: 500 }
-                );
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Server misconfigured: HOME is not configured",
+                    status: 500,
+                });
             }
             const lexicalTarget = path.resolve(root, relativePath);
             try {
                 if (fs.lstatSync(lexicalTarget).isSymbolicLink()) {
-                    return json({ error: "Access denied" }, { status: 403 });
+                    return routeFailureResponse({
+                        context: "config-file",
+                        message: "Access denied",
+                        status: 403,
+                    });
                 }
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -314,39 +353,51 @@ export const configFileRoutes = {
             }
             const target = prepareSafeWriteTargetWithinRoot(lexicalTarget, root);
             if (!target) {
-                return json(
-                    { error: "Access denied: path outside allowed root" },
-                    { status: 403 }
-                );
+                return routeFailureResponse({
+                    context: "config-file",
+                    message: "Access denied: path outside allowed root",
+                    status: 403,
+                });
             }
             let existingMode: number | undefined;
             try {
                 if (fs.existsSync(target)) {
                     const stat = fs.lstatSync(target);
                     if (stat.isSymbolicLink()) {
-                        return json({ error: "Access denied" }, { status: 403 });
+                        return routeFailureResponse({
+                            context: "config-file",
+                            message: "Access denied",
+                            status: 403,
+                        });
                     }
                     if (stat.isDirectory()) {
-                        return json(
-                            { error: "Path is a directory, not a file" },
-                            { status: 400 }
-                        );
+                        return routeFailureResponse({
+                            context: "config-file",
+                            message: "Path is a directory, not a file",
+                            status: 400,
+                        });
                     }
                     if (stat.nlink > 1) {
-                        return json(
-                            { error: "Hard-linked files are not allowed" },
-                            { status: 403 }
-                        );
+                        return routeFailureResponse({
+                            context: "config-file",
+                            message: "Hard-linked files are not allowed",
+                            status: 403,
+                        });
                     }
                     existingMode = stat.mode & 0o777;
                     if (stat.size > MAX_CONFIG_WRITE_SIZE) {
-                        return json(
-                            { error: "Existing file is too large to back up" },
-                            { status: 413 }
-                        );
+                        return routeFailureResponse({
+                            context: "config-file",
+                            message: "Existing file is too large to back up",
+                            status: 413,
+                        });
                     }
                     if (!fs.statSync(target).isFile()) {
-                        return json({ error: "Access denied" }, { status: 403 });
+                        return routeFailureResponse({
+                            context: "config-file",
+                            message: "Access denied",
+                            status: 403,
+                        });
                     }
                     let file: fs.promises.FileHandle;
                     try {
@@ -364,13 +415,18 @@ export const configFileRoutes = {
                             target
                         );
                         if (!openedStat) {
-                            return json({ error: "Access denied" }, { status: 403 });
+                            return routeFailureResponse({
+                                context: "config-file",
+                                message: "Access denied",
+                                status: 403,
+                            });
                         }
                         if (openedStat.size > MAX_CONFIG_WRITE_SIZE) {
-                            return json(
-                                { error: "Existing file is too large to back up" },
-                                { status: 413 }
-                            );
+                            return routeFailureResponse({
+                                context: "config-file",
+                                message: "Existing file is too large to back up",
+                                status: 413,
+                            });
                         }
                         backupContent = readFromOpenFile(
                             file.fd,
@@ -394,7 +450,11 @@ export const configFileRoutes = {
                 );
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code === "EACCES") {
-                    return json({ error: "Access denied" }, { status: 403 });
+                    return routeFailureResponse({
+                        context: "config-file",
+                        message: "Access denied",
+                        status: 403,
+                    });
                 }
                 throw error;
             }
@@ -405,7 +465,7 @@ export const configFileRoutes = {
                 path: `config:${relativePath}`,
                 relativePath,
                 size: stat.size,
-            });
+            } satisfies FileWriteResponse);
         },
     },
 } as const;

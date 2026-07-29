@@ -2,7 +2,12 @@ export interface HttpStatusError extends Error {
     statusCode?: number;
 }
 
-/** Returns a stable message for unknown caught values. */
+/**
+ * Returns a stable message for unknown caught values.
+ * @param error Error to inspect.
+ * @param fallback Fallback value.
+ * @returns a stable message for unknown caught values.
+ */
 export function errorMessage(error: unknown, fallback: string): string {
     if (!(error instanceof Error)) {
         return fallback;
@@ -10,7 +15,7 @@ export function errorMessage(error: unknown, fallback: string): string {
     return error.message.trim() || fallback;
 }
 
-export function httpStatusCode(error: unknown): number {
+export function httpStatusCode(error?: unknown): number {
     if (typeof error === "object" && error !== null) {
         const statusCode = (error as HttpStatusError).statusCode;
         if (

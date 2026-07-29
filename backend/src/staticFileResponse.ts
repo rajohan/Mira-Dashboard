@@ -133,6 +133,7 @@ function isNotModified(request: Request, entityTag: string, modifiedAt: Date): b
 /**
  * Serves a verified static file with conditional requests and negotiated
  * precompressed representations.
+ * @returns Promise resolving to the static file response result.
  */
 export async function staticFileResponse(
     request: Request,

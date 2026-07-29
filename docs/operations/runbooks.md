@@ -118,8 +118,7 @@ sqlite3 "$db_path" \
 ```
 
 Do not print token values. A current row must contain a versioned encrypted
-envelope; startup automatically upgrades a legacy plaintext row when
-`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` is available.
+envelope. Unsupported plaintext or malformed values fail startup closed.
 
 ## Provision Or Rotate OpenClaw Dashboard Callers
 

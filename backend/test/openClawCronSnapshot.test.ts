@@ -7,19 +7,12 @@ import {
 } from "../src/services/openClawCronSnapshot.ts";
 
 describe("OpenClaw cron snapshot", () => {
-    it("normalizes jobs before items and accepts a healthy empty list", () => {
+    it("normalizes the current Gateway jobs response and accepts an empty list", () => {
         expect(
             normalizeOpenClawCronJobs<{ id: string }>({
-                items: [{ id: "item" }],
                 jobs: [{ id: "job" }],
             })
         ).toEqual([{ id: "job" }]);
-        expect(
-            normalizeOpenClawCronJobs<{ id: string }>({
-                items: [{ id: "item" }],
-                jobs: "unavailable",
-            })
-        ).toEqual([{ id: "item" }]);
         expect(normalizeOpenClawCronJobs({ jobs: [] })).toEqual([]);
     });
 
@@ -29,7 +22,7 @@ describe("OpenClaw cron snapshot", () => {
             [],
             {},
             { jobs: [undefined] },
-            { items: [[]] },
+            { items: [{ id: "obsolete" }] },
             { jobs: ["invalid"] },
         ]) {
             expect(() => normalizeOpenClawCronJobs(payload)).toThrow(
@@ -38,10 +31,10 @@ describe("OpenClaw cron snapshot", () => {
         }
     });
 
-    it("records malformed Gateway responses as snapshot load failures", async () => {
+    it("records malformed Gateway responses as snapshot load failures", () => {
         jest.spyOn(gateway, "request").mockResolvedValue({});
 
-        await expect(getOpenClawCronListSnapshot()).rejects.toThrow(
+        expect(getOpenClawCronListSnapshot()).rejects.toThrow(
             "Invalid OpenClaw cron list response"
         );
     });

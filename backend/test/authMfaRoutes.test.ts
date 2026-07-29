@@ -1,12 +1,14 @@
+import { afterEach, describe, expect, it } from "bun:test";
+
 import type {
     AuthenticationResponseJSON,
     PublicKeyCredentialRequestOptionsJSON,
     RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import type { Server } from "bun";
-import { afterEach, describe, expect, it, jest } from "bun:test";
 import { generate } from "otplib";
 
+import type { WebAuthnCredential } from "../../contracts/accountSecurity.ts";
 import {
     createSession,
     createUser,
@@ -26,9 +28,9 @@ import {
 import {
     confirmTotpEnrollment,
     createTotpEnrollment,
-    type WebAuthnFactorSummary,
 } from "../src/services/multiFactorAuth.ts";
 import type { WebAuthnChallengeContext } from "../src/services/webAuthn.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const USER_PREFIX = "auth-route-test-";
 const originalSecretEncryptionKey = process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;
@@ -157,7 +159,7 @@ function assertionOptions(): PublicKeyCredentialRequestOptionsJSON {
     };
 }
 
-function credentialSummary(id: string): WebAuthnFactorSummary {
+function credentialSummary(id: string): WebAuthnCredential {
     return {
         backedUp: false,
         createdAt: "2026-07-24T12:00:00.000Z",
@@ -193,7 +195,7 @@ function insertCredential(userId: number, id: string): void {
 }
 
 async function enrollTotp(userId: number, username: string) {
-    const enrollment = await createTotpEnrollment(userId, username, "Authenticator app");
+    const enrollment = createTotpEnrollment(userId, username, "Authenticator app");
     const code = await generate({
         algorithm: "sha1",
         digits: 6,
@@ -242,7 +244,7 @@ describe("MFA authentication routes", () => {
             server
         );
         expect(firstStep.status).toBe(202);
-        await expect(firstStep.json()).resolves.toMatchObject({
+        expect(firstStep.json()).resolves.toMatchObject({
             authenticated: false,
             methods: ["totp", "recovery"],
             mfaRequired: true,
@@ -286,7 +288,7 @@ describe("MFA authentication routes", () => {
             server
         );
         expect(completed.status).toBe(200);
-        await expect(completed.json()).resolves.toMatchObject({
+        expect(completed.json()).resolves.toMatchObject({
             authenticated: true,
             mfaRequired: false,
             user: { id: user.id, username: user.username },
@@ -415,15 +417,19 @@ describe("MFA authentication routes", () => {
 
         const contexts: WebAuthnChallengeContext[] = [];
         const routes = createAuthRoutes({
-            createAuthenticationOptions: async (context) => {
-                contexts.push(context);
-                return assertionOptions();
+            createAuthenticationOptions: (context) => {
+                return Promise.try(() => {
+                    contexts.push(context);
+                    return assertionOptions();
+                });
             },
-            verifyAuthentication: async (context, response) => {
-                contexts.push(context);
-                return response.id === "credential_route_login"
-                    ? credentialSummary(response.id)
-                    : undefined;
+            verifyAuthentication: (context, response) => {
+                return Promise.try(() => {
+                    contexts.push(context);
+                    return response.id === "credential_route_login"
+                        ? credentialSummary(response.id)
+                        : undefined;
+                });
             },
         });
         const firstStep = await routes["/api/auth/login"].POST(
@@ -436,7 +442,7 @@ describe("MFA authentication routes", () => {
             server
         );
         const pending = pendingCookie(firstStep);
-        await expect(firstStep.json()).resolves.toMatchObject({
+        expect(firstStep.json()).resolves.toMatchObject({
             methods: ["webauthn"],
         });
 
@@ -448,7 +454,7 @@ describe("MFA authentication routes", () => {
             server
         );
         expect(options.status).toBe(200);
-        await expect(options.json()).resolves.toEqual({
+        expect(options.json()).resolves.toEqual({
             options: assertionOptions(),
         });
 
@@ -472,8 +478,10 @@ describe("MFA authentication routes", () => {
         });
 
         const unavailableRoutes = createAuthRoutes({
-            createAuthenticationOptions: async () => {
-                throw new Error("WebAuthn unavailable");
+            createAuthenticationOptions: () => {
+                return Promise.try(() => {
+                    throw new Error("WebAuthn unavailable");
+                });
             },
             verifyAuthentication: async () => {},
         });
@@ -486,7 +494,7 @@ describe("MFA authentication routes", () => {
             }),
             server
         );
-        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             const unavailable = await unavailableRoutes[
                 "/api/auth/login/webauthn/options"
@@ -498,9 +506,19 @@ describe("MFA authentication routes", () => {
                 server
             );
             expect(unavailable.status).toBe(503);
-            expect(consoleError).toHaveBeenCalled();
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "auth",
+                    error: {
+                        message: "WebAuthn unavailable",
+                        name: "Error",
+                    },
+                    event: "auth.webauthn_login_options_failed",
+                    level: "error",
+                })
+            );
         } finally {
-            consoleError.mockRestore();
+            structuredLogs.stop();
         }
     });
 });
@@ -604,7 +622,7 @@ describe("Account security routes", () => {
             server
         );
         expect(changed.status).toBe(200);
-        await expect(changed.json()).resolves.toMatchObject({
+        expect(changed.json()).resolves.toMatchObject({
             isOk: true,
             revokedSessions: 1,
         });
@@ -631,10 +649,231 @@ describe("Account security routes", () => {
             server
         );
         expect(revoked.status).toBe(200);
-        await expect(revoked.json()).resolves.toEqual({
+        expect(revoked.json()).resolves.toEqual({
             isOk: true,
             loggedOut: false,
         });
+    });
+
+    it("maps invalid factor, WebAuthn, password, and session operations", async () => {
+        configureSecurity();
+        const user = await createUser(`${USER_PREFIX}account-errors`, "initial-password");
+        const verifiedAt = new Date().toISOString();
+        const sessionToken = createSession(user.id, {
+            mfaVerifiedAt: verifiedAt,
+        });
+        const currentCookie = `mira_dashboard_session=${encodeURIComponent(
+            sessionToken
+        )}`;
+        const routes = createAccountSecurityRoutes({
+            createAuthenticationOptions: () =>
+                Promise.reject(new Error("WebAuthn verification unavailable")),
+            createRegistrationOptions: () =>
+                Promise.reject(new Error("WebAuthn enrollment unavailable")),
+            verifyAuthentication: () => Promise.resolve(undefined),
+            verifyRegistration: () => Promise.resolve(undefined),
+        });
+
+        const wrongPasswordChange = await routes[
+            "/api/account/security/password/change"
+        ].POST(
+            request("/api/account/security/password/change", {
+                body: {
+                    currentPassword: "wrong-password",
+                    newPassword: "replacement-password",
+                },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(wrongPasswordChange.status).toBe(400);
+        clearAuthenticationFailures("account-password", user.id);
+
+        const invalidTotp = await routes["/api/account/security/step-up/totp"].POST(
+            request("/api/account/security/step-up/totp", {
+                body: { code: "000000" },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(invalidTotp.status).toBe(400);
+        clearAuthenticationFailures("second-factor", user.id);
+
+        const invalidRecovery = await routes[
+            "/api/account/security/step-up/recovery"
+        ].POST(
+            request("/api/account/security/step-up/recovery", {
+                body: { code: "invalid-recovery" },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(invalidRecovery.status).toBe(400);
+        clearAuthenticationFailures("second-factor", user.id);
+
+        const unavailableWebAuthnStepUp = await routes[
+            "/api/account/security/step-up/webauthn/options"
+        ].POST(
+            request("/api/account/security/step-up/webauthn/options", {
+                cookie: currentCookie,
+                method: "POST",
+            }),
+            server
+        );
+        expect(unavailableWebAuthnStepUp.status).toBe(503);
+
+        const invalidWebAuthnStepUp = await routes[
+            "/api/account/security/step-up/webauthn/verify"
+        ].POST(
+            request("/api/account/security/step-up/webauthn/verify", {
+                body: {
+                    response: authenticationResponse("missing-credential"),
+                },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(invalidWebAuthnStepUp.status).toBe(400);
+        clearAuthenticationFailures("second-factor", user.id);
+
+        const invalidTotpLabel = await routes["/api/account/security/totp/setup"].POST(
+            request("/api/account/security/totp/setup", {
+                body: { label: "" },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(invalidTotpLabel.status).toBe(400);
+
+        const invalidFactorConfirmation = await routes[
+            "/api/account/security/totp/confirm"
+        ].POST(
+            request("/api/account/security/totp/confirm", {
+                body: { code: "000000", factorId: "invalid" },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(invalidFactorConfirmation.status).toBe(400);
+
+        const missingFactorConfirmation = await routes[
+            "/api/account/security/totp/confirm"
+        ].POST(
+            request("/api/account/security/totp/confirm", {
+                body: {
+                    code: "000000",
+                    factorId: "00000000-0000-0000-0000-000000000000",
+                },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(missingFactorConfirmation.status).toBe(400);
+        clearAuthenticationFailures("second-factor", user.id);
+
+        const invalidFactorRemovalRequest = Object.assign(
+            request("/api/account/security/totp/invalid", {
+                cookie: currentCookie,
+                method: "DELETE",
+            }),
+            { params: { factorId: "invalid" } }
+        );
+        const invalidFactorRemoval = routes[
+            "/api/account/security/totp/:factorId"
+        ].DELETE(invalidFactorRemovalRequest, server);
+        expect(invalidFactorRemoval.status).toBe(400);
+
+        const unavailableRegistration = await routes[
+            "/api/account/security/webauthn/register/options"
+        ].POST(
+            request("/api/account/security/webauthn/register/options", {
+                cookie: currentCookie,
+                method: "POST",
+            }),
+            server
+        );
+        expect(unavailableRegistration.status).toBe(503);
+
+        const invalidRegistrationLabel = await routes[
+            "/api/account/security/webauthn/register/verify"
+        ].POST(
+            request("/api/account/security/webauthn/register/verify", {
+                body: {
+                    label: "",
+                    response: registrationResponse("ignored"),
+                },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(invalidRegistrationLabel.status).toBe(400);
+
+        const invalidRegistration = await routes[
+            "/api/account/security/webauthn/register/verify"
+        ].POST(
+            request("/api/account/security/webauthn/register/verify", {
+                body: { response: {} },
+                cookie: currentCookie,
+            }),
+            server
+        );
+        expect(invalidRegistration.status).toBe(400);
+
+        await enrollTotp(user.id, user.username);
+        const mfaSessionToken = createSession(user.id, {
+            mfaVerifiedAt: verifiedAt,
+        });
+        const mfaCookie = `mira_dashboard_session=${encodeURIComponent(mfaSessionToken)}`;
+
+        const missingCredentialRequest = Object.assign(
+            request("/api/account/security/webauthn/missing-credential", {
+                cookie: mfaCookie,
+                method: "DELETE",
+            }),
+            { params: { credentialId: "missing-credential" } }
+        );
+        const missingCredential = routes[
+            "/api/account/security/webauthn/:credentialId"
+        ].DELETE(missingCredentialRequest, server);
+        expect(missingCredential.status).toBe(409);
+
+        const wrongDisablePassword = await routes[
+            "/api/account/security/mfa/disable"
+        ].POST(
+            request("/api/account/security/mfa/disable", {
+                body: { password: "wrong-password" },
+                cookie: mfaCookie,
+            }),
+            server
+        );
+        expect(wrongDisablePassword.status).toBe(400);
+        clearAuthenticationFailures("account-password", user.id);
+
+        const invalidSessionRequest = Object.assign(
+            request("/api/account/security/sessions/invalid", {
+                cookie: mfaCookie,
+                method: "DELETE",
+            }),
+            { params: { sessionId: "invalid" } }
+        );
+        const invalidSession = routes["/api/account/security/sessions/:sessionId"].DELETE(
+            invalidSessionRequest,
+            server
+        );
+        expect(invalidSession.status).toBe(400);
+
+        const missingSessionRequest = Object.assign(
+            request(`/api/account/security/sessions/${"f".repeat(32)}`, {
+                cookie: mfaCookie,
+                method: "DELETE",
+            }),
+            { params: { sessionId: "f".repeat(32) } }
+        );
+        const missingSession = routes["/api/account/security/sessions/:sessionId"].DELETE(
+            missingSessionRequest,
+            server
+        );
+        expect(missingSession.status).toBe(404);
     });
 
     it("handles WebAuthn step-up and long audit-safe registration identifiers", async () => {
@@ -656,25 +895,31 @@ describe("Account security routes", () => {
         let currentCookie = `mira_dashboard_session=${encodeURIComponent(staleToken)}`;
         const longCredentialId = `credential_${"a".repeat(400)}`;
         const routes = createAccountSecurityRoutes({
-            createAuthenticationOptions: async () => assertionOptions(),
-            createRegistrationOptions: async () =>
-                ({
-                    challenge: "registration-route",
-                }) as Awaited<
-                    ReturnType<
-                        NonNullable<
-                            Parameters<typeof createAccountSecurityRoutes>[0]
-                        >["createRegistrationOptions"]
-                    >
-                >,
-            verifyAuthentication: async (_context, response) =>
-                response.id === "credential_existing"
-                    ? credentialSummary(response.id)
-                    : undefined,
-            verifyRegistration: async () => ({
-                confirmation: { enabledMfa: false },
-                credential: credentialSummary(longCredentialId),
-            }),
+            createAuthenticationOptions: () => Promise.try(() => assertionOptions()),
+            createRegistrationOptions: () =>
+                Promise.try(
+                    () =>
+                        ({
+                            challenge: "registration-route",
+                        }) as Awaited<
+                            ReturnType<
+                                NonNullable<
+                                    Parameters<typeof createAccountSecurityRoutes>[0]
+                                >["createRegistrationOptions"]
+                            >
+                        >
+                ),
+            verifyAuthentication: (_context, response) =>
+                Promise.try(() =>
+                    response.id === "credential_existing"
+                        ? credentialSummary(response.id)
+                        : undefined
+                ),
+            verifyRegistration: () =>
+                Promise.try(() => ({
+                    confirmation: { enabledMfa: false },
+                    credential: credentialSummary(longCredentialId),
+                })),
         });
 
         const blockedOptions = await routes[

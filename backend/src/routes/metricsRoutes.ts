@@ -11,6 +11,7 @@ import {
 } from "../lib/coalescedSnapshot.ts";
 import { getHttpRequestMetrics } from "../lib/httpRequestMetrics.ts";
 import { runProcess } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { stringFallback } from "../lib/values.ts";
 import { getAppObservabilityMetrics } from "../observability.ts";
 import { routeErrorResponse } from "../routeSupport.ts";
@@ -29,6 +30,7 @@ type TokenMetrics = Metrics["tokens"];
 const PREFERRED_LINUX_NETWORK_INTERFACE = "enp0s6";
 const METRICS_FRESH_MS = 2000;
 const METRICS_STALE_MS = 10_000;
+const logger = createStructuredLogger("metrics");
 
 const metricsRouteState: {
     networkSampleLock: Promise<void>;
@@ -51,12 +53,6 @@ async function withNetworkSampleLock<T>(callback: () => Promise<T> | T): Promise
     } finally {
         lock.resolve();
     }
-}
-
-function safeErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    if (error === undefined) return "Unknown error";
-    return String(error);
 }
 
 function finiteNumber(value: unknown): number {
@@ -125,10 +121,10 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
                     }
                     didReadNetwork = selectedRows.length > 0;
                 } catch (procError) {
-                    console.error(
-                        "[Metrics] network error:",
-                        `${safeErrorMessage(sysError)}; ${safeErrorMessage(procError)}`
-                    );
+                    logger.error("metrics.network_read_failed", {
+                        procError,
+                        sysError,
+                    });
                 }
             }
         } else {
@@ -216,7 +212,7 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
             diskPercent = finiteNumber((parts[2] ?? "0").replace(/%$/u, ""));
         }
     } catch (error) {
-        console.error("[Metrics] df error:", safeErrorMessage(error));
+        logger.error("metrics.disk_read_failed", { error });
     }
 
     return {

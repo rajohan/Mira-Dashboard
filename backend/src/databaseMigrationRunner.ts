@@ -78,6 +78,7 @@ function appliedMigrationRows(database: Database): AppliedMigrationRow[] {
  * Well-formed unknown migrations are intentionally allowed and the local registry
  * is not asserted or compared here. validateDatabaseMigrationHistory owns full
  * validation against the running code's registry.
+ * @returns Read structurally valid history for release compatibility checks. Well-formed unknown migrations are intentionally allowed and the local registry is not asserted or compared here. validateDatabaseMigrationHistory owns full validation against the running code's registry.
  */
 export function readAppliedDatabaseMigrationHistory(
     database: Database,
@@ -255,6 +256,7 @@ export function applyDatabaseMigrations(
 /**
  * Applies pending migrations only to an isolated restore copy that will be
  * discarded by the caller.
+ * @returns Migrate disposable database copy result.
  */
 export function migrateDisposableDatabaseCopy(
     database: Database

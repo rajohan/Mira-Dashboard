@@ -1,122 +1,72 @@
-import {
-    assertContractKeys,
-    contractEnum,
-    contractFiniteNumber,
-    contractRecord,
-    contractString,
-    invalidContract,
-    optionalContractBoolean,
-    optionalContractString,
-    requiresContractBoolean,
-} from "./runtime";
+import * as v from "valibot";
 
-export interface ExecRequest {
-    args?: string[];
-    command: string;
-    cwd?: string;
-    shell?: boolean;
-}
+import { finiteNumberSchema, parseContract, strictJsonObjectSchema } from "./runtime";
 
-export interface ExecResponse {
-    code: number | undefined;
-    stderr: string;
-    stdout: string;
-}
+const nonBlankStringSchema = v.pipe(
+    v.string(),
+    v.check((value) => value.trim().length > 0, "must not be blank")
+);
 
-export interface ExecStartResponse {
-    jobId: string;
-}
+export const execRequestSchema = strictJsonObjectSchema({
+    args: v.optional(v.array(v.string())),
+    command: nonBlankStringSchema,
+    cwd: v.optional(v.string()),
+    shell: v.optional(v.boolean()),
+});
 
-export type ExecJobStatus = "done" | "running" | "signaled";
+export const execResponseSchema = v.strictObject({
+    code: v.optional(finiteNumberSchema),
+    stderr: v.string(),
+    stdout: v.string(),
+});
 
-const EXEC_JOB_STATUSES = ["done", "running", "signaled"] as const;
+export const execStartResponseSchema = v.strictObject({
+    jobId: v.pipe(v.string(), v.trim(), v.nonEmpty()),
+});
 
-export interface ExecJobResponse extends ExecResponse {
-    endedAt: number | undefined;
-    jobId: string;
-    startedAt: number;
-    status: ExecJobStatus;
-}
+export const execJobStatusSchema = v.picklist(["done", "running", "signaled"]);
 
-export interface ExecStopResponse {
-    isSuccess: boolean;
-    message: string;
-}
+export const execJobResponseSchema = v.strictObject({
+    ...execResponseSchema.entries,
+    endedAt: v.optional(finiteNumberSchema),
+    jobId: v.pipe(v.string(), v.trim(), v.nonEmpty()),
+    startedAt: finiteNumberSchema,
+    status: execJobStatusSchema,
+});
 
-/** Parses the transport shape before service-level command authorization. */
+export const execStopResponseSchema = v.strictObject({
+    isSuccess: v.boolean(),
+    message: v.string(),
+});
+
+export type ExecRequest = v.InferOutput<typeof execRequestSchema>;
+export type ExecResponse = v.InferOutput<typeof execResponseSchema>;
+export type ExecStartResponse = v.InferOutput<typeof execStartResponseSchema>;
+export type ExecJobStatus = v.InferOutput<typeof execJobStatusSchema>;
+export type ExecJobResponse = v.InferOutput<typeof execJobResponseSchema>;
+export type ExecStopResponse = v.InferOutput<typeof execStopResponseSchema>;
+
+/**
+ * Parses the transport shape before service-level command authorization.
+ * @param value Value to process.
+ * @returns Parsed the transport shape before service-level command authorization.
+ */
 export function parseExecRequest(value: unknown): ExecRequest {
-    const input = contractRecord(value);
-    assertContractKeys(input, ["args", "command", "cwd", "shell"], "body");
-    let arguments_: string[] | undefined;
-    if (input.args !== undefined) {
-        if (!Array.isArray(input.args)) {
-            return invalidContract("body.args", "must be an array of strings");
-        }
-        arguments_ = input.args.map((argument, index) =>
-            contractString(argument, `body.args[${index}]`, {
-                allowEmpty: true,
-                trim: false,
-            })
-        );
-    }
-    const cwd = optionalContractString(input.cwd, "body.cwd", {
-        allowEmpty: true,
-        trim: false,
-    });
-    const shell = optionalContractBoolean(input.shell, "body.shell");
-    return {
-        command: contractString(input.command, "body.command", { trim: false }),
-        ...(arguments_ !== undefined && { args: arguments_ }),
-        ...(cwd !== undefined && { cwd }),
-        ...(shell !== undefined && { shell }),
-    };
+    return parseContract(execRequestSchema, value);
 }
 
 export function parseExecResponse(value: unknown): ExecResponse {
-    const input = contractRecord(value, "response");
-    return {
-        code:
-            input.code === undefined
-                ? undefined
-                : contractFiniteNumber(input.code, "response.code"),
-        stderr: contractString(input.stderr, "response.stderr", {
-            allowEmpty: true,
-            trim: false,
-        }),
-        stdout: contractString(input.stdout, "response.stdout", {
-            allowEmpty: true,
-            trim: false,
-        }),
-    };
+    return parseContract(execResponseSchema, value, "response");
 }
 
 export function parseExecStartResponse(value: unknown): ExecStartResponse {
-    const input = contractRecord(value, "response");
-    return { jobId: contractString(input.jobId, "response.jobId") };
+    return parseContract(execStartResponseSchema, value, "response");
 }
 
 export function parseExecJobResponse(value: unknown): ExecJobResponse {
-    const input = contractRecord(value, "response");
-    const base = parseExecResponse(input);
-    return {
-        ...base,
-        endedAt:
-            input.endedAt === undefined
-                ? undefined
-                : contractFiniteNumber(input.endedAt, "response.endedAt"),
-        jobId: contractString(input.jobId, "response.jobId"),
-        startedAt: contractFiniteNumber(input.startedAt, "response.startedAt"),
-        status: contractEnum(input.status, EXEC_JOB_STATUSES, "response.status"),
-    };
+    return parseContract(execJobResponseSchema, value, "response");
 }
 
 export function parseExecStopResponse(value: unknown): ExecStopResponse {
-    const input = contractRecord(value, "response");
-    return {
-        isSuccess: requiresContractBoolean(input.isSuccess, "response.isSuccess"),
-        message: contractString(input.message, "response.message", {
-            allowEmpty: true,
-            trim: false,
-        }),
-    };
+    return parseContract(execStopResponseSchema, value, "response");
 }

@@ -34,7 +34,10 @@ function contentSecurityPolicyFor(request: Request, server: Server<unknown>): st
     ].join("; ");
 }
 
-/** Returns the server-generated correlation identifier for a request. */
+/**
+ * Returns the server-generated correlation identifier for a request.
+ * @returns the server-generated correlation identifier for a request.
+ */
 export function requestIdFor(request: Request): string {
     const existing = requestIds.get(request);
     if (existing) return existing;
@@ -48,6 +51,7 @@ export function requestIdFor(request: Request): string {
  * Rejects browser mutations that identify a cross-origin or same-site source.
  * Requests without browser provenance headers remain available to direct API
  * clients and scoped automation credentials.
+ * @returns Whether the request has an allowed mutation source.
  */
 export function isAllowedMutationSource(request: Request): boolean {
     if (SAFE_REQUEST_METHODS.has(request.method.toUpperCase())) {
@@ -63,7 +67,10 @@ export function isAllowedMutationSource(request: Request): boolean {
     return !fetchSite || ALLOWED_FETCH_SITES.has(fetchSite);
 }
 
-/** Adds correlation and browser hardening headers without consuming the body. */
+/**
+ * Adds correlation and browser hardening headers without consuming the body.
+ * @returns With request security result.
+ */
 export function withRequestSecurity(
     request: Request,
     response: Response,

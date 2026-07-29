@@ -15,26 +15,28 @@ const cronListSnapshot = new CoalescedSnapshot<unknown>({
 });
 
 interface CronListResponse<T> {
-    items?: T[];
     jobs?: T[];
 }
 
-/** Reads the shared raw Gateway cron list for route-specific normalization. */
+/**
+ * Reads the shared raw Gateway cron list for route-specific normalization.
+ * @returns Read the shared raw Gateway cron list for route-specific normalization.
+ */
 export function getOpenClawCronListSnapshot(): Promise<unknown> {
     return cronListSnapshot.read();
 }
 
-/** Extracts cron jobs while letting each consumer retain its own narrow job type. */
+/**
+ * Extracts cron jobs while letting each consumer retain its own narrow job type.
+ * @param payload Request or event payload.
+ * @returns Normalize open claw cron jobs result.
+ */
 export function normalizeOpenClawCronJobs<T>(payload: unknown): T[] {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         throw new TypeError("Invalid OpenClaw cron list response");
     }
     const value = payload as CronListResponse<T>;
-    const jobs = Array.isArray(value.jobs)
-        ? value.jobs
-        : Array.isArray(value.items)
-          ? value.items
-          : undefined;
+    const jobs = Array.isArray(value.jobs) ? value.jobs : undefined;
     if (
         !jobs ||
         jobs.some((job) => !job || typeof job !== "object" || Array.isArray(job))

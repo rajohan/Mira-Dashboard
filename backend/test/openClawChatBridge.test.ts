@@ -1,9 +1,9 @@
 import { describe, expect, it, jest } from "bun:test";
 
+import type { OpenClawRuntimeSnapshot } from "../../contracts/chat.ts";
 import {
     OpenClawChatBridge,
     type OpenClawChatSnapshotStore,
-    type OpenClawRuntimeSnapshot,
 } from "../src/chat/openClawChatBridge.ts";
 import { OpenClawChatRequestBoundaries } from "../src/chat/openClawChatRequestBoundaries.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
@@ -3138,13 +3138,13 @@ describe("OpenClaw chat bridge", () => {
                 ),
             ],
             firstSequenceByRun: {
-                [runIds[0]!]: 1,
-                [runIds[1]!]: 3,
-                [runIds[2]!]: 5,
+                [runIds[0]]: 1,
+                [runIds[1]]: 3,
+                [runIds[2]]: 5,
             },
             interruptedAtByRun: {
-                [runIds[0]!]: now - 1500,
-                [runIds[1]!]: now - 1500,
+                [runIds[0]]: now - 1500,
+                [runIds[1]]: now - 1500,
             },
             requestBoundary: 6,
             throughSequence: 7,

@@ -10,7 +10,6 @@ lerna-debug.log*
 .env.local
 
 node_modules
-.eslintcache
 dist
 release-manifest.json
 backend/data/
@@ -23,6 +22,7 @@ dist-ssr
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 .idea
 .DS_Store
 *.suo

@@ -4,6 +4,7 @@ import type {
     ReportStatus,
     ReportType,
 } from "../../../contracts/reports.ts";
+import { isPlainRecord } from "../../../contracts/runtime.ts";
 import { database, sqlNullable } from "../database.ts";
 
 export interface ListReportsOptions {
@@ -34,10 +35,8 @@ function nowIso(): string {
 
 function parseMetadata(value: string): Record<string, unknown> {
     try {
-        const parsed = value ? JSON.parse(value) : {};
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-            ? (parsed as Record<string, unknown>)
-            : {};
+        const parsed: unknown = value ? JSON.parse(value) : {};
+        return isPlainRecord(parsed) ? parsed : {};
     } catch {
         return {};
     }

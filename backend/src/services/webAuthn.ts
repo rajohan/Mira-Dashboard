@@ -10,14 +10,16 @@ import {
     verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 
+import type {
+    FactorConfirmation,
+    WebAuthnCredential as WebAuthnFactorSummary,
+} from "../../../contracts/accountSecurity.ts";
 import { database, sqlNullable } from "../database.ts";
 import {
     enableMultiFactorInTransaction,
-    type FactorConfirmation,
     generateRecoveryCodeSet,
     normalizeFactorLabel,
     totalConfirmedFactorCount,
-    type WebAuthnFactorSummary,
 } from "./multiFactorAuth.ts";
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -152,7 +154,10 @@ function normalizeOrigins(value: string | undefined, rpId: string): string[] {
     return [...normalized];
 }
 
-/** Resolves the explicit, origin-bound WebAuthn relying-party configuration. */
+/**
+ * Resolves the explicit, origin-bound WebAuthn relying-party configuration.
+ * @returns Resolved the explicit, origin-bound WebAuthn relying-party configuration.
+ */
 export function webAuthnConfig(
     environment: Record<string, string | undefined> = process.env
 ): WebAuthnConfig {
@@ -247,11 +252,12 @@ function storeChallenge(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "WebAuthn challenge storage and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
@@ -276,7 +282,8 @@ function readChallenge(
              LIMIT 1`
         )
         .get(userId, purpose, sessionId, pendingLoginId, nowIso(now)) as
-        WebAuthnChallengeRow | undefined;
+        | WebAuthnChallengeRow
+        | undefined;
 }
 
 function didConsumeChallenge(challengeId: string): boolean {
@@ -324,7 +331,10 @@ function credentialsForUser(userId: number): WebAuthnCredentialRow[] {
         .all(userId) as WebAuthnCredentialRow[];
 }
 
-/** Starts registration for an additional named cross-platform security key. */
+/**
+ * Starts registration for an additional named cross-platform security key.
+ * @returns Promise resolving to the create web authn registration options result.
+ */
 export async function createWebAuthnRegistrationOptions(
     context: WebAuthnChallengeContext,
     username: string,
@@ -360,7 +370,10 @@ export async function createWebAuthnRegistrationOptions(
     return options;
 }
 
-/** Completes registration and returns recovery codes only for the first factor. */
+/**
+ * Completes registration and returns recovery codes only for the first factor.
+ * @returns Promise resolving to the verify web authn registration result.
+ */
 export async function verifyWebAuthnRegistration(
     context: WebAuthnChallengeContext,
     response: RegistrationResponseJSON,
@@ -471,17 +484,21 @@ export async function verifyWebAuthnRegistration(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "WebAuthn registration and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 }
 
-/** Starts a user-bound WebAuthn login or step-up assertion. */
+/**
+ * Starts a user-bound WebAuthn login or step-up assertion.
+ * @returns Promise resolving to the create web authn authentication options result.
+ */
 export async function createWebAuthnAuthenticationOptions(
     context: WebAuthnChallengeContext,
     now = new Date(),
@@ -509,7 +526,10 @@ export async function createWebAuthnAuthenticationOptions(
     return options;
 }
 
-/** Verifies and atomically consumes one user-bound WebAuthn assertion. */
+/**
+ * Verifies and atomically consumes one user-bound WebAuthn assertion.
+ * @returns Promise resolving to the verify web authn authentication result.
+ */
 export async function verifyWebAuthnAuthentication(
     context: WebAuthnChallengeContext,
     response: AuthenticationResponseJSON,
@@ -613,17 +633,23 @@ export async function verifyWebAuthnAuthentication(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "WebAuthn authentication and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 }
 
-/** Removes one key while preserving at least one active second factor. */
+/**
+ * Removes one key while preserving at least one active second factor.
+ * @param userId User identifier.
+ * @param credentialId Credential identifier.
+ * @returns Did remove web authn credential result.
+ */
 export function didRemoveWebAuthnCredential(
     userId: number,
     credentialId: string
@@ -649,11 +675,12 @@ export function didRemoveWebAuthnCredential(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "WebAuthn credential removal and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }

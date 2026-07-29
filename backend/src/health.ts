@@ -13,12 +13,15 @@ import {
 } from "./databaseSchemaCompatibility.ts";
 import { isFrontendIndexReady } from "./frontendAssets.ts";
 import gateway from "./gateway.ts";
+import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import { getAppObservabilityMetrics } from "./observability.ts";
 import { getRuntimeReleaseIdentity } from "./releaseManifest.ts";
 import {
     getJobExecutionSummary,
     isJobWorkerReleaseReady,
 } from "./services/jobExecutionQueue.ts";
+
+const logger = createStructuredLogger("health");
 
 export interface ReadinessSignals {
     database: DatabaseReadiness;
@@ -43,7 +46,7 @@ function databaseReadiness(): DatabaseReadiness {
             targetSchemaVersion: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
         };
     } catch (error) {
-        console.warn("[Health] Database readiness failed:", error);
+        logger.warn("health.database_readiness_failed", { error });
         return {
             maximumCompatibleSchemaVersion:
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
@@ -62,7 +65,7 @@ function isWorkerReady(release: RuntimeReleaseIdentity): boolean {
         }
         return getJobExecutionSummary().workerOnline;
     } catch (error) {
-        console.warn("[Health] Failed to read job worker telemetry:", error);
+        logger.warn("health.worker_telemetry_read_failed", { error });
         return false;
     }
 }

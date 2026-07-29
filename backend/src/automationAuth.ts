@@ -1,3 +1,5 @@
+import { isPlainRecord } from "../../contracts/runtime.ts";
+
 export const AUTOMATION_SCOPES = [
     "agents:read",
     "agents:write",
@@ -55,12 +57,6 @@ function isTimingSafeHashEqual(storedHash: string, candidateHash: string): boole
 
 function tokenHash(token: string): string {
     return new Bun.CryptoHasher("sha256").update(token).digest("hex");
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
 }
 
 function parseCredential(value: unknown, index: number): AutomationCredentialConfig {
@@ -144,14 +140,21 @@ function configuredCredentials(
     return credentialCache.credentials;
 }
 
-/** Fails startup on malformed or overbroad automation credential configuration. */
+/**
+ * Fails startup on malformed or overbroad automation credential configuration.
+ * @param serialized Serialized value.
+ * @returns Validate automation credentials result.
+ */
 export function validateAutomationCredentials(
     serialized = process.env.MIRA_DASHBOARD_AUTOMATION_CREDENTIALS
 ): number {
     return configuredCredentials(serialized).size;
 }
 
-/** Authenticates a strict id/validator bearer token without storing the validator. */
+/**
+ * Authenticates a strict id/validator bearer token without storing the validator.
+ * @returns Authenticate automation request result.
+ */
 export function authenticateAutomationRequest(
     request: Request,
     serialized = process.env.MIRA_DASHBOARD_AUTOMATION_CREDENTIALS
@@ -204,7 +207,10 @@ function readOrWriteScope(
     return SAFE_METHODS.has(request.method.toUpperCase()) ? readScope : writeScope;
 }
 
-/** Returns the one capability required by a deliberately automation-safe route. */
+/**
+ * Returns the one capability required by a deliberately automation-safe route.
+ * @returns the one capability required by a deliberately automation-safe route.
+ */
 export function requiredAutomationScope(request: Request): AutomationScope | undefined {
     const pathname = new URL(request.url).pathname;
     if (pathname.includes("%")) {

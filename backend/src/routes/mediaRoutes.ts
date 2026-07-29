@@ -4,13 +4,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { getPersistedGatewayToken } from "../auth.ts";
-import { json } from "../http.ts";
+import { byteStreamReader } from "../lib/byteStreams.ts";
 import {
     guardedPath,
     openReadNoFollowNonblockingGuarded,
     readFromOpenFile,
 } from "../lib/guardedOps.ts";
 import { stringFallback } from "../lib/values.ts";
+import { routeFailureResponse } from "../routeSupport.ts";
 
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 const MAX_TEXT_PREVIEW_SIZE = 1024 * 1024;
@@ -150,7 +151,7 @@ async function readGatewayBodyUpTo(
         return undefined;
     }
 
-    const reader = response.body?.getReader();
+    const reader = byteStreamReader(response.body);
     if (!reader) {
         return new Uint8Array();
     }
@@ -185,12 +186,20 @@ async function readGatewayBodyUpTo(
 async function proxyGatewayMedia(request: Request): Promise<Response> {
     const previewMode = new URL(request.url).searchParams.get("preview");
     if (previewMode && !["image", "text"].includes(previewMode)) {
-        return json({ error: "Invalid preview mode" }, { status: 400 });
+        return routeFailureResponse({
+            context: "media",
+            message: "Invalid preview mode",
+            status: 400,
+        });
     }
     const gatewayUrl = gatewayMediaUrl(request);
     const token = configuredGatewayToken();
     if (!gatewayUrl || !token) {
-        return json({ error: "Media not found" }, { status: 404 });
+        return routeFailureResponse({
+            context: "media",
+            message: "Media not found",
+            status: 404,
+        });
     }
 
     let response: Response;
@@ -207,14 +216,22 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
         });
     } catch {
         clearTimeout(gatewayRequestTimeout);
-        return json({ error: "Gateway media unavailable" }, { status: 502 });
+        return routeFailureResponse({
+            context: "media",
+            message: "Gateway media unavailable",
+            status: 502,
+        });
     }
     if (!response.ok) {
         clearTimeout(gatewayRequestTimeout);
         const status = [400, 401, 403, 404, 413, 429].includes(response.status)
             ? response.status
             : 502;
-        return json({ error: "Media not found" }, { status });
+        return routeFailureResponse({
+            context: "media",
+            message: "Media not found",
+            status,
+        });
     }
 
     const { contentDisposition, contentType, fileExtension } =
@@ -226,19 +243,31 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
         ) {
             await response.body?.cancel();
             clearTimeout(gatewayRequestTimeout);
-            return json({ error: "Text preview is not available" }, { status: 415 });
+            return routeFailureResponse({
+                context: "media",
+                message: "Text preview is not available",
+                status: 415,
+            });
         }
 
         let body: Uint8Array | undefined;
         try {
             body = await readGatewayBodyUpTo(response, MAX_TEXT_PREVIEW_SIZE);
         } catch {
-            return json({ error: "Gateway media preview timed out" }, { status: 504 });
+            return routeFailureResponse({
+                context: "media",
+                message: "Gateway media preview timed out",
+                status: 504,
+            });
         } finally {
             clearTimeout(gatewayRequestTimeout);
         }
         if (!body) {
-            return json({ error: "Text preview is too large" }, { status: 413 });
+            return routeFailureResponse({
+                context: "media",
+                message: "Text preview is too large",
+                status: 413,
+            });
         }
         return new Response(body, {
             headers: {
@@ -251,26 +280,40 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
 
     if (previewMode === "image") {
         const isSvg = contentType === "image/svg+xml" || fileExtension === ".svg";
-        const previewContentType = contentType.startsWith("image/")
-            ? contentType
-            : isSvg
-              ? "image/svg+xml"
-              : undefined;
+        let previewContentType: string | undefined;
+        if (contentType.startsWith("image/")) {
+            previewContentType = contentType;
+        }
+        if (!previewContentType && isSvg) {
+            previewContentType = "image/svg+xml";
+        }
         if (!previewContentType) {
             await response.body?.cancel();
             clearTimeout(gatewayRequestTimeout);
-            return json({ error: "Image preview is not available" }, { status: 415 });
+            return routeFailureResponse({
+                context: "media",
+                message: "Image preview is not available",
+                status: 415,
+            });
         }
         let body: Uint8Array | undefined;
         try {
             body = await readGatewayBodyUpTo(response, MAX_MEDIA_SIZE);
         } catch {
-            return json({ error: "Gateway media preview timed out" }, { status: 504 });
+            return routeFailureResponse({
+                context: "media",
+                message: "Gateway media preview timed out",
+                status: 504,
+            });
         } finally {
             clearTimeout(gatewayRequestTimeout);
         }
         if (!body) {
-            return json({ error: "Media file too large" }, { status: 413 });
+            return routeFailureResponse({
+                context: "media",
+                message: "Media file too large",
+                status: 413,
+            });
         }
         const previewHeaders = new Headers({
             "Cache-Control": MANAGED_MEDIA_CACHE_CONTROL,
@@ -386,25 +429,45 @@ export const mediaRoutes = {
             const requestedPath = stringFallback(requestUrl.searchParams.get("path"));
 
             if (!requestedPath) {
-                return json({ error: "Access denied" }, { status: 403 });
+                return routeFailureResponse({
+                    context: "media",
+                    message: "Access denied",
+                    status: 403,
+                });
             }
             if (requestedPath.includes("\0")) {
-                return json({ error: "Invalid media path" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "media",
+                    message: "Invalid media path",
+                    status: 400,
+                });
             }
             const previewMode = requestUrl.searchParams.get("preview");
             if (previewMode && !["image", "text"].includes(previewMode)) {
-                return json({ error: "Invalid preview mode" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "media",
+                    message: "Invalid preview mode",
+                    status: 400,
+                });
             }
 
             const mediaRoot = getMediaRoot();
             if (!mediaRoot) {
-                return json({ error: "Media not found" }, { status: 404 });
+                return routeFailureResponse({
+                    context: "media",
+                    message: "Media not found",
+                    status: 404,
+                });
             }
 
             const fullPath = path.resolve(mediaRoot, requestedPath);
             const realMediaRoot = getRealMediaRoot(mediaRoot);
             if (!realMediaRoot) {
-                return json({ error: "Media not found" }, { status: 404 });
+                return routeFailureResponse({
+                    context: "media",
+                    message: "Media not found",
+                    status: 404,
+                });
             }
 
             let realPath: string;
@@ -413,13 +476,21 @@ export const mediaRoutes = {
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
-                    return json({ error: "Media not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Media not found",
+                        status: 404,
+                    });
                 }
                 throw error;
             }
             const relativeRealPath = path.relative(realMediaRoot, realPath);
             if (relativeRealPath.startsWith("..") || path.isAbsolute(relativeRealPath)) {
-                return json({ error: "Access denied" }, { status: 403 });
+                return routeFailureResponse({
+                    context: "media",
+                    message: "Access denied",
+                    status: 403,
+                });
             }
             let preOpenStat: fs.Stats;
             try {
@@ -427,15 +498,27 @@ export const mediaRoutes = {
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
-                    return json({ error: "Media not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Media not found",
+                        status: 404,
+                    });
                 }
                 if (["EACCES", "EPERM"].includes(code ?? "")) {
-                    return json({ error: "Access denied" }, { status: 403 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Access denied",
+                        status: 403,
+                    });
                 }
                 throw error;
             }
             if (!preOpenStat.isFile()) {
-                return json({ error: "Media path is not a file" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "media",
+                    message: "Media path is not a file",
+                    status: 400,
+                });
             }
 
             let file: fs.promises.FileHandle;
@@ -444,13 +527,25 @@ export const mediaRoutes = {
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
                 if (code === "ENOENT" || code === "ENOTDIR") {
-                    return json({ error: "Media not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Media not found",
+                        status: 404,
+                    });
                 }
                 if (code === "ENXIO") {
-                    return json({ error: "Media path is not a file" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Media path is not a file",
+                        status: 400,
+                    });
                 }
                 if (["ELOOP", "EACCES", "EPERM"].includes(code ?? "")) {
-                    return json({ error: "Access denied" }, { status: 403 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Access denied",
+                        status: 403,
+                    });
                 }
                 throw error;
             }
@@ -467,46 +562,70 @@ export const mediaRoutes = {
                     relativeOpenedPath.startsWith("..") ||
                     path.isAbsolute(relativeOpenedPath)
                 ) {
-                    return json({ error: "Access denied" }, { status: 403 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Access denied",
+                        status: 403,
+                    });
                 }
                 if (!stat.isFile()) {
-                    return json({ error: "Media path is not a file" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Media path is not a file",
+                        status: 400,
+                    });
                 }
                 if (stat.nlink > 1) {
-                    return json({ error: "Access denied" }, { status: 403 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Access denied",
+                        status: 403,
+                    });
                 }
                 if (stat.size > MAX_MEDIA_SIZE) {
-                    return json({ error: "Media file too large" }, { status: 413 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Media file too large",
+                        status: 413,
+                    });
                 }
                 const extension = path.extname(openedRealPath).toLowerCase();
                 if (previewMode === "text" && !TEXT_PREVIEW_EXTENSIONS.has(extension)) {
-                    return json(
-                        { error: "Text preview is not available" },
-                        { status: 415 }
-                    );
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Text preview is not available",
+                        status: 415,
+                    });
                 }
                 if (previewMode === "text" && stat.size > MAX_TEXT_PREVIEW_SIZE) {
-                    return json({ error: "Text preview is too large" }, { status: 413 });
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Text preview is too large",
+                        status: 413,
+                    });
                 }
                 if (previewMode === "image" && extension !== ".svg") {
-                    return json(
-                        { error: "Image preview is not available" },
-                        { status: 415 }
-                    );
+                    return routeFailureResponse({
+                        context: "media",
+                        message: "Image preview is not available",
+                        status: 415,
+                    });
                 }
                 buffer = readFromOpenFile(file.fd, stat.size);
             } finally {
                 await file.close();
             }
 
+            let previewContentType = mimeTypeFromPath(openedRealPath);
+            if (previewMode === "text") {
+                previewContentType = "text/plain; charset=utf-8";
+            }
+            if (previewMode === "image") {
+                previewContentType = "image/svg+xml";
+            }
             const responseHeaders = new Headers({
                 "Cache-Control": "private, max-age=3600",
-                "Content-Type":
-                    previewMode === "text"
-                        ? "text/plain; charset=utf-8"
-                        : previewMode === "image"
-                          ? "image/svg+xml"
-                          : mimeTypeFromPath(openedRealPath),
+                "Content-Type": previewContentType,
                 "X-Content-Type-Options": "nosniff",
             });
             if (previewMode === "image") {

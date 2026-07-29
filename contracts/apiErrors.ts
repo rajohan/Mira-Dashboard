@@ -1,50 +1,27 @@
-export interface ApiErrorBody {
-    code: string;
-    details?: unknown;
-    message: string;
-    requestId: string;
-}
+import * as v from "valibot";
 
-export interface ApiErrorResponse {
-    error: ApiErrorBody;
-}
+const trimmedNonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
 
-export interface ParsedApiError {
-    code: string;
-    details?: unknown;
-    message: string;
-    requestId: string;
-}
+export const apiErrorBodySchema = v.strictObject({
+    code: trimmedNonEmptyStringSchema,
+    details: v.optional(v.unknown()),
+    message: trimmedNonEmptyStringSchema,
+    requestId: trimmedNonEmptyStringSchema,
+});
 
-function record(value: unknown): Record<string, unknown> | undefined {
-    return value !== null && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : undefined;
-}
+export const apiErrorResponseSchema = v.strictObject({
+    error: apiErrorBodySchema,
+});
 
-function nonEmptyString(value: unknown): string | undefined {
-    if (typeof value !== "string") return undefined;
-    const trimmed = value.trim();
-    return trimmed || undefined;
-}
+export type ApiErrorBody = v.InferOutput<typeof apiErrorBodySchema>;
+export type ApiErrorResponse = v.InferOutput<typeof apiErrorResponseSchema>;
 
-/** Parses the shared error contract at the HTTP trust boundary. */
-export function parseApiErrorResponse(value: unknown): ParsedApiError | undefined {
-    const payload = record(value);
-    if (!payload) return undefined;
-
-    const nestedError = record(payload.error);
-    if (!nestedError) return undefined;
-    const code = nonEmptyString(nestedError.code);
-    const message = nonEmptyString(nestedError.message);
-    const requestId = nonEmptyString(nestedError.requestId);
-    if (!code || !message || !requestId) return undefined;
-    return {
-        code,
-        ...(Object.hasOwn(nestedError, "details") && {
-            details: nestedError.details,
-        }),
-        message,
-        requestId,
-    };
+/**
+ * Parses the shared error contract at the HTTP trust boundary.
+ * @param value Value to process.
+ * @returns Parsed the shared error contract at the HTTP trust boundary.
+ */
+export function parseApiErrorResponse(value: unknown): ApiErrorBody | undefined {
+    const result = v.safeParse(apiErrorResponseSchema, value);
+    return result.success ? result.output.error : undefined;
 }

@@ -1,7 +1,19 @@
 import type { Server } from "bun";
 
+import type { DashboardMfaMethod } from "../../../contracts/accountSecurity.ts";
+import type {
+    AuthBootstrapResponse,
+    AuthLoginResponse,
+    AuthSessionResponse,
+} from "../../../contracts/auth.ts";
 import {
-    type AuthMethod,
+    parseFirstUserRegistrationRequest,
+    parseLoginCredentialsRequest,
+    parseLoginMfaCodeRequest,
+    parseLoginWebAuthnRequest,
+} from "../../../contracts/auth.ts";
+import type { ContractParser } from "../../../contracts/runtime.ts";
+import {
     createFirstUser,
     createSession,
     createUser,
@@ -22,12 +34,13 @@ import {
     json,
     pendingLoginCookie,
     pendingLoginFromCookie,
-    readJson,
     sessionCookie,
     sessionIdFromCookie,
     withCookies,
 } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { errorMessage } from "../lib/errors.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
 import {
     authenticationThrottleResponse,
     normalizeLoginPassword,
@@ -43,7 +56,6 @@ import {
     consumePendingLogin,
     createPendingLogin,
     getPendingLogin,
-    type MfaLoginMethod,
     mfaMethodsForUser,
     type PendingLogin,
     recordPendingLoginFailure,
@@ -55,13 +67,7 @@ import {
     verifyWebAuthnAuthentication,
 } from "../services/webAuthn.ts";
 
-interface AuthBody {
-    code?: unknown;
-    gatewayToken?: unknown;
-    password?: unknown;
-    response?: unknown;
-    username?: unknown;
-}
+const logger = createStructuredLogger("auth");
 
 interface AuthWebAuthnDependencies {
     createAuthenticationOptions: typeof createWebAuthnAuthenticationOptions;
@@ -77,24 +83,21 @@ const defaultWebAuthnDependencies: AuthWebAuthnDependencies = {
 const UNKNOWN_USER_PASSWORD_HASH =
     "$argon2id$v=19$m=65536,t=2,p=1$f3HFQG8vpt61lN+oOECsgjKF/kekaeFRsKlTi+dn71Y$Xlpldr0SHTMjbwyeJR9V352PLnlLWm9L6pHPUMS+9mQ";
 
-async function readAuthBody(request: Request): Promise<AuthBody | Response> {
-    try {
-        const body = await readJson<unknown>(request, { maxBytes: 128 * 1024 });
-        if (!body || typeof body !== "object" || Array.isArray(body)) {
-            return json({ error: "Invalid request body" }, { status: 400 });
-        }
-        return body as AuthBody;
-    } catch (error) {
-        return json(
-            { error: errorMessage(error, "Invalid request body") },
-            { status: httpStatusCode(error) }
-        );
-    }
+async function readAuthBody<T>(
+    request: Request,
+    parser: ContractParser<T>
+): Promise<Response | T> {
+    return readApiJsonOrError(request, parser, {
+        code: "invalid_auth_request",
+        context: "auth.body",
+        maxBytes: 128 * 1024,
+        message: "Invalid request body",
+    });
 }
 
 function pendingLoginForMethod(
     request: Request,
-    method: MfaLoginMethod
+    method: DashboardMfaMethod
 ): { pending: PendingLogin; token: string } | undefined {
     const token = pendingLoginFromCookie(request);
     const pending = token ? getPendingLogin(token) : undefined;
@@ -109,10 +112,11 @@ function failedSecondFactor(
     if (pending) {
         recordPendingLoginFailure(pending.pendingLoginId);
     }
-    const response = json(
-        { error: "Invalid or expired authentication attempt" },
-        { status: 401 }
-    );
+    const response = routeFailureResponse({
+        context: "auth",
+        message: "Invalid or expired authentication attempt",
+        status: 401,
+    });
     return pending
         ? response
         : withCookies(response, [clearPendingLoginCookie(request, server)]);
@@ -122,7 +126,7 @@ function completePendingLogin(
     request: Request,
     server: Server<unknown>,
     pendingToken: string,
-    method: Exclude<AuthMethod, "password">
+    method: DashboardMfaMethod
 ): Response {
     const pending = consumePendingLogin(pendingToken);
     if (!pending) {
@@ -141,7 +145,7 @@ function completePendingLogin(
             authenticated: true,
             mfaRequired: false,
             user: { id: pending.userId, username: pending.username },
-        }),
+        } satisfies AuthLoginResponse),
         [
             sessionCookie(request, server, sessionId),
             clearPendingLoginCookie(request, server),
@@ -152,7 +156,7 @@ function completePendingLogin(
 function rollbackFirstUserBootstrap(
     userId: number,
     gatewayToken: string,
-    previousGatewayToken?: string | undefined
+    previousGatewayToken?: string
 ): void {
     database.run("BEGIN IMMEDIATE");
     try {
@@ -168,15 +172,15 @@ function rollbackFirstUserBootstrap(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            console.error(
-                "[Auth] First-user rollback transaction rollback failed:",
-                rollbackError
-            );
-            throw new AggregateError(
+            logger.error("auth.first_user_transaction_rollback_failed", {
+                error: rollbackError,
+            });
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "First-user rollback transaction and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
@@ -184,7 +188,7 @@ function rollbackFirstUserBootstrap(
 
 function rollbackGatewayTokenSwitch(
     gatewayToken: string,
-    previousGatewayToken?: string | undefined
+    previousGatewayToken?: string
 ): void {
     if (previousGatewayToken) {
         persistGatewayToken(previousGatewayToken);
@@ -194,14 +198,15 @@ function rollbackGatewayTokenSwitch(
 }
 
 function responseForClosedBootstrap(): Response {
-    return json(
-        { error: "Bootstrap registration is no longer available" },
-        { status: 409 }
-    );
+    return routeFailureResponse({
+        context: "auth",
+        message: "Bootstrap registration is no longer available",
+        status: 409,
+    });
 }
 
 function isGatewayAuthFailure(error: unknown): boolean {
-    const message = errorMessage(error, String(error)).toLowerCase();
+    const message = errorMessage(error, "Gateway authentication failed").toLowerCase();
     return message.includes("unauthorized") || message.includes("token mismatch");
 }
 
@@ -222,7 +227,7 @@ export function createAuthRoutes(
                 json({
                     isBootstrapRequired: isBootstrapRequired(),
                     hasGatewayToken: Boolean(getPersistedGatewayToken()),
-                }),
+                } satisfies AuthBootstrapResponse),
         },
 
         "/api/auth/session": {
@@ -242,51 +247,59 @@ export function createAuthRoutes(
                             expiresAt: session.expiresAt,
                             lastSeenAt: session.lastSeenAt,
                             mfaEnabled: session.mfaEnabled,
-                            mfaVerifiedAt: session.mfaVerifiedAt,
+                            ...(session.mfaVerifiedAt && {
+                                mfaVerifiedAt: session.mfaVerifiedAt,
+                            }),
                             // This is only the non-secret selector; the validator stays in the cookie.
                             sessionId: session.sessionId,
                         },
                     }),
-                    user,
-                });
+                    ...(user && { user }),
+                } satisfies AuthSessionResponse);
             },
         },
 
         "/api/auth/register-first-user": {
             POST: async (request: Request, server: Server<unknown>) => {
-                const body = await readAuthBody(request);
+                const body = await readAuthBody(
+                    request,
+                    parseFirstUserRegistrationRequest
+                );
                 if (body instanceof Response) return body;
                 const username = normalizeLoginUsername(body.username);
                 if (!username) {
-                    return json(
-                        {
-                            error: "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
-                        },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "auth",
+                        message:
+                            "Username must be 3-32 chars: letters, numbers, dot, dash, underscore",
+                        status: 400,
+                    });
                 }
                 const password = normalizeLoginPassword(body.password);
                 if (!password) {
-                    return json(
-                        { error: "Password must be 8-256 characters" },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "auth",
+                        message: "Password must be 8-256 characters",
+                        status: 400,
+                    });
                 }
                 const rawGatewayToken = body.gatewayToken;
                 if (typeof rawGatewayToken !== "string" || !rawGatewayToken.trim()) {
-                    return json(
-                        { error: "Gateway token is required for first-user setup" },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "auth",
+                        message: "Gateway token is required for first-user setup",
+                        status: 400,
+                    });
                 }
                 if (!isBootstrapRequired()) {
                     return responseForClosedBootstrap();
                 }
                 if (firstUserBootstrapState.isInProgress) {
-                    return json(
-                        { error: "First-user setup is already in progress" },
-                        { status: 409 }
-                    );
+                    return routeFailureResponse({
+                        context: "auth",
+                        message: "First-user setup is already in progress",
+                        status: 409,
+                    });
                 }
                 const gatewayToken = rawGatewayToken.trim();
                 firstUserBootstrapState.isInProgress = true;
@@ -322,7 +335,7 @@ export function createAuthRoutes(
                             {
                                 authenticated: true,
                                 user: { id: user.id, username: user.username },
-                            },
+                            } satisfies AuthLoginResponse,
                             { status: 201 }
                         ),
                         [
@@ -331,7 +344,9 @@ export function createAuthRoutes(
                         ]
                     );
                 } catch (bootstrapError) {
-                    console.error("[Auth] First-user bootstrap failed:", bootstrapError);
+                    logger.error("auth.first_user_bootstrap_failed", {
+                        error: bootstrapError,
+                    });
                     let isRollbackFailed = false;
                     if (isGatewayTokenPersisted) {
                         try {
@@ -349,10 +364,9 @@ export function createAuthRoutes(
                             }
                         } catch (rollbackError) {
                             isRollbackFailed = true;
-                            console.error(
-                                "[Auth] First-user bootstrap rollback failed:",
-                                rollbackError
-                            );
+                            logger.error("auth.first_user_bootstrap_rollback_failed", {
+                                error: rollbackError,
+                            });
                         }
                     }
                     if (isAttemptedGatewaySwitch && !isRollbackFailed) {
@@ -370,16 +384,18 @@ export function createAuthRoutes(
                         }
                     }
                     const isAuthFailure = isGatewayAuthFailure(bootstrapError);
-                    return json(
-                        {
-                            error: isRollbackFailed
-                                ? "Failed to roll back first-user bootstrap"
-                                : isAuthFailure
-                                  ? "Invalid OpenClaw gateway token"
-                                  : "Failed to complete first-user setup",
-                        },
-                        { status: !isRollbackFailed && isAuthFailure ? 401 : 500 }
-                    );
+                    let message = "Failed to complete first-user setup";
+                    if (isAuthFailure) {
+                        message = "Invalid OpenClaw gateway token";
+                    }
+                    if (isRollbackFailed) {
+                        message = "Failed to roll back first-user bootstrap";
+                    }
+                    return routeFailureResponse({
+                        context: "auth",
+                        message,
+                        status: !isRollbackFailed && isAuthFailure ? 401 : 500,
+                    });
                 } finally {
                     firstUserBootstrapState.isInProgress = false;
                 }
@@ -389,22 +405,25 @@ export function createAuthRoutes(
         "/api/auth/login": {
             POST: async (request: Request, server: Server<unknown>) => {
                 if (isBootstrapRequired()) {
-                    return json(
-                        { error: "Create the first user before logging in" },
-                        { status: 409 }
-                    );
+                    return routeFailureResponse({
+                        context: "auth",
+                        message: "Create the first user before logging in",
+                        status: 409,
+                    });
                 }
-                const body = await readAuthBody(request);
+                const body = await readAuthBody(request, parseLoginCredentialsRequest);
                 if (body instanceof Response) return body;
                 const username = normalizeLoginUsername(body.username);
                 const password = normalizeLoginPassword(body.password);
                 if (!username || !password) {
-                    return json(
-                        { error: "Username and password are required" },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "auth",
+                        message: "Username and password are required",
+                        status: 400,
+                    });
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "login-password",
                     username
                 );
@@ -416,10 +435,11 @@ export function createAuthRoutes(
                 );
                 if (!user || !isPasswordValid) {
                     recordAuthenticationFailure("login-password", username);
-                    return json(
-                        { error: "Invalid username or password" },
-                        { status: 401 }
-                    );
+                    return routeFailureResponse({
+                        context: "auth",
+                        message: "Invalid username or password",
+                        status: 401,
+                    });
                 }
                 clearAuthenticationFailures("login-password", username);
                 const existingSession = sessionIdFromCookie(request);
@@ -429,10 +449,11 @@ export function createAuthRoutes(
                 if (user.mfa_enabled_at) {
                     const methods = mfaMethodsForUser(user.id);
                     if (methods.length === 0) {
-                        return json(
-                            { error: "Multi-factor authentication is unavailable" },
-                            { status: 503 }
-                        );
+                        return routeFailureResponse({
+                            context: "auth",
+                            message: "Multi-factor authentication is unavailable",
+                            status: 503,
+                        });
                     }
                     const pendingLogin = createPendingLogin(
                         user.id,
@@ -446,7 +467,7 @@ export function createAuthRoutes(
                                 methods,
                                 mfaRequired: true,
                                 user: { username: user.username },
-                            },
+                            } satisfies AuthLoginResponse,
                             { status: 202 }
                         ),
                         [
@@ -463,7 +484,7 @@ export function createAuthRoutes(
                         authenticated: true,
                         mfaRequired: false,
                         user: { id: user.id, username: user.username },
-                    }),
+                    } satisfies AuthLoginResponse),
                     [
                         sessionCookie(request, server, sessionId),
                         clearPendingLoginCookie(request, server),
@@ -479,11 +500,12 @@ export function createAuthRoutes(
                     return failedSecondFactor(request, server);
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     attempt.pending.userId
                 );
                 if (throttled) return throttled;
-                const body = await readAuthBody(request);
+                const body = await readAuthBody(request, parseLoginMfaCodeRequest);
                 if (body instanceof Response) return body;
                 const code = normalizeSecondFactorCode(body.code);
                 const factor = code
@@ -505,11 +527,12 @@ export function createAuthRoutes(
                     return failedSecondFactor(request, server);
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     attempt.pending.userId
                 );
                 if (throttled) return throttled;
-                const body = await readAuthBody(request);
+                const body = await readAuthBody(request, parseLoginMfaCodeRequest);
                 if (body instanceof Response) return body;
                 const code = normalizeSecondFactorCode(body.code);
                 const verified =
@@ -531,6 +554,7 @@ export function createAuthRoutes(
                     return failedSecondFactor(request, server);
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     attempt.pending.userId
                 );
@@ -543,11 +567,12 @@ export function createAuthRoutes(
                     });
                     return json({ options });
                 } catch (error) {
-                    console.error("[Auth] WebAuthn login options failed:", error);
-                    return json(
-                        { error: "Security-key authentication is unavailable" },
-                        { status: 503 }
-                    );
+                    logger.error("auth.webauthn_login_options_failed", { error });
+                    return routeFailureResponse({
+                        context: "auth",
+                        message: "Security-key authentication is unavailable",
+                        status: 503,
+                    });
                 }
             },
         },
@@ -559,11 +584,12 @@ export function createAuthRoutes(
                     return failedSecondFactor(request, server);
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     attempt.pending.userId
                 );
                 if (throttled) return throttled;
-                const body = await readAuthBody(request);
+                const body = await readAuthBody(request, parseLoginWebAuthnRequest);
                 if (body instanceof Response) return body;
                 const response = parseAuthenticationResponse(body.response);
                 const factor = response

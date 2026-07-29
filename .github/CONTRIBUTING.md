@@ -15,8 +15,8 @@ Thanks for helping improve Mira Dashboard.
 Run the relevant checks locally when possible:
 
 ```bash
-bun run lint:frontend
-bun run lint:backend
+bun run lint
+bun run format:check
 bun run build:frontend
 bun run build:backend
 bun run test:frontend:coverage

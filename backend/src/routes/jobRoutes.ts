@@ -7,7 +7,12 @@ import type {
 } from "../../../contracts/jobs.ts";
 import { parseScheduledJobUpdateRequest } from "../../../contracts/jobs.ts";
 import { json } from "../http.ts";
-import { readApiJson, routeErrorResponse } from "../routeSupport.ts";
+import {
+    type ParametersRequest,
+    readApiJson,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import { assertJobDisableIntentIsCurrent } from "../services/jobDisableIntent.ts";
 import {
     enqueueScheduledJob,
@@ -16,8 +21,6 @@ import {
     listScheduledJobs,
     updateScheduledJob,
 } from "../services/scheduledJobs.ts";
-
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
 export const jobRoutes = {
     "/api/jobs": {
@@ -41,7 +44,11 @@ export const jobRoutes = {
             try {
                 const job = getScheduledJob(String(request.params.id));
                 if (!job) {
-                    return json({ error: "Scheduled job not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "job",
+                        message: "Scheduled job not found",
+                        status: 404,
+                    });
                 }
                 return json({ job } satisfies ScheduledJobResponse);
             } catch (error) {
@@ -60,12 +67,11 @@ export const jobRoutes = {
                 );
                 const hasDisableIntent = Object.hasOwn(jobPatch, "disableIntent");
                 if (hasDisableIntent && jobPatch.enabled !== false) {
-                    return json(
-                        {
-                            error: "disableIntent is only valid when disabling a job",
-                        },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "job",
+                        message: "disableIntent is only valid when disabling a job",
+                        status: 400,
+                    });
                 }
                 const disableIntent = jobPatch.disableIntent;
                 if (disableIntent) assertJobDisableIntentIsCurrent(disableIntent);
@@ -78,7 +84,11 @@ export const jobRoutes = {
                     timeOfDay: jobPatch.timeOfDay,
                 });
                 if (!job) {
-                    return json({ error: "Scheduled job not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "job",
+                        message: "Scheduled job not found",
+                        status: 404,
+                    });
                 }
                 return json({
                     isOk: true,
@@ -120,7 +130,11 @@ export const jobRoutes = {
             try {
                 const job = getScheduledJob(String(request.params.id));
                 if (!job) {
-                    return json({ error: "Scheduled job not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "job",
+                        message: "Scheduled job not found",
+                        status: 404,
+                    });
                 }
                 return json({
                     runs: listScheduledJobRuns(job.id),

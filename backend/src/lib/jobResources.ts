@@ -103,7 +103,13 @@ function isSystemdRunExecutable(executable: string): boolean {
     return executable === "systemd-run" || executable.endsWith("/systemd-run");
 }
 
-/** Keeps the user-bus variables needed by a scoped launcher without widening child env. */
+/**
+ * Keeps the user-bus variables needed by a scoped launcher without widening child env.
+ * @param executable Executable value.
+ * @param environment Environment value.
+ * @param inheritedEnvironment Inherited environment value.
+ * @returns Scoped job process environment result.
+ */
 export function scopedJobProcessEnvironment(
     executable: string,
     environment: Record<string, string | undefined> | undefined,
@@ -135,7 +141,13 @@ function scopeOwnerProperties(environment: Record<string, string | undefined>): 
         : [];
 }
 
-/** Wraps child commands in a constrained transient scope while a worker action runs. */
+/**
+ * Wraps child commands in a constrained transient scope while a worker action runs.
+ * @param executable Executable value.
+ * @param arguments_ Arguments value.
+ * @param environment Environment value.
+ * @returns Scoped job process command result.
+ */
 export function scopedJobProcessCommand(
     executable: string,
     arguments_: readonly string[],

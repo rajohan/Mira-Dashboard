@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { writeCliError, writeCliOutput } from "./lib/cliOutput.ts";
 import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
@@ -162,11 +163,12 @@ async function cleanupReleaseWorktree(
             timeoutMs: 30_000,
         });
     } catch (fallbackError) {
-        throw new AggregateError(
+        const removalFailure = new AggregateError(
             [removeError, fallbackError],
             "Failed to remove release build worktree",
-            { cause: fallbackError }
+            { cause: removeError }
         );
+        throw removalFailure;
     }
 }
 
@@ -348,7 +350,7 @@ export async function stageDashboardRelease(
     const environment = managedReleaseEnvironment(contract);
     let isWorktreeCreated = false;
     let stagedRelease: ManagedDashboardRelease | undefined;
-    let stagingError: unknown;
+    let stagingError: Error | undefined;
     try {
         options.onProgress?.("Creating isolated release worktree");
         await commandRunner(
@@ -372,19 +374,12 @@ export async function stageDashboardRelease(
             throw new Error("Release worktree resolved an unexpected commit");
         }
 
-        options.onProgress?.("Installing frontend release dependencies");
+        options.onProgress?.("Installing release dependencies");
         await commandRunner(bunExecutable, ["install", "--frozen-lockfile"], {
             cwd: worktreePath,
             environment,
             signal: options.signal,
             timeoutMs: 180_000,
-        });
-        options.onProgress?.("Installing backend release dependencies");
-        await commandRunner(bunExecutable, ["install", "--frozen-lockfile"], {
-            cwd: path.join(worktreePath, "backend"),
-            environment,
-            signal: options.signal,
-            timeoutMs: 120_000,
         });
         options.onProgress?.("Building and preflighting release");
         await commandRunner(bunExecutable, ["run", "deploy:prepare"], {
@@ -400,9 +395,12 @@ export async function stageDashboardRelease(
             contract.releasesRoot
         );
     } catch (error) {
-        stagingError = error;
+        stagingError =
+            error instanceof Error
+                ? error
+                : new Error("Release staging failed", { cause: error });
     }
-    let cleanupError: unknown;
+    let cleanupError: Error | undefined;
     try {
         await cleanupReleaseWorktree(
             commandRunner,
@@ -412,7 +410,10 @@ export async function stageDashboardRelease(
             isWorktreeCreated
         );
     } catch (error) {
-        cleanupError = error;
+        cleanupError =
+            error instanceof Error
+                ? error
+                : new Error("Release worktree cleanup failed", { cause: error });
     }
     if (stagingError !== undefined) {
         if (cleanupError !== undefined) {
@@ -471,9 +472,9 @@ export async function runReleaseDeploymentCommand(
 if (import.meta.main) {
     try {
         const result = await runReleaseDeploymentCommand(Bun.argv.slice(2));
-        console.log(JSON.stringify(result));
+        writeCliOutput(JSON.stringify(result));
     } catch (error) {
-        console.error(
+        writeCliError(
             error instanceof Error ? error.message : "Release deployment failed"
         );
         process.exitCode = 1;

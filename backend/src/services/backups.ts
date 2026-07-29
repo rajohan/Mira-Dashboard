@@ -1,3 +1,8 @@
+import type {
+    BackupJob as BackupJobResponse,
+    BackupJobStatus,
+    BackupType,
+} from "../../../contracts/backups.ts";
 import { database } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
@@ -7,13 +12,14 @@ import {
     runProcess,
     spawnProcess,
 } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { refreshCacheProducer } from "./cacheRefresh.ts";
 import {
     enqueueJobExecution,
     getJobExecution,
     getLatestScheduledJobExecution,
     getPreviousScheduledJobExecution,
-    type JobExecution,
+    type JobExecutionRecord,
 } from "./jobExecutionQueue.ts";
 import {
     successfulJobExecutionOutput,
@@ -28,6 +34,7 @@ import {
     ScheduledJobActionError,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
+const logger = createStructuredLogger("backups");
 const MAX_OUTPUT_CHARS = 100_000;
 const SCHEDULED_BACKUP_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const BACKUP_ABORT_SIGKILL_GRACE_MS = 10_000;
@@ -44,22 +51,22 @@ interface BackupAbortConfig {
     processPattern: string;
 }
 
-/** Represents backup job. */
-interface BackupJob {
+/** Tracks process-owned state that is not exposed by the backup API contract. */
+interface ActiveBackupJob {
     id: string;
-    type: "kopia" | "walg";
-    status: "running" | "done" | "needs_attention";
+    type: BackupType;
+    status: BackupJobStatus;
     code: number | undefined;
     stdout: string;
     stderr: string;
     startedAt: number;
     endedAt: number | undefined;
-    completed: Promise<BackupJob>;
+    completed: Promise<ActiveBackupJob>;
     process?: BunProcess;
     statusRefreshed?: boolean;
 }
 
-const backupJobs = new Map<string, BackupJob>();
+const backupJobs = new Map<string, ActiveBackupJob>();
 const backupRouteState: {
     activeKopiaJobId: string | undefined;
     activeWalgJobId: string | undefined;
@@ -68,7 +75,11 @@ const backupRouteState: {
     activeWalgJobId: undefined,
 };
 
-/** Performs trim output. */
+/**
+ * Performs trim output.
+ * @param text Text value.
+ * @returns Trim output result.
+ */
 function trimOutput(text: string): string {
     if (text.length <= MAX_OUTPUT_CHARS) {
         return text;
@@ -76,7 +87,12 @@ function trimOutput(text: string): string {
     return text.slice(-MAX_OUTPUT_CHARS);
 }
 
-/** Returns current job. */
+/**
+ * Returns current job.
+ * @param activeJobId Active job identifier.
+ * @param clear Clear value.
+ * @returns current job.
+ */
 function getCurrentJob(activeJobId: string | undefined, clear: () => void) {
     if (!activeJobId) {
         return;
@@ -94,22 +110,31 @@ function getCurrentJob(activeJobId: string | undefined, clear: () => void) {
     return job;
 }
 
-/** Returns current kopia job. */
+/**
+ * Returns current kopia job.
+ * @returns current kopia job.
+ */
 function getCurrentKopiaJob() {
     return getCurrentJob(backupRouteState.activeKopiaJobId, () => {
         backupRouteState.activeKopiaJobId = undefined;
     });
 }
 
-/** Returns current walg job. */
+/**
+ * Returns current walg job.
+ * @returns current walg job.
+ */
 function getCurrentWalgJob() {
     return getCurrentJob(backupRouteState.activeWalgJobId, () => {
         backupRouteState.activeWalgJobId = undefined;
     });
 }
 
-/** Performs map job. */
-export function mapBackupJob(job: BackupJob | undefined) {
+/**
+ * Performs map job.
+ * @returns Map job result.
+ */
+export function mapBackupJob(job?: ActiveBackupJob): BackupJobResponse | undefined {
     if (!job) {
         return;
     }
@@ -126,7 +151,11 @@ export function mapBackupJob(job: BackupJob | undefined) {
     };
 }
 
-/** Returns backup type from scheduled job payload. */
+/**
+ * Returns backup type from scheduled job payload.
+ * @param payload Request or event payload.
+ * @returns backup type from scheduled job payload.
+ */
 function getScheduledBackupType(payload: unknown) {
     if (typeof payload !== "object" || payload === null) {
         return;
@@ -135,11 +164,11 @@ function getScheduledBackupType(payload: unknown) {
     return (payload as { type?: unknown }).type;
 }
 
-function backupStatusCacheKey(type: BackupJob["type"]) {
+function backupStatusCacheKey(type: BackupType) {
     return type === "kopia" ? "backup.kopia.status" : "backup.walg.status";
 }
 
-function evictCompletedBackupJobs(type: BackupJob["type"]) {
+function evictCompletedBackupJobs(type: BackupType) {
     for (const [id, job] of backupJobs) {
         if (job.type === type && job.status === "done") {
             backupJobs.delete(id);
@@ -147,7 +176,7 @@ function evictCompletedBackupJobs(type: BackupJob["type"]) {
     }
 }
 
-export async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
+export async function clearNeedsAttentionBackupJob(type: BackupType) {
     const job = getCurrentBackupJob(type);
     if (!job || job.status === "done") {
         if (job) backupJobs.delete(job.id);
@@ -172,11 +201,11 @@ export async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     return job;
 }
 
-function recordBackupNeedsAttention(type: BackupJob["type"], stderr: string): BackupJob {
+function recordBackupNeedsAttention(type: BackupType, stderr: string): ActiveBackupJob {
     const jobId = Bun.randomUUIDv7();
-    const completed = Promise.withResolvers<BackupJob>();
+    const completed = Promise.withResolvers<ActiveBackupJob>();
     const now = Date.now();
-    const job: BackupJob = {
+    const job: ActiveBackupJob = {
         id: jobId,
         type,
         status: "needs_attention",
@@ -197,9 +226,17 @@ function recordBackupNeedsAttention(type: BackupJob["type"], stderr: string): Ba
     return job;
 }
 
-/** Performs start backup job. */
+/**
+ * Performs start backup job.
+ * @param type Type value.
+ * @param command Command value.
+ * @param signal Signal used to cancel the operation.
+ * @param abortConfig Abort config value.
+ * @param hostAbortPattern Host abort pattern value.
+ * @returns Start backup job result.
+ */
 function startBackupJob(
-    type: BackupJob["type"],
+    type: BackupType,
     command: string,
     signal?: AbortSignal,
     abortConfig?: BackupAbortConfig,
@@ -220,8 +257,8 @@ function startBackupJob(
     evictCompletedBackupJobs(type);
 
     const jobId = Bun.randomUUIDv7();
-    const completed = Promise.withResolvers<BackupJob>();
-    const job: BackupJob = {
+    const completed = Promise.withResolvers<ActiveBackupJob>();
+    const job: ActiveBackupJob = {
         id: jobId,
         type,
         status: "running",
@@ -357,7 +394,10 @@ function startBackupJob(
                     killProcessGroup(child, "SIGKILL");
                 } catch (error) {
                     job.stderr = trimOutput(
-                        `${job.stderr}\nFailed to force terminate backup process: ${String(error)}`.trim()
+                        `${job.stderr}\nFailed to force terminate backup process: ${errorMessage(
+                            error,
+                            "Unknown error"
+                        )}`.trim()
                     );
                     void markNeedsAttention();
                 }
@@ -365,7 +405,10 @@ function startBackupJob(
             hostAbortKillTimer.unref();
         } catch (error) {
             job.stderr = trimOutput(
-                `${job.stderr}\nFailed to terminate backup process: ${String(error)}`.trim()
+                `${job.stderr}\nFailed to terminate backup process: ${errorMessage(
+                    error,
+                    "Unknown error"
+                )}`.trim()
             );
             void markNeedsAttention();
         }
@@ -388,14 +431,11 @@ function startBackupJob(
     );
 
     void (async () => {
-        const code = await child.exited;
-        await Promise.all([stdoutDone, stderrDone]);
-        return code;
-    })()
-        .then(async (code) => {
+        try {
+            const code = await child.exited;
+            await Promise.all([stdoutDone, stderrDone]);
             await finalizeJob(code, isAbortRequested ? "SIGTERM" : undefined);
-        })
-        .catch(async (error: unknown) => {
+        } catch (error) {
             if (isFinalized || isFinalizing) {
                 return;
             }
@@ -412,7 +452,10 @@ function startBackupJob(
             job.status = "done";
             job.code = 1;
             job.stderr = trimOutput(
-                `${job.stderr}\n${error instanceof Error ? error.message : String(error)}`.trim()
+                `${job.stderr}\nBackup process failed: ${errorMessage(
+                    error,
+                    "Unknown error"
+                )}`.trim()
             );
             job.endedAt = Date.now();
             if (signal) {
@@ -420,7 +463,8 @@ function startBackupJob(
             }
             completed.resolve(job);
             await refreshBackupStatus(type, job);
-        });
+        }
+    })();
 
     return job;
 }
@@ -470,9 +514,9 @@ function isContainerPgrepNoMatch(result: { code: number; stdout: string }): bool
 
 async function assertNoContainerBackupInProgress(
     config: BackupAbortConfig,
-    type: BackupJob["type"],
-    getCurrent: () => BackupJob | undefined
-): Promise<BackupJob | undefined> {
+    type: BackupType,
+    getCurrent: () => ActiveBackupJob | undefined
+): Promise<ActiveBackupJob | undefined> {
     const result = await runContainerPgrep(config);
     if (isContainerPgrepNoMatch(result)) {
         return undefined;
@@ -517,10 +561,10 @@ function runHostPgrep(
 }
 
 async function assertNoHostBackupInProgress(
-    type: BackupJob["type"],
+    type: BackupType,
     processPattern: string,
-    getCurrent: () => BackupJob | undefined
-): Promise<BackupJob | undefined> {
+    getCurrent: () => ActiveBackupJob | undefined
+): Promise<ActiveBackupJob | undefined> {
     const result = await runHostPgrep(processPattern);
     if (result.code === 1) {
         return undefined;
@@ -587,7 +631,7 @@ async function waitForContainerProcessExit(config: BackupAbortConfig): Promise<v
 
 async function waitForContainerProcessExitWithRetries(
     config: BackupAbortConfig,
-    job: BackupJob
+    job: ActiveBackupJob
 ): Promise<boolean> {
     for (let attempt = 1; attempt <= backupAbortContainerConfirmAttempts; attempt += 1) {
         try {
@@ -595,7 +639,10 @@ async function waitForContainerProcessExitWithRetries(
             return true;
         } catch (error: unknown) {
             job.stderr = trimOutput(
-                `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
+                `${job.stderr}\nFailed to confirm backup process termination: ${errorMessage(
+                    error,
+                    "Unknown error"
+                )}`.trim()
             );
             if (attempt >= backupAbortContainerConfirmAttempts) {
                 job.stderr = trimOutput(
@@ -628,7 +675,7 @@ async function waitForHostProcessExit(processPattern: string): Promise<void> {
 
 async function waitForHostProcessExitWithRetries(
     processPattern: string,
-    job: BackupJob
+    job: ActiveBackupJob
 ): Promise<boolean> {
     for (let attempt = 1; attempt <= backupAbortContainerConfirmAttempts; attempt += 1) {
         try {
@@ -636,7 +683,10 @@ async function waitForHostProcessExitWithRetries(
             return true;
         } catch (error: unknown) {
             job.stderr = trimOutput(
-                `${job.stderr}\nFailed to confirm backup process termination: ${String(error)}`.trim()
+                `${job.stderr}\nFailed to confirm backup process termination: ${errorMessage(
+                    error,
+                    "Unknown error"
+                )}`.trim()
             );
             if (attempt >= backupAbortContainerConfirmAttempts) {
                 job.stderr = trimOutput(
@@ -653,21 +703,27 @@ async function waitForHostProcessExitWithRetries(
 }
 
 async function refreshBackupStatus(
-    type: BackupJob["type"],
-    job: BackupJob
+    type: BackupType,
+    job: ActiveBackupJob
 ): Promise<void> {
     const cacheKey = backupStatusCacheKey(type);
     try {
         await refreshCacheProducer(cacheKey, undefined, { force: true });
     } catch (error) {
         job.stderr = trimOutput(
-            `${job.stderr}\nStatus refresh failed: ${String(error)}`.trim()
+            `${job.stderr}\nStatus refresh failed: ${errorMessage(
+                error,
+                "Unknown error"
+            )}`.trim()
         );
     }
     job.statusRefreshed = true;
 }
 
-/** Performs start kopia backup job. */
+/**
+ * Performs start kopia backup job.
+ * @returns Start kopia backup job result.
+ */
 async function startKopiaBackupJob(signal?: AbortSignal) {
     const existingJob = getCurrentKopiaJob();
     if (existingJob?.status === "running") {
@@ -678,7 +734,7 @@ async function startKopiaBackupJob(signal?: AbortSignal) {
             statusCode: 409,
         });
     }
-    let hostJob: BackupJob | undefined;
+    let hostJob: ActiveBackupJob | undefined;
     try {
         hostJob = await assertNoHostBackupInProgress(
             "kopia",
@@ -705,7 +761,10 @@ async function startKopiaBackupJob(signal?: AbortSignal) {
     );
 }
 
-/** Performs start walg backup job. */
+/**
+ * Performs start walg backup job.
+ * @returns Start walg backup job result.
+ */
 async function startWalgBackupJob(signal?: AbortSignal) {
     const abortConfig = {
         container: "walg",
@@ -720,7 +779,7 @@ async function startWalgBackupJob(signal?: AbortSignal) {
             statusCode: 409,
         });
     }
-    let containerJob: BackupJob | undefined;
+    let containerJob: ActiveBackupJob | undefined;
     try {
         containerJob = await assertNoContainerBackupInProgress(
             abortConfig,
@@ -731,10 +790,9 @@ async function startWalgBackupJob(signal?: AbortSignal) {
         try {
             await refreshCacheProducer(backupStatusCacheKey("walg"));
         } catch (refreshError) {
-            console.warn(
-                "[Backups] Failed to refresh WAL-G status after preflight failure:",
-                refreshError
-            );
+            logger.warn("backups.walg_status_refresh_failed", {
+                error: refreshError,
+            });
             // Preserve the original preflight failure for the API response.
         }
         throw error;
@@ -751,7 +809,7 @@ async function startWalgBackupJob(signal?: AbortSignal) {
 }
 
 async function startScheduledBackup(
-    type: BackupJob["type"],
+    type: BackupType,
     signal: AbortSignal | undefined,
     context: ScheduledJobActionContext
 ) {
@@ -786,7 +844,7 @@ async function startScheduledBackup(
             { statusCode: 409 }
         );
     }
-    let job: BackupJob;
+    let job: ActiveBackupJob;
     try {
         job = await startManualBackup(type, signal);
     } catch (error) {
@@ -809,7 +867,7 @@ async function startScheduledBackup(
     publish();
     const progress = setInterval(publish, 1000);
     progress.unref();
-    let completedJob: BackupJob;
+    let completedJob: ActiveBackupJob;
     try {
         completedJob = await job.completed;
     } finally {
@@ -827,16 +885,21 @@ async function startScheduledBackup(
     return { backup: mapBackupJob(completedJob) };
 }
 
-function scheduledBackupJobId(type: BackupJob["type"]) {
+function scheduledBackupJobId(type: BackupType) {
     return type === "kopia" ? "backup.kopia" : "backup.walg";
 }
 
-export function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | undefined {
+export function getCurrentBackupJob(type: BackupType): ActiveBackupJob | undefined {
     return (type === "kopia" ? getCurrentKopiaJob : getCurrentWalgJob)();
 }
 
-/** Worker primitive. HTTP callers must enqueue the registered backup action. */
-export async function startManualBackup(type: BackupJob["type"], signal?: AbortSignal) {
+/**
+ * Worker primitive. HTTP callers must enqueue the registered backup action.
+ * @param type Type value.
+ * @param signal Signal used to cancel the operation.
+ * @returns Promise resolving to the start manual backup result.
+ */
+export async function startManualBackup(type: BackupType, signal?: AbortSignal) {
     const existingJob = getCurrentBackupJob(type);
     if (existingJob?.status === "running") return existingJob;
     return type === "kopia"
@@ -845,8 +908,8 @@ export async function startManualBackup(type: BackupJob["type"], signal?: AbortS
 }
 
 function backupViewFromExecution(
-    type: BackupJob["type"],
-    execution: JobExecution | undefined
+    type: BackupType,
+    execution: JobExecutionRecord | undefined
 ) {
     if (!execution) return;
     const backup = execution.output.backup;
@@ -867,17 +930,16 @@ function backupViewFromExecution(
         }
         return backupView;
     }
+    let status: BackupJobStatus = execution.finishedAt ? "done" : "running";
+    if (execution.status === "failed" || execution.status === "cancelled") {
+        status = execution.status;
+    }
     return {
         code: undefined,
         endedAt: execution.finishedAt ? Date.parse(execution.finishedAt) : undefined,
         id: execution.id,
         startedAt: Date.parse(execution.startedAt ?? execution.queuedAt),
-        status:
-            execution.status === "failed" || execution.status === "cancelled"
-                ? execution.status
-                : execution.finishedAt
-                  ? "done"
-                  : "running",
+        status,
         stderr: execution.message ?? "",
         stdout: "",
         type,
@@ -885,14 +947,14 @@ function backupViewFromExecution(
 }
 
 function persistedBackupViewFromExecution(
-    type: BackupJob["type"],
-    execution: JobExecution | undefined
+    type: BackupType,
+    execution: JobExecutionRecord | undefined
 ) {
     if (!execution || wasBackupAttentionClearedAfter(type, execution)) return;
     return backupViewFromExecution(type, execution);
 }
 
-export function getPersistedBackupJob(type: BackupJob["type"]) {
+export function getPersistedBackupJob(type: BackupType) {
     return persistedBackupViewFromExecution(
         type,
         getLatestScheduledJobExecution(scheduledBackupJobId(type))
@@ -900,8 +962,8 @@ export function getPersistedBackupJob(type: BackupJob["type"]) {
 }
 
 function wasBackupAttentionClearedAfter(
-    type: BackupJob["type"],
-    execution: JobExecution
+    type: BackupType,
+    execution: JobExecutionRecord
 ): boolean {
     return Boolean(
         database
@@ -920,7 +982,7 @@ function wasBackupAttentionClearedAfter(
     );
 }
 
-export function queueManualBackup(type: BackupJob["type"]) {
+export function queueManualBackup(type: BackupType) {
     if (getPersistedBackupJob(type)?.status === "needs_attention") {
         throw Object.assign(new Error(`${type.toUpperCase()} backup needs attention`), {
             statusCode: 409,
@@ -933,8 +995,8 @@ export function queueManualBackup(type: BackupJob["type"]) {
     );
 }
 
-export async function clearPersistedBackupAttention(type: BackupJob["type"]) {
-    let execution: JobExecution;
+export async function clearPersistedBackupAttention(type: BackupType) {
+    let execution: JobExecutionRecord;
     database.run("BEGIN IMMEDIATE");
     try {
         const backupExecutionId = getLatestScheduledJobExecution(
@@ -968,7 +1030,7 @@ export async function clearPersistedBackupAttention(type: BackupJob["type"]) {
     return output.backup as ReturnType<typeof mapBackupJob>;
 }
 
-async function clearBackupAttention(type: BackupJob["type"], backupExecutionId: string) {
+async function clearBackupAttention(type: BackupType, backupExecutionId: string) {
     const latestExecution = getLatestScheduledJobExecution(scheduledBackupJobId(type));
     if (!latestExecution) {
         throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
@@ -1008,7 +1070,10 @@ async function clearBackupAttention(type: BackupJob["type"], backupExecutionId: 
     } catch (error) {
         const stderr = typeof cleared.stderr === "string" ? cleared.stderr : "";
         cleared.stderr = trimOutput(
-            `${stderr}\nStatus refresh failed: ${String(error)}`.trim()
+            `${stderr}\nStatus refresh failed: ${errorMessage(
+                error,
+                "Unknown error"
+            )}`.trim()
         );
     }
     return cleared;
@@ -1017,7 +1082,7 @@ async function clearBackupAttention(type: BackupJob["type"], backupExecutionId: 
 async function terminateContainerProcessSafely(
     abortConfig: BackupAbortConfig,
     signal: NodeJS.Signals,
-    job: BackupJob
+    job: ActiveBackupJob
 ): Promise<void> {
     try {
         await terminateContainerProcess(abortConfig, signal);
@@ -1026,7 +1091,9 @@ async function terminateContainerProcessSafely(
             signal === "SIGTERM"
                 ? "Failed to terminate container backup process"
                 : "Failed to force terminate container backup process";
-        job.stderr = trimOutput(`${job.stderr}\n${message}: ${String(error)}`.trim());
+        job.stderr = trimOutput(
+            `${job.stderr}\n${message}: ${errorMessage(error, "Unknown error")}`.trim()
+        );
     }
 }
 

@@ -3,10 +3,10 @@ import type {
     PullRequestPreviewStatus,
     PullRequestSummary,
 } from "../../../contracts/delivery.ts";
-import { errorMessage } from "../lib/errors.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
     enqueueJobExecution,
-    type JobExecution,
+    type JobExecutionRecord,
     listJobExecutions,
 } from "./jobExecutionQueue.ts";
 import {
@@ -27,6 +27,8 @@ import {
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
 import { registerScheduledJobAction } from "./scheduledJobs.ts";
+
+const logger = createStructuredLogger("pull-request-previews");
 
 const PREVIEW_START_TIMEOUT_MS = 30 * 60 * 1000;
 const PREVIEW_STOP_TIMEOUT_MS = 6 * 60 * 1000;
@@ -62,7 +64,10 @@ function executionPreviewCommitSha(value: unknown): string {
     return value;
 }
 
-/** Converts a GitHub PR summary into the constrained host-preview contract. */
+/**
+ * Converts a GitHub PR summary into the constrained host-preview contract.
+ * @returns Converted a GitHub PR summary into the constrained host-preview contract.
+ */
 export function pullRequestPreviewCandidate(
     pullRequest: PullRequestSummary
 ): PullRequestPreviewCandidate {
@@ -86,7 +91,11 @@ async function findPullRequest(number: number): Promise<PullRequestPreviewCandid
     return pullRequestPreviewCandidate(pullRequest);
 }
 
-/** Validates preview output before it crosses the queued-execution boundary. */
+/**
+ * Validates preview output before it crosses the queued-execution boundary.
+ * @param value Value to process.
+ * @returns Validation result for preview output before it crosses the queued-execution boundary.
+ */
 export function parsePullRequestPreviewStatus(value: unknown): PullRequestPreviewStatus {
     if (!isRecord(value) || !PREVIEW_LIFECYCLES.has(value.status as never)) {
         throw new Error("Preview execution returned an invalid status");
@@ -141,7 +150,7 @@ export function parsePullRequestPreviewStatus(value: unknown): PullRequestPrevie
     };
 }
 
-function previewFromExecution(execution: JobExecution): PullRequestPreviewStatus {
+function previewFromExecution(execution: JobExecutionRecord): PullRequestPreviewStatus {
     const output = successfulJobExecutionOutput(execution);
     return parsePullRequestPreviewStatus(output.preview);
 }
@@ -160,7 +169,10 @@ function unavailablePreviewControls(): PullRequestPreviewStatus | undefined {
     };
 }
 
-/** Reads the current preview state, including queued lifecycle transitions. */
+/**
+ * Reads the current preview state, including queued lifecycle transitions.
+ * @returns Read the current preview state, including queued lifecycle transitions.
+ */
 export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewStatus> {
     const unavailable = unavailablePreviewControls();
     if (unavailable) return unavailable;
@@ -195,6 +207,7 @@ export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewS
 /**
  * Queues cleanup when a successful production-base listing omits retained
  * preview data and an unfiltered GitHub lookup confirms that the PR is closed.
+ * @param openPullRequests Open pull requests value.
  */
 export async function reconcileClosedPullRequestPreview(
     openPullRequests: readonly PullRequestSummary[]
@@ -241,14 +254,15 @@ export async function reconcileClosedPullRequestPreview(
             return;
         }
     } catch (error) {
-        console.error(
-            "[PullRequestPreview] Closed-PR reconciliation failed:",
-            errorMessage(error, "preview cleanup reconciliation failed")
-        );
+        logger.error("preview.closed_pr_reconciliation_failed", { error });
     }
 }
 
-/** Queues one managed preview startup in the dedicated production worker. */
+/**
+ * Queues one managed preview startup in the dedicated production worker.
+ * @param number Number value.
+ * @returns Promise resolving to the prepare and start pull request preview result.
+ */
 export async function prepareAndStartPullRequestPreview(
     number: number
 ): Promise<PullRequestPreviewStatus> {
@@ -298,7 +312,11 @@ export async function prepareAndStartPullRequestPreview(
     };
 }
 
-/** Queues a managed preview stop in the dedicated production worker. */
+/**
+ * Queues a managed preview stop in the dedicated production worker.
+ * @param number Number value.
+ * @returns Promise resolving to the prepare and stop pull request preview result.
+ */
 export async function prepareAndStopPullRequestPreview(
     number?: number
 ): Promise<PullRequestPreviewStatus> {

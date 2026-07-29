@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import {
     existsSync,
     mkdirSync,
@@ -8,8 +9,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-import { afterEach, describe, expect, it } from "bun:test";
 
 import {
     resolveDashboardProjectPaths,
@@ -186,15 +185,15 @@ describe("immutable release deployment", () => {
     });
 
     it("keeps host-local password reset on the stable production database", () => {
-        const backendPackage = JSON.parse(
-            readFileSync(path.resolve(import.meta.dirname, "../package.json"), "utf8")
+        const rootPackage = JSON.parse(
+            readFileSync(path.resolve(import.meta.dirname, "../../package.json"), "utf8")
         ) as { scripts?: Record<string, string> };
-        const resetCommand = backendPackage.scripts?.["auth:reset-password"];
+        const resetCommand = rootPackage.scripts?.["auth:reset-password"];
         expect(resetCommand).toContain(
             "NODE_ENV=production doppler run --config prd --project rajohan"
         );
         expect(resetCommand).toContain(
-            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun dist/resetDashboardPassword.js"
+            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun --cwd backend dist/resetDashboardPassword.js"
         );
         expect(resetCommand).not.toContain("/home/ubuntu/projects");
     });
@@ -263,14 +262,12 @@ describe("immutable release deployment", () => {
             ["git", "worktree", "add", "--detach", expect.any(String), COMMIT_SHA],
             ["git", "rev-parse", "HEAD"],
             [process.execPath, "install", "--frozen-lockfile"],
-            [process.execPath, "install", "--frozen-lockfile"],
             [process.execPath, "run", "deploy:prepare"],
             ["git", "worktree", "remove", "--force", expect.any(String)],
         ]);
         expect(progress).toEqual([
             "Creating isolated release worktree",
-            "Installing frontend release dependencies",
-            "Installing backend release dependencies",
+            "Installing release dependencies",
             "Building and preflighting release",
             "Publishing verified immutable release",
         ]);
@@ -318,18 +315,20 @@ describe("immutable release deployment", () => {
         }> = [];
         const reused = await stageDashboardRelease(COMMIT_SHA, {
             ...options,
-            commandRunner: async (command, arguments_, commandOptions) => {
-                calls.push({
-                    arguments_,
-                    command,
-                    cwd: commandOptions.cwd,
-                    dashboardEnvironment: Object.fromEntries(
-                        Object.entries(commandOptions.environment).filter(([key]) =>
-                            key.startsWith("MIRA_DASHBOARD_")
-                        )
-                    ),
+            commandRunner: (command, arguments_, commandOptions) => {
+                return Promise.try(() => {
+                    calls.push({
+                        arguments_,
+                        command,
+                        cwd: commandOptions.cwd,
+                        dashboardEnvironment: Object.fromEntries(
+                            Object.entries(commandOptions.environment).filter(([key]) =>
+                                key.startsWith("MIRA_DASHBOARD_")
+                            )
+                        ),
+                    });
+                    return { stderr: "", stdout: "" };
                 });
-                return { stderr: "", stdout: "" };
             },
         });
 
@@ -345,16 +344,18 @@ describe("immutable release deployment", () => {
                 },
             },
         ]);
-        await expect(
+        expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,
-                commandRunner: async () => {
-                    throw Object.assign(
-                        new Error("database preflight executable missing"),
-                        {
-                            code: "ENOENT",
-                        }
-                    );
+                commandRunner: () => {
+                    return Promise.try(() => {
+                        throw Object.assign(
+                            new Error("database preflight executable missing"),
+                            {
+                                code: "ENOENT",
+                            }
+                        );
+                    });
                 },
             })
         ).rejects.toThrow("database preflight executable missing");
@@ -415,28 +416,30 @@ describe("immutable release deployment", () => {
         ).toEqual([]);
     });
 
-    it("removes the temporary worktree when commit verification fails", async () => {
+    it("removes the temporary worktree when commit verification fails", () => {
         const options = stagingOptions();
         const calls: string[] = [];
-        const runner: DashboardReleaseCommandRunner = async (command, arguments_) => {
-            calls.push(`${command} ${arguments_.slice(0, 2).join(" ")}`);
-            if (command === "git" && arguments_[0] === "worktree") {
-                if (arguments_[1] === "add") {
-                    mkdirSync(String(arguments_[3]));
-                } else {
-                    rmSync(String(arguments_[3]), { force: true, recursive: true });
+        const runner: DashboardReleaseCommandRunner = (command, arguments_) => {
+            return Promise.try(() => {
+                calls.push(`${command} ${arguments_.slice(0, 2).join(" ")}`);
+                if (command === "git" && arguments_[0] === "worktree") {
+                    if (arguments_[1] === "add") {
+                        mkdirSync(String(arguments_[3]));
+                    } else {
+                        rmSync(String(arguments_[3]), { force: true, recursive: true });
+                    }
                 }
-            }
-            return {
-                stderr: "",
-                stdout:
-                    command === "git" && arguments_[0] === "rev-parse"
-                        ? OTHER_COMMIT_SHA
-                        : "",
-            };
+                return {
+                    stderr: "",
+                    stdout:
+                        command === "git" && arguments_[0] === "rev-parse"
+                            ? OTHER_COMMIT_SHA
+                            : "",
+                };
+            });
         };
 
-        await expect(
+        expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,
                 commandRunner: runner,
@@ -449,30 +452,32 @@ describe("immutable release deployment", () => {
         );
     });
 
-    it("cleans a partially-created worktree when git worktree add fails", async () => {
+    it("cleans a partially-created worktree when git worktree add fails", () => {
         const options = stagingOptions();
         const calls: string[] = [];
-        const runner: DashboardReleaseCommandRunner = async (command, arguments_) => {
-            calls.push(`${command} ${arguments_.slice(0, 2).join(" ")}`);
-            if (
-                command === "git" &&
-                arguments_[0] === "worktree" &&
-                arguments_[1] === "add"
-            ) {
-                mkdirSync(String(arguments_[3]));
-                throw new Error("worktree add failed");
-            }
-            if (
-                command === "git" &&
-                arguments_[0] === "worktree" &&
-                arguments_[1] === "remove"
-            ) {
-                rmSync(String(arguments_[3]), { force: true, recursive: true });
-            }
-            return { stderr: "", stdout: "" };
+        const runner: DashboardReleaseCommandRunner = (command, arguments_) => {
+            return Promise.try(() => {
+                calls.push(`${command} ${arguments_.slice(0, 2).join(" ")}`);
+                if (
+                    command === "git" &&
+                    arguments_[0] === "worktree" &&
+                    arguments_[1] === "add"
+                ) {
+                    mkdirSync(String(arguments_[3]));
+                    throw new Error("worktree add failed");
+                }
+                if (
+                    command === "git" &&
+                    arguments_[0] === "worktree" &&
+                    arguments_[1] === "remove"
+                ) {
+                    rmSync(String(arguments_[3]), { force: true, recursive: true });
+                }
+                return { stderr: "", stdout: "" };
+            });
         };
 
-        await expect(
+        expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,
                 commandRunner: runner,
@@ -482,7 +487,7 @@ describe("immutable release deployment", () => {
         expect(calls).toEqual(["git worktree add", "git worktree remove"]);
     });
 
-    it("falls back to filesystem cleanup and prunes stale worktree metadata", async () => {
+    it("falls back to filesystem cleanup and prunes stale worktree metadata", () => {
         const options = stagingOptions();
         const calls: string[] = [];
         const runner: DashboardReleaseCommandRunner = async (command, arguments_) => {
@@ -503,7 +508,7 @@ describe("immutable release deployment", () => {
             };
         };
 
-        await expect(
+        expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,
                 commandRunner: runner,
@@ -514,7 +519,7 @@ describe("immutable release deployment", () => {
         expect(calls.at(-1)).toBe("git worktree prune");
     });
 
-    it("rejects mismatched build identity and cleans the worktree", async () => {
+    it("rejects mismatched build identity and cleans the worktree", () => {
         const options = stagingOptions();
         const runner: DashboardReleaseCommandRunner = async (command, arguments_) => {
             if (command === "git" && arguments_[0] === "worktree") {
@@ -533,7 +538,7 @@ describe("immutable release deployment", () => {
             };
         };
 
-        await expect(
+        expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,
                 commandRunner: runner,
@@ -625,22 +630,22 @@ describe("immutable release deployment", () => {
                 contract
             )
         ).toThrow("MIRA_DASHBOARD_PROJECT_ROOT");
-        await expect(
+        expect(
             stageDashboardRelease("short", {
                 ...options,
-                commandRunner: async () => ({ stderr: "", stdout: "" }),
+                commandRunner: () => Promise.try(() => ({ stderr: "", stdout: "" })),
             })
         ).rejects.toThrow("full lowercase Git SHA");
-        await expect(
+        expect(
             runReleaseDeploymentCommand(["unknown"], options.releasesRoot)
         ).rejects.toThrow("Usage");
-        await expect(
+        expect(
             runReleaseDeploymentCommand(["stage"], options.releasesRoot)
         ).rejects.toThrow("stage requires a commit SHA");
-        await expect(
+        expect(
             runReleaseDeploymentCommand(["prune", "2"], options.releasesRoot)
         ).rejects.toThrow("retention must be between 3 and 20");
-        await expect(
+        expect(
             runReleaseDeploymentCommand(["prune", "3", "extra"], options.releasesRoot)
         ).rejects.toThrow("unexpected arguments");
         expect(

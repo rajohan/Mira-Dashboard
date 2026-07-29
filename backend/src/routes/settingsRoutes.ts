@@ -2,24 +2,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+    type DashboardSettings,
+    type DashboardSettingsPatch,
+    type DashboardSettingsResponse,
+    parseDashboardSettingsPatch,
+} from "../../../contracts/settings.ts";
 import gateway from "../gateway.ts";
-import { json, readJson } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { json } from "../http.ts";
 import {
     guardedPath,
     mkdirGuarded,
     readTextNoFollowGuarded,
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
 
-interface Settings {
-    defaultModel: string;
-    refreshInterval: number;
-    sidebarCollapsed: boolean;
-    theme: "light" | "dark" | "system";
-}
-
-const DEFAULT_SETTINGS: Settings = {
+const DEFAULT_SETTINGS: DashboardSettings = {
     defaultModel: "ollama/glm-5",
     refreshInterval: 5000,
     sidebarCollapsed: false,
@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS: Settings = {
 const settingsRouteState = {
     updateQueue: Promise.resolve(),
 };
+const logger = createStructuredLogger("settings");
 
 async function withSettingsUpdateLock<T>(callback: () => Promise<T>): Promise<T> {
     const previous = settingsRouteState.updateQueue;
@@ -88,57 +89,7 @@ async function withPinnedSettingsFile<T>(
     }
 }
 
-function parseSettingsPatch(input: unknown): Partial<Settings> {
-    if (!input || typeof input !== "object" || Array.isArray(input)) {
-        throw new Error("Settings payload must be an object");
-    }
-
-    const body = input as Record<string, unknown>;
-    const patch: Partial<Settings> = {};
-
-    if ("theme" in body) {
-        if (body.theme !== "light" && body.theme !== "dark" && body.theme !== "system") {
-            throw new Error("Invalid theme");
-        }
-        patch.theme = body.theme;
-    }
-
-    if ("sidebarCollapsed" in body) {
-        if (typeof body.sidebarCollapsed !== "boolean") {
-            throw new TypeError("Invalid sidebarCollapsed setting");
-        }
-        patch.sidebarCollapsed = body.sidebarCollapsed;
-    }
-
-    if ("defaultModel" in body) {
-        if (
-            typeof body.defaultModel !== "string" ||
-            body.defaultModel.trim().length === 0 ||
-            body.defaultModel.length > 200 ||
-            body.defaultModel.includes("\0")
-        ) {
-            throw new Error("Invalid defaultModel setting");
-        }
-        patch.defaultModel = body.defaultModel.trim();
-    }
-
-    if ("refreshInterval" in body) {
-        if (
-            typeof body.refreshInterval !== "number" ||
-            !Number.isFinite(body.refreshInterval)
-        ) {
-            throw new TypeError("Invalid refreshInterval setting");
-        }
-        patch.refreshInterval = Math.max(
-            1000,
-            Math.min(60_000, Math.trunc(body.refreshInterval))
-        );
-    }
-
-    return patch;
-}
-
-async function loadSettings(): Promise<Settings> {
+async function loadSettings(): Promise<DashboardSettings> {
     const settingsDirectory = resolveSettingsDirectory();
     let content: string;
 
@@ -155,13 +106,13 @@ async function loadSettings(): Promise<Settings> {
 
     try {
         const persisted = JSON.parse(content) as unknown;
-        return { ...DEFAULT_SETTINGS, ...parseSettingsPatch(persisted) };
+        return { ...DEFAULT_SETTINGS, ...parseDashboardSettingsPatch(persisted) };
     } catch {
         return DEFAULT_SETTINGS;
     }
 }
 
-async function saveSettings(settings: Settings): Promise<void> {
+async function saveSettings(settings: DashboardSettings): Promise<void> {
     const settingsDirectory = resolveSettingsDirectory();
     mkdirGuarded(guardedPath(settingsDirectory), { recursive: true });
     await withPinnedSettingsFile(settingsDirectory, (settingsFile) =>
@@ -177,44 +128,45 @@ export const settingsRoutes = {
         GET: async () => {
             try {
                 const settings = await loadSettings();
-                return json({ ...settings, gateway: gateway.getStatus() });
+                return json({
+                    ...settings,
+                    gateway: gateway.getStatus(),
+                } satisfies DashboardSettingsResponse);
             } catch (error) {
-                console.error("[Settings] Failed to load settings:", error);
-                return json({ error: "Failed to load settings" }, { status: 500 });
+                logger.error("settings.load_failed", { error });
+                return routeFailureResponse({
+                    context: "settings",
+                    message: "Failed to load settings",
+                    status: 500,
+                });
             }
         },
         PUT: async (request: Request) => {
-            let patch: Partial<Settings>;
-            try {
-                const body = await readJson(request);
-                patch = parseSettingsPatch(body);
-            } catch (error) {
-                const mappedStatus = httpStatusCode(error);
-                const status = mappedStatus === 500 ? 400 : mappedStatus;
-                return json(
-                    {
-                        error:
-                            status >= 500
-                                ? "Internal server error"
-                                : errorMessage(error, "Invalid settings payload"),
-                    },
-                    { status }
-                );
-            }
+            const patch: DashboardSettingsPatch | Response = await readApiJsonOrError(
+                request,
+                parseDashboardSettingsPatch,
+                {
+                    code: "invalid_settings",
+                    context: "settings.update",
+                    message: "Invalid settings payload",
+                }
+            );
+            if (patch instanceof Response) return patch;
 
             try {
                 return await withSettingsUpdateLock(async () => {
                     const current = await loadSettings();
                     const updated = { ...current, ...patch };
                     await saveSettings(updated);
-                    return json(updated);
+                    return json(updated satisfies DashboardSettings);
                 });
             } catch (error) {
-                console.error(
-                    "[Settings] Save error:",
-                    errorMessage(error, "Unknown error")
-                );
-                return json({ error: "Failed to save settings" }, { status: 500 });
+                logger.error("settings.save_failed", { error });
+                return routeFailureResponse({
+                    context: "settings",
+                    message: "Failed to save settings",
+                    status: 500,
+                });
             }
         },
     },

@@ -2,8 +2,7 @@ import { isIP } from "node:net";
 
 import type { Server } from "bun";
 
-import { normalizeApiErrorResponse } from "./apiErrors.ts";
-import type { AuthUser } from "./auth.ts";
+import type { DashboardUser } from "../../contracts/auth.ts";
 import { hasRecentMfaVerification } from "./auth.ts";
 import {
     authenticateAutomationRequest,
@@ -16,26 +15,28 @@ import {
     isDevelopmentGatewayMethodAllowed,
     isGatewayMethodRecentMfaExempt,
 } from "./development/developmentGatewayPolicy.ts";
-import { authSession, isTrustedProxyAddress, json, requestIp } from "./http.ts";
+import { authSession, isTrustedProxyAddress, requestIp } from "./http.ts";
 import {
     recordHttpRequestMetric,
     resetHttpRequestMetrics,
 } from "./lib/httpRequestMetrics.ts";
 import { hashedLogCorrelation, runWithLogContext } from "./lib/logContext.ts";
-import { structuredLog } from "./lib/structuredLogger.ts";
+import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import { runWithRequestAuditContext } from "./requestAuditContext.ts";
 import {
     isAllowedMutationSource,
     requestIdFor,
     withRequestSecurity,
 } from "./requestSecurity.ts";
-import { routeErrorResponse } from "./routeSupport.ts";
+import { routeErrorResponse, routeFailureResponse } from "./routeSupport.ts";
 import {
     type AuditActor,
     type AuditOutcome,
     writeAuditEvent,
 } from "./services/auditEvents.ts";
 import { isProductionDeploymentCutoverActive } from "./services/deploymentCutoverState.ts";
+
+const logger = createStructuredLogger("http");
 
 type BunHandler = (
     request: Request,
@@ -51,6 +52,21 @@ type BunRouteEntry =
           POST?: BunHandler | Response;
           PUT?: BunHandler | Response;
       };
+type SecuredHandler<T> = T extends (
+    ...arguments_: infer Arguments
+) => Response | Promise<Response>
+    ? (...arguments_: Arguments) => Promise<Response>
+    : T extends Response
+      ? BunHandler
+      : never;
+type SecuredRouteEntry<T> = T extends BunHandler | Response
+    ? SecuredHandler<T>
+    : T extends Record<string, unknown>
+      ? { [Method in keyof T]: SecuredHandler<T[Method]> }
+      : never;
+type SecuredRoutes<T extends Record<string, unknown>> = {
+    [Path in keyof T]: SecuredRouteEntry<T[Path]>;
+};
 
 interface RateLimitBucket {
     lastSeenAt: number;
@@ -141,7 +157,10 @@ function isApiRoute(pathname: string): boolean {
     return pathname === "/api" || pathname.startsWith("/api/");
 }
 
-/** Blocks user-visible writes until a guarded deployment reaches a terminal state. */
+/**
+ * Blocks user-visible writes until a guarded deployment reaches a terminal state.
+ * @returns Whether the mutation is blocked during deployment cutover.
+ */
 export function isDeploymentCutoverMutationBlocked(
     request: Request,
     options: {
@@ -178,14 +197,30 @@ function isPathAtOrBelow(pathname: string, prefix: string): boolean {
     return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
-/** Blocks host and external-service mutations while preserving isolated dev data. */
+/**
+ * Returns whether the backend is running with isolated development safeguards.
+ * @param environment Environment value.
+ * @returns Whether isolated development safeguards are active.
+ */
+export function isDevelopmentSafeMode(
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    return (
+        environment.NODE_ENV !== "production" &&
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1"
+    );
+}
+
+/**
+ * Blocks host and external-service mutations while preserving isolated dev data.
+ * @returns Whether development host policy blocks the mutation.
+ */
 export function isDevelopmentHostMutationBlocked(
     request: Request,
     environment: Record<string, string | undefined> = process.env
 ): boolean {
     if (
-        environment.NODE_ENV === "production" ||
-        environment.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1" ||
+        !isDevelopmentSafeMode(environment) ||
         SAFE_REQUEST_METHODS.has(request.method.toUpperCase())
     ) {
         return false;
@@ -196,14 +231,14 @@ export function isDevelopmentHostMutationBlocked(
     );
 }
 
-/** Prevents isolated data mutations from notifying production integrations. */
+/**
+ * Prevents isolated data mutations from notifying production integrations.
+ * @returns Whether development policy suppresses the external notification.
+ */
 export function isDevelopmentExternalNotificationSuppressed(
     environment: Record<string, string | undefined> = process.env
 ): boolean {
-    return (
-        environment.NODE_ENV !== "production" &&
-        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1"
-    );
+    return isDevelopmentSafeMode(environment);
 }
 
 export {
@@ -212,15 +247,18 @@ export {
     isDevelopmentGatewayProxyMethodAllowed,
 } from "./development/developmentGatewayPolicy.ts";
 
-/** Blocks Gateway calls outside the production-like Dashboard dev allowlist. */
+/**
+ * Blocks Gateway calls outside the production-like Dashboard dev allowlist.
+ * @param method Method value.
+ * @param environment Environment value.
+ * @returns Whether development policy blocks the Gateway method.
+ */
 export function isDevelopmentGatewayMethodBlocked(
     method: string,
     environment: Record<string, string | undefined> = process.env
 ): boolean {
     return (
-        environment.NODE_ENV !== "production" &&
-        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
-        !isDevelopmentGatewayMethodAllowed(method)
+        isDevelopmentSafeMode(environment) && !isDevelopmentGatewayMethodAllowed(method)
     );
 }
 
@@ -286,15 +324,17 @@ function checkRateLimit(
     }
 
     const remaining = rule.max - bucket.used;
-    const response = json({ error: rule.message }, { status: 429 });
-    const withHeaders = withRateLimitHeaders(response, rule, remaining, bucket.resetAt);
-    const headers = new Headers(withHeaders.headers);
-    headers.set("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));
-    return new Response(withHeaders.body, {
-        headers,
-        status: withHeaders.status,
-        statusText: withHeaders.statusText,
-    });
+    const response = routeFailureResponse(
+        {
+            code: "rate_limited",
+            context: "request.rate-limit",
+            message: rule.message,
+            retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000),
+            status: 429,
+        },
+        request
+    );
+    return withRateLimitHeaders(response, rule, remaining, bucket.resetAt);
 }
 
 async function callHandler(
@@ -309,7 +349,7 @@ async function callHandler(
 }
 
 function requestActor(
-    user: AuthUser | undefined,
+    user: DashboardUser | undefined,
     automationPrincipal?: AutomationPrincipal
 ): AuditActor {
     if (automationPrincipal) {
@@ -336,7 +376,10 @@ function isAuditedMutation(
     );
 }
 
-/** Identifies host-control actions that require a freshly verified second factor. */
+/**
+ * Identifies host-control actions that require a freshly verified second factor.
+ * @returns Requires recent mfa result.
+ */
 export function requiresRecentMfa(request: Request): boolean {
     const url = new URL(request.url);
     let pathname: string;
@@ -390,7 +433,11 @@ export function requiresRecentMfa(request: Request): boolean {
     );
 }
 
-/** Requires fresh MFA for every Gateway RPC except the explicit read-only set. */
+/**
+ * Requires fresh MFA for every Gateway RPC except the explicit read-only set.
+ * @param method Method value.
+ * @returns Requires recent mfa for gateway method result.
+ */
 export function requiresRecentMfaForGatewayMethod(method: string): boolean {
     return !isGatewayMethodRecentMfaExempt(method);
 }
@@ -443,10 +490,11 @@ function didWriteRequestAudit(
         );
         return true;
     } catch (error) {
-        console.error(
-            `[Audit] Request ${requestId} ${outcome} persistence failed:`,
-            error
-        );
+        logger.error("audit.request_persistence_failed", {
+            error,
+            outcome,
+            requestId,
+        });
         return false;
     }
 }
@@ -457,7 +505,7 @@ function auditedForbiddenResponse(
     requestId: string,
     routePath: string,
     automationScope: AutomationScope | undefined,
-    payload: Record<string, string>,
+    error: { code?: string; message: string },
     persistAuditEvent: typeof writeAuditEvent
 ): Response {
     const didRecordDenial = didWriteRequestAudit(
@@ -470,9 +518,22 @@ function auditedForbiddenResponse(
         automationScope,
         persistAuditEvent
     );
-    return didRecordDenial
-        ? json(payload, { status: 403 })
-        : json({ error: "Audit trail unavailable" }, { status: 503 });
+    return routeFailureResponse(
+        didRecordDenial
+            ? {
+                  ...(error.code && { code: error.code }),
+                  context: "request.authorization",
+                  message: error.message,
+                  status: 403,
+              }
+            : {
+                  code: "audit_unavailable",
+                  context: "request.audit",
+                  message: "Audit trail unavailable",
+                  status: 503,
+              },
+        request
+    );
 }
 
 function secureHandler(
@@ -490,26 +551,37 @@ function secureHandler(
             const response = await (async () => {
                 const pathname = new URL(request.url).pathname || routePath;
                 const isApi = isApiRoute(pathname);
-                const rateRule = isAuthRoute(pathname)
-                    ? authRule
-                    : isApi
-                      ? apiRule
-                      : undefined;
+                let rateRule = isApi ? apiRule : undefined;
+                if (isAuthRoute(pathname)) {
+                    rateRule = authRule;
+                }
                 if (rateRule) {
                     const limited = checkRateLimit(request, server, rateRule);
                     if (limited) return limited;
                 }
 
                 if (isApi && !isAllowedMutationSource(request)) {
-                    return json({ error: "Forbidden request origin" }, { status: 403 });
+                    return routeFailureResponse(
+                        {
+                            code: "forbidden_origin",
+                            context: "request.origin",
+                            message: "Forbidden request origin",
+                            status: 403,
+                        },
+                        request
+                    );
                 }
                 if (isApi && isDeploymentCutoverMutationBlocked(request)) {
-                    return json(
+                    return routeFailureResponse(
                         {
                             code: "deployment_cutover_in_progress",
-                            error: "Dashboard writes are paused while the release is verified",
+                            context: "request.deployment-cutover",
+                            message:
+                                "Dashboard writes are paused while the release is verified",
+                            retryAfterSeconds: 5,
+                            status: 503,
                         },
-                        { headers: { "Retry-After": "5" }, status: 503 }
+                        request
                     );
                 }
 
@@ -518,9 +590,14 @@ function secureHandler(
                     ? authenticateAutomation(request)
                     : ({ kind: "absent" } as const);
                 if (automationAuthentication.kind === "invalid") {
-                    return json(
-                        { error: "Invalid automation credential" },
-                        { status: 401 }
+                    return routeFailureResponse(
+                        {
+                            code: "invalid_automation_credential",
+                            context: "request.automation-authentication",
+                            message: "Invalid automation credential",
+                            status: 401,
+                        },
+                        request
                     );
                 }
                 const automationPrincipal =
@@ -540,7 +617,10 @@ function secureHandler(
                         requestIdentifier,
                         routePath,
                         automationScope,
-                        { error: "Automation credential scope denied" },
+                        {
+                            code: "automation_scope_denied",
+                            message: "Automation credential scope denied",
+                        },
                         persistAuditEvent
                     );
                 }
@@ -558,7 +638,14 @@ function secureHandler(
                     ? hashedLogCorrelation("dashboard-session", session.sessionId)
                     : undefined;
                 if (requiresAuthentication && !session && !automationPrincipal) {
-                    return json({ error: "Unauthorized" }, { status: 401 });
+                    return routeFailureResponse(
+                        {
+                            context: "request.authentication",
+                            message: "Unauthorized",
+                            status: 401,
+                        },
+                        request
+                    );
                 }
 
                 const user = session
@@ -573,7 +660,8 @@ function secureHandler(
                         routePath,
                         automationScope,
                         {
-                            error: "Host-control actions are disabled in Dashboard dev",
+                            code: "development_host_mutation_disabled",
+                            message: "Host-control actions are disabled in Dashboard dev",
                         },
                         persistAuditEvent
                     );
@@ -597,7 +685,7 @@ function secureHandler(
                             code: session.mfaEnabled
                                 ? "step_up_required"
                                 : "mfa_enrollment_required",
-                            error: session.mfaEnabled
+                            message: session.mfaEnabled
                                 ? "Recent MFA verification is required"
                                 : "Multi-factor authentication must be enabled",
                         },
@@ -619,9 +707,14 @@ function secureHandler(
                         persistAuditEvent
                     );
                     if (!didRecordAttempt) {
-                        return json(
-                            { error: "Audit trail unavailable" },
-                            { status: 503 }
+                        return routeFailureResponse(
+                            {
+                                code: "audit_unavailable",
+                                context: "request.audit",
+                                message: "Audit trail unavailable",
+                                status: 503,
+                            },
+                            request
                         );
                     }
                 }
@@ -671,9 +764,8 @@ function secureHandler(
                 );
             })();
 
-            const normalizedResponse = await normalizeApiErrorResponse(request, response);
-            responseStatus = normalizedResponse.status;
-            return withRequestSecurity(request, normalizedResponse, server);
+            responseStatus = response.status;
+            return withRequestSecurity(request, response, server);
         } finally {
             const durationMs =
                 Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
@@ -683,14 +775,21 @@ function secureHandler(
                 route: routePath,
                 status: responseStatus,
             });
-            structuredLog("info", "http.request", {
+            const fields = {
                 durationMs,
                 method: request.method.toUpperCase(),
                 requestId: requestIdentifier,
                 route: routePath,
                 ...(correlatedSessionId && { sessionId: correlatedSessionId }),
                 status: responseStatus,
-            });
+            };
+            if (responseStatus >= 500) {
+                logger.error("http.request", fields);
+            } else if (responseStatus >= 400) {
+                logger.warn("http.request", fields);
+            } else {
+                logger.info("http.request", fields);
+            }
         }
     };
 }
@@ -708,20 +807,15 @@ function secureEntry(
     return Object.fromEntries(
         Object.entries(entry).map(([method, handler]) => [
             method,
-            secureHandler(
-                routePath,
-                handler as BunHandler | Response,
-                authenticateAutomation,
-                persistAuditEvent
-            ),
+            secureHandler(routePath, handler, authenticateAutomation, persistAuditEvent),
         ])
-    ) as BunRouteEntry;
+    );
 }
 
 export function withRequestPolicy<T extends Record<string, unknown>>(
     routes: T,
     options: RequestPolicyOptions = {}
-): T {
+): SecuredRoutes<T> {
     const authenticateAutomation =
         options.authenticateAutomation ?? authenticateAutomationRequest;
     const persistAuditEvent = options.persistAuditEvent ?? writeAuditEvent;
@@ -735,7 +829,7 @@ export function withRequestPolicy<T extends Record<string, unknown>>(
                 persistAuditEvent
             ),
         ])
-    ) as T;
+    ) as SecuredRoutes<T>;
 }
 
 export function resetRequestPolicyForTests(): void {

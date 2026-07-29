@@ -1,7 +1,14 @@
+import type {
+    OpenClawRuntimeEnvelope,
+    OpenClawRuntimeSnapshot,
+} from "../../../contracts/chat.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
     OpenClawChatRequestBoundaries,
     type OpenClawChatRequestBoundaryMetadata,
 } from "./openClawChatRequestBoundaries.ts";
+
+const logger = createStructuredLogger("openclaw-chat");
 
 /** A minimal session shape used to recover missing session keys on runtime events. */
 export interface OpenClawChatSessionIdentity {
@@ -10,27 +17,6 @@ export interface OpenClawChatSessionIdentity {
     runId?: string;
     activeRunId?: string;
     currentRunId?: string;
-}
-
-/** A sequenced OpenClaw runtime envelope forwarded to Dashboard clients. */
-export interface OpenClawRuntimeEnvelope {
-    type: "event";
-    event: unknown;
-    payload: unknown;
-    runtimeRecordedAt: number;
-    runtimeRunAliases?: string[];
-    runtimeSequence: number;
-}
-
-export interface OpenClawRuntimeSnapshot {
-    acknowledgedRequestIds?: string[];
-    completed: boolean;
-    events: OpenClawRuntimeEnvelope[];
-    firstSequenceByRun?: Record<string, number>;
-    interruptedAtByRun?: Record<string, number>;
-    pendingRequestBoundaries?: Record<string, number>;
-    requestBoundary?: number;
-    throughSequence: number;
 }
 
 /** Storage boundary for the latest bounded replay of each chat session. */
@@ -133,7 +119,12 @@ function safeNumberField(
         : undefined;
 }
 
-/** Returns the later defined timestamp without inventing a fallback value. */
+/**
+ * Returns the later defined timestamp without inventing a fallback value.
+ * @param left Left value.
+ * @param right Right value.
+ * @returns the later defined timestamp without inventing a fallback value.
+ */
 function latestOptionalTimestamp(
     left: number | undefined,
     right: number | undefined
@@ -147,7 +138,11 @@ function latestOptionalTimestamp(
     return Math.max(left, right);
 }
 
-/** Uses the same nested event-data precedence as the browser runtime adapter. */
+/**
+ * Uses the same nested event-data precedence as the browser runtime adapter.
+ * @param payload Request or event payload.
+ * @returns Runtime payload view result.
+ */
 function runtimePayloadView(payload: unknown): Record<string, unknown> | undefined {
     const record = asRecord(payload);
     if (!record) {
@@ -198,7 +193,10 @@ function runtimeSessionBoundary(
     };
 }
 
-/** Makes nested runtime identities available at the envelope boundary as well. */
+/**
+ * Makes nested runtime identities available at the envelope boundary as well.
+ * @returns With runtime identity result.
+ */
 function withRuntimeIdentity(
     payload: Record<string, unknown>,
     {
@@ -485,7 +483,12 @@ function isSettlingLifecycleEvent(event: unknown, payload: unknown): boolean {
     );
 }
 
-/** Identifies provider work that can continue one interrupted conversation. */
+/**
+ * Identifies provider work that can continue one interrupted conversation.
+ * @param event Event to handle.
+ * @param payload Request or event payload.
+ * @returns Whether the event continues the active conversation.
+ */
 function isConversationContinuationEvent(event: unknown, payload: unknown): boolean {
     return !(
         isCompactionEvent(event, payload) ||
@@ -1079,10 +1082,7 @@ export class OpenClawChatBridge {
             return;
         }
         this.#storeFailureReported = true;
-        console.warn(
-            "[OpenClawChatBridge] Runtime snapshot persistence failed:",
-            error instanceof Error ? error.message : String(error)
-        );
+        logger.warn("openclaw_chat.snapshot_persistence_failed", { error });
     }
 
     #withDeferredSessionLimit<T>(operation: () => T): T {
@@ -2100,8 +2100,10 @@ export class OpenClawChatBridge {
 
     #rememberRunSession(runId: string, sessionKey: string): void {
         const storageSessionKey = normalizedSessionKey(sessionKey);
-        const sessionKeys = new Set(this.#sessionsByRun.get(runId));
-        sessionKeys.add(storageSessionKey);
+        const sessionKeys = new Set([
+            ...(this.#sessionsByRun.get(runId) ?? []),
+            storageSessionKey,
+        ]);
         this.#sessionsByRun.delete(runId);
         this.#sessionsByRun.set(runId, sessionKeys);
 
@@ -2656,19 +2658,20 @@ export class OpenClawChatBridge {
             return [];
         }
         const serializedBytes = Buffer.byteLength(JSON.stringify(envelope));
-        const retainedEnvelope =
-            serializedBytes <= MAX_BYTES_PER_EVENT
-                ? envelope
-                : isTerminal
-                  ? {
-                        ...envelope,
-                        payload: compactTerminalPayload(
-                            payload,
-                            explicitRunId,
-                            storageSessionKey
-                        ),
-                    }
-                  : undefined;
+        let retainedEnvelope: OpenClawRuntimeEnvelope | undefined;
+        if (isTerminal) {
+            retainedEnvelope = {
+                ...envelope,
+                payload: compactTerminalPayload(
+                    payload,
+                    explicitRunId,
+                    storageSessionKey
+                ),
+            };
+        }
+        if (serializedBytes <= MAX_BYTES_PER_EVENT) {
+            retainedEnvelope = envelope;
+        }
         if (!retainedEnvelope) {
             return [];
         }
@@ -2746,12 +2749,13 @@ export class OpenClawChatBridge {
         const activeRunlessRuns = compatibleActiveRuns.filter((run) =>
             isRunlessRunId(run.runId)
         );
-        const compatibleActiveRun =
-            compatibleActiveRuns.length === 1
-                ? compatibleActiveRuns[0]
-                : activeRunlessRuns.length === 1
-                  ? activeRunlessRuns[0]
-                  : undefined;
+        let compatibleActiveRun: RetainedRun | undefined;
+        if (activeRunlessRuns.length === 1) {
+            compatibleActiveRun = activeRunlessRuns[0];
+        }
+        if (compatibleActiveRuns.length === 1) {
+            compatibleActiveRun = compatibleActiveRuns[0];
+        }
         const isMetadataOnlyCompletion =
             !explicitRunId && isMetadataOnlyCompletionEnvelope(retainedEnvelope);
         const completedRuns =
@@ -2998,7 +3002,10 @@ export class OpenClawChatBridge {
         return isContinuation;
     }
 
-    /** Flushes all coalesced replay writes at lifecycle boundaries. */
+    /**
+     * Flushes all coalesced replay writes at lifecycle boundaries.
+     * @returns Whether every replay write was flushed successfully.
+     */
     flush(): boolean {
         this.#cancelPersistenceTimer();
         if (!this.#retryStoreClear()) {
@@ -3021,7 +3028,10 @@ export class OpenClawChatBridge {
         );
     }
 
-    /** Drops only process-local indexes while retaining the persisted replay. */
+    /**
+     * Drops only process-local indexes while retaining the persisted replay.
+     * @returns Whether process-local indexes were cleared successfully.
+     */
     clearMemory(): boolean {
         if (!this.flush()) {
             return false;
@@ -3045,7 +3055,10 @@ export class OpenClawChatBridge {
         this.#enforceReplayMemoryLimit();
     }
 
-    /** Allows one interrupted conversation to resume under a fresh provider run ID. */
+    /**
+     * Allows one interrupted conversation to resume under a fresh provider run ID.
+     * @param disconnectedAt Disconnected at timestamp.
+     */
     markGatewayDisconnected(disconnectedAt = Date.now()): void {
         for (const [sessionKey, runs] of this.#runsBySession) {
             const interruptedRuns = runs
@@ -3076,7 +3089,10 @@ export class OpenClawChatBridge {
         this.#retryStoreClear();
     }
 
-    /** Canonicalizes quarantined short session keys after the session index loads. */
+    /**
+     * Canonicalizes quarantined short session keys after the session index loads.
+     * @param sessions Sessions value.
+     */
     reconcileSessions(sessions: readonly OpenClawChatSessionIdentity[]): void {
         for (const sessionKey of this.#runsBySession.keys()) {
             if (isAgentSessionKey(sessionKey)) {
@@ -3098,7 +3114,12 @@ export class OpenClawChatBridge {
         }
     }
 
-    /** Hydrates the target before durably capturing one outgoing chat request. */
+    /**
+     * Hydrates the target before durably capturing one outgoing chat request.
+     * @param sessionKey Session key value.
+     * @param requestId Request identifier.
+     * @returns Captured request-boundary sequence number.
+     */
     captureRequestBoundary(sessionKey?: string, requestId?: string): number {
         this.#requireSequenceHydrated();
         if (sessionKey) {
@@ -3149,7 +3170,10 @@ export class OpenClawChatBridge {
         return this.#sequence;
     }
 
-    /** Clears replay state associated with one reset, aborted, or deleted session. */
+    /**
+     * Clears replay state associated with one reset, aborted, or deleted session.
+     * @param sessionKey Session key value.
+     */
     clearSession(sessionKey: string): void {
         const storageSessionKey = normalizedSessionKey(sessionKey);
         const sessionKeys = new Set([storageSessionKey]);
@@ -3204,7 +3228,14 @@ export class OpenClawChatBridge {
         }
     }
 
-    /** Updates run associations and replay cleanup after successful RPCs. */
+    /**
+     * Updates run associations and replay cleanup after successful RPCs.
+     * @param method Method value.
+     * @param parameters Parameters value.
+     * @param payload Request or event payload.
+     * @param requestBoundary Request boundary value.
+     * @returns Updated runtime envelope when a successful send changes replay state.
+     */
     handleSuccessfulRequest(
         method: string,
         parameters: Record<string, unknown>,
@@ -3313,7 +3344,12 @@ export class OpenClawChatBridge {
         return undefined;
     }
 
-    /** Removes a request boundary when the Gateway rejects or times out a send. */
+    /**
+     * Removes a request boundary when the Gateway rejects or times out a send.
+     * @param method Method value.
+     * @param parameters Parameters value.
+     * @param requestBoundary Request boundary value.
+     */
     handleFailedRequest(
         method: string,
         parameters: Record<string, unknown>,
@@ -3338,6 +3374,10 @@ export class OpenClawChatBridge {
     /**
      * Records one Gateway event and returns the exact sequenced envelope to
      * broadcast. Events without a session remain live-only and are not cached.
+     * @param event Event to handle.
+     * @param payload Request or event payload.
+     * @param sessions Sessions value.
+     * @returns Exact sequenced runtime event envelope.
      */
     recordEvent(
         event: unknown,
@@ -3399,7 +3439,11 @@ export class OpenClawChatBridge {
             : envelope;
     }
 
-    /** Returns active runs or the latest completed run for one session. */
+    /**
+     * Returns active runs or the latest completed run for one session.
+     * @param sessionKey Session key value.
+     * @returns active runs or the latest completed run for one session.
+     */
     snapshot(sessionKey: string): OpenClawRuntimeSnapshot {
         this.#replayMemoryLimitDeferrals += 1;
         try {

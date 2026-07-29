@@ -1,3 +1,11 @@
+import {
+    type CacheEnvelope,
+    type CacheHeartbeatResponse,
+    type CacheRefreshResponse,
+    type CacheStatusResponse,
+    cacheStatusSchema,
+} from "../../../contracts/cache.ts";
+import { jsonObjectSchema, parseContract } from "../../../contracts/runtime.ts";
 import { json } from "../http.ts";
 import {
     type CacheEntryRow,
@@ -6,8 +14,13 @@ import {
     getCacheStatusEntries,
     parseJsonField,
 } from "../lib/cacheStore.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { httpStatusCode } from "../lib/errors.ts";
 import { stringFallback } from "../lib/values.ts";
+import {
+    type ParametersRequest,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import {
     cacheRefreshResourceClass,
     cacheRefreshScheduledJobId,
@@ -33,9 +46,8 @@ function parseJsonFieldOrValue(value: string) {
 }
 
 export function compactHeartbeatData(key: string, data: unknown): unknown {
-    const missingValue = JSON.parse("null") as null;
     if (!data || typeof data !== "object" || Array.isArray(data)) {
-        return missingValue;
+        return null;
     }
     const value = data as Record<string, unknown>;
     switch (key) {
@@ -246,7 +258,7 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
             return value;
         }
         default: {
-            return missingValue;
+            return null;
         }
     }
 }
@@ -277,27 +289,27 @@ function compactDashboardJobs() {
 function mapCacheRowForResponse(
     row: CacheEntryRow,
     options: { includeData?: boolean } = {}
-) {
-    const missingValue = JSON.parse("null") as null;
+): CacheEnvelope<unknown> {
     return {
         consecutiveFailures: Number(row.consecutive_failures ?? 0),
-        data:
-            options.includeData === false
-                ? missingValue
-                : parseJsonFieldOrValue(row.data),
-        errorCode: row.error_code ?? missingValue,
-        errorMessage: row.error_message ?? missingValue,
-        expiresAt: row.expires_at ?? missingValue,
+        data: options.includeData === false ? null : parseJsonFieldOrValue(row.data),
+        errorCode: row.error_code ?? null,
+        errorMessage: row.error_message ?? null,
+        expiresAt: row.expires_at ?? null,
         key: row.key,
-        lastAttemptAt: row.last_attempt_at ?? missingValue,
-        meta: parseJsonField<unknown>(row.meta) ?? {},
+        lastAttemptAt: row.last_attempt_at ?? null,
+        meta: parseContract(
+            jsonObjectSchema,
+            parseJsonFieldOrValue(row.meta),
+            `cache.${row.key}.meta`
+        ),
         source: row.source,
-        status: row.status,
-        updatedAt: row.updated_at ?? missingValue,
+        status: parseContract(cacheStatusSchema, row.status, `cache.${row.key}.status`),
+        updatedAt: row.updated_at ?? null,
     };
 }
 
-async function refreshedCacheEntry(key: string, result: Record<string, unknown>) {
+function refreshedCacheEntry(key: string, result: Record<string, unknown>) {
     const refreshed = Array.isArray(result?.refreshed) ? result.refreshed : [];
     if (refreshed.length === 0) {
         throw Object.assign(new Error(`No cache keys refreshed for: ${key}`), {
@@ -313,7 +325,7 @@ async function refreshedCacheEntry(key: string, result: Record<string, unknown>)
             statusCode: refreshedKeys.length > 0 ? 400 : 404,
         });
     }
-    const row = await getCacheEntry(refreshedKey);
+    const row = getCacheEntry(refreshedKey);
     if (!row) {
         throw new Error(`Cache key not found after refresh: ${refreshedKey}`);
     }
@@ -385,12 +397,10 @@ async function enqueueAndWaitForCacheRefresh(
     return execution;
 }
 
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
-
 export const cacheRoutes = {
     "/api/cache/heartbeat": {
         GET: async () => {
-            const rows = await getAllCacheEntries();
+            const rows = getAllCacheEntries();
             const dashboardJobs = compactDashboardJobs();
             const automation = await getHeartbeatAutomationSnapshot();
             const entries = rows.map((row) => {
@@ -404,7 +414,7 @@ export const cacheRoutes = {
                 count: entries.length,
                 cronJobs: {
                     dataAvailable: automation.isCronDataAvailable,
-                    error: automation.cronError,
+                    ...(automation.cronError && { error: automation.cronError }),
                     items: automation.cronJobs,
                 },
                 dashboardJobs,
@@ -412,35 +422,55 @@ export const cacheRoutes = {
                 generatedAt: new Date().toISOString(),
                 schemaVersion: 3,
                 tasks: automation.tasks,
-            });
+            } satisfies CacheHeartbeatResponse);
         },
     },
     "/api/cache/status": {
-        GET: async () => {
-            const rows = await getCacheStatusEntries();
-            const entries = rows.map((row) =>
-                mapCacheRowForResponse(row, { includeData: false })
+        GET: () => {
+            const rows = getCacheStatusEntries();
+            const entries = rows.map(
+                (row): CacheEnvelope<null> => ({
+                    ...mapCacheRowForResponse(row, { includeData: false }),
+                    data: null,
+                })
             );
             return json({
                 count: entries.length,
                 entries,
                 generatedAt: new Date().toISOString(),
-            });
+            } satisfies CacheStatusResponse);
         },
     },
     "/api/cache/:key": {
-        GET: async (request: ParametersRequest<"key">) => {
+        GET: (request: ParametersRequest<"key">) => {
             const key = stringFallback(request.params.key).trim();
-            if (!key) return json({ error: "Missing cache key" }, { status: 400 });
-            const row = await getCacheEntry(key);
-            if (!row) return json({ error: "Cache key not found", key }, { status: 404 });
+            if (!key)
+                return routeFailureResponse({
+                    context: "cache",
+                    message: "Missing cache key",
+                    status: 400,
+                });
+            const row = getCacheEntry(key);
+            if (!row) {
+                return routeFailureResponse({
+                    context: "cache",
+                    details: { key },
+                    message: "Cache key not found",
+                    status: 404,
+                });
+            }
             return json(mapCacheRowForResponse(row));
         },
     },
     "/api/cache/:key/refresh": {
         POST: async (request: ParametersRequest<"key">) => {
             const key = stringFallback(request.params.key).trim();
-            if (!key) return json({ error: "Missing cache key" }, { status: 400 });
+            if (!key)
+                return routeFailureResponse({
+                    context: "cache",
+                    message: "Missing cache key",
+                    status: 400,
+                });
             try {
                 const resourceClass = cacheRefreshResourceClass(key);
                 const execution = await enqueueAndWaitForCacheRefresh(
@@ -448,16 +478,20 @@ export const cacheRoutes = {
                     resourceClass,
                     request.signal
                 );
-                const entry = await refreshedCacheEntry(
+                const entry = refreshedCacheEntry(
                     key,
                     successfulJobExecutionOutput(execution)
                 );
-                return json({ entry, isOk: true });
+                return json({
+                    entry,
+                    isOk: true,
+                } satisfies CacheRefreshResponse<unknown>);
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Cache refresh failed") },
-                    { status: httpStatusCode(error) }
-                );
+                return routeErrorResponse(request, error, {
+                    code: "cache_refresh_failed",
+                    context: "cache.refresh",
+                    message: "Cache refresh failed",
+                });
             }
         },
     },

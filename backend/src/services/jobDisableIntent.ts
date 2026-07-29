@@ -3,7 +3,11 @@ import { HttpError } from "../http.ts";
 
 const disableIntentCommentMaxLength = 1000;
 
-/** Validates and normalizes an intentional job-disable annotation. */
+/**
+ * Validates and normalizes an intentional job-disable annotation.
+ * @param value Value to process.
+ * @returns Validation result for and normalizes an intentional job-disable annotation.
+ */
 export function normalizeJobDisableIntent(value: unknown): JobDisableIntent | undefined {
     if (value === undefined || value === null) return;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -41,7 +45,11 @@ export function normalizeJobDisableIntent(value: unknown): JobDisableIntent | un
     };
 }
 
-/** Reads persisted intent without turning malformed data into an API failure. */
+/**
+ * Reads persisted intent without turning malformed data into an API failure.
+ * @param value Value to process.
+ * @returns Read persisted intent without turning malformed data into an API failure.
+ */
 export function readJobDisableIntent(value: unknown): JobDisableIntent | undefined {
     try {
         return normalizeJobDisableIntent(value);
@@ -50,7 +58,11 @@ export function readJobDisableIntent(value: unknown): JobDisableIntent | undefin
     }
 }
 
-/** Parses persisted JSON without treating malformed metadata as intentional. */
+/**
+ * Parses persisted JSON without treating malformed metadata as intentional.
+ * @param value Value to process.
+ * @returns Parsed persisted JSON without treating malformed metadata as intentional.
+ */
 export function parseJobDisableIntent(
     value: string | null | undefined
 ): JobDisableIntent | undefined {

@@ -1,3 +1,4 @@
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { registerBackupScheduledJobs } from "./backups.ts";
 import {
     DATABASE_SUMMARY_KEY,
@@ -20,6 +21,8 @@ import {
 } from "./scheduledJobs.ts";
 import { registerSqliteMaintenanceScheduledJob } from "./sqliteMaintenance.ts";
 
+const logger = createStructuredLogger("job-worker");
+
 const workerState: {
     isStarted: boolean;
     pendingStop?: Promise<void>;
@@ -31,7 +34,10 @@ const workerState: {
 
 export type DashboardJobProfile = "full" | "isolated";
 
-/** Selects whether the worker may register host-control execution actions. */
+/**
+ * Selects whether the worker may register host-control execution actions.
+ * @returns Dashboard job profile result.
+ */
 export function dashboardJobProfile(
     environment: Record<string, string | undefined> = process.env
 ): DashboardJobProfile {
@@ -81,14 +87,19 @@ function registerScheduledActions(profile = dashboardJobProfile()): void {
     registerPullRequestPreviewExecutionActions();
 }
 
-/** Starts the persistent queue scheduler and its single-concurrency executor. */
+/**
+ * Starts the persistent queue scheduler and its single-concurrency executor.
+ * @param releaseCommit Release commit value.
+ */
 export function startDashboardJobWorker(releaseCommit = "development"): void {
     if (workerState.isStarted || workerState.pendingStop) return;
     workerState.isStarted = true;
+    const profile = dashboardJobProfile();
     try {
-        registerScheduledActions();
+        registerScheduledActions(profile);
         startScheduledJobExecutor(releaseCommit);
         startScheduledJobScheduler();
+        logger.info("job_worker.started", { profile, releaseCommit });
     } catch (error) {
         stopScheduledJobScheduler();
         void trackWorkerStop(async () => {
@@ -96,10 +107,9 @@ export function startDashboardJobWorker(releaseCommit = "development"): void {
                 await stopScheduledJobExecutor();
                 workerState.isStarted = false;
             } catch (cleanupError) {
-                console.error(
-                    "[JobWorker] Failed to roll back executor startup:",
-                    cleanupError
-                );
+                logger.error("job_worker.executor_startup_rollback_failed", {
+                    error: cleanupError,
+                });
             }
         });
         throw error;
@@ -120,6 +130,7 @@ export async function stopDashboardJobWorker(): Promise<void> {
             await stopScheduledJobExecutor();
             // Release the startup guard only after executor cleanup succeeds.
             workerState.isStarted = false;
+            logger.info("job_worker.stopped");
         });
         return;
     }

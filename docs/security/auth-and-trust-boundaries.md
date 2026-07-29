@@ -353,9 +353,10 @@ Other allowed config files retain their existing bounded file policy.
 
 Do not print Gateway token values. `app_config.gateway_token` contains a
 versioned AES-256-GCM envelope bound to its storage context; the external
-`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` remains outside SQLite. A legacy
-plaintext value is encrypted in place before requests are served. Inspect only
-metadata such as length and timestamps.
+`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` remains outside SQLite. Persisted values
+must already use the authenticated envelope format; unsupported plaintext or
+malformed values fail startup closed. Inspect only metadata such as length and
+timestamps.
 
 Startup token precedence:
 

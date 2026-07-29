@@ -9,7 +9,10 @@ export interface LogCorrelationContext {
 
 const logContextStorage = new AsyncLocalStorage<LogCorrelationContext>();
 
-/** Runs work with additive correlation fields available to structured logs. */
+/**
+ * Runs work with additive correlation fields available to structured logs.
+ * @returns Run with log context result.
+ */
 export function runWithLogContext<T>(
     context: LogCorrelationContext,
     operation: () => T
@@ -24,7 +27,12 @@ export function currentLogContext(): LogCorrelationContext | undefined {
     return logContextStorage.getStore();
 }
 
-/** Produces a stable, non-reversible correlation value for sensitive identifiers. */
+/**
+ * Produces a stable, non-reversible correlation value for sensitive identifiers.
+ * @param namespace Namespace value.
+ * @param value Value to process.
+ * @returns Hashed log correlation result.
+ */
 export function hashedLogCorrelation(namespace: string, value: string): string {
     return createHash("sha256")
         .update(namespace)

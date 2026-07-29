@@ -14,7 +14,11 @@ import {
 } from "../../../contracts/terminal.ts";
 import { json } from "../http.ts";
 import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.ts";
-import { readApiJson, routeErrorResponse } from "../routeSupport.ts";
+import {
+    readApiJson,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 
 const HOME_DIR = os.homedir();
 const SHELL_ESCAPE_RE = /([\s\\'"$`!&|;<>()*?[\]{}])/gu;
@@ -202,14 +206,22 @@ export const terminalRoutes = {
 
             const { cwd, partial } = body;
             if (partial.includes("\0")) {
-                return json({ error: "Missing or invalid partial" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "terminal",
+                    message: "Missing or invalid partial",
+                    status: 400,
+                });
             }
             const trimmedCwd = cwd?.trim();
             if (
                 cwd !== undefined &&
                 (!trimmedCwd || trimmedCwd.includes("\0") || !path.isAbsolute(trimmedCwd))
             ) {
-                return json({ error: "Missing or invalid cwd" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "terminal",
+                    message: "Missing or invalid cwd",
+                    status: 400,
+                });
             }
             return json(await getCompletions(partial, trimmedCwd || HOME_DIR));
         },
@@ -237,13 +249,13 @@ export const terminalRoutes = {
                 !body.cwd.startsWith("/") ||
                 targetPath.includes("\0")
             ) {
-                return json(
+                return routeFailureResponse(
                     {
-                        error: "Missing or invalid path",
-                        isSuccess: false,
-                        newCwd: resolvedCwd,
-                    } satisfies CdResponse,
-                    { status: 400 }
+                        context: "terminal.cd",
+                        message: "Missing or invalid path",
+                        status: 400,
+                    },
+                    request
                 );
             }
 
@@ -272,24 +284,24 @@ export const terminalRoutes = {
             try {
                 const stats = await statGuardedAsync(guardedPath(newPath));
                 if (!stats.isDirectory()) {
-                    return json(
+                    return routeFailureResponse(
                         {
-                            error: `Not a directory: ${targetPath}`,
-                            isSuccess: false,
-                            newCwd: resolvedCwd,
-                        } satisfies CdResponse,
-                        { status: 400 }
+                            context: "terminal.cd",
+                            message: `Not a directory: ${targetPath}`,
+                            status: 400,
+                        },
+                        request
                     );
                 }
-                return json({ isSuccess: true, newCwd: newPath } satisfies CdResponse);
+                return json({ newCwd: newPath } satisfies CdResponse);
             } catch {
-                return json(
+                return routeFailureResponse(
                     {
-                        error: `No such file or directory: ${targetPath}`,
-                        isSuccess: false,
-                        newCwd: resolvedCwd,
-                    } satisfies CdResponse,
-                    { status: 400 }
+                        context: "terminal.cd",
+                        message: `No such file or directory: ${targetPath}`,
+                        status: 400,
+                    },
+                    request
                 );
             }
         },

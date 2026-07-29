@@ -290,7 +290,10 @@ function copyWorkspaceSnapshot(sourcePath: string, targetPath: string): void {
     }
 }
 
-/** Creates a writable workspace snapshot and a secret-free agent config for dev. */
+/**
+ * Creates a writable workspace snapshot and a secret-free agent config for dev.
+ * @returns Created a writable workspace snapshot and a secret-free agent config for dev.
+ */
 export function prepareDevelopmentOpenClawSnapshot(
     config: DevelopmentOpenClawSnapshotConfig
 ): DevelopmentWorkspaceState {

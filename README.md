@@ -34,26 +34,25 @@ reference, operations runbooks, reports delivery, and development workflow.
 ## Repository layout
 
 ```text
-src/                     React app, routes, hooks, stores, types, and UI components
-backend/src/             Bun backend, Gateway bridge, route modules, services, DB setup
-backend/data/            Local runtime SQLite databases; do not commit runtime data changes
+frontend/                React HTML entrypoint, assets, application code, and tests
+backend/src/             Bun backend, Gateway bridge, route modules, services, and DB setup
+contracts/               Shared frontend/backend wire contracts and runtime schemas
+scripts/                 Shared build, development, release, and repository tooling
 dist/                    Bun production frontend build output
-scripts/                 Bun frontend build/dev scripts and React Compiler/Tailwind plugins
 ```
 
 ## Local development
 
-Install frontend dependencies from the repo root:
+Install all frontend, backend, and tooling dependencies from the repo root:
 
 ```bash
-bun install
+bun install --frozen-lockfile
 ```
 
-Install backend dependencies separately:
-
-```bash
-bun --cwd backend install
-```
+The repository tracks Bun's moving Canary channel in `.bun-version`. Install or
+upgrade that runtime before working in the repository; the committed Bun config
+keeps the runtime-only `bun-plugin-tailwind` peer from installing a second,
+stale Bun executable into `node_modules`.
 
 Run the complete local dev stack:
 
@@ -85,14 +84,13 @@ commands, and the trusted PR-dev flow.
 From the repo root:
 
 ```bash
-bun run lint:frontend
-bun run lint:backend
+bun run lint
+bun run format:check
 bun run build
 bun run test:frontend
 bun run test:backend
 bun run test:frontend:coverage
 bun run test:backend:coverage
-bun run format:check
 ```
 
 Use the smallest meaningful gate for the change you are making. For docs-only changes, `git diff --check` is usually enough; for frontend/backend code changes, prefer lint plus the relevant build.

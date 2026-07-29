@@ -1,8 +1,9 @@
+import { afterEach, describe, expect, it } from "bun:test";
+
 import type {
     AuthenticationResponseJSON,
     RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { afterEach, describe, expect, it } from "bun:test";
 
 import { createSession, createUser, getAuthSessionFromSessionId } from "../src/auth.ts";
 import { database } from "../src/database.ts";
@@ -142,11 +143,12 @@ function fakeAdapter(
     overrides: Partial<WebAuthnServerAdapter> = {}
 ): WebAuthnServerAdapter {
     return {
-        generateAuthenticationOptions: async () => authenticationOptions(),
-        generateRegistrationOptions: async () => registrationOptions(),
-        verifyAuthenticationResponse: async () => authenticationVerification(1),
-        verifyRegistrationResponse: async () =>
-            registrationVerification("credential-default"),
+        generateAuthenticationOptions: () => Promise.try(() => authenticationOptions()),
+        generateRegistrationOptions: () => Promise.try(() => registrationOptions()),
+        verifyAuthenticationResponse: () =>
+            Promise.try(() => authenticationVerification(1)),
+        verifyRegistrationResponse: () =>
+            Promise.try(() => registrationVerification("credential-default")),
         ...overrides,
     };
 }
@@ -316,15 +318,17 @@ describe("WebAuthn security-key service", () => {
         const generatedArguments: unknown[] = [];
         let challengeNumber = 0;
         const adapter = fakeAdapter({
-            generateRegistrationOptions: async (arguments_) => {
-                generatedArguments.push(arguments_);
-                challengeNumber += 1;
-                return registrationOptions(`registration-${challengeNumber}`);
+            generateRegistrationOptions: (arguments_) => {
+                return Promise.try(() => {
+                    generatedArguments.push(arguments_);
+                    challengeNumber += 1;
+                    return registrationOptions(`registration-${challengeNumber}`);
+                });
             },
         });
         const context = sessionContext(user.id);
 
-        await expect(
+        expect(
             createWebAuthnRegistrationOptions(
                 { ...context, purpose: "step-up" },
                 user.username,
@@ -332,7 +336,7 @@ describe("WebAuthn security-key service", () => {
                 adapter
             )
         ).rejects.toThrow("Registration requires");
-        await expect(
+        expect(
             createWebAuthnRegistrationOptions(
                 {
                     pendingLoginId: "pending",
@@ -345,7 +349,7 @@ describe("WebAuthn security-key service", () => {
                 adapter
             )
         ).rejects.toThrow("exactly one");
-        await expect(
+        expect(
             createWebAuthnRegistrationOptions(
                 {
                     pendingLoginId: "pending",
@@ -408,19 +412,22 @@ describe("WebAuthn security-key service", () => {
         const now = new Date("2026-07-24T12:00:00.000Z");
         const primaryId = "credential_primary";
         const primaryAdapter = fakeAdapter({
-            generateRegistrationOptions: async () => registrationOptions("primary"),
-            verifyRegistrationResponse: async (arguments_) => {
-                expect(arguments_).toMatchObject({
-                    expectedChallenge: "primary",
-                    expectedOrigin: [
-                        "https://dashboard.example.com",
-                        "https://admin.dashboard.example.com",
-                    ],
-                    expectedRPID: "dashboard.example.com",
-                    requireUserPresence: true,
-                    requireUserVerification: true,
+            generateRegistrationOptions: () =>
+                Promise.try(() => registrationOptions("primary")),
+            verifyRegistrationResponse: (arguments_) => {
+                return Promise.try(() => {
+                    expect(arguments_).toMatchObject({
+                        expectedChallenge: "primary",
+                        expectedOrigin: [
+                            "https://dashboard.example.com",
+                            "https://admin.dashboard.example.com",
+                        ],
+                        expectedRPID: "dashboard.example.com",
+                        requireUserPresence: true,
+                        requireUserVerification: true,
+                    });
+                    return registrationVerification(primaryId);
                 });
-                return registrationVerification(primaryId);
             },
         });
         await createWebAuthnRegistrationOptions(
@@ -461,13 +468,16 @@ describe("WebAuthn security-key service", () => {
         const backupId = "credential_backup";
         const backupTime = new Date(now.getTime() + 1000);
         const backupAdapter = fakeAdapter({
-            generateRegistrationOptions: async () => registrationOptions("backup"),
-            verifyRegistrationResponse: async () => {
-                const result = registrationVerification(backupId);
-                result.registrationInfo!.credential.transports = undefined;
-                result.registrationInfo!.credentialBackedUp = true;
-                result.registrationInfo!.credentialDeviceType = "multiDevice";
-                return result;
+            generateRegistrationOptions: () =>
+                Promise.try(() => registrationOptions("backup")),
+            verifyRegistrationResponse: () => {
+                return Promise.try(() => {
+                    const result = registrationVerification(backupId);
+                    result.registrationInfo!.credential.transports = undefined;
+                    result.registrationInfo!.credentialBackedUp = true;
+                    result.registrationInfo!.credentialDeviceType = "multiDevice";
+                    return result;
+                });
             },
         });
         await createWebAuthnRegistrationOptions(
@@ -539,9 +549,12 @@ describe("WebAuthn security-key service", () => {
         ).toBeUndefined();
 
         const throwingAdapter = fakeAdapter({
-            generateRegistrationOptions: async () => registrationOptions("throwing"),
-            verifyRegistrationResponse: async () => {
-                throw new Error("invalid attestation");
+            generateRegistrationOptions: () =>
+                Promise.try(() => registrationOptions("throwing")),
+            verifyRegistrationResponse: () => {
+                return Promise.try(() => {
+                    throw new Error("invalid attestation");
+                });
             },
         });
         await createWebAuthnRegistrationOptions(
@@ -561,11 +574,14 @@ describe("WebAuthn security-key service", () => {
         ).toBeUndefined();
 
         const unverifiedAdapter = fakeAdapter({
-            generateRegistrationOptions: async () => registrationOptions("unverified"),
-            verifyRegistrationResponse: async () =>
-                registrationVerification("credential_failure", {
-                    verified: false,
-                }),
+            generateRegistrationOptions: () =>
+                Promise.try(() => registrationOptions("unverified")),
+            verifyRegistrationResponse: () =>
+                Promise.try(() =>
+                    registrationVerification("credential_failure", {
+                        verified: false,
+                    })
+                ),
         });
         await createWebAuthnRegistrationOptions(
             context,
@@ -584,15 +600,18 @@ describe("WebAuthn security-key service", () => {
         ).toBeUndefined();
 
         const consumedAdapter = fakeAdapter({
-            generateRegistrationOptions: async () => registrationOptions("consumed"),
-            verifyRegistrationResponse: async () => {
-                database
-                    .prepare(
-                        `DELETE FROM auth_webauthn_challenges
+            generateRegistrationOptions: () =>
+                Promise.try(() => registrationOptions("consumed")),
+            verifyRegistrationResponse: () => {
+                return Promise.try(() => {
+                    database
+                        .prepare(
+                            `DELETE FROM auth_webauthn_challenges
                          WHERE user_id = ?`
-                    )
-                    .run(user.id);
-                return registrationVerification("credential_failure");
+                        )
+                        .run(user.id);
+                    return registrationVerification("credential_failure");
+                });
             },
         });
         await createWebAuthnRegistrationOptions(
@@ -612,7 +631,8 @@ describe("WebAuthn security-key service", () => {
         ).toBeUndefined();
 
         const expiredAdapter = fakeAdapter({
-            generateRegistrationOptions: async () => registrationOptions("expired"),
+            generateRegistrationOptions: () =>
+                Promise.try(() => registrationOptions("expired")),
         });
         await createWebAuthnRegistrationOptions(
             context,
@@ -644,11 +664,11 @@ describe("WebAuthn security-key service", () => {
         const credentialId = "credential_assertion";
         insertCredential(user.id, credentialId, '["usb","bogus"]', 4);
 
-        await expect(
+        expect(
             createWebAuthnAuthenticationOptions(registrationContext, now, fakeAdapter())
         ).rejects.toThrow("Authentication requires");
         const emptyUser = await createUser(`${USER_PREFIX}no-credential`, "password123");
-        await expect(
+        expect(
             createWebAuthnAuthenticationOptions(
                 {
                     purpose: "step-up",
@@ -662,26 +682,30 @@ describe("WebAuthn security-key service", () => {
 
         const generatedArguments: unknown[] = [];
         const successAdapter = fakeAdapter({
-            generateAuthenticationOptions: async (arguments_) => {
-                generatedArguments.push(arguments_);
-                return authenticationOptions("assertion-success");
-            },
-            verifyAuthenticationResponse: async (arguments_) => {
-                expect(arguments_).toMatchObject({
-                    credential: {
-                        counter: 4,
-                        id: credentialId,
-                        transports: ["usb"],
-                    },
-                    expectedChallenge: "assertion-success",
-                    expectedOrigin: [
-                        "https://dashboard.example.com",
-                        "https://admin.dashboard.example.com",
-                    ],
-                    expectedRPID: "dashboard.example.com",
-                    requireUserVerification: true,
+            generateAuthenticationOptions: (arguments_) => {
+                return Promise.try(() => {
+                    generatedArguments.push(arguments_);
+                    return authenticationOptions("assertion-success");
                 });
-                return authenticationVerification(5);
+            },
+            verifyAuthenticationResponse: (arguments_) => {
+                return Promise.try(() => {
+                    expect(arguments_).toMatchObject({
+                        credential: {
+                            counter: 4,
+                            id: credentialId,
+                            transports: ["usb"],
+                        },
+                        expectedChallenge: "assertion-success",
+                        expectedOrigin: [
+                            "https://dashboard.example.com",
+                            "https://admin.dashboard.example.com",
+                        ],
+                        expectedRPID: "dashboard.example.com",
+                        requireUserVerification: true,
+                    });
+                    return authenticationVerification(5);
+                });
             },
         });
         expect(
@@ -767,8 +791,8 @@ describe("WebAuthn security-key service", () => {
         const counterRaceAt = new Date(now.getTime() + 3000);
 
         const unknownCredentialAdapter = fakeAdapter({
-            generateAuthenticationOptions: async () =>
-                authenticationOptions("unknown-credential"),
+            generateAuthenticationOptions: () =>
+                Promise.try(() => authenticationOptions("unknown-credential")),
         });
         await createWebAuthnAuthenticationOptions(context, now, unknownCredentialAdapter);
         expect(
@@ -790,9 +814,12 @@ describe("WebAuthn security-key service", () => {
         ).toEqual({ count: 0 });
 
         const throwingAdapter = fakeAdapter({
-            generateAuthenticationOptions: async () => authenticationOptions("throwing"),
-            verifyAuthenticationResponse: async () => {
-                throw new Error("bad assertion");
+            generateAuthenticationOptions: () =>
+                Promise.try(() => authenticationOptions("throwing")),
+            verifyAuthenticationResponse: () => {
+                return Promise.try(() => {
+                    throw new Error("bad assertion");
+                });
             },
         });
         await createWebAuthnAuthenticationOptions(context, now, throwingAdapter);
@@ -806,10 +833,10 @@ describe("WebAuthn security-key service", () => {
         ).toBeUndefined();
 
         const unverifiedAdapter = fakeAdapter({
-            generateAuthenticationOptions: async () =>
-                authenticationOptions("unverified"),
-            verifyAuthenticationResponse: async () =>
-                authenticationVerification(1, { verified: false }),
+            generateAuthenticationOptions: () =>
+                Promise.try(() => authenticationOptions("unverified")),
+            verifyAuthenticationResponse: () =>
+                Promise.try(() => authenticationVerification(1, { verified: false })),
         });
         await createWebAuthnAuthenticationOptions(
             context,
@@ -826,15 +853,18 @@ describe("WebAuthn security-key service", () => {
         ).toBeUndefined();
 
         const consumedAdapter = fakeAdapter({
-            generateAuthenticationOptions: async () => authenticationOptions("consumed"),
-            verifyAuthenticationResponse: async () => {
-                database
-                    .prepare(
-                        `DELETE FROM auth_webauthn_challenges
+            generateAuthenticationOptions: () =>
+                Promise.try(() => authenticationOptions("consumed")),
+            verifyAuthenticationResponse: () => {
+                return Promise.try(() => {
+                    database
+                        .prepare(
+                            `DELETE FROM auth_webauthn_challenges
                          WHERE user_id = ?`
-                    )
-                    .run(user.id);
-                return authenticationVerification(1);
+                        )
+                        .run(user.id);
+                    return authenticationVerification(1);
+                });
             },
         });
         await createWebAuthnAuthenticationOptions(context, consumedAt, consumedAdapter);
@@ -848,17 +878,19 @@ describe("WebAuthn security-key service", () => {
         ).toBeUndefined();
 
         const counterRaceAdapter = fakeAdapter({
-            generateAuthenticationOptions: async () =>
-                authenticationOptions("counter-race"),
-            verifyAuthenticationResponse: async () => {
-                database
-                    .prepare(
-                        `UPDATE user_webauthn_credentials
+            generateAuthenticationOptions: () =>
+                Promise.try(() => authenticationOptions("counter-race")),
+            verifyAuthenticationResponse: () => {
+                return Promise.try(() => {
+                    database
+                        .prepare(
+                            `UPDATE user_webauthn_credentials
                          SET counter = counter + 1
                          WHERE id = ?`
-                    )
-                    .run(credentialId);
-                return authenticationVerification(2);
+                        )
+                        .run(credentialId);
+                    return authenticationVerification(2);
+                });
             },
         });
         await createWebAuthnAuthenticationOptions(

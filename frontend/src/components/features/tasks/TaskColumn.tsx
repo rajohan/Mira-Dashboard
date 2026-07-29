@@ -1,0 +1,66 @@
+import { useDroppable } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+
+import type { ColumnId, Task } from "../../../../../contracts/tasks";
+import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtilities";
+import { TaskCard } from "./TaskCard";
+
+/** Provides props for task column. */
+interface TaskColumnProperties {
+    id: ColumnId;
+    tasks: Task[];
+    isOver: boolean;
+    onTaskClick: (task: Task) => void;
+}
+
+/**
+ * Renders the task column UI.
+ * @returns Rendered the task column UI.
+ */
+export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnProperties) {
+    const config: ColumnConfig | undefined = COLUMN_CONFIG.find((c) => c.id === id);
+    const { setNodeRef } = useDroppable({ id });
+
+    if (!config) return;
+
+    return (
+        <div className="flex min-w-0 flex-col lg:min-h-0 lg:min-w-70 lg:flex-1">
+            <div className="mb-2 flex items-center gap-2">
+                <div className={"h-2 w-2 rounded-full " + config.dotColor} />
+                <h2 className="text-sm font-medium text-primary-300">{config.title}</h2>
+                <span className="rounded bg-primary-700/50 px-1.5 py-0.5 text-xs text-primary-400">
+                    {tasks.length}
+                </span>
+            </div>
+            <div
+                ref={setNodeRef}
+                data-column={id}
+                className={
+                    "flex max-h-100 min-h-28 flex-col gap-2 overflow-y-auto rounded-lg border-2 border-dashed p-2 transition-colors lg:max-h-none lg:min-h-0 lg:flex-1 lg:overscroll-y-contain " +
+                    (isOver
+                        ? "border-accent-500/50 bg-accent-500/5"
+                        : "border-primary-700/50 bg-primary-800/30")
+                }
+            >
+                {tasks.length > 0 ? (
+                    <SortableContext
+                        items={tasks.map((task) => String(task.number))}
+                        strategy={verticalListSortingStrategy}
+                    >
+                        {tasks.map((task) => (
+                            <TaskCard
+                                key={task.number}
+                                task={task}
+                                onClick={() => onTaskClick(task)}
+                            />
+                        ))}
+                    </SortableContext>
+                ) : (
+                    <div className="flex flex-1 items-center justify-center text-sm text-primary-500">
+                        No tasks
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}

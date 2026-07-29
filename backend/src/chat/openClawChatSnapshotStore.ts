@@ -1,9 +1,11 @@
+import type {
+    OpenClawRuntimeEnvelope,
+    OpenClawRuntimeSnapshot,
+} from "../../../contracts/chat.ts";
 import { database } from "../database.ts";
 import {
     MAX_CHAT_RUNTIME_SESSIONS,
     type OpenClawChatSnapshotStore,
-    type OpenClawRuntimeEnvelope,
-    type OpenClawRuntimeSnapshot,
 } from "./openClawChatBridge.ts";
 import { MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES } from "./openClawChatRequestBoundaries.ts";
 
@@ -648,7 +650,8 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 WHERE gateway_scope = ?`
             )
             .get(Number.MAX_SAFE_INTEGER, this.#gatewayScope) as
-            SnapshotMaximumSequenceRow | undefined;
+            | SnapshotMaximumSequenceRow
+            | undefined;
         return typeof row?.maximum_sequence === "number" &&
             Number.isSafeInteger(row.maximum_sequence) &&
             row.maximum_sequence >= 0

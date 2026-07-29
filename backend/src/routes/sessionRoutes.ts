@@ -1,17 +1,30 @@
+import {
+    parseSessionActionRequest,
+    type SessionActionResponse,
+    type SessionDeleteResponse,
+    type SessionListResponse,
+    type SessionStats,
+} from "../../../contracts/sessions.ts";
 import gateway from "../gateway.ts";
-import { json, readJson } from "../http.ts";
-import { httpStatusCode } from "../lib/errors.ts";
+import { json } from "../http.ts";
 import { stringFallback } from "../lib/values.ts";
-
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
+import {
+    type ParametersRequest,
+    readApiJsonOrError,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 
 function isValidSessionKey(sessionKey: string): boolean {
     return sessionKey.length > 0;
 }
 
 function sessionRouteError(error: unknown, fallback = "Internal server error"): Response {
-    console.error("[Sessions] Request failed:", error);
-    return json({ error: fallback }, { status: httpStatusCode(error) });
+    return routeErrorResponse(undefined, error, {
+        code: "session_request_failed",
+        context: "session",
+        message: fallback,
+    });
 }
 
 export const sessionRoutes = {
@@ -30,7 +43,7 @@ export const sessionRoutes = {
                             : false
                     );
                 sessions = sessions.toSorted((a, b) => b.tokenCount - a.tokenCount);
-                return json({ sessions });
+                return json({ sessions } satisfies SessionListResponse);
             } catch (error) {
                 return sessionRouteError(error);
             }
@@ -41,30 +54,43 @@ export const sessionRoutes = {
         POST: async (request: ParametersRequest<"id">) => {
             const sessionKey = stringFallback(request.params.id).trim();
             if (!isValidSessionKey(sessionKey)) {
-                return json({ error: "Invalid session id" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "session",
+                    message: "Invalid session id",
+                    status: 400,
+                });
             }
             try {
-                const body = await readJson<{ action?: unknown }>(request);
-                if (!body || typeof body !== "object" || Array.isArray(body)) {
-                    return json(
-                        { error: "Request body must be an object" },
-                        { status: 400 }
-                    );
-                }
-                const action = stringFallback(body.action).trim().toLowerCase();
+                const body = await readApiJsonOrError(
+                    request,
+                    parseSessionActionRequest,
+                    {
+                        code: "invalid_session_action",
+                        context: "session.action",
+                        message: "Invalid session action",
+                    }
+                );
+                if (body instanceof Response) return body;
+                const { action } = body;
                 if (action === "stop") {
                     await gateway.abortSessionRun(sessionKey);
-                    return json({ action, isSuccess: true });
+                    return json({
+                        action,
+                        isSuccess: true,
+                    } satisfies SessionActionResponse);
                 }
                 if (action === "compact") {
                     await gateway.sendSessionMessage(sessionKey, "/compact");
-                    return json({ action, isSuccess: true });
+                    return json({
+                        action,
+                        isSuccess: true,
+                    } satisfies SessionActionResponse);
                 }
-                if (action === "reset") {
-                    await gateway.sendSessionMessage(sessionKey, "/reset");
-                    return json({ action, isSuccess: true });
-                }
-                return json({ error: `Unsupported action: ${action}` }, { status: 400 });
+                await gateway.sendSessionMessage(sessionKey, "/reset");
+                return json({
+                    action,
+                    isSuccess: true,
+                } satisfies SessionActionResponse);
             } catch (error) {
                 return sessionRouteError(error);
             }
@@ -75,13 +101,17 @@ export const sessionRoutes = {
         DELETE: async (request: ParametersRequest<"id">) => {
             const sessionKey = stringFallback(request.params.id).trim();
             if (!isValidSessionKey(sessionKey)) {
-                return json({ error: "Invalid session id" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "session",
+                    message: "Invalid session id",
+                    status: 400,
+                });
             }
             try {
                 return json({
                     isSuccess: true,
                     result: await gateway.deleteSession(sessionKey),
-                });
+                } satisfies SessionDeleteResponse);
             } catch (error) {
                 return sessionRouteError(error);
             }
@@ -93,10 +123,10 @@ export const sessionRoutes = {
             try {
                 const sessions = gateway.getSessions();
                 const now = Date.now();
-                const stats = {
+                const stats: SessionStats = {
                     activeInLastHour: 0,
-                    byModel: {} as Record<string, number>,
-                    byType: {} as Record<string, number>,
+                    byModel: {},
+                    byType: {},
                     total: sessions.length,
                     totalTokens: 0,
                 };

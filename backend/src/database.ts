@@ -1,8 +1,7 @@
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-import { Database, type SQLQueryBindings } from "bun:sqlite";
 
 import { applyDatabaseMigrations } from "./databaseMigrationRunner.ts";
 import {
@@ -17,13 +16,15 @@ import { recordDatabaseOperation } from "./lib/databaseMetrics.ts";
 
 type DatabaseSync = Database;
 
-const SQLITE_NULL = JSON.parse("null") as SQLQueryBindings;
 const SQLITE_BUSY_TIMEOUT_MS = 5000;
 const SQLITE_JOURNAL_MODE_RETRY_DELAY_MS = 25;
 
-/** Converts optional values to SQLite NULL-compatible bindings. */
-export function sqlNullable(value: SQLQueryBindings | undefined): SQLQueryBindings {
-    return value === undefined ? SQLITE_NULL : value;
+/**
+ * Converts optional values to SQLite NULL-compatible bindings.
+ * @returns Converted optional values to SQLite NULL-compatible bindings.
+ */
+export function sqlNullable(value?: SQLQueryBindings): SQLQueryBindings {
+    return value === undefined ? null : value;
 }
 
 function resolveDatabasePath(): {
@@ -120,7 +121,10 @@ function assertTestDatabasePath(
     }
 }
 
-/** Prevents test-mode code paths from touching a database outside an isolated temp root. */
+/**
+ * Prevents test-mode code paths from touching a database outside an isolated temp root.
+ * @param databasePath Database path value.
+ */
 export function assertMiraDatabasePathSafeForEnvironment(databasePath: string): void {
     const { configuredDatabasePath } = resolveDatabasePath();
     assertTestDatabasePath(databasePath, configuredDatabasePath);
@@ -140,7 +144,7 @@ function isSqliteLockContention(error: unknown): boolean {
     if (typeof error !== "object" || error === null) {
         return false;
     }
-    const code = Reflect.get(error, "code");
+    const code: unknown = Reflect.get(error, "code");
     return (
         typeof code === "string" &&
         (code.startsWith("SQLITE_BUSY") || code.startsWith("SQLITE_LOCKED"))
@@ -216,6 +220,7 @@ const activeDatabaseState: {
 
 const instrumentedStatements = new WeakMap<object, object>();
 const measuredStatementMethods = new Set(["all", "get", "run", "values"]);
+type UnknownDatabaseMethod = (this: object, ...arguments_: unknown[]) => unknown;
 
 function measuredDatabaseOperation<T>(operation: () => T): T {
     const startedAt = performance.now();
@@ -234,18 +239,19 @@ function instrumentStatement<T extends object>(statement: T): T {
     if (cached) return cached as T;
     const instrumented = new Proxy(statement, {
         get(target, property) {
-            const value = Reflect.get(target, property, target);
-            if (
-                typeof value === "function" &&
-                typeof property === "string" &&
-                measuredStatementMethods.has(property)
-            ) {
+            const value: unknown = Reflect.get(target, property, target);
+            if (typeof value !== "function") {
+                return value;
+            }
+            const method = value as UnknownDatabaseMethod;
+            if (typeof property === "string" && measuredStatementMethods.has(property)) {
                 return (...arguments_: unknown[]) =>
                     measuredDatabaseOperation(() =>
-                        Reflect.apply(value, target, arguments_)
+                        Reflect.apply(method, target, arguments_)
                     );
             }
-            return typeof value === "function" ? value.bind(target) : value;
+            return (...arguments_: unknown[]) =>
+                Reflect.apply(method, target, arguments_);
         },
     });
     instrumentedStatements.set(statement, instrumented);
@@ -290,11 +296,12 @@ export const database = new Proxy({} as DatabaseSync, {
             return closeActiveDatabase;
         }
         const active = currentDatabase();
-        const value = Reflect.get(active, property, active);
+        const value: unknown = Reflect.get(active, property, active);
         if (typeof value !== "function") return value;
+        const method = value as UnknownDatabaseMethod;
         if (property === "prepare" || property === "query") {
             return (...arguments_: unknown[]) => {
-                const statement = Reflect.apply(value, active, arguments_) as unknown;
+                const statement = Reflect.apply(method, active, arguments_);
                 return statement !== null && typeof statement === "object"
                     ? instrumentStatement(statement)
                     : statement;
@@ -302,8 +309,10 @@ export const database = new Proxy({} as DatabaseSync, {
         }
         if (property === "exec" || property === "run") {
             return (...arguments_: unknown[]) =>
-                measuredDatabaseOperation(() => Reflect.apply(value, active, arguments_));
+                measuredDatabaseOperation(() =>
+                    Reflect.apply(method, active, arguments_)
+                );
         }
-        return value.bind(active);
+        return (...arguments_: unknown[]) => Reflect.apply(method, active, arguments_);
     },
 });

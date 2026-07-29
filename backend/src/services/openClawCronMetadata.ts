@@ -7,7 +7,11 @@ interface OpenClawCronJobMetadataRow {
     disable_intent_json: string;
 }
 
-/** Reads one OpenClaw cron annotation for compensated writes. */
+/**
+ * Reads one OpenClaw cron annotation for compensated writes.
+ * @param jobId Job identifier.
+ * @returns Read one OpenClaw cron annotation for compensated writes.
+ */
 export function getOpenClawCronDisableIntent(
     jobId: string
 ): JobDisableIntent | undefined {
@@ -21,7 +25,10 @@ export function getOpenClawCronDisableIntent(
     return parseJobDisableIntent(row?.disable_intent_json);
 }
 
-/** Reads intentional-disable metadata keyed by the external OpenClaw cron ID. */
+/**
+ * Reads intentional-disable metadata keyed by the external OpenClaw cron ID.
+ * @returns Read intentional-disable metadata keyed by the external OpenClaw cron ID.
+ */
 export function openClawCronDisableIntentsByJobId(): Map<string, JobDisableIntent> {
     const rows = database
         .prepare("SELECT job_id, disable_intent_json FROM openclaw_cron_job_metadata")
@@ -34,7 +41,11 @@ export function openClawCronDisableIntentsByJobId(): Map<string, JobDisableInten
     );
 }
 
-/** Stores an active annotation, or removes it when the cron is enabled again. */
+/**
+ * Stores an active annotation, or removes it when the cron is enabled again.
+ * @param jobId Job identifier.
+ * @param intent Intent value.
+ */
 export function setOpenClawCronDisableIntent(
     jobId: string,
     intent: JobDisableIntent | undefined

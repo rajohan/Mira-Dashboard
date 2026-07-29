@@ -1,13 +1,16 @@
+[install]
+peer = false
+
 [test]
-root = "src"
-preload = ["./src/test/setup.ts"]
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage"
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
-    "src/test/**",
-    "src/types/**",
-    "src/**/*.d.ts",
+    "backend/dist/**",
+    "backend/src/**/*.d.ts",
+    "backend/test/**",
+    "frontend/src/test/**",
+    "frontend/src/**/*.d.ts",
 ]
 
 [serve.static]

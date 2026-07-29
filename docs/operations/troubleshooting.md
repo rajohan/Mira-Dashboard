@@ -116,8 +116,7 @@ If the browser still shows old UI, hard refresh or clear the tab cache.
 Run the same local gates before pushing another fix:
 
 ```bash
-bun run lint:frontend
-bun run lint:backend
+bun run lint
 bun run build:frontend
 bun run build:backend
 bun run format:check

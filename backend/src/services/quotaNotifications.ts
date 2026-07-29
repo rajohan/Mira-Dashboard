@@ -1,7 +1,10 @@
 import type { QuotasResponse, SyntheticQuota } from "../../../contracts/quotas.ts";
 import { database } from "../database.ts";
 import { hasQuotaStatus } from "../lib/quotasCache.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
+
+const logger = createStructuredLogger("quota-notifications");
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -13,14 +16,21 @@ type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
 
-/** Formats the Synthetic.new weekly remaining quota. */
+/**
+ * Formats the Synthetic.new weekly remaining quota.
+ * @param weeklyTokenLimit Weekly token limit value.
+ * @returns Formatted the Synthetic.new weekly remaining quota.
+ */
 function formatSyntheticWeeklyRemaining(
     weeklyTokenLimit: SyntheticQuota["weeklyTokenLimit"]
 ): string {
     return `${weeklyTokenLimit.percentRemaining}% left`;
 }
 
-/** Returns provider percent. */
+/**
+ * Returns provider percent.
+ * @returns provider percent.
+ */
 function getProviderPercent(
     provider: ProviderKey,
     quotas: QuotasResponse
@@ -49,7 +59,10 @@ function getProviderPercent(
     return hasQuotaStatus(quotas.openai) ? undefined : quotas.openai.percentUsed;
 }
 
-/** Returns notification payload. */
+/**
+ * Returns notification payload.
+ * @returns notification payload.
+ */
 function getNotificationPayload(
     provider: ProviderKey,
     bucket: number,
@@ -93,7 +106,10 @@ function getNotificationPayload(
     return;
 }
 
-/** Returns a notification payload or skips inconsistent quota snapshots. */
+/**
+ * Returns a notification payload or skips inconsistent quota snapshots.
+ * @returns a notification payload or skips inconsistent quota snapshots.
+ */
 function getProviderNotificationPayload(
     provider: ProviderKey,
     bucket: number,
@@ -101,9 +117,7 @@ function getProviderNotificationPayload(
 ) {
     const payload = getNotificationPayload(provider, bucket, quotas);
     if (!payload) {
-        console.warn(
-            `[QuotaNotifications] Missing notification payload for ${provider} ${bucket}%`
-        );
+        logger.warn("quota_notifications.payload_missing", { bucket, provider });
         return;
     }
     return payload;
@@ -120,7 +134,10 @@ function ensureStateRow(provider: ProviderKey, bucket: number): void {
         .run(provider, bucket, dateToISOString(new Date()));
 }
 
-/** Returns state. */
+/**
+ * Returns state.
+ * @returns state.
+ */
 function getState(provider: ProviderKey, bucket: number): { is_armed: number } {
     const state = database
         .prepare(
@@ -237,6 +254,6 @@ export function evaluateQuotaNotifications(quotas: QuotasResponse): void {
             }
         }
     } catch (error) {
-        console.error("[QuotaNotifications] check failed", error);
+        logger.error("quota_notifications.check_failed", { error });
     }
 }

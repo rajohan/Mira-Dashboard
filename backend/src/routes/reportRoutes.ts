@@ -8,15 +8,18 @@ import type {
 } from "../../../contracts/reports.ts";
 import { parseCreateReportInput } from "../../../contracts/reports.ts";
 import { json } from "../http.ts";
-import { readApiJson, routeErrorResponse } from "../routeSupport.ts";
+import {
+    type ParametersRequest,
+    readApiJson,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import {
     createReport,
     deleteReport,
     getReport,
     listReports,
 } from "../services/reports.ts";
-
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
 const reportTypes = new Set(["daily_brief", "daily_summary", "heartbeat", "custom"]);
 const reportStatuses = new Set(["ok", "warning", "error"]);
@@ -81,11 +84,19 @@ export const reportRoutes = {
             try {
                 const id = validId(request.params.id);
                 if (id === undefined)
-                    return json({ error: "invalid id" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "report",
+                        message: "invalid id",
+                        status: 400,
+                    });
                 const report = getReport(id);
                 return report
                     ? json({ report } satisfies ReportResponse)
-                    : json({ error: "Report not found" }, { status: 404 });
+                    : routeFailureResponse({
+                          context: "report",
+                          message: "Report not found",
+                          status: 404,
+                      });
             } catch (error) {
                 return routeErrorResponse(request, error, {
                     code: "report_lookup_failed",
@@ -98,7 +109,11 @@ export const reportRoutes = {
             try {
                 const id = validId(request.params.id);
                 if (id === undefined)
-                    return json({ error: "invalid id" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "report",
+                        message: "invalid id",
+                        status: 400,
+                    });
                 return json({
                     deleted: deleteReport(id),
                     isOk: true,

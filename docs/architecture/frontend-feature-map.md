@@ -1,8 +1,9 @@
 # Frontend Feature Map
 
-The frontend is a React/TanStack Router app. Routes live in `src/router.tsx`,
-pages live in `src/pages`, feature code lives under `src/components/features`,
-and shared primitives live under `src/components/ui`.
+The frontend is a React/TanStack Router app. Routes live in
+`frontend/src/router.tsx`, pages live in `frontend/src/pages`, feature code lives
+under `frontend/src/components/features`, and shared primitives live under
+`frontend/src/components/ui`.
 
 React Compiler is enabled. Avoid routine `useMemo` and `useCallback`; use them
 only when stable identity is part of an external contract that React Compiler
@@ -105,9 +106,8 @@ For destructive actions:
 - The quota card shows provider-specific windows. OpenAI may expose a weekly
   window with an optional five-hour window; a missing five-hour value means
   unlimited, not a parse failure.
-- The Git workspace card distinguishes an explicitly missing repository
-  (`exists === false`) from legacy cache rows where `exists` is absent. Missing
-  repositories do not count as off-main checkouts.
+- The Git workspace card uses the required `exists` field to distinguish
+  missing repositories. Missing repositories do not count as off-main checkouts.
 - The Database page shows either Postgres/PgBouncer (including Comet/Bitmagnet
   totals and conservative maintenance assessment) or Dashboard SQLite
   lifecycle state. The Dashboard Database card shows both sources in equal
@@ -125,8 +125,10 @@ For frontend-only changes, run the narrowest relevant test plus the standard
 frontend gates:
 
 ```bash
-bun test ./src/test/frontendBehavior.test.tsx --test-name-pattern "<feature>"
-bun run lint:frontend
+bun test --preload ./frontend/src/test/setup.ts \
+  ./frontend/src/test/frontendBehavior.test.tsx \
+  --test-name-pattern "<feature>"
+bun run lint
 bun run build:frontend
 bun run format:check
 git diff --check

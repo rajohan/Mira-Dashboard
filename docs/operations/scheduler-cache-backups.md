@@ -167,9 +167,8 @@ Do not change heartbeat automation to `/api/cache/status`: it needs the compact
 operational data. Conversely, routine UI badge polling should not download the
 heartbeat projection or full cache rows.
 
-Git cache rows use `exists === false` as the explicit missing-repository signal.
-Legacy rows may omit `exists` and remain valid. Explicitly missing repositories
-are excluded from off-main totals even if stale branch fields remain.
+Git cache rows require `exists`; `false` is the explicit missing-repository
+signal. Missing repositories are excluded from off-main totals.
 
 OpenAI quota parsing accepts a weekly window and an optional five-hour window.
 After a Codex CLI update, the producer retries the quota probe once because the

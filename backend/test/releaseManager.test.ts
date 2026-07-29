@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
     closeSync,
@@ -17,8 +18,6 @@ import fsp from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
-
 import {
     databaseMigrationIdentities,
     type DatabaseMigrationIdentity,
@@ -29,7 +28,6 @@ import {
     assertDashboardReleaseHostRuntimeCompatible,
     assertReleaseTransitionLockCommandSucceeded,
     ensureDashboardReleaseLayout,
-    isReleaseTransitionLockAvailable,
     loadManagedRelease,
     managedReleasePath,
     pruneDashboardReleases,
@@ -146,8 +144,6 @@ async function createManagedRelease(
     mkdirSync(path.join(releasePath, "dist", "assets"), { recursive: true });
     writeFileSync(path.join(releasePath, "package.json"), "{}\n");
     writeFileSync(path.join(releasePath, "bun.lock"), "root-lock\n");
-    writeFileSync(path.join(releasePath, "backend", "package.json"), "{}\n");
-    writeFileSync(path.join(releasePath, "backend", "bun.lock"), "backend-lock\n");
     writeFileSync(
         path.join(releasePath, "backend", "config", "log-rotation.json"),
         '{"jobs":[]}\n'
@@ -410,7 +406,7 @@ describe("Dashboard immutable release manager", () => {
         expect(readlinkSync(path.join(root, "previous"))).toBe(
             `releases/${FIRST_COMMIT}`
         );
-        await expect(
+        expect(
             restoreDashboardReleaseAfterFailedActivation(
                 {
                     ...SCHEMA_6_OPTIONS,
@@ -426,7 +422,7 @@ describe("Dashboard immutable release manager", () => {
             current: { commitSha: SECOND_COMMIT },
             previous: { commitSha: FIRST_COMMIT },
         });
-        await expect(readDashboardReleaseState(root)).resolves.toMatchObject({
+        expect(readDashboardReleaseState(root)).resolves.toMatchObject({
             current: { commitSha: SECOND_COMMIT },
             previous: { commitSha: FIRST_COMMIT },
         });
@@ -477,15 +473,15 @@ describe("Dashboard immutable release manager", () => {
         await createManagedRelease(root, FIRST_COMMIT);
         await createManagedRelease(root, SECOND_COMMIT);
 
-        await expect(runReleaseLifecycleCommand(["status"], root)).resolves.toEqual({
+        expect(runReleaseLifecycleCommand(["status"], root)).resolves.toEqual({
             current: undefined,
             previous: undefined,
             root,
         });
-        await expect(runReleaseLifecycleCommand(["activate"], root)).rejects.toThrow(
+        expect(runReleaseLifecycleCommand(["activate"], root)).rejects.toThrow(
             "requires a commit SHA"
         );
-        await expect(runReleaseLifecycleCommand([], root)).rejects.toThrow(
+        expect(runReleaseLifecycleCommand([], root)).rejects.toThrow(
             "Usage: releaseLifecycle.js"
         );
 
@@ -499,14 +495,14 @@ describe("Dashboard immutable release manager", () => {
             root,
             SCHEMA_6_OPTIONS
         );
-        await expect(
+        expect(
             runReleaseLifecycleCommand(
                 ["rollback", FIRST_COMMIT, SECOND_COMMIT],
                 root,
                 SCHEMA_6_OPTIONS
             )
         ).rejects.toThrow("rollback slots changed");
-        await expect(readDashboardReleaseState(root)).resolves.toMatchObject({
+        expect(readDashboardReleaseState(root)).resolves.toMatchObject({
             current: { commitSha: SECOND_COMMIT },
             previous: { commitSha: FIRST_COMMIT },
         });
@@ -533,39 +529,39 @@ describe("Dashboard immutable release manager", () => {
             root,
         });
         expect(status).not.toHaveProperty("current.manifest");
-        await expect(runReleaseLifecycleCommand(["prune"], root)).resolves.toEqual({
+        expect(runReleaseLifecycleCommand(["prune"], root)).resolves.toEqual({
             removed: [],
             retained: [SECOND_COMMIT, FIRST_COMMIT],
             warnings: [],
         });
-        await expect(runReleaseLifecycleCommand(["prune", "2"], root)).rejects.toThrow(
+        expect(runReleaseLifecycleCommand(["prune", "2"], root)).rejects.toThrow(
             "retention must be between 3 and 20"
         );
-        await expect(
-            runReleaseLifecycleCommand(["prune", "3", "extra"], root)
-        ).rejects.toThrow("unexpected arguments");
-        await expect(
+        expect(runReleaseLifecycleCommand(["prune", "3", "extra"], root)).rejects.toThrow(
+            "unexpected arguments"
+        );
+        expect(
             runReleaseLifecycleCommand(["rollback", FIRST_COMMIT], root)
         ).rejects.toThrow("requires expected current and target");
-        await expect(
+        expect(
             runReleaseLifecycleCommand(
                 ["rollback", FIRST_COMMIT, SECOND_COMMIT, "extra"],
                 root
             )
         ).rejects.toThrow("requires expected current and target");
-        await expect(
+        expect(
             runReleaseLifecycleCommand(["rollback", "", FIRST_COMMIT], root)
         ).rejects.toThrow("requires expected current and target");
-        await expect(
+        expect(
             runReleaseLifecycleCommand(["restore", FIRST_COMMIT], root)
         ).rejects.toThrow("requires expected candidate and rollback");
-        await expect(
+        expect(
             runReleaseLifecycleCommand(
                 ["restore", FIRST_COMMIT, SECOND_COMMIT, THIRD_COMMIT, "extra"],
                 root
             )
         ).rejects.toThrow("requires expected candidate and rollback");
-        await expect(runReleaseLifecycleCommand(["status", ""], root)).rejects.toThrow(
+        expect(runReleaseLifecycleCommand(["status", ""], root)).rejects.toThrow(
             "takes no commit SHA"
         );
     });
@@ -578,14 +574,14 @@ describe("Dashboard immutable release manager", () => {
             SECOND_COMMIT
         );
 
-        await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
+        expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
             "contains manifest"
         );
 
         rmSync(mismatchedPath, { force: true, recursive: true });
         const releasePath = await createManagedRelease(root, FIRST_COMMIT);
         writeFileSync(path.join(releasePath, "dist", "index.html"), "tampered\n");
-        await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
+        expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
             "Release artifact verification failed"
         );
     });
@@ -597,7 +593,7 @@ describe("Dashboard immutable release manager", () => {
         renameSync(originalPath, relabeledPath);
         await rewriteManifest(relabeledPath, { commitSha: SECOND_COMMIT });
 
-        await expect(loadManagedRelease(root, SECOND_COMMIT)).rejects.toThrow(
+        expect(loadManagedRelease(root, SECOND_COMMIT)).rejects.toThrow(
             "backend build identity does not match the release manifest"
         );
     });
@@ -609,14 +605,14 @@ describe("Dashboard immutable release manager", () => {
         const layout = await ensureDashboardReleaseLayout(root);
         symlinkSync(outside, path.join(layout.releasesPath, FIRST_COMMIT), "dir");
 
-        await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
+        expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
             "must be a real directory"
         );
 
         rmSync(path.join(layout.releasesPath, FIRST_COMMIT), { force: true });
         const releasePath = await createManagedRelease(root, FIRST_COMMIT);
         writeFileSync(path.join(root, "current"), FIRST_COMMIT);
-        await expect(readDashboardReleaseState(root)).rejects.toThrow(
+        expect(readDashboardReleaseState(root)).rejects.toThrow(
             "current slot must be a symlink"
         );
 
@@ -624,7 +620,7 @@ describe("Dashboard immutable release manager", () => {
         const outsideBackend = path.join(outside, "backend");
         renameSync(path.join(releasePath, "backend"), outsideBackend);
         symlinkSync(outsideBackend, path.join(releasePath, "backend"), "dir");
-        await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
+        expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
             "must not traverse symlinks"
         );
     });
@@ -634,19 +630,17 @@ describe("Dashboard immutable release manager", () => {
         await ensureDashboardReleaseLayout(root);
         symlinkSync("releases/../outside", path.join(root, "current"), "dir");
 
-        await expect(readDashboardReleaseState(root)).rejects.toThrow(
-            "link target is invalid"
-        );
+        expect(readDashboardReleaseState(root)).rejects.toThrow("link target is invalid");
     });
 
-    it("rejects a symlinked layout root before creating release directories", async () => {
+    it("rejects a symlinked layout root before creating release directories", () => {
         const parent = temporaryReleasesRoot();
         const outside = mkdtempSync(path.join(tmpdir(), "mira-layout-outside-"));
         temporaryRoots.push(outside);
         const linkedRoot = path.join(parent, "linked-root");
         symlinkSync(outside, linkedRoot, "dir");
 
-        await expect(ensureDashboardReleaseLayout(linkedRoot)).rejects.toThrow(
+        expect(ensureDashboardReleaseLayout(linkedRoot)).rejects.toThrow(
             "must be a real directory"
         );
         expect(existsSync(path.join(outside, "releases"))).toBe(false);
@@ -664,7 +658,7 @@ describe("Dashboard immutable release manager", () => {
         });
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
 
-        await expect(
+        expect(
             activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("cannot roll back after SQLite schema 8");
         expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
@@ -679,7 +673,7 @@ describe("Dashboard immutable release manager", () => {
             migrationRegistrySha256: "d".repeat(64),
         });
         await activateDashboardRelease(FIRST_COMMIT, registryRoot, SCHEMA_6_OPTIONS);
-        await expect(
+        expect(
             activateDashboardRelease(SECOND_COMMIT, registryRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("migration registry changed");
         const restoredRegistryState = await restoreDashboardReleaseAfterFailedActivation(
@@ -704,7 +698,7 @@ describe("Dashboard immutable release manager", () => {
         expect(() =>
             assertDashboardReleaseHostRuntimeCompatible(incompatibleRelease)
         ).toThrow("requires Bun 0.0.0");
-        await expect(
+        expect(
             activateDashboardRelease(FIRST_COMMIT, runtimeRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("requires Bun 0.0.0");
     });
@@ -733,9 +727,9 @@ describe("Dashboard immutable release manager", () => {
         liveSchemaVersion = 8;
         await rollbackDashboardRelease(root, options);
 
-        await expect(
-            activateDashboardRelease(THIRD_COMMIT, root, options)
-        ).rejects.toThrow("Activation release cannot open live SQLite schema 8");
+        expect(activateDashboardRelease(THIRD_COMMIT, root, options)).rejects.toThrow(
+            "Activation release cannot open live SQLite schema 8"
+        );
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(FIRST_COMMIT);
         expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
@@ -758,7 +752,7 @@ describe("Dashboard immutable release manager", () => {
             readLiveSchemaState: () => testLiveSchemaState(7),
         });
 
-        await expect(
+        expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 readLiveSchemaState: () =>
                     testLiveSchemaState(8, {
@@ -789,7 +783,7 @@ describe("Dashboard immutable release manager", () => {
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
         await activateDashboardRelease(FIRST_COMMIT, root, options);
-        await expect(
+        expect(
             activateDashboardRelease(FIRST_COMMIT, root, {
                 ...options,
                 schemaCutoverMode: "coordinated",
@@ -797,9 +791,9 @@ describe("Dashboard immutable release manager", () => {
         ).resolves.toMatchObject({
             current: { commitSha: FIRST_COMMIT },
         });
-        await expect(
-            activateDashboardRelease(SECOND_COMMIT, root, options)
-        ).rejects.toThrow("cannot roll back after SQLite schema 8");
+        expect(activateDashboardRelease(SECOND_COMMIT, root, options)).rejects.toThrow(
+            "cannot roll back after SQLite schema 8"
+        );
 
         await runReleaseLifecycleCommand(
             ["activate", SECOND_COMMIT, "--coordinated-schema-cutover"],
@@ -807,12 +801,12 @@ describe("Dashboard immutable release manager", () => {
             options
         );
         liveSchemaVersion = 8;
-        await expect(
+        expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 readLiveSchemaState: () => testLiveSchemaState(9),
             })
         ).rejects.toThrow("Activation release cannot open live SQLite schema 9");
-        await expect(rollbackDashboardRelease(root, options)).rejects.toThrow(
+        expect(rollbackDashboardRelease(root, options)).rejects.toThrow(
             "Rollback release cannot open SQLite schema 8"
         );
         expect(readlinkSync(path.join(root, "current"))).toBe(
@@ -878,7 +872,7 @@ describe("Dashboard immutable release manager", () => {
         rmSync(path.join(root, "previous"));
         symlinkSync(`releases/${SECOND_COMMIT}`, path.join(root, "previous"), "dir");
 
-        await expect(readDashboardReleaseState(root)).rejects.toThrow(
+        expect(readDashboardReleaseState(root)).rejects.toThrow(
             "requires activate, restore, or rollback to recover"
         );
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(true);
@@ -933,37 +927,34 @@ describe("Dashboard immutable release manager", () => {
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
     });
 
-    it.skipIf(!isReleaseTransitionLockAvailable())(
-        "serializes status and transitions with a kernel-owned lock",
-        async () => {
-            const root = temporaryReleasesRoot();
-            await createManagedRelease(root, FIRST_COMMIT);
-            await createManagedRelease(root, SECOND_COMMIT);
-            await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
-            const lockFileDescriptor = holdTransitionLock(root);
+    it("serializes status and transitions with a kernel-owned lock", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        const lockFileDescriptor = holdTransitionLock(root);
 
-            try {
-                await expect(readDashboardReleaseState(root)).rejects.toThrow(
-                    "Another managed release transition is in progress"
-                );
-                await expect(
-                    activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
-                ).rejects.toThrow("Another managed release transition is in progress");
-                expect(readlinkSync(path.join(root, "current"))).toBe(
-                    `releases/${FIRST_COMMIT}`
-                );
-                expect(existsSync(path.join(root, "previous"))).toBe(false);
-            } finally {
-                closeSync(lockFileDescriptor);
-            }
+        try {
+            expect(readDashboardReleaseState(root)).rejects.toThrow(
+                "Another managed release transition is in progress"
+            );
+            expect(
+                activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
+            ).rejects.toThrow("Another managed release transition is in progress");
+            expect(readlinkSync(path.join(root, "current"))).toBe(
+                `releases/${FIRST_COMMIT}`
+            );
+            expect(existsSync(path.join(root, "previous"))).toBe(false);
+        } finally {
+            closeSync(lockFileDescriptor);
         }
-    );
+    });
 
-    it("rejects invalid release transition lock wait values", async () => {
+    it("rejects invalid release transition lock wait values", () => {
         const root = temporaryReleasesRoot();
 
-        for (const transitionLockWaitMs of [-1, NaN, Infinity]) {
-            await expect(
+        for (const transitionLockWaitMs of [-1, Number.NaN, Infinity]) {
+            expect(
                 readDashboardReleaseState(root, { transitionLockWaitMs })
             ).rejects.toThrow(
                 "Managed release transition lock wait must be a finite non-negative number"
@@ -971,69 +962,67 @@ describe("Dashboard immutable release manager", () => {
         }
     });
 
-    it.skipIf(!isReleaseTransitionLockAvailable())(
-        "lets lifecycle transitions wait for an in-flight status reader",
-        async () => {
-            const root = temporaryReleasesRoot();
-            await createManagedRelease(root, FIRST_COMMIT);
-            await readDashboardReleaseState(root);
-            const lockFileDescriptor = holdTransitionLock(root, "shared");
-            const activation = runReleaseLifecycleCommand(
-                ["activate", FIRST_COMMIT],
-                root,
-                SCHEMA_6_OPTIONS
-            );
-            let isSettled = false;
-            void activation
-                .then(() => {
-                    isSettled = true;
-                })
-                .catch(() => {
-                    isSettled = true;
-                });
-
+    it("lets lifecycle transitions wait for an in-flight status reader", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await readDashboardReleaseState(root);
+        const lockFileDescriptor = holdTransitionLock(root, "shared");
+        const activation = runReleaseLifecycleCommand(
+            ["activate", FIRST_COMMIT],
+            root,
+            SCHEMA_6_OPTIONS
+        );
+        let isSettled = false;
+        void (async () => {
             try {
-                await Bun.sleep(125);
-                expect(isSettled).toBe(false);
+                await activation;
+            } catch {
+                // The assertion below reports a rejected transition.
             } finally {
-                closeSync(lockFileDescriptor);
+                isSettled = true;
             }
+        })();
 
-            await expect(activation).resolves.toMatchObject({
-                current: { commitSha: FIRST_COMMIT },
-            });
+        try {
+            await Bun.sleep(125);
+            expect(isSettled).toBe(false);
+        } finally {
+            closeSync(lockFileDescriptor);
         }
-    );
 
-    it.skipIf(!isReleaseTransitionLockAvailable())(
-        "lets lifecycle status wait for an in-flight transition",
-        async () => {
-            const root = temporaryReleasesRoot();
-            await createManagedRelease(root, FIRST_COMMIT);
-            await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
-            const lockFileDescriptor = holdTransitionLock(root);
-            const status = runReleaseLifecycleCommand(["status"], root);
-            let isSettled = false;
-            void status
-                .then(() => {
-                    isSettled = true;
-                })
-                .catch(() => {
-                    isSettled = true;
-                });
+        expect(activation).resolves.toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+        });
+    });
 
+    it("lets lifecycle status wait for an in-flight transition", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        const lockFileDescriptor = holdTransitionLock(root);
+        const status = runReleaseLifecycleCommand(["status"], root);
+        let isSettled = false;
+        void (async () => {
             try {
-                await Bun.sleep(125);
-                expect(isSettled).toBe(false);
+                await status;
+            } catch {
+                // The assertion below reports a rejected status read.
             } finally {
-                closeSync(lockFileDescriptor);
+                isSettled = true;
             }
+        })();
 
-            await expect(status).resolves.toMatchObject({
-                current: { commitSha: FIRST_COMMIT },
-            });
+        try {
+            await Bun.sleep(125);
+            expect(isSettled).toBe(false);
+        } finally {
+            closeSync(lockFileDescriptor);
         }
-    );
+
+        expect(status).resolves.toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+        });
+    });
 
     it("restores both prior slots when activation fails after changing a link", async () => {
         const root = temporaryReleasesRoot();
@@ -1043,7 +1032,7 @@ describe("Dashboard immutable release manager", () => {
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
         await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
 
-        await expect(
+        expect(
             activateDashboardRelease(THIRD_COMMIT, root, {
                 readLiveSchemaState: () => {
                     rmSync(candidatePath, { force: true, recursive: true });
@@ -1065,7 +1054,7 @@ describe("Dashboard immutable release manager", () => {
         await createManagedRelease(root, SECOND_COMMIT);
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
 
-        await expect(
+        expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 readLiveSchemaState: async () => {
                     rmSync(managedReleasePath(root, SECOND_COMMIT), {
@@ -1103,7 +1092,7 @@ describe("Dashboard immutable release manager", () => {
         );
 
         try {
-            await expect(
+            expect(
                 activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
             ).rejects.toThrow("Managed release snapshot changed while linking");
         } finally {
@@ -1122,7 +1111,7 @@ describe("Dashboard immutable release manager", () => {
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
         symlinkSync(`releases/${FIRST_COMMIT}`, path.join(root, "previous"), "dir");
 
-        await expect(rollbackDashboardRelease(root, SCHEMA_6_OPTIONS)).rejects.toThrow(
+        expect(rollbackDashboardRelease(root, SCHEMA_6_OPTIONS)).rejects.toThrow(
             "requires two distinct releases"
         );
     });
@@ -1207,15 +1196,15 @@ describe("Dashboard immutable release manager", () => {
         expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
     });
 
-    it("validates release retention bounds", async () => {
+    it("validates release retention bounds", () => {
         const root = temporaryReleasesRoot();
-        await expect(pruneDashboardReleases(2, root)).rejects.toThrow(
+        expect(pruneDashboardReleases(2, root)).rejects.toThrow(
             "retention must be between 3 and 20"
         );
-        await expect(pruneDashboardReleases(21, root)).rejects.toThrow(
+        expect(pruneDashboardReleases(21, root)).rejects.toThrow(
             "retention must be between 3 and 20"
         );
-        await expect(pruneDashboardReleases(NaN, root)).rejects.toThrow(
+        expect(pruneDashboardReleases(Number.NaN, root)).rejects.toThrow(
             "retention must be between 3 and 20"
         );
     });

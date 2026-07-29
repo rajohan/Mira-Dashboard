@@ -1,7 +1,7 @@
 import { parseExecRequest } from "../../../contracts/exec.ts";
 import { apiErrorResponse } from "../apiErrors.ts";
 import { json } from "../http.ts";
-import { readApiJson } from "../routeSupport.ts";
+import { type ParametersRequest, readApiJson } from "../routeSupport.ts";
 import {
     execErrorResponse,
     getExecJob,
@@ -9,8 +9,6 @@ import {
     startExecJob,
     stopExecJob,
 } from "../services/execJobs.ts";
-
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
 function errorResponse(request: Request, error: unknown): Response {
     return apiErrorResponse(request, execErrorResponse(error), "exec");

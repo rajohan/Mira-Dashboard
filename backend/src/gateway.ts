@@ -3,6 +3,9 @@ import os from "node:os";
 import Path from "node:path";
 
 import type { GatewayMetrics } from "../../contracts/metrics.ts";
+import type { Session } from "../../contracts/sessions.ts";
+import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
+import { parseDashboardSocketRequest } from "../../contracts/socket.ts";
 import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
@@ -20,7 +23,22 @@ import {
     type OpenClawGatewayClientOptions,
     type OpenClawGatewayRequestOptions,
 } from "./lib/openclawGatewayClient.ts";
-import { nonEmptyEnvironmentFallback, stringFallback } from "./lib/values.ts";
+import { createStructuredLogger } from "./lib/structuredLogger.ts";
+import {
+    nonEmptyEnvironmentFallback,
+    stringFallback,
+    unknownArray,
+} from "./lib/values.ts";
+import {
+    subscribeToDashboardLogs,
+    unsubscribeFromDashboardLogs,
+} from "./services/appLogStreams.ts";
+import {
+    subscribeToLogs as logsSubscribe,
+    unsubscribeFromLogs as logsUnsubscribe,
+} from "./services/logStreams.ts";
+
+const logger = createStructuredLogger("gateway");
 
 function validateOpenClawRoot(rootPath: string, environmentName: string): string {
     const resolved = Path.resolve(rootPath);
@@ -41,7 +59,12 @@ const DEFAULT_DASHBOARD_OPENCLAW_HOME =
     resolveDashboardProjectPathsForRuntime()?.productionOpenClawHome ??
     Path.join(process.cwd(), "data", "openclaw-client");
 
-/** Performs load or create dashboard device IDentity. */
+/**
+ * Performs load or create dashboard device IDentity.
+ * @param identityPath Identity path value.
+ * @param loader Loader value.
+ * @returns Load or create dashboard device IDentity result.
+ */
 function loadOrCreateDashboardDeviceIdentity(
     identityPath = Path.join(
         gatewayRuntime.dashboardOpenClawHome,
@@ -54,56 +77,9 @@ function loadOrCreateDashboardDeviceIdentity(
     try {
         return loader(identityPath);
     } catch (error) {
-        console.warn(
-            "[Gateway] Failed to load dashboard device identity, continuing without explicit identity:",
-            errorMessage(error, String(error))
-        );
+        logger.warn("gateway.device_identity_load_failed", { error });
         return undefined;
     }
-}
-
-import {
-    subscribeToLogs as logsSubscribe,
-    unsubscribeFromLogs as logsUnsubscribe,
-} from "./services/logStreams.ts";
-
-/** Represents session. */
-interface Session {
-    id: string;
-    key: string;
-    type: string;
-    agentType: string;
-    hookName: string;
-    kind?: string;
-    model: string;
-    modelProvider?: string;
-    tokenCount: number;
-    maxTokens: number;
-    createdAt: string | undefined;
-    updatedAt?: number;
-    displayName: string;
-    label: string;
-    displayLabel: string;
-    channel: string;
-    status?: string;
-    endedAt?: string | number | undefined;
-    startedAt?: string | number | undefined;
-    runId?: string | undefined;
-    activeRunId?: string | undefined;
-    currentRunId?: string | undefined;
-    hasActiveRun?: boolean;
-    isRunning?: boolean;
-    running?: boolean;
-    thinkingLevel?: string;
-    thinkingLevels?: Array<{ id: string; label: string }>;
-    thinkingOptions?: string[];
-    thinkingDefault?: string;
-    fastMode?: boolean | "auto";
-    effectiveFastMode?: boolean | "auto";
-    verboseLevel?: string;
-    reasoningLevel?: string;
-    elevatedLevel?: string;
-    totalTokensFresh?: boolean;
 }
 
 /** Represents gateway session. */
@@ -317,14 +293,14 @@ async function refreshSessionsAfterRequest(
     try {
         await refreshSessions(activeGateway);
     } catch (error) {
-        console.warn(
-            "[Gateway] Failed to refresh sessions after request:",
-            errorMessage(error, String(error))
-        );
+        logger.warn("gateway.sessions_refresh_after_request_failed", { error });
     }
 }
 
-/** Performs transform session. */
+/**
+ * Performs transform session.
+ * @returns Transform session result.
+ */
 function transformSession(session: GatewaySession): Session {
     let type = "UNKNOWN";
     let agentType = "";
@@ -367,6 +343,7 @@ function transformSession(session: GatewaySession): Session {
 
     return {
         id: session.sessionId || session.key || "unknown",
+        ...(session.sessionId && { sessionId: session.sessionId }),
         key: session.key || "",
         type,
         agentType,
@@ -404,7 +381,10 @@ function transformSession(session: GatewaySession): Session {
     };
 }
 
-/** Performs broadcast. */
+/**
+ * Performs broadcast.
+ * @param message Message to process.
+ */
 function broadcast(message: unknown): void {
     const data = JSON.stringify(message);
     for (const ws of subscribers) {
@@ -418,14 +398,21 @@ function broadcast(message: unknown): void {
     }
 }
 
-/** Performs as record. */
+/**
+ * Performs as record.
+ * @param value Value to process.
+ * @returns As record result.
+ */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : undefined;
 }
 
-/** Performs image block has omitted data. */
+/**
+ * Performs image block has omitted data.
+ * @returns Image block has omitted data result.
+ */
 function hasImageBlockOmittedData(block: Record<string, unknown>): boolean {
     if (block.type !== "image") {
         return false;
@@ -439,7 +426,38 @@ function hasImageBlockOmittedData(block: Record<string, unknown>): boolean {
     return block.omitted === true || source?.omitted === true || !source?.data;
 }
 
-/** Normalizes message text. */
+/**
+ * Normalizes one raw transcript image block.
+ *
+ * @param value - Raw content block.
+ * @returns Canonical image block, or `undefined` when no image data is present.
+ */
+function normalizeTranscriptImageBlock(value: unknown): ChatImageBlockRecord | undefined {
+    const block = asRecord(value);
+    if (block?.type !== "image") {
+        return undefined;
+    }
+    const source = asRecord(block.source);
+    let data = typeof source?.data === "string" ? source.data : undefined;
+    if (typeof block.data === "string" && block.data.trim().length > 0) {
+        data = block.data;
+    }
+    if (!data?.trim()) {
+        return undefined;
+    }
+    let mimeType =
+        typeof source?.media_type === "string" ? source.media_type : "image/jpeg";
+    if (typeof block.mimeType === "string") {
+        mimeType = block.mimeType;
+    }
+    return { data, mimeType, type: "image" };
+}
+
+/**
+ * Normalizes message text.
+ * @param content Content value.
+ * @returns Normalized message text.
+ */
 function normalizeMessageText(content: unknown): string {
     if (typeof content === "string") {
         return content.trim();
@@ -463,7 +481,11 @@ function normalizeMessageText(content: unknown): string {
         .trim();
 }
 
-/** Normalizes timestamp. */
+/**
+ * Normalizes timestamp.
+ * @param value Value to process.
+ * @returns Normalized timestamp.
+ */
 function normalizeTimestamp(value: unknown): number | undefined {
     if (typeof value === "number" && Number.isFinite(value)) {
         return value;
@@ -477,18 +499,33 @@ function normalizeTimestamp(value: unknown): number | undefined {
     return undefined;
 }
 
-/** Returns transcript path. */
+/**
+ * Returns transcript path.
+ * @param root Root value.
+ * @param candidate Candidate value.
+ * @returns transcript path.
+ */
 function isPathInsideRoot(root: string, candidate: string): boolean {
     const relativePath = Path.relative(root, candidate);
     return !relativePath.startsWith("..") && !Path.isAbsolute(relativePath);
 }
 
-/** Returns candidate when it stays inside root. */
+/**
+ * Returns candidate when it stays inside root.
+ * @param root Root value.
+ * @param candidate Candidate value.
+ * @returns candidate when it stays inside root.
+ */
 function resolvePathInsideRoot(root: string, candidate: string): string | undefined {
     return isPathInsideRoot(root, candidate) ? candidate : undefined;
 }
 
-/** Returns transcript path. */
+/**
+ * Returns transcript path.
+ * @param sessionKey Session key value.
+ * @param sessionId Session identifier.
+ * @returns transcript path.
+ */
 function getTranscriptPath(sessionKey: string, sessionId?: string): string | undefined {
     const parts = sessionKey.split(":");
     if (parts[0]?.toLowerCase() !== "agent") {
@@ -547,12 +584,21 @@ function getTranscriptPath(sessionKey: string, sessionId?: string): string | und
     return resolvePathInsideRoot(realOpenClawRoot, realTranscriptPath);
 }
 
-/** Returns whether a failed session index subscription should retry. */
+/**
+ * Returns whether a failed session index subscription should retry.
+ * @param attempt Attempt value.
+ * @returns Whether a failed session index subscription should retry.
+ */
 function shouldRetrySessionIndexSubscription(attempt: number): boolean {
     return attempt < 3;
 }
 
-/** Performs read raw transcript image messages. */
+/**
+ * Performs read raw transcript image messages.
+ * @param sessionKey Session key value.
+ * @param sessionId Session identifier.
+ * @returns Read raw transcript image messages result.
+ */
 async function readRawTranscriptImageMessages(
     sessionKey: string,
     sessionId?: string
@@ -582,36 +628,14 @@ async function readRawTranscriptImageMessages(
                 continue;
             }
 
-            const content = message.content;
-            if (!Array.isArray(content)) {
+            const content = unknownArray(message.content);
+            if (content.length === 0) {
                 continue;
             }
 
             const images = content
-                .map((block) => asRecord(block))
-                .filter((block): block is Record<string, unknown> => {
-                    const source = asRecord(block?.source);
-                    const data =
-                        typeof block?.data === "string" && block.data.trim().length > 0
-                            ? block.data
-                            : typeof source?.data === "string"
-                              ? source.data
-                              : "";
-                    return block?.type === "image" && data.trim().length > 0;
-                })
-                .map((block) => ({
-                    type: "image",
-                    data:
-                        typeof block.data === "string" && block.data.trim().length > 0
-                            ? block.data
-                            : (asRecord(block.source)?.data as string | undefined),
-                    mimeType:
-                        typeof block.mimeType === "string"
-                            ? block.mimeType
-                            : typeof asRecord(block.source)?.media_type === "string"
-                              ? (asRecord(block.source)?.media_type as string)
-                              : "image/jpeg",
-                }));
+                .map((block) => normalizeTranscriptImageBlock(block))
+                .filter((block): block is ChatImageBlockRecord => block !== undefined);
             if (images.length === 0) {
                 continue;
             }
@@ -632,7 +656,12 @@ async function readRawTranscriptImageMessages(
     return messages;
 }
 
-/** Performs hydrate omitted chat history images. */
+/**
+ * Performs hydrate omitted chat history images.
+ * @param payload Request or event payload.
+ * @param requestedSessionKey Requested session key value.
+ * @returns Hydrate omitted chat history images result.
+ */
 async function hydrateOmittedChatHistoryImages(
     payload: unknown,
     requestedSessionKey?: string
@@ -694,7 +723,7 @@ async function hydrateOmittedChatHistoryImages(
         let imageCursor = 0;
         return {
             ...record,
-            content: record.content.map((block) => {
+            content: unknownArray(record.content).map((block) => {
                 const blockRecord = asRecord(block);
                 if (!blockRecord || !hasImageBlockOmittedData(blockRecord)) {
                     return block;
@@ -713,7 +742,10 @@ function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): 
     return gatewayState.client === expectedClient;
 }
 
-/** Performs refresh sessions. */
+/**
+ * Performs refresh sessions.
+ * @param expectedClient Expected client value.
+ */
 async function refreshSessions(
     expectedClient: OpenClawGatewayClientInstance | undefined = gatewayState.client
 ): Promise<void> {
@@ -767,6 +799,18 @@ async function refreshSessions(
                 const hasSessionThinkingChoices = Boolean(
                     session.thinkingLevels?.length || session.thinkingOptions?.length
                 );
+                let thinkingLevels = hasSessionThinkingChoices
+                    ? undefined
+                    : matchingDefaults?.thinkingLevels;
+                if (session.thinkingLevels?.length) {
+                    thinkingLevels = session.thinkingLevels;
+                }
+                let thinkingOptions = hasSessionThinkingChoices
+                    ? undefined
+                    : matchingDefaults?.thinkingOptions;
+                if (session.thinkingOptions?.length) {
+                    thinkingOptions = session.thinkingOptions;
+                }
                 return transformSession({
                     ...matchingDefaults,
                     ...session,
@@ -780,16 +824,8 @@ async function refreshSessions(
                         session.contextTokens ?? matchingDefaults?.contextTokens,
                     thinkingDefault:
                         session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
-                    thinkingLevels: session.thinkingLevels?.length
-                        ? session.thinkingLevels
-                        : hasSessionThinkingChoices
-                          ? undefined
-                          : matchingDefaults?.thinkingLevels,
-                    thinkingOptions: session.thinkingOptions?.length
-                        ? session.thinkingOptions
-                        : hasSessionThinkingChoices
-                          ? undefined
-                          : matchingDefaults?.thinkingOptions,
+                    thinkingLevels,
+                    thinkingOptions,
                     fastMode: session.fastMode,
                     effectiveFastMode:
                         session.effectiveFastMode ??
@@ -820,14 +856,14 @@ async function refreshGatewaySessions(
     try {
         await refreshSessions(activeClient);
     } catch (error) {
-        console.error(
-            "[Gateway] Failed to refresh sessions:",
-            errorMessage(error, String(error))
-        );
+        logger.error("gateway.sessions_refresh_failed", { error });
     }
 }
 
-/** Performs init. */
+/**
+ * Performs init.
+ * @param token Token value.
+ */
 function init(token: string): void {
     if (gatewayState.currentToken === token && gatewayState.client) {
         return;
@@ -845,7 +881,7 @@ function init(token: string): void {
     try {
         previousGatewayClient?.stop();
     } catch (error) {
-        console.error("[Gateway] Failed to stop wasPrevious client before init:", {
+        logger.error("gateway.previous_client_stop_failed", {
             error,
             hadPreviousGatewayClient: previousGatewayClient !== undefined,
         });
@@ -860,7 +896,10 @@ function init(token: string): void {
     broadcast({ type: "disconnected", gatewayConnected: false });
     gatewayState.currentToken = token;
     const thisReplayBridge = chatReplayState.bridge;
-    /** Returns the active Gateway client when this callback belongs to it. */
+    /**
+     * Returns the active Gateway client when this callback belongs to it.
+     * @returns the active Gateway client when this callback belongs to it.
+     */
     function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | undefined {
         return thisGatewayClient && isCurrentGatewayClient(thisGatewayClient)
             ? thisGatewayClient
@@ -878,8 +917,15 @@ function init(token: string): void {
         gatewayMetricsState.connections += 1;
         gatewayMetricsState.lastConnectedAt = new Date().toISOString();
         gatewayState.isConnected = true;
+        logger.info("gateway.connected", {
+            connections: gatewayMetricsState.connections,
+            reconnects: gatewayMetricsState.reconnects,
+        });
         broadcast({ type: "connected", gatewayConnected: true });
-        /** Subscribes to Gateway session index events for live session updates. */
+        /**
+         * Subscribes to Gateway session index events for live session updates.
+         * @param attempt Attempt value.
+         */
         async function subscribeToSessionIndexEvents(attempt = 0): Promise<void> {
             const currentClient = getCurrentInitGatewayClient();
             if (!currentClient || !gatewayState.isConnected) {
@@ -897,16 +943,16 @@ function init(token: string): void {
                     setTimeout(retrySessionIndexSubscription, delayMs);
                     return;
                 }
-                console.warn(
-                    "[Gateway] Failed to subscribe to session index events:",
-                    errorMessage(error, String(error))
-                );
+                logger.warn("gateway.session_index_subscription_failed", { error });
             }
         }
         void subscribeToSessionIndexEvents();
         void refreshGatewaySessions(activeClient);
     }
-    /** Broadcasts one Gateway runtime event and refreshes session metadata when needed. */
+    /**
+     * Broadcasts one Gateway runtime event and refreshes session metadata when needed.
+     * @param event Event to handle.
+     */
     function handleGatewayEvent(event: { event?: unknown; payload?: unknown }): void {
         const activeClient = getCurrentInitGatewayClient();
         if (!activeClient) {
@@ -929,7 +975,7 @@ function init(token: string): void {
         }
         gatewayState.connectError = error.message;
         gatewayMetricsState.connectFailures += 1;
-        console.error("[Gateway] Connect failed:", error.message);
+        logger.error("gateway.connect_failed", { error });
     }
     /** Marks Gateway state disconnected and informs dashboard clients. */
     function handleGatewayClose(): void {
@@ -939,6 +985,9 @@ function init(token: string): void {
         if (gatewayState.isConnected) {
             gatewayMetricsState.disconnects += 1;
             gatewayMetricsState.lastDisconnectedAt = new Date().toISOString();
+            logger.warn("gateway.disconnected", {
+                disconnects: gatewayMetricsState.disconnects,
+            });
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
@@ -1077,20 +1126,36 @@ async function requestWithReplayBoundaryInContext(
     }
 }
 
+/**
+ * Extracts a session identifier suitable for request correlation.
+ *
+ * @param method - OpenClaw Gateway method name.
+ * @param parameters - Gateway request parameters.
+ * @returns Session identifier, when the request carries one.
+ */
+function gatewaySessionIdentifier(
+    method: string,
+    parameters: Record<string, unknown>
+): string | undefined {
+    if (typeof parameters.sessionKey === "string") {
+        return parameters.sessionKey;
+    }
+    if (typeof parameters.sessionId === "string") {
+        return parameters.sessionId;
+    }
+    if (typeof parameters.key === "string" && method.startsWith("sessions.")) {
+        return parameters.key;
+    }
+    return undefined;
+}
+
 async function requestWithReplayBoundary(
     client: OpenClawGatewayClientInstance,
     method: string,
     parameters: Record<string, unknown>,
     options?: OpenClawGatewayRequestOptions
 ): Promise<unknown> {
-    const sessionIdentifier =
-        typeof parameters.sessionKey === "string"
-            ? parameters.sessionKey
-            : typeof parameters.sessionId === "string"
-              ? parameters.sessionId
-              : typeof parameters.key === "string" && method.startsWith("sessions.")
-                ? parameters.key
-                : undefined;
+    const sessionIdentifier = gatewaySessionIdentifier(method, parameters);
     return runWithLogContext(
         {
             ...(sessionIdentifier && {
@@ -1101,7 +1166,15 @@ async function requestWithReplayBoundary(
     );
 }
 
-/** Performs forward request. */
+/**
+ * Performs forward request.
+ * @param method Method value.
+ * @param parameters Parameters value.
+ * @param clientWs Client ws value.
+ * @param clientId Client identifier.
+ * @param timeoutMs Timeout duration in milliseconds.
+ * @returns Forward request result.
+ */
 async function forwardRequest(
     method: string,
     parameters: Record<string, unknown>,
@@ -1160,7 +1233,10 @@ async function forwardRequest(
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
             if (pending) {
-                sendPendingRequestError(pending, errorMessage(error, String(error)));
+                sendPendingRequestError(
+                    pending,
+                    errorMessage(error, "Gateway request failed")
+                );
             }
         }
         return true;
@@ -1186,6 +1262,7 @@ async function forwardRequest(
 function handleDashboardClient(ws: DashboardSocket): void {
     const cleanupClient = () => {
         subscribers.delete(ws);
+        unsubscribeFromDashboardLogs(ws);
         logsUnsubscribe(ws);
         for (const [id, pending] of pendingRequests) {
             if (pending.clientWs === ws) {
@@ -1195,10 +1272,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
     };
 
     ws.onError((error) => {
-        console.error(
-            "[Gateway] Client socket error:",
-            errorMessage(error, String(error))
-        );
+        logger.error("gateway.client_socket_failed", { error });
         cleanupClient();
     });
 
@@ -1212,10 +1286,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
             })
         );
     } catch (error) {
-        console.error(
-            "[Gateway] Failed to send initial client state:",
-            errorMessage(error, String(error))
-        );
+        logger.error("gateway.initial_client_state_send_failed", { error });
         cleanupClient();
         ws.close();
         return;
@@ -1224,20 +1295,27 @@ function handleDashboardClient(ws: DashboardSocket): void {
     ws.onMessage((data) => {
         void (async () => {
             try {
-                const message = JSON.parse(data.toString()) as {
-                    type?: string;
-                    channel?: string;
-                    method?: string;
-                    params?: Record<string, unknown>;
-                    id?: string;
-                    timeoutMs?: number;
-                };
+                const message = parseDashboardSocketRequest(JSON.parse(data.toString()));
                 if (message.type === "subscribe" && message.channel === "logs") {
                     logsSubscribe(ws);
                     return;
                 }
                 if (message.type === "unsubscribe" && message.channel === "logs") {
                     logsUnsubscribe(ws);
+                    return;
+                }
+                if (
+                    message.type === "subscribe" &&
+                    message.channel === "dashboard-logs"
+                ) {
+                    subscribeToDashboardLogs(ws);
+                    return;
+                }
+                if (
+                    message.type === "unsubscribe" &&
+                    message.channel === "dashboard-logs"
+                ) {
+                    unsubscribeFromDashboardLogs(ws);
                     return;
                 }
 
@@ -1247,6 +1325,42 @@ function handleDashboardClient(ws: DashboardSocket): void {
                     message.params?.channel === "logs"
                 ) {
                     logsSubscribe(ws);
+                    if (message.id) {
+                        ws.send(
+                            JSON.stringify({
+                                type: "response",
+                                id: message.id,
+                                isOk: true,
+                            })
+                        );
+                    }
+                    return;
+                }
+
+                if (
+                    (message.type === "request" || message.type === "req") &&
+                    message.method === "subscribe" &&
+                    message.params?.channel === "dashboard-logs"
+                ) {
+                    subscribeToDashboardLogs(ws);
+                    if (message.id) {
+                        ws.send(
+                            JSON.stringify({
+                                type: "response",
+                                id: message.id,
+                                isOk: true,
+                            })
+                        );
+                    }
+                    return;
+                }
+
+                if (
+                    (message.type === "request" || message.type === "req") &&
+                    message.method === "unsubscribe" &&
+                    message.params?.channel === "dashboard-logs"
+                ) {
+                    unsubscribeFromDashboardLogs(ws);
                     if (message.id) {
                         ws.send(
                             JSON.stringify({
@@ -1320,10 +1434,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
                     }
                 }
             } catch (error) {
-                console.error(
-                    "[Gateway] Client message error:",
-                    errorMessage(error, String(error))
-                );
+                logger.error("gateway.client_message_failed", { error });
             }
         })();
     });
@@ -1333,25 +1444,37 @@ function handleDashboardClient(ws: DashboardSocket): void {
     });
 }
 
-/** Returns status. */
-function getStatus(): { gateway: string; sessions: number } {
+/**
+ * Returns status.
+ * @returns status.
+ */
+function getStatus(): DashboardSettingsResponse["gateway"] {
     return {
         gateway: gatewayState.isConnected ? "connected" : "disconnected",
         sessions: gatewayState.sessions.length,
     };
 }
 
-/** Returns sessions. */
+/**
+ * Returns sessions.
+ * @returns sessions.
+ */
 function getSessions(): Session[] {
     return gatewayState.sessions;
 }
 
-/** Returns whether connected. */
+/**
+ * Returns whether connected.
+ * @returns Whether connected.
+ */
 function isConnected(): boolean {
     return gatewayState.isConnected;
 }
 
-/** Returns connection counters and pending volume without request payloads. */
+/**
+ * Returns connection counters and pending volume without request payloads.
+ * @returns connection counters and pending volume without request payloads.
+ */
 function getMetrics(): GatewayMetrics {
     return {
         ...gatewayMetricsState,
@@ -1366,7 +1489,13 @@ function getGatewayWs(): undefined {
     return;
 }
 
-/** Performs send request async. */
+/**
+ * Performs send request async.
+ * @param method Method value.
+ * @param parameters Parameters value.
+ * @param options Operation options.
+ * @returns Send request async result.
+ */
 async function sendRequestAsync(
     method: string,
     parameters: Record<string, unknown>,
@@ -1379,7 +1508,11 @@ async function sendRequestAsync(
     return requestWithReplayBoundary(gatewayState.client, method, parameters, options);
 }
 
-/** Performs send session message. */
+/**
+ * Performs send session message.
+ * @param sessionKey Session key value.
+ * @param message Message to process.
+ */
 async function sendSessionMessage(sessionKey: string, message: string): Promise<void> {
     await sendRequestAsync(
         "chat.send",
@@ -1393,14 +1526,21 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
     );
 }
 
-/** Performs abort session run. */
+/**
+ * Performs abort session run.
+ * @param sessionKey Session key value.
+ */
 async function abortSessionRun(sessionKey: string): Promise<void> {
     await sendRequestAsync("chat.abort", {
         sessionKey,
     });
 }
 
-/** Performs delete session. */
+/**
+ * Performs delete session.
+ * @param sessionKey Session key value.
+ * @returns Delete session result.
+ */
 async function deleteSession(sessionKey: string): Promise<unknown> {
     const result = await sendRequestAsync("sessions.delete", {
         key: sessionKey,
@@ -1410,16 +1550,18 @@ async function deleteSession(sessionKey: string): Promise<unknown> {
     try {
         await refreshSessions();
     } catch (error) {
-        console.warn(
-            "[Gateway] Failed to refresh sessions after delete:",
-            errorMessage(error, String(error))
-        );
+        logger.warn("gateway.sessions_refresh_after_delete_failed", { error });
     }
 
     return result;
 }
 
-/** Performs request. */
+/**
+ * Performs request.
+ * @param method Method value.
+ * @param parameters Parameters value.
+ * @returns Request result.
+ */
 async function request(
     method: string,
     parameters: Record<string, unknown>
@@ -1434,7 +1576,7 @@ function shutdown(): void {
     try {
         previousGatewayClient?.stop();
     } catch (error) {
-        console.error("[Gateway] Failed to stop wasPrevious client during shutdown:", {
+        logger.error("gateway.previous_client_shutdown_failed", {
             error,
             hadPreviousGatewayClient: previousGatewayClient !== undefined,
         });
@@ -1471,5 +1613,3 @@ export default {
     request,
     shutdown,
 };
-
-export type { GatewaySession, Session };

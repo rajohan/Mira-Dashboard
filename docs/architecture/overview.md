@@ -28,11 +28,11 @@ Mira Dashboard worker                         |
 ## Frontend
 
 - React 19.
-- TanStack Router routes in `src/router.tsx`.
+- TanStack Router routes in `frontend/src/router.tsx`.
 - TanStack Query and TanStack DB collections for data fetching/state.
-- Shared UI primitives in `src/components/ui`.
-- Domain pages in `src/pages`.
-- Feature components under `src/components/features`.
+- Shared UI primitives in `frontend/src/components/ui`.
+- Domain pages in `frontend/src/pages`.
+- Feature components under `frontend/src/components/features`.
 - React Compiler is enabled; avoid routine `useMemo` and `useCallback` unless
   semantics require stable identity for a third-party contract.
 

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import {
     resolveDevelopmentStackConfig,
     runDevelopmentStack,
@@ -91,7 +93,10 @@ async function commandJson<T>(command: string[]): Promise<T> {
     }
 }
 
-/** Resolves the stable MagicDNS hostname used as the WebAuthn RP ID. */
+/**
+ * Resolves the stable MagicDNS hostname used as the WebAuthn RP ID.
+ * @returns Resolved the stable MagicDNS hostname used as the WebAuthn RP ID.
+ */
 export function tailscaleDnsName(status: TailscaleStatus): string {
     const dnsName = status.Self?.DNSName?.trim().replace(/\.$/u, "");
     if (!dnsName || !/^[a-z0-9.-]+$/iu.test(dnsName)) {
@@ -108,7 +113,25 @@ function expectedProxyTarget(port: number): string {
     return `http://127.0.0.1:${port}`;
 }
 
-/** Maps Tailscale Serve JSON into one exact development route status. */
+/**
+ * Keeps HTTPS/WebAuthn development state separate from localhost HTTP state.
+ * @param localStateRoot Local state root value.
+ * @param configuredStateRoot Configured state root value.
+ * @returns Remote development state root result.
+ */
+export function remoteDevelopmentStateRoot(
+    localStateRoot: string,
+    configuredStateRoot?: string
+): string {
+    return (
+        configuredStateRoot?.trim() || path.join(path.dirname(localStateRoot), "remote")
+    );
+}
+
+/**
+ * Maps Tailscale Serve JSON into one exact development route status.
+ * @returns Mapped Tailscale Serve JSON into one exact development route status.
+ */
 export function developmentServeStatus(
     status: TailscaleServeStatus,
     dnsName: string,
@@ -181,11 +204,12 @@ export async function enableDevelopmentServe(
                 "off",
             ]);
         } catch (cleanupError) {
-            throw new AggregateError(
+            const activationFailure = new AggregateError(
                 [activationError, cleanupError],
                 `Tailscale Serve activation failed and port ${port} cleanup also failed`,
-                { cause: cleanupError }
+                { cause: activationError }
             );
+            throw activationFailure;
         }
         throw activationError;
     }
@@ -221,9 +245,14 @@ async function main(): Promise<number> {
         throw new TypeError("Usage: developmentTailscale.ts [run|status|enable|disable]");
     }
     const route = await enableDevelopmentServe(port);
+    const remoteStateRoot = remoteDevelopmentStateRoot(
+        initialConfig.stateRoot,
+        process.env.MIRA_DASHBOARD_DEV_STATE_ROOT
+    );
     const config = resolveDevelopmentStackConfig({
         ...process.env,
         MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: route.status.origin,
+        MIRA_DASHBOARD_DEV_STATE_ROOT: remoteStateRoot,
     });
     try {
         return await runDevelopmentStack(config);

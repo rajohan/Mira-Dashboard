@@ -1,3 +1,5 @@
+import { Database } from "bun:sqlite";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
     chmodSync,
     existsSync,
@@ -12,9 +14,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-
-import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, it } from "bun:test";
 
 import {
     applyDatabaseMigrations,
@@ -696,7 +695,7 @@ describe("Dashboard SQLite lifecycle", () => {
         expect(didDiscardSqliteCutoverSnapshot(databasePath, snapshotId)).toBe(false);
     });
 
-    it("exposes cutover snapshots through bounded release lifecycle commands", async () => {
+    it("exposes cutover snapshots through bounded release lifecycle commands", () => {
         const root = temporaryRoot("mira-db-cutover-lifecycle-");
         const databasePath = path.join(root, "dashboard.db");
         const snapshotId = "019fa351-e832-7000-ae09-435160fd5ccd";
@@ -711,12 +710,12 @@ describe("Dashboard SQLite lifecycle", () => {
         const originalDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH;
         process.env.MIRA_DASHBOARD_DB_PATH = databasePath;
         try {
-            await expect(
+            expect(
                 runReleaseLifecycleCommand(["snapshot-database", snapshotId])
             ).resolves.toMatchObject({
                 snapshotId,
             });
-            await expect(
+            expect(
                 runReleaseLifecycleCommand(["verify-database-snapshot", snapshotId])
             ).resolves.toEqual({
                 bytes: expect.any(Number),
@@ -730,7 +729,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 .run("candidate-write");
             candidateDatabase.close();
 
-            await expect(
+            expect(
                 runReleaseLifecycleCommand(["restore-database", snapshotId])
             ).resolves.toEqual({
                 bytes: expect.any(Number),
@@ -747,21 +746,21 @@ describe("Dashboard SQLite lifecycle", () => {
             } finally {
                 restoredDatabase.close();
             }
-            await expect(
+            expect(
                 runReleaseLifecycleCommand(["discard-database-snapshot", snapshotId])
             ).resolves.toEqual({
                 discarded: true,
                 snapshotId,
             });
-            await expect(
+            expect(
                 runReleaseLifecycleCommand(["discard-database-snapshot", snapshotId])
             ).resolves.toEqual({
                 discarded: false,
                 snapshotId,
             });
-            await expect(
-                runReleaseLifecycleCommand(["snapshot-database"])
-            ).rejects.toThrow("requires exactly one snapshot id");
+            expect(runReleaseLifecycleCommand(["snapshot-database"])).rejects.toThrow(
+                "requires exactly one snapshot id"
+            );
         } finally {
             if (originalDatabasePath === undefined) {
                 delete process.env.MIRA_DASHBOARD_DB_PATH;

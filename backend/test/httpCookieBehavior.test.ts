@@ -1,5 +1,6 @@
-import type { Server } from "bun";
 import { describe, expect, it } from "bun:test";
+
+import type { Server } from "bun";
 
 import { clearSessionCookie, sessionCookie } from "../src/http.ts";
 

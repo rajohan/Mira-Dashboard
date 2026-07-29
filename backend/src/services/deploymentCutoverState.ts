@@ -1,6 +1,9 @@
 import { database } from "../database.ts";
 
-/** Keeps production writes paused while a detached release guardian owns cutover. */
+/**
+ * Keeps production writes paused while a detached release guardian owns cutover.
+ * @returns Whether production deployment cutover is active.
+ */
 export function isProductionDeploymentCutoverActive(
     environment: Record<string, string | undefined> = process.env
 ): boolean {

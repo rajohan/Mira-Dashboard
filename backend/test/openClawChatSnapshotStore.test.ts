@@ -1,10 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 
-import {
-    MAX_CHAT_RUNTIME_SESSIONS,
-    type OpenClawRuntimeSnapshot,
-} from "../src/chat/openClawChatBridge.ts";
+import type { OpenClawRuntimeSnapshot } from "../../contracts/chat.ts";
+import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 import { database, enableRequiredWalJournalMode } from "../src/database.ts";
 

@@ -66,7 +66,10 @@ export function recordHttpRequestMetric(metric: RecordHttpRequestMetric): void {
     entry.statusCodes[statusKey] = (entry.statusCodes[statusKey] ?? 0) + 1;
 }
 
-/** Returns low-cardinality route-pattern telemetry without URLs or payloads. */
+/**
+ * Returns low-cardinality route-pattern telemetry without URLs or payloads.
+ * @returns low-cardinality route-pattern telemetry without URLs or payloads.
+ */
 export function getHttpRequestMetrics(): HttpRequestMetrics {
     let requests = 0;
     let errors = 0;

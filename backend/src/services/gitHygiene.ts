@@ -82,8 +82,8 @@ function parseStatusPaths(output: string): string[] {
         const entry = entries[index] ?? "";
         if (entry.length < 4) continue;
         paths.push(entry.slice(3));
-        const status = entry.slice(0, 2);
-        if (status.includes("R") || status.includes("C")) {
+        const status = new Set(entry.slice(0, 2));
+        if (status.has("R") || status.has("C")) {
             const previousPath = entries[index + 1];
             if (previousPath) paths.push(previousPath);
             index += 1;
@@ -133,14 +133,12 @@ function isDockerUpdaterSafePath(
     const isAncestorComposePath =
         shouldAllowRepoRootCompose &&
         (dirname === "." || appsPath.startsWith(`${dirname}/`));
-    const relativeToApps =
-        appsPath === "."
-            ? path_
-            : path_.startsWith(`${appsPath}/`)
-              ? path_.slice(appsPath.length + 1)
-              : isAncestorComposePath
-                ? path_
-                : undefined;
+    let relativeToApps: string | undefined;
+    if (appsPath === "." || isAncestorComposePath) {
+        relativeToApps = path_;
+    } else if (path_.startsWith(`${appsPath}/`)) {
+        relativeToApps = path_.slice(appsPath.length + 1);
+    }
     return relativeToApps !== undefined && DOCKER_COMPOSE_FILE_RE.test(relativeToApps);
 }
 

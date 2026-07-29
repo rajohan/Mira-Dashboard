@@ -1,3 +1,4 @@
+import { describe, expect, it, jest } from "bun:test";
 import {
     chmodSync,
     existsSync,
@@ -13,12 +14,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it, jest } from "bun:test";
-
 import type { PullRequestSummary } from "../../contracts/delivery.ts";
+import type { ScheduledJob } from "../../contracts/jobs.ts";
+import { isPlainRecord } from "../../contracts/runtime.ts";
+import { parseJsonText } from "../../test/support/fetch.ts";
 import * as developmentStack from "../src/development/developmentStack.ts";
 import * as processModule from "../src/lib/processes.ts";
-import type { JobExecution } from "../src/services/jobExecutionQueue.ts";
+import type { JobExecutionRecord } from "../src/services/jobExecutionQueue.ts";
 import * as jobExecutionQueue from "../src/services/jobExecutionQueue.ts";
 import * as previewHost from "../src/services/pullRequestPreviewHost.ts";
 import {
@@ -42,15 +44,24 @@ import {
 import * as pullRequests from "../src/services/pullRequests.ts";
 import * as queuedJobExecution from "../src/services/queuedJobExecution.ts";
 import type {
-    ScheduledJob,
     ScheduledJobActionContext,
     ScheduledJobActionHandler,
 } from "../src/services/scheduledJobs.ts";
 import * as scheduledJobs from "../src/services/scheduledJobs.ts";
+import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const COMMIT = "a".repeat(40);
 
 function noOperation(): void {}
+
+function readJsonRecord(filePath: string): Record<string, unknown> {
+    const value = parseJsonText(readFileSync(filePath, "utf8"));
+    if (!isPlainRecord(value)) {
+        throw new TypeError(`Expected a JSON object in ${filePath}`);
+    }
+    return value;
+}
 
 function previewRouteRequest(number: string) {
     return Object.assign(
@@ -99,7 +110,7 @@ function previewExecution(
     id: string,
     status: "queued" | "success",
     previewStatus: "running" | "stopped"
-): JobExecution {
+): JobExecutionRecord {
     return {
         actionKey: "dashboard.preview.start",
         attempt: status === "queued" ? 0 : 1,
@@ -127,7 +138,10 @@ function previewExecution(
     };
 }
 
-function previewScheduledJob(number: unknown, commitSha: unknown = COMMIT): ScheduledJob {
+function previewScheduledJob(
+    number?: unknown,
+    commitSha: unknown = COMMIT
+): ScheduledJob {
     return {
         actionKey: "dashboard.preview.start",
         actionPayload: { commitSha, number },
@@ -165,19 +179,19 @@ describe("managed pull request preview", () => {
         process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
 
         try {
-            await expect(getDeliveryPullRequestPreviewStatus()).resolves.toEqual({
+            expect(getDeliveryPullRequestPreviewStatus()).resolves.toEqual({
                 controlsAvailable: false,
                 message:
                     "PR dev controls are available only from the production Dashboard.",
                 status: "stopped",
             });
-            await expect(prepareAndStartPullRequestPreview(342)).resolves.toEqual({
+            expect(prepareAndStartPullRequestPreview(342)).resolves.toEqual({
                 controlsAvailable: false,
                 message:
                     "PR dev controls are available only from the production Dashboard.",
                 status: "stopped",
             });
-            await expect(prepareAndStopPullRequestPreview(342)).resolves.toEqual({
+            expect(prepareAndStopPullRequestPreview(342)).resolves.toEqual({
                 controlsAvailable: false,
                 message:
                     "PR dev controls are available only from the production Dashboard.",
@@ -341,10 +355,10 @@ describe("managed pull request preview", () => {
         const config = previewConfig(root);
         mkdirSync(config.previewRoot, { recursive: true });
         writeFileSync(config.stateFile, "{not-json\n", { mode: 0o600 });
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
 
         try {
-            await expect(getPullRequestPreviewStatus(config)).resolves.toEqual({
+            expect(await getPullRequestPreviewStatus(config)).toEqual({
                 status: "stopped",
             });
             expect(existsSync(config.stateFile)).toBe(false);
@@ -353,16 +367,21 @@ describe("managed pull request preview", () => {
                     entry.startsWith("active-preview.corrupt-")
                 )
             ).toHaveLength(1);
-            expect(errorSpy).toHaveBeenCalledWith(
-                expect.stringContaining("Quarantined invalid state")
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "pull-request-preview-host",
+                    event: "preview.invalid_state_quarantined",
+                    level: "error",
+                    quarantinePath: expect.stringContaining("active-preview.corrupt-"),
+                })
             );
         } finally {
-            errorSpy.mockRestore();
+            structuredLogs.stop();
             rmSync(root, { force: true, recursive: true });
         }
     });
 
-    it("does not quarantine a preview record that cannot be safely read", async () => {
+    it("does not quarantine a preview record that cannot be safely read", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-unreadable-state-"));
         const config = previewConfig(root);
         mkdirSync(config.previewRoot, { recursive: true });
@@ -371,7 +390,7 @@ describe("managed pull request preview", () => {
         });
 
         try {
-            await expect(getPullRequestPreviewStatus(config)).rejects.toThrow(
+            expect(getPullRequestPreviewStatus(config)).rejects.toThrow(
                 "Dashboard preview state is too large"
             );
             expect(existsSync(config.stateFile)).toBe(true);
@@ -385,7 +404,7 @@ describe("managed pull request preview", () => {
         }
     });
 
-    it("returns a warning when closed-PR cleanup cannot read its preview record", async () => {
+    it("returns a warning when closed-PR cleanup cannot read its preview record", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-cleanup-warning-"));
         const config = previewConfig(root);
         mkdirSync(config.previewRoot, { recursive: true });
@@ -394,7 +413,7 @@ describe("managed pull request preview", () => {
         });
 
         try {
-            await expect(
+            expect(
                 cleanupClosedPullRequestPreview(335, { config })
             ).resolves.toMatchObject({
                 message: expect.stringContaining("Dashboard preview state is too large"),
@@ -407,14 +426,14 @@ describe("managed pull request preview", () => {
         }
     });
 
-    it("preserves preview state after a transient read failure", async () => {
+    it("preserves preview state after a transient read failure", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-read-failure-"));
         const config = previewConfig(root);
         mkdirSync(config.previewRoot, { recursive: true });
         writeFileSync(config.stateFile, "{}\n", { mode: 0o000 });
 
         try {
-            await expect(getPullRequestPreviewStatus(config)).rejects.toThrow();
+            expect(getPullRequestPreviewStatus(config)).rejects.toThrow();
             expect(existsSync(config.stateFile)).toBe(true);
             expect(
                 readdirSync(config.previewRoot).filter((entry) =>
@@ -429,7 +448,7 @@ describe("managed pull request preview", () => {
         }
     });
 
-    it("rejects a symlinked preview record without quarantining its target", async () => {
+    it("rejects a symlinked preview record without quarantining its target", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-symlink-state-"));
         const config = previewConfig(root);
         const target = path.join(root, "outside-preview-state.json");
@@ -438,7 +457,7 @@ describe("managed pull request preview", () => {
         symlinkSync(target, config.stateFile);
 
         try {
-            await expect(getPullRequestPreviewStatus(config)).rejects.toThrow(
+            expect(getPullRequestPreviewStatus(config)).rejects.toThrow(
                 "Dashboard preview state must be a readable real regular file"
             );
             expect(existsSync(config.stateFile)).toBe(true);
@@ -453,7 +472,7 @@ describe("managed pull request preview", () => {
         }
     });
 
-    it("removes closed PR state without touching a shared checkout owned by another PR", async () => {
+    it("removes closed PR state without touching a shared checkout owned by another PR", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-closed-state-"));
         const config = previewConfig(root);
         const managedStatePath = path.join(config.previewRoot, "states", "pr-335");
@@ -463,7 +482,7 @@ describe("managed pull request preview", () => {
         writeFileSync(path.join(config.managedWorktreePath, "other-pr.txt"), "keep\n");
 
         try {
-            await expect(
+            expect(
                 cleanupClosedPullRequestPreview(335, { config })
             ).resolves.toMatchObject({
                 number: 335,
@@ -521,167 +540,172 @@ describe("managed pull request preview", () => {
 
         const processSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (executable, arguments_) => {
-                const commandArguments = [...arguments_];
-                commands.push([executable, ...commandArguments].join(" "));
-                if (executable === "tailscale" && commandArguments[0] === "status") {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: JSON.stringify({
-                            Self: { DNSName: "Preview-Node.ts.net." },
-                        }),
-                    };
-                }
-                if (
-                    executable === "tailscale" &&
-                    commandArguments[0] === "serve" &&
-                    commandArguments[1] === "status"
-                ) {
-                    if (isServeEnabled && shouldFailServeInspectionWhenEnabled) {
+            .mockImplementation((executable, arguments_) => {
+                return Promise.try(() => {
+                    const commandArguments = [...arguments_];
+                    commands.push([executable, ...commandArguments].join(" "));
+                    if (executable === "tailscale" && commandArguments[0] === "status") {
                         return {
-                            code: 1,
-                            stderr: "serve status unavailable",
-                            stdout: "",
+                            code: 0,
+                            stderr: "",
+                            stdout: JSON.stringify({
+                                Self: { DNSName: "Preview-Node.ts.net." },
+                            }),
                         };
                     }
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: JSON.stringify(
-                            isServeEnabled
-                                ? {
-                                      TCP: { "5173": { HTTPS: true } },
-                                      Web: {
-                                          "preview-node.ts.net:5173": {
-                                              Handlers: {
-                                                  "/": {
-                                                      Proxy: "http://127.0.0.1:5173",
+                    if (
+                        executable === "tailscale" &&
+                        commandArguments[0] === "serve" &&
+                        commandArguments[1] === "status"
+                    ) {
+                        if (isServeEnabled && shouldFailServeInspectionWhenEnabled) {
+                            return {
+                                code: 1,
+                                stderr: "serve status unavailable",
+                                stdout: "",
+                            };
+                        }
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: JSON.stringify(
+                                isServeEnabled
+                                    ? {
+                                          TCP: { "5173": { HTTPS: true } },
+                                          Web: {
+                                              "preview-node.ts.net:5173": {
+                                                  Handlers: {
+                                                      "/": {
+                                                          Proxy: "http://127.0.0.1:5173",
+                                                      },
                                                   },
                                               },
                                           },
-                                      },
-                                  }
-                                : {}
-                        ),
-                    };
-                }
-                if (executable === "sudo" && commandArguments.includes("serve")) {
-                    if (shouldFailServeDisable && commandArguments.includes("off")) {
-                        return {
-                            code: 1,
-                            stderr: "serve cleanup unavailable",
-                            stdout: "",
+                                      }
+                                    : {}
+                            ),
                         };
                     }
-                    isServeEnabled = !commandArguments.includes("off");
-                }
-                if (executable === "systemd-run") {
-                    const unitArgument = commandArguments.find((argument) =>
-                        argument.startsWith("--unit=")
-                    );
-                    if (unitArgument) {
-                        activeUnits.add(unitArgument.slice("--unit=".length));
+                    if (executable === "sudo" && commandArguments.includes("serve")) {
+                        if (shouldFailServeDisable && commandArguments.includes("off")) {
+                            return {
+                                code: 1,
+                                stderr: "serve cleanup unavailable",
+                                stdout: "",
+                            };
+                        }
+                        isServeEnabled = !commandArguments.includes("off");
+                    }
+                    if (executable === "systemd-run") {
+                        const unitArgument = commandArguments.find((argument) =>
+                            argument.startsWith("--unit=")
+                        );
+                        if (unitArgument) {
+                            activeUnits.add(unitArgument.slice("--unit=".length));
+                        }
+                        if (
+                            commandArguments.includes(
+                                `--unit=${config.gatewayProxyUnitName}`
+                            )
+                        ) {
+                            didProxyStartWithStartingRecord =
+                                readJsonRecord(config.stateFile).status === "starting";
+                            didProxyReceiveDisposableToken =
+                                readFileSync(config.gatewayTokenFile, "utf8").trim() !==
+                                "persisted-gateway-token";
+                            didProxyReceiveUpstreamToken =
+                                readFileSync(
+                                    config.gatewayUpstreamTokenFile,
+                                    "utf8"
+                                ).trim() === "persisted-gateway-token";
+                        }
+                        if (commandArguments.includes(`--unit=${config.unitName}`)) {
+                            isPreviewUnitCollected = false;
+                        }
+                    }
+                    if (executable === "systemctl" && commandArguments.includes("stop")) {
+                        activeUnits.delete(
+                            commandArguments[commandArguments.indexOf("stop") + 1] || ""
+                        );
+                    }
+                    if (executable === "systemctl" && commandArguments.includes("show")) {
+                        const shownUnit =
+                            commandArguments[commandArguments.indexOf("show") + 1];
+                        if (isPreviewUnitCollected && shownUnit === config.unitName) {
+                            return {
+                                code: 1,
+                                stderr: "Unit could not be found",
+                                stdout: "",
+                            };
+                        }
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: activeUnits.has(shownUnit || "")
+                                ? "ActiveState=active\nSubState=running\nResult=success\n"
+                                : "ActiveState=inactive\nSubState=dead\nResult=success\n",
+                        };
                     }
                     if (
-                        commandArguments.includes(`--unit=${config.gatewayProxyUnitName}`)
+                        executable === "git" &&
+                        commandArguments.includes("--show-toplevel")
                     ) {
-                        didProxyStartWithStartingRecord =
-                            JSON.parse(readFileSync(config.stateFile, "utf8")).status ===
-                            "starting";
-                        didProxyReceiveDisposableToken =
-                            readFileSync(config.gatewayTokenFile, "utf8").trim() !==
-                            "persisted-gateway-token";
-                        didProxyReceiveUpstreamToken =
-                            readFileSync(
-                                config.gatewayUpstreamTokenFile,
-                                "utf8"
-                            ).trim() === "persisted-gateway-token";
+                        if (readdirSync(worktreePath).length === 0) {
+                            return {
+                                code: 128,
+                                stderr: "fatal: not a git repository (or any of the parent directories): .git",
+                                stdout: "",
+                            };
+                        }
+                        return { code: 0, stderr: "", stdout: `${worktreePath}\n` };
                     }
-                    if (commandArguments.includes(`--unit=${config.unitName}`)) {
-                        isPreviewUnitCollected = false;
+                    if (executable === "git" && commandArguments.includes("status")) {
+                        return { code: 0, stderr: "", stdout: "" };
                     }
-                }
-                if (executable === "systemctl" && commandArguments.includes("stop")) {
-                    activeUnits.delete(
-                        commandArguments[commandArguments.indexOf("stop") + 1] || ""
-                    );
-                }
-                if (executable === "systemctl" && commandArguments.includes("show")) {
-                    const shownUnit =
-                        commandArguments[commandArguments.indexOf("show") + 1];
-                    if (isPreviewUnitCollected && shownUnit === config.unitName) {
+                    if (
+                        executable === "git" &&
+                        commandArguments.includes("worktree") &&
+                        commandArguments.includes("list")
+                    ) {
                         return {
-                            code: 1,
-                            stderr: "Unit could not be found",
-                            stdout: "",
+                            code: 0,
+                            stderr: "",
+                            stdout: isMissingWorktreeRegistered
+                                ? `worktree ${worktreePath}\nHEAD ${expectedCommit}\ndetached\n\n`
+                                : "",
                         };
                     }
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: activeUnits.has(shownUnit || "")
-                            ? "ActiveState=active\nSubState=running\nResult=success\n"
-                            : "ActiveState=inactive\nSubState=dead\nResult=success\n",
-                    };
-                }
-                if (
-                    executable === "git" &&
-                    commandArguments.includes("--show-toplevel")
-                ) {
-                    if (readdirSync(worktreePath).length === 0) {
+                    if (
+                        executable === "git" &&
+                        commandArguments.includes("worktree") &&
+                        commandArguments.includes("add")
+                    ) {
+                        if (isMissingWorktreeRegistered) {
+                            throw new Error(
+                                "stale worktree registration was not cleared"
+                            );
+                        }
+                        mkdirSync(path.join(worktreePath, "backend"), {
+                            recursive: true,
+                        });
+                    }
+                    if (
+                        executable === "git" &&
+                        commandArguments.includes("worktree") &&
+                        commandArguments.includes("remove")
+                    ) {
+                        isMissingWorktreeRegistered = false;
+                        rmSync(worktreePath, { force: true, recursive: true });
+                    }
+                    if (executable === "git" && commandArguments.includes("rev-parse")) {
                         return {
-                            code: 128,
-                            stderr: "fatal: not a git repository (or any of the parent directories): .git",
-                            stdout: "",
+                            code: 0,
+                            stderr: "",
+                            stdout: `${expectedCommit}\n`,
                         };
                     }
-                    return { code: 0, stderr: "", stdout: `${worktreePath}\n` };
-                }
-                if (executable === "git" && commandArguments.includes("status")) {
                     return { code: 0, stderr: "", stdout: "" };
-                }
-                if (
-                    executable === "git" &&
-                    commandArguments.includes("worktree") &&
-                    commandArguments.includes("list")
-                ) {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: isMissingWorktreeRegistered
-                            ? `worktree ${worktreePath}\nHEAD ${expectedCommit}\ndetached\n\n`
-                            : "",
-                    };
-                }
-                if (
-                    executable === "git" &&
-                    commandArguments.includes("worktree") &&
-                    commandArguments.includes("add")
-                ) {
-                    if (isMissingWorktreeRegistered) {
-                        throw new Error("stale worktree registration was not cleared");
-                    }
-                    mkdirSync(path.join(worktreePath, "backend"), {
-                        recursive: true,
-                    });
-                }
-                if (
-                    executable === "git" &&
-                    commandArguments.includes("worktree") &&
-                    commandArguments.includes("remove")
-                ) {
-                    isMissingWorktreeRegistered = false;
-                    rmSync(worktreePath, { force: true, recursive: true });
-                }
-                if (executable === "git" && commandArguments.includes("rev-parse")) {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: `${expectedCommit}\n`,
-                    };
-                }
-                return { code: 0, stderr: "", stdout: "" };
+                });
             });
         const prepareStateSpy = jest
             .spyOn(developmentStack, "prepareDevelopmentState")
@@ -754,19 +778,17 @@ describe("managed pull request preview", () => {
                     command.startsWith("sudo -n tailscale serve --bg --https=5173")
                 )
             );
-            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+            expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 number: 335,
                 status: "running",
             });
-            await expect(
-                startPullRequestPreview(candidate, { config })
-            ).resolves.toMatchObject({
-                commitSha: COMMIT,
-                status: "running",
-            });
-            const interruptedRecord = JSON.parse(
-                readFileSync(config.stateFile, "utf8")
-            ) as Record<string, unknown>;
+            expect(startPullRequestPreview(candidate, { config })).resolves.toMatchObject(
+                {
+                    commitSha: COMMIT,
+                    status: "running",
+                }
+            );
+            const interruptedRecord = readJsonRecord(config.stateFile);
             writeFileSync(
                 config.stateFile,
                 `${JSON.stringify({
@@ -777,11 +799,11 @@ describe("managed pull request preview", () => {
                 { mode: 0o600 }
             );
             isServeEnabled = false;
-            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+            expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 commitSha: COMMIT,
                 status: "starting",
             });
-            await expect(
+            expect(
                 startPullRequestPreview(candidate, {
                     config,
                     readGatewayToken: () => "persisted-gateway-token",
@@ -792,9 +814,7 @@ describe("managed pull request preview", () => {
             });
             expect(prepareStateSpy).toHaveBeenCalledTimes(2);
 
-            const interruptedAfterServeRecord = JSON.parse(
-                readFileSync(config.stateFile, "utf8")
-            ) as Record<string, unknown>;
+            const interruptedAfterServeRecord = readJsonRecord(config.stateFile);
             writeFileSync(
                 config.stateFile,
                 `${JSON.stringify({
@@ -807,21 +827,21 @@ describe("managed pull request preview", () => {
             );
             isServeEnabled = true;
             activeUnits.clear();
-            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+            expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 commitSha: COMMIT,
                 status: "stopped",
             });
             expect(isServeEnabled).toBe(false);
             expect(existsSync(config.gatewayTokenFile)).toBe(false);
             expect(existsSync(config.gatewayUpstreamTokenFile)).toBe(false);
-            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+            expect(readJsonRecord(config.stateFile)).toMatchObject({
                 ownsTailscaleServe: false,
                 status: "stopped",
             });
 
             rmSync(worktreePath, { force: true, recursive: true });
             isMissingWorktreeRegistered = true;
-            await expect(
+            expect(
                 startPullRequestPreview(candidate, {
                     config,
                     readGatewayToken: () => "persisted-gateway-token",
@@ -841,16 +861,16 @@ describe("managed pull request preview", () => {
             expect(staleRemovalIndex).toBeGreaterThanOrEqual(0);
             expect(recreatedWorktreeIndex).toBeGreaterThan(staleRemovalIndex);
             expect(prepareStateSpy).toHaveBeenCalledTimes(3);
-            await expect(
+            expect(
                 startPullRequestPreview(
                     { ...candidate, number: 336, title: "Other trusted preview" },
                     { config }
                 )
             ).rejects.toMatchObject({ statusCode: 409 });
-            await expect(stopPullRequestPreview(336, { config })).rejects.toMatchObject({
+            expect(stopPullRequestPreview(336, { config })).rejects.toMatchObject({
                 statusCode: 409,
             });
-            await expect(
+            expect(
                 stopPullRequestPreview(335, {
                     config,
                     protectFromCancellation,
@@ -870,13 +890,13 @@ describe("managed pull request preview", () => {
             expect(existsSync(worktreePath)).toBe(true);
 
             isServeEnabled = true;
-            await expect(
-                startPullRequestPreview(candidate, { config })
-            ).rejects.toMatchObject({ statusCode: 409 });
+            expect(startPullRequestPreview(candidate, { config })).rejects.toMatchObject({
+                statusCode: 409,
+            });
             isServeEnabled = false;
 
             expectedCommit = "b".repeat(40);
-            await expect(
+            expect(
                 startPullRequestPreview(
                     {
                         ...candidate,
@@ -899,7 +919,7 @@ describe("managed pull request preview", () => {
             ).toBe(true);
             isPreviewUnitCollected = true;
             activeUnits.delete(config.unitName);
-            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+            expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 number: 335,
                 status: "stopped",
             });
@@ -910,7 +930,7 @@ describe("managed pull request preview", () => {
             expectedCommit = "c".repeat(40);
             shouldFailServeDisable = true;
             shouldFailServeInspectionWhenEnabled = true;
-            await expect(
+            expect(
                 startPullRequestPreview(
                     {
                         ...candidate,
@@ -925,35 +945,33 @@ describe("managed pull request preview", () => {
             ).rejects.toThrow(
                 "Tailscale Serve activation failed and its route could not be removed"
             );
-            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+            expect(readJsonRecord(config.stateFile)).toMatchObject({
                 commitSha: expectedCommit,
                 ownsTailscaleServe: true,
                 status: "failed",
             });
-            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+            expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 commitSha: expectedCommit,
                 message: expect.stringContaining(
                     "Tailscale Serve activation failed and its route could not be removed"
                 ),
                 status: "failed",
             });
-            await expect(stopPullRequestPreview(335, { config })).rejects.toThrow(
+            expect(stopPullRequestPreview(335, { config })).rejects.toThrow(
                 "PR dev stop cleanup failed"
             );
-            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+            expect(readJsonRecord(config.stateFile)).toMatchObject({
                 ownsTailscaleServe: true,
                 status: "failed",
             });
             shouldFailServeDisable = false;
             shouldFailServeInspectionWhenEnabled = false;
-            await expect(stopPullRequestPreview(335, { config })).resolves.toMatchObject({
+            expect(stopPullRequestPreview(335, { config })).resolves.toMatchObject({
                 status: "stopped",
             });
             expect(isServeEnabled).toBe(false);
 
-            const stoppedRecord = JSON.parse(
-                readFileSync(config.stateFile, "utf8")
-            ) as Record<string, unknown>;
+            const stoppedRecord = readJsonRecord(config.stateFile);
             writeFileSync(
                 config.stateFile,
                 `${JSON.stringify({
@@ -967,19 +985,19 @@ describe("managed pull request preview", () => {
             isServeEnabled = true;
             activeUnits.add(config.unitName);
             activeUnits.add(config.gatewayProxyUnitName);
-            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+            expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 status: "stopped",
             });
             expect(activeUnits.size).toBe(0);
             expect(isServeEnabled).toBe(false);
-            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+            expect(readJsonRecord(config.stateFile)).toMatchObject({
                 ownsTailscaleServe: false,
                 status: "stopped",
             });
             const managedStatePath = path.join(config.previewRoot, "states", "pr-335");
             mkdirSync(managedStatePath, { recursive: true });
             writeFileSync(path.join(managedStatePath, "state.txt"), "managed\n");
-            await expect(
+            expect(
                 cleanupClosedPullRequestPreview(335, { config })
             ).resolves.toMatchObject({
                 number: 335,
@@ -1028,8 +1046,10 @@ describe("managed pull request preview", () => {
             .mockReturnValue([]);
         const waitSpy = jest
             .spyOn(queuedJobExecution, "waitForJobExecution")
-            .mockImplementation(async (id) =>
-                id === queuedStart.id ? completedStart : completedStop
+            .mockImplementation((id) =>
+                Promise.try(() =>
+                    id === queuedStart.id ? completedStart : completedStop
+                )
             );
         const handlers = new Map<string, ScheduledJobActionHandler>();
         const registerSpy = jest
@@ -1096,7 +1116,7 @@ describe("managed pull request preview", () => {
         };
 
         try {
-            await expect(prepareAndStartPullRequestPreview(335)).resolves.toMatchObject({
+            expect(prepareAndStartPullRequestPreview(335)).resolves.toMatchObject({
                 commitSha: COMMIT,
                 number: 335,
                 status: "starting",
@@ -1107,14 +1127,14 @@ describe("managed pull request preview", () => {
                 number: 334,
                 status: "running",
             });
-            await expect(prepareAndStartPullRequestPreview(335)).rejects.toMatchObject({
+            expect(prepareAndStartPullRequestPreview(335)).rejects.toMatchObject({
                 statusCode: 409,
             });
-            await expect(prepareAndStopPullRequestPreview(335)).resolves.toEqual({
+            expect(prepareAndStopPullRequestPreview(335)).resolves.toEqual({
                 number: 335,
                 status: "stopped",
             });
-            await expect(prepareAndStopPullRequestPreview()).resolves.toEqual({
+            expect(prepareAndStopPullRequestPreview()).resolves.toEqual({
                 number: 335,
                 status: "stopped",
             });
@@ -1151,7 +1171,7 @@ describe("managed pull request preview", () => {
                 "/api/pull-requests/:number/preview/start"
             ].POST(previewRouteRequest("335"));
             expect(startResponse.status).toBe(202);
-            await expect(startResponse.json()).resolves.toMatchObject({
+            expect(startResponse.json()).resolves.toMatchObject({
                 isOk: true,
                 preview: {
                     commitSha: COMMIT,
@@ -1166,7 +1186,7 @@ describe("managed pull request preview", () => {
                 "/api/pull-requests/:number/preview/stop"
             ].POST(previewRouteRequest("335"));
             expect(stopResponse.status).toBe(200);
-            await expect(stopResponse.json()).resolves.toEqual({
+            expect(stopResponse.json()).resolves.toEqual({
                 isOk: true,
                 preview: { number: 335, status: "stopped" },
             });
@@ -1176,7 +1196,7 @@ describe("managed pull request preview", () => {
             const statusResponse =
                 await pullRequestRoutes["/api/pull-requests/preview"].GET();
             expect(statusResponse.status).toBe(200);
-            await expect(statusResponse.json()).resolves.toMatchObject({
+            expect(statusResponse.json()).resolves.toMatchObject({
                 preview: {
                     commitSha: COMMIT,
                     number: 335,
@@ -1218,19 +1238,24 @@ describe("managed pull request preview", () => {
                 enqueueCallsBeforeReconciliation + 2
             );
             executionsSpy.mockReturnValue([]);
-            const consoleErrorSpy = jest
-                .spyOn(console, "error")
-                .mockImplementation(noOperation);
+            const structuredLogs = captureStructuredLogs();
             statusSpy.mockRejectedValueOnce(new Error("preview status unavailable"));
             await reconcileClosedPullRequestPreview([]);
             expect(enqueueSpy).toHaveBeenCalledTimes(
                 enqueueCallsBeforeReconciliation + 2
             );
-            expect(consoleErrorSpy).toHaveBeenCalledWith(
-                "[PullRequestPreview] Closed-PR reconciliation failed:",
-                "preview status unavailable"
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "pull-request-previews",
+                    error: {
+                        message: "preview status unavailable",
+                        name: "Error",
+                    },
+                    event: "preview.closed_pr_reconciliation_failed",
+                    level: "error",
+                })
             );
-            consoleErrorSpy.mockRestore();
+            structuredLogs.stop();
 
             for (const route of [
                 "/api/pull-requests/:number/preview/start",
@@ -1240,9 +1265,9 @@ describe("managed pull request preview", () => {
                     previewRouteRequest("invalid")
                 );
                 expect(invalidResponse.status).toBe(400);
-                await expect(invalidResponse.json()).resolves.toEqual({
-                    error: "Invalid pull request number",
-                });
+                expect(invalidResponse.json()).resolves.toEqual(
+                    apiErrorExpectation("Invalid pull request number")
+                );
             }
 
             listSpy.mockRejectedValueOnce(
@@ -1254,9 +1279,9 @@ describe("managed pull request preview", () => {
                 "/api/pull-requests/:number/preview/start"
             ].POST(previewRouteRequest("335"));
             expect(failedStartResponse.status).toBe(503);
-            await expect(failedStartResponse.json()).resolves.toEqual({
-                error: "preview startup unavailable",
-            });
+            expect(failedStartResponse.json()).resolves.toEqual(
+                apiErrorExpectation("preview startup unavailable")
+            );
 
             waitSpy.mockRejectedValueOnce(
                 Object.assign(new Error("preview stop unavailable"), {
@@ -1267,9 +1292,9 @@ describe("managed pull request preview", () => {
                 "/api/pull-requests/:number/preview/stop"
             ].POST(previewRouteRequest("335"));
             expect(failedStopResponse.status).toBe(503);
-            await expect(failedStopResponse.json()).resolves.toEqual({
-                error: "preview stop unavailable",
-            });
+            expect(failedStopResponse.json()).resolves.toEqual(
+                apiErrorExpectation("preview stop unavailable")
+            );
 
             statusSpy.mockRejectedValueOnce(
                 Object.assign(new Error("preview status unavailable"), {
@@ -1279,9 +1304,9 @@ describe("managed pull request preview", () => {
             const failedStatusResponse =
                 await pullRequestRoutes["/api/pull-requests/preview"].GET();
             expect(failedStatusResponse.status).toBe(503);
-            await expect(failedStatusResponse.json()).resolves.toEqual({
-                error: "preview status unavailable",
-            });
+            expect(failedStatusResponse.json()).resolves.toEqual(
+                apiErrorExpectation("preview status unavailable")
+            );
 
             registerPullRequestPreviewExecutionActions();
             const cleanupHandler = handlers.get("dashboard.preview.cleanup");
@@ -1293,7 +1318,7 @@ describe("managed pull request preview", () => {
             if (!cleanupHandler || !startHandler || !stopHandler) {
                 throw new Error("Preview handlers were not registered");
             }
-            await expect(
+            expect(
                 startHandler(
                     previewScheduledJob("335"),
                     new AbortController().signal,
@@ -1315,8 +1340,8 @@ describe("managed pull request preview", () => {
             );
             startSpy.mock.calls[0]?.[1]?.protectFromCancellation?.();
             expect(protectFromCancellation).toHaveBeenCalledTimes(1);
-            await expect(
-                stopHandler(previewScheduledJob(undefined), undefined, context)
+            expect(
+                stopHandler(previewScheduledJob(), undefined, context)
             ).resolves.toEqual({
                 preview: { number: 335, status: "stopped" },
             });
@@ -1327,7 +1352,7 @@ describe("managed pull request preview", () => {
                 })
             );
             isOpenSpy.mockResolvedValueOnce(true);
-            await expect(
+            expect(
                 cleanupHandler(previewScheduledJob(335), undefined, context)
             ).resolves.toMatchObject({
                 cleanup: {
@@ -1338,7 +1363,7 @@ describe("managed pull request preview", () => {
             expect(cleanupSpy).not.toHaveBeenCalled();
             listSpy.mockResolvedValue([]);
             statusSpy.mockResolvedValue({ status: "stopped" });
-            await expect(
+            expect(
                 cleanupHandler(previewScheduledJob(335), undefined, context)
             ).resolves.toEqual({
                 cleanup: {
@@ -1352,13 +1377,13 @@ describe("managed pull request preview", () => {
             expect(protectFromCancellation).toHaveBeenCalledTimes(2);
 
             listSpy.mockResolvedValue([{ ...pullRequest, headRefOid: "b".repeat(40) }]);
-            await expect(
+            expect(
                 startHandler(previewScheduledJob(335, COMMIT), undefined, context)
             ).rejects.toMatchObject({ statusCode: 409 });
             expect(startSpy).toHaveBeenCalledTimes(1);
 
             listSpy.mockResolvedValue([]);
-            await expect(
+            expect(
                 startHandler(previewScheduledJob(336), undefined, context)
             ).rejects.toMatchObject({ statusCode: 404 });
         } finally {
@@ -1396,7 +1421,7 @@ describe("managed pull request preview", () => {
             expect(await stopPullRequestPreview(undefined, { config })).toEqual({
                 status: "stopped",
             });
-            await expect(
+            expect(
                 startPullRequestPreview(
                     {
                         authorLogin: "external",
@@ -1408,7 +1433,7 @@ describe("managed pull request preview", () => {
                     { config }
                 )
             ).rejects.toThrow("Pull request author is not allowed to run host previews");
-            await expect(
+            expect(
                 startPullRequestPreview(
                     {
                         authorLogin: "mira-2026",

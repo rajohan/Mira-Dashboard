@@ -1,3 +1,7 @@
+import type {
+    CacheHeartbeatCronJob,
+    CacheHeartbeatTask,
+} from "../../../contracts/cache.ts";
 import type { CronJob, CronTaskLink } from "../../../contracts/cron.ts";
 import type { JobDisableIntent } from "../../../contracts/jobs.ts";
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../contracts/tasks.ts";
@@ -18,38 +22,11 @@ interface TaskAutomationRow {
     automation_json: string;
 }
 
-interface HeartbeatTaskAutomation {
-    cronJobId: string;
-    missing?: boolean;
-    recurring: boolean;
-}
-
-interface HeartbeatTask {
-    assignee?: TaskAssigneeId;
-    automation?: HeartbeatTaskAutomation;
-    number: number;
-    priority: TaskAutomationRow["priority"];
-    status: TaskAutomationRow["status"];
-    title: string;
-}
-
-interface HeartbeatCronJob {
-    disableIntent?: JobDisableIntent;
-    enabled?: boolean;
-    id: string;
-    lastDurationMs?: number;
-    lastRunAtMs?: number;
-    lastRunStatus?: string;
-    name?: string;
-    nextRunAtMs?: number;
-    runningAtMs?: number;
-}
-
 export interface HeartbeatAutomationSnapshot {
     isCronDataAvailable: boolean;
     cronError?: string;
-    cronJobs: HeartbeatCronJob[];
-    tasks: HeartbeatTask[];
+    cronJobs: CacheHeartbeatCronJob[];
+    tasks: CacheHeartbeatTask[];
 }
 
 function parseRecordJson(value: string): Record<string, unknown> {
@@ -102,7 +79,10 @@ function openTaskAutomationRows(): TaskAutomationRow[] {
         .all() as unknown as TaskAutomationRow[];
 }
 
-/** Returns open task links for each OpenClaw cron job. */
+/**
+ * Returns open task links for each OpenClaw cron job.
+ * @returns open task links for each OpenClaw cron job.
+ */
 export function cronTaskLinksByJobId(): Map<string, CronTaskLink[]> {
     const links = new Map<string, CronTaskLink[]>();
     for (const task of openTaskAutomationRows()) {
@@ -119,7 +99,11 @@ export function cronTaskLinksByJobId(): Map<string, CronTaskLink[]> {
     return links;
 }
 
-/** Adds Dashboard-owned metadata to raw OpenClaw cron jobs for the Jobs UI. */
+/**
+ * Adds Dashboard-owned metadata to raw OpenClaw cron jobs for the Jobs UI.
+ * @param jobs Jobs value.
+ * @returns With cron task links result.
+ */
 export function withCronTaskLinks<T extends CronJob>(
     jobs: T[]
 ): Array<T & { disableIntent?: JobDisableIntent; taskLinks?: CronTaskLink[] }> {
@@ -151,7 +135,10 @@ function isHeartbeatRelevantTask(
     return task.assignee === TASK_ASSIGNEES.raymond.id && task.status === "blocked";
 }
 
-/** Builds the compact open-task projection consumed by OpenClaw heartbeat. */
+/**
+ * Builds the compact open-task projection consumed by OpenClaw heartbeat.
+ * @returns Built the compact open-task projection consumed by OpenClaw heartbeat.
+ */
 export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomationSnapshot> {
     let isCronDataAvailable = true;
     let cronError: string | undefined;
@@ -173,7 +160,7 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
 
     const taskRows = openTaskAutomationRows();
     const heartbeatCronJobs = cronJobs
-        .map((job): HeartbeatCronJob | undefined => {
+        .map((job): CacheHeartbeatCronJob | undefined => {
             const id = cronJobId(job);
             if (!id) return;
             const state = job.state;
@@ -191,10 +178,10 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
                 lastDurationMs: numberFromRecord(state, "lastDurationMs"),
             };
         })
-        .filter((job): job is HeartbeatCronJob => job !== undefined);
+        .filter((job): job is CacheHeartbeatCronJob => job !== undefined);
 
     const tasks = taskRows
-        .map((task): HeartbeatTask | undefined => {
+        .map((task): CacheHeartbeatTask | undefined => {
             const stored = parseRecordJson(task.automation_json);
             const id = stringFromRecord(stored, "cronJobId");
             if (!isHeartbeatRelevantTask(task, Boolean(id))) return;
@@ -215,7 +202,7 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
                     : undefined,
             };
         })
-        .filter((task): task is HeartbeatTask => task !== undefined);
+        .filter((task): task is CacheHeartbeatTask => task !== undefined);
 
     return {
         isCronDataAvailable,

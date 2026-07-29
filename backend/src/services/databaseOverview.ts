@@ -1,5 +1,11 @@
 import { isIP } from "node:net";
 
+import type {
+    DatabaseOverviewResponse,
+    PgBouncerPoolSummary,
+    PgBouncerStatsSummary,
+    PostgresDeadTupleSummary,
+} from "../../../contracts/database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { stringFallback } from "../lib/values.ts";
 import { getDashboardSqliteOverview } from "./sqliteOverview.ts";
@@ -92,7 +98,71 @@ interface PgBouncerStatsRow {
     total_sent: string;
 }
 
-/** Parses tab-delimited psql --no-align output into typed row objects; blank/header-only output returns an empty array. */
+/**
+ * Projects a PostgreSQL table-health row onto the public response contract.
+ * @param row PostgreSQL table-health row.
+ * @returns Contract-safe PostgreSQL table-health row.
+ */
+function projectDeadTupleRow(row: PostgresDeadTupleSummary): PostgresDeadTupleSummary {
+    return {
+        ...(row.database === undefined ? {} : { database: row.database }),
+        dead_pct: row.dead_pct,
+        ...(row.last_autoanalyze === undefined
+            ? {}
+            : { last_autoanalyze: row.last_autoanalyze }),
+        ...(row.last_autovacuum === undefined
+            ? {}
+            : { last_autovacuum: row.last_autovacuum }),
+        n_dead_tup: row.n_dead_tup,
+        n_live_tup: row.n_live_tup,
+        relname: row.relname,
+        schemaname: row.schemaname,
+    };
+}
+
+/**
+ * Projects a dynamic PgBouncer pool row onto the fields consumed by the UI.
+ * @param row PgBouncer pool row.
+ * @returns Contract-safe PgBouncer pool row.
+ */
+function projectPgBouncerPoolRow(row: PgBouncerPoolSummary): PgBouncerPoolSummary {
+    return {
+        cl_active: row.cl_active,
+        cl_waiting: row.cl_waiting,
+        database: row.database,
+        maxwait: row.maxwait,
+        pool_mode: row.pool_mode,
+        sv_active: row.sv_active,
+        sv_idle: row.sv_idle,
+        sv_used: row.sv_used,
+        user: row.user,
+    };
+}
+
+/**
+ * Projects a dynamic PgBouncer statistics row onto the public response contract.
+ * @param row PgBouncer statistics row.
+ * @returns Contract-safe PgBouncer statistics row.
+ */
+function projectPgBouncerStatsRow(row: PgBouncerStatsSummary): PgBouncerStatsSummary {
+    return {
+        avg_query_time: row.avg_query_time,
+        avg_xact_time: row.avg_xact_time,
+        database: row.database,
+        total_query_count: row.total_query_count,
+        total_query_time: row.total_query_time,
+        total_received: row.total_received,
+        total_sent: row.total_sent,
+        total_xact_count: row.total_xact_count,
+        total_xact_time: row.total_xact_time,
+    };
+}
+
+/**
+ * Parses tab-delimited psql --no-align output into typed row objects; blank/header-only output returns an empty array.
+ * @param output Output value.
+ * @returns Parsed tab-delimited psql --no-align output into typed row objects; blank/header-only output returns an empty array.
+ */
 function parseTable<T extends object>(output: string): T[] {
     const trimmed = output.trim();
     if (!trimmed) {
@@ -117,17 +187,32 @@ function parseTable<T extends object>(output: string): T[] {
     });
 }
 
-/** Returns a string value or a fallback using the route's existing falsy-value behavior. */
+/**
+ * Returns a string value or a fallback using the route's existing falsy-value behavior.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns a string value or a fallback using the route's existing falsy-value behavior.
+ */
 function stringWithDefault(value: string | undefined, fallback: string): string {
     return value || fallback;
 }
 
-/** Converts psql numeric text to a number, preserving the existing falsy-to-zero behavior. */
+/**
+ * Converts psql numeric text to a number, preserving the existing falsy-to-zero behavior.
+ * @param value Value to process.
+ * @returns Converted psql numeric text to a number, preserving the existing falsy-to-zero behavior.
+ */
 function numberFrom(value: string | undefined): number {
     return Number(value || 0);
 }
 
-/** Runs a command inside a Docker container and returns raw stdout. */
+/**
+ * Runs a command inside a Docker container and returns raw stdout.
+ * @param container Container value.
+ * @param command Command value.
+ * @param environment Environment value.
+ * @returns Promise resolving to the run docker exec result.
+ */
 async function runDockerExec(
     container: string,
     command: string[],
@@ -153,18 +238,32 @@ async function runDockerExec(
     return stdout;
 }
 
-/** Returns trimmed environment overrides while treating whitespace-only values as missing. */
+/**
+ * Returns trimmed environment overrides while treating whitespace-only values as missing.
+ * @param value Value to process.
+ * @returns trimmed environment overrides while treating whitespace-only values as missing.
+ */
 function trimmedEnvironmentValue(value: string | undefined): string | undefined {
     const trimmed = value?.trim() ?? "";
     return trimmed === "" ? undefined : trimmed;
 }
 
-/** Returns a fallback only when the value is absent, preserving intentional blanks. */
+/**
+ * Returns a fallback only when the value is absent, preserving intentional blanks.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns a fallback only when the value is absent, preserving intentional blanks.
+ */
 function environmentValueOrDefault(value: string | undefined, fallback: string): string {
     return value === undefined ? fallback : value;
 }
 
-/** Returns a safe PostgreSQL hostname for URI construction. */
+/**
+ * Returns a safe PostgreSQL hostname for URI construction.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns a safe PostgreSQL hostname for URI construction.
+ */
 function normalizePostgresHost(value: string | undefined, fallback: string): string {
     const host = trimmedEnvironmentValue(value) ?? fallback;
     const isValidIpv4 =
@@ -188,7 +287,11 @@ function normalizePostgresHost(value: string | undefined, fallback: string): str
     return isRawIpv6 ? `[${host}]` : host;
 }
 
-/** Returns a safe PostgreSQL port for URI construction. */
+/**
+ * Returns a safe PostgreSQL port for URI construction.
+ * @param value Value to process.
+ * @returns a safe PostgreSQL port for URI construction.
+ */
 function normalizePostgresPort(value: string | undefined): string {
     const port = trimmedEnvironmentValue(value) ?? "5432";
     if (!/^\d+$/u.test(port)) {
@@ -206,7 +309,11 @@ interface PostgresConnection {
     uri: string;
 }
 
-/** Builds PostgreSQL connection details from environment defaults for the requested database. */
+/**
+ * Builds PostgreSQL connection details from environment defaults for the requested database.
+ * @param database Database value.
+ * @returns Built PostgreSQL connection details from environment defaults for the requested database.
+ */
 function buildPostgresConnection(database = "postgres"): PostgresConnection {
     const username = encodeURIComponent(
         environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
@@ -218,7 +325,11 @@ function buildPostgresConnection(database = "postgres"): PostgresConnection {
     return { password, uri: `postgresql://${username}@${host}:${port}/${database_}` };
 }
 
-/** Builds PgBouncer admin connection details from environment defaults. */
+/**
+ * Builds PgBouncer admin connection details from environment defaults.
+ * @param database Database value.
+ * @returns Built PgBouncer admin connection details from environment defaults.
+ */
 function buildPgBouncerConnection(database = "pgbouncer"): PostgresConnection {
     const username = encodeURIComponent(
         environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
@@ -230,7 +341,12 @@ function buildPgBouncerConnection(database = "pgbouncer"): PostgresConnection {
     return { password, uri: `postgresql://${username}@${host}:${port}/${database_}` };
 }
 
-/** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */
+/**
+ * Executes SQL against Postgres through the postgres container and returns tab-delimited stdout.
+ * @param sql Sql value.
+ * @param database Database value.
+ * @returns Promise resolving to the query postgres result.
+ */
 async function queryPostgres(sql: string, database = "postgres") {
     const connection = buildPostgresConnection(database);
     return runDockerExec(
@@ -242,7 +358,11 @@ async function queryPostgres(sql: string, database = "postgres") {
     );
 }
 
-/** Executes SQL against the PgBouncer admin database and returns tab-delimited stdout. */
+/**
+ * Executes SQL against the PgBouncer admin database and returns tab-delimited stdout.
+ * @param sql Sql value.
+ * @returns Promise resolving to the query pg bouncer result.
+ */
 async function queryPgBouncer(sql: string) {
     const connection = buildPgBouncerConnection();
     return runDockerExec(
@@ -254,7 +374,12 @@ async function queryPgBouncer(sql: string) {
     );
 }
 
-/** Sums numeric values selected from a row collection. */
+/**
+ * Sums numeric values selected from a row collection.
+ * @param rows Rows value.
+ * @param selector Selector value.
+ * @returns Sum by result.
+ */
 function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     let total = 0;
     for (const row of rows) {
@@ -263,7 +388,11 @@ function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     return total;
 }
 
-/** Runs a SQL query against every connectable non-template database and concatenates parsed rows. */
+/**
+ * Runs a SQL query against every connectable non-template database and concatenates parsed rows.
+ * @param sql Sql value.
+ * @returns Promise resolving to the query all user databases result.
+ */
 async function queryAllUserDatabases<T extends object>(
     sql: string
 ): Promise<Array<T & { database: string }>> {
@@ -287,7 +416,10 @@ async function queryAllUserDatabases<T extends object>(
     return results;
 }
 
-/** Returns current torrent counts for Comet and Bitmagnet. */
+/**
+ * Returns current torrent counts for Comet and Bitmagnet.
+ * @returns current torrent counts for Comet and Bitmagnet.
+ */
 async function getTorrentCounts() {
     const [cometOutput, bitmagnetOutput] = await Promise.all([
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet"),
@@ -305,8 +437,11 @@ async function getTorrentCounts() {
     return { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
 }
 
-/** Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint. */
-export async function getDatabaseOverview() {
+/**
+ * Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint.
+ * @returns Database overview value.
+ */
+export async function getDatabaseOverview(): Promise<DatabaseOverviewResponse> {
     const torrentCounts = await getTorrentCounts();
 
     const databaseRows = parseTable<PostgresDatabaseRow>(
@@ -331,7 +466,7 @@ export async function getDatabaseOverview() {
               AND datname NOT IN ('template0', 'template1', 'postgres')
             ORDER BY pg_database_size(datname) DESC;
         `)
-    ) as PostgresDatabaseRow[];
+    );
 
     const connectionRows = parseTable<ConnectionCountsRow>(
         await queryPostgres(`
@@ -341,7 +476,7 @@ export async function getDatabaseOverview() {
             GROUP BY COALESCE(state, 'unknown')
             ORDER BY COUNT(*) DESC;
         `)
-    ) as ConnectionCountsRow[];
+    );
 
     const allDeadTupleRows = await queryAllUserDatabases<DeadTupleRow>(`
         WITH table_estimates AS (
@@ -485,7 +620,7 @@ export async function getDatabaseOverview() {
     `);
     const pgStatStatementsEnabled = pgStatStatementsResult.includes("pg_stat_statements");
     const topQueries = pgStatStatementsEnabled
-        ? (parseTable<TopQueryRow>(
+        ? parseTable<TopQueryRow>(
               await queryPostgres(String.raw`
                 SELECT
                     regexp_replace(query, '\s+', ' ', 'g') AS query,
@@ -499,7 +634,7 @@ export async function getDatabaseOverview() {
                 ORDER BY total_exec_time DESC
                 LIMIT 20;
             `)
-          ) as TopQueryRow[])
+          )
         : [];
     const slowQueryCount = topQueries.filter(
         (query) => numberFrom(query.mean_exec_time) >= SLOW_QUERY_MEAN_MS
@@ -561,7 +696,14 @@ export async function getDatabaseOverview() {
             : 0;
     const sqlite = getDashboardSqliteOverview();
 
+    let maintenanceStatus: "healthy" | "not_assessed" | "review" =
+        isBloatAssessmentIncomplete ? "not_assessed" : "healthy";
+    if (maintenanceHintCount > 0) {
+        maintenanceStatus = "review";
+    }
     return {
+        checkedAt: new Date().toISOString(),
+        mode: "full",
         overview: {
             totalDatabaseSizeBytes,
             managedDatabaseCount: databaseRows.length + 1,
@@ -580,12 +722,7 @@ export async function getDatabaseOverview() {
                 avgTransactionTime,
             },
             maintenance: {
-                status:
-                    maintenanceHintCount > 0
-                        ? "review"
-                        : isBloatAssessmentIncomplete
-                          ? "not_assessed"
-                          : "healthy",
+                status: maintenanceStatus,
                 hintCount: maintenanceHintCount,
                 requiresBloatReview,
                 isBloatAssessmentIncomplete,
@@ -602,7 +739,7 @@ export async function getDatabaseOverview() {
             },
         },
         databases: databaseRows,
-        deadTuples: deadTupleRows,
+        deadTuples: deadTupleRows.map((row) => projectDeadTupleRow(row)),
         bloatEstimates: bloatEstimates
             .filter(
                 (row) =>
@@ -617,15 +754,15 @@ export async function getDatabaseOverview() {
             )
             .slice(0, 25),
         topQueries,
-        pgbouncerPools: pgBouncerPools,
-        pgbouncerStats: pgBouncerStats,
+        pgbouncerPools: pgBouncerPools.map((row) => projectPgBouncerPoolRow(row)),
+        pgbouncerStats: pgBouncerStats.map((row) => projectPgBouncerStatsRow(row)),
         sqlite,
     };
 }
 
-type DatabaseOverviewResult = Awaited<ReturnType<typeof getDatabaseOverview>>;
-type DatabaseOverviewSnapshot = DatabaseOverviewResult & {
+type DatabaseOverviewSnapshot = Omit<DatabaseOverviewResponse, "checkedAt" | "mode"> & {
     checkedAt?: string;
+    mode?: "full" | "isolated";
 };
 
 function isDatabaseOverviewSnapshot(value: unknown): value is DatabaseOverviewSnapshot {
@@ -643,7 +780,11 @@ function isDatabaseOverviewSnapshot(value: unknown): value is DatabaseOverviewSn
     );
 }
 
-/** Refreshes only the isolated Dashboard SQLite metrics while retaining copied host data. */
+/**
+ * Refreshes only the isolated Dashboard SQLite metrics while retaining copied host data.
+ * @param snapshot Snapshot value.
+ * @returns Isolated database overview value.
+ */
 export function getIsolatedDatabaseOverview(snapshot: unknown) {
     const sqlite = getDashboardSqliteOverview();
     const previous: DatabaseOverviewSnapshot = isDatabaseOverviewSnapshot(snapshot)
@@ -691,12 +832,20 @@ export function getIsolatedDatabaseOverview(snapshot: unknown) {
               pgbouncerStats: [],
               sqlite,
           };
-    const { checkedAt: postgresSnapshotCheckedAt, ...previousOverview } = previous;
+    const {
+        checkedAt,
+        mode: previousMode,
+        postgresSnapshotCheckedAt: previousPostgresSnapshotCheckedAt,
+        ...previousOverview
+    } = previous;
+    const postgresSnapshotCheckedAt =
+        previousMode === "isolated" ? previousPostgresSnapshotCheckedAt : checkedAt;
     const totalDatabaseSizeBytes =
         Number(previousOverview.overview.totalDatabaseSizeBytes) || 0;
 
     return {
         ...previousOverview,
+        deadTuples: previous.deadTuples.map((row) => projectDeadTupleRow(row)),
         mode: "isolated" as const,
         ...(postgresSnapshotCheckedAt && {
             postgresSnapshotCheckedAt,
@@ -707,6 +856,12 @@ export function getIsolatedDatabaseOverview(snapshot: unknown) {
             totalDatabaseSizeBytes,
             totalManagedDatabaseSizeBytes: totalDatabaseSizeBytes + sqlite.storageBytes,
         },
+        pgbouncerPools: previous.pgbouncerPools.map((row) =>
+            projectPgBouncerPoolRow(row)
+        ),
+        pgbouncerStats: previous.pgbouncerStats.map((row) =>
+            projectPgBouncerStatsRow(row)
+        ),
         sqlite,
     };
 }

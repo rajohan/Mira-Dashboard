@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import type { RuntimeReleaseIdentity } from "../../contracts/health.ts";
+import { isPlainRecord } from "../../contracts/runtime.ts";
 import { getBackendBuildCommit } from "./buildIdentity.ts";
 import {
     databaseMigrationIdentities,
@@ -12,35 +13,43 @@ import {
 } from "./databaseMigrations/index.ts";
 import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
+import { createStructuredLogger } from "./lib/structuredLogger.ts";
 
 export { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 
 export const RELEASE_MANIFEST_FILE_NAME = "release-manifest.json";
 export const RELEASE_MANIFEST_FORMAT_VERSION = 2;
+const logger = createStructuredLogger("release-manifest");
 
 const MAX_RELEASE_MANIFEST_BYTES = 256 * 1024;
 const RELEASE_ARTIFACT_DIRECTORIES = ["dist", "backend/dist"] as const;
 const RELEASE_STATIC_ARTIFACTS = [
     "backend/config/log-rotation.json",
-    "backend/bun.lock",
-    "backend/package.json",
     "bun.lock",
     "package.json",
 ] as const;
-const COMPATIBLE_REQUIRED_RELEASE_ARTIFACTS = [
+// Keep the immediately previous pre-root-workspace release verifiable for
+// rollback. Remove this allowlist after both managed slots were built from the
+// consolidated root package.
+const PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS = [
+    "backend/bun.lock",
+    "backend/package.json",
+] as const;
+const SAFE_RELEASE_STATIC_ARTIFACTS = [
+    ...RELEASE_STATIC_ARTIFACTS,
+    ...PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS,
+] as const;
+const REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
     "backend/dist/build-identity.json",
     "backend/dist/databasePreflight.js",
+    "backend/dist/pullRequestPreviewGatewayProxy.js",
     "backend/dist/releaseLifecycle.js",
     "backend/dist/resetDashboardPassword.js",
     "backend/dist/serverStart.js",
     "backend/dist/workerStart.js",
     "dist/build-identity.json",
     "dist/index.html",
-] as const;
-const CURRENT_BUILD_REQUIRED_RELEASE_ARTIFACTS = [
-    ...COMPATIBLE_REQUIRED_RELEASE_ARTIFACTS,
-    "backend/dist/pullRequestPreviewGatewayProxy.js",
 ] as const;
 const MAX_BUILD_IDENTITY_BYTES = 4096;
 const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
@@ -120,12 +129,6 @@ const runtimeReleaseIdentityCacheState: {
     entry?: RuntimeReleaseIdentityCache;
 } = {};
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-}
-
 function compareStrings(left: string, right: string): number {
     return left.localeCompare(right);
 }
@@ -177,8 +180,8 @@ function isSafeArtifactPath(value: string): boolean {
         return false;
     }
     return (
-        RELEASE_STATIC_ARTIFACTS.includes(
-            value as (typeof RELEASE_STATIC_ARTIFACTS)[number]
+        SAFE_RELEASE_STATIC_ARTIFACTS.includes(
+            value as (typeof SAFE_RELEASE_STATIC_ARTIFACTS)[number]
         ) ||
         RELEASE_ARTIFACT_DIRECTORIES.some((directory) =>
             value.startsWith(`${directory}/`)
@@ -280,6 +283,27 @@ export async function listReleaseArtifactPaths(releaseRoot: string): Promise<str
     }
 
     const paths: string[] = [...RELEASE_STATIC_ARTIFACTS];
+    for (const relativePath of PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS) {
+        try {
+            const stat = await fsp.lstat(artifactPath(realReleaseRoot, relativePath));
+            if (!stat.isFile() || stat.isSymbolicLink()) {
+                throw new TypeError(
+                    `Release artifact must be a regular file: ${relativePath}`
+                );
+            }
+            paths.push(relativePath);
+        } catch (error) {
+            if (
+                error &&
+                typeof error === "object" &&
+                "code" in error &&
+                error.code === "ENOENT"
+            ) {
+                continue;
+            }
+            throw error;
+        }
+    }
     for (const directory of RELEASE_ARTIFACT_DIRECTORIES) {
         paths.push(...(await collectArtifactDirectory(realReleaseRoot, directory)));
     }
@@ -428,7 +452,7 @@ export async function createReleaseManifest(
 
     const artifactPaths = await listReleaseArtifactPaths(releaseRoot);
     if (
-        CURRENT_BUILD_REQUIRED_RELEASE_ARTIFACTS.some(
+        REQUIRED_RELEASE_ARTIFACTS.some(
             (requiredPath) => !artifactPaths.includes(requiredPath)
         )
     ) {
@@ -546,7 +570,7 @@ function parseSchema(value: unknown): DashboardReleaseManifest["schema"] {
     return {
         maximumCompatible: maximumCompatible as number,
         migrations,
-        migrationInventorySha256: value.migrationInventorySha256 as string,
+        migrationInventorySha256: value.migrationInventorySha256,
         migrationRegistrySha256: value.migrationRegistrySha256,
         minimumCompatible: minimumCompatible as number,
         target: target as number,
@@ -603,7 +627,7 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         artifactPaths.some(
             (artifactPath_, index) => artifactPath_ !== sortedArtifactPaths[index]
         ) ||
-        COMPATIBLE_REQUIRED_RELEASE_ARTIFACTS.some(
+        REQUIRED_RELEASE_ARTIFACTS.some(
             (requiredPath) => !artifactPaths.includes(requiredPath)
         )
     ) {
@@ -618,8 +642,8 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         commitShort: value.commitShort,
         commitTitle: value.commitTitle,
         components: {
-            backendCommit: value.components.backendCommit as string,
-            frontendCommit: value.components.frontendCommit as string,
+            backendCommit: value.components.backendCommit,
+            frontendCommit: value.components.frontendCommit,
         },
         formatVersion: value.formatVersion,
         schema: parseSchema(value.schema),
@@ -662,9 +686,12 @@ export async function loadReleaseManifest(
         ) {
             throw new TypeError("Release manifest must be a bounded regular file");
         }
-        // eslint-disable-next-line unicorn/consistent-json-file-read -- The pinned no-follow descriptor must remain the read target.
-        const serialized = await file.readFile("utf8");
-        return parseReleaseManifest(JSON.parse(serialized) as unknown);
+        const serialized = Buffer.alloc(stat.size);
+        const { bytesRead } = await file.read(serialized, 0, stat.size, 0);
+        if (bytesRead !== stat.size) {
+            throw new TypeError("Release manifest could not be read completely");
+        }
+        return parseReleaseManifest(JSON.parse(serialized.toString("utf8")) as unknown);
     } finally {
         await file.close();
     }
@@ -748,7 +775,9 @@ export async function loadRuntimeReleaseIdentity(
         try {
             await verifyReleaseBuildIdentities(realReleaseRoot, manifest);
         } catch (error) {
-            console.warn("[ReleaseManifest] Build identity verification failed:", error);
+            logger.warn("release_manifest.build_identity_verification_failed", {
+                error,
+            });
             return {
                 artifactCount: manifest.artifacts.length,
                 backendCommit: manifest.components.backendCommit,
@@ -832,17 +861,18 @@ export function getRuntimeReleaseIdentity(
         promise,
     };
     runtimeReleaseIdentityCacheState.entry = cacheEntry;
-    void promise
-        .then(() => {
+    void (async () => {
+        try {
+            await promise;
             if (runtimeReleaseIdentityCacheState.entry === cacheEntry) {
                 cacheEntry.expiresAt = Date.now() + RUNTIME_RELEASE_VERIFICATION_CACHE_MS;
             }
-        })
-        .catch(() => {
+        } catch {
             if (runtimeReleaseIdentityCacheState.entry === cacheEntry) {
                 runtimeReleaseIdentityCacheState.entry = undefined;
             }
-        });
+        }
+    })();
     return promise;
 }
 

@@ -21,7 +21,7 @@ coverage:
                 flags:
                     - frontend
                 paths:
-                    - src/
+                    - frontend/src/
         patch:
             backend:
                 target: 85%
@@ -40,7 +40,7 @@ coverage:
                 flags:
                     - frontend
                 paths:
-                    - src/
+                    - frontend/src/
 
 comment:
     layout: "reach,diff,flags,tree"
@@ -50,7 +50,7 @@ comment:
 flags:
     frontend:
         paths:
-            - src/
+            - frontend/src/
     backend:
         paths:
             - backend/src/

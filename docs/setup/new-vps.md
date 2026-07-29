@@ -10,7 +10,8 @@ project.
 - Ubuntu system user with systemd user services available.
 - Git access as `mira-2026`.
 - Doppler CLI installed and authenticated for project/config `rajohan/prd`.
-- Bun installed at `/home/ubuntu/.bun/bin/bun`.
+- Bun Canary installed at `/home/ubuntu/.bun/bin/bun`, matching the repository
+  `.bun-version` channel.
 - OpenClaw installed and running its gateway.
 - Tailscale or equivalent private access path for the Dashboard UI.
 
@@ -37,11 +38,11 @@ git clone https://github.com/rajohan/Mira-Dashboard.git \
 cd /home/ubuntu/projects/mira-dashboard/production/checkout
 ```
 
-Install dependencies:
+Select the repository runtime channel, then install dependencies:
 
 ```bash
-bun install --frozen-lockfile
-cd backend
+bun upgrade --canary
+bun --revision
 bun install --frozen-lockfile
 ```
 

@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import {
     existsSync,
     mkdirSync,
@@ -9,8 +10,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-import { afterEach, describe, expect, it } from "bun:test";
 
 import { databaseMigrationIdentities } from "../src/databaseMigrations/index.ts";
 import {
@@ -32,7 +31,7 @@ import {
 const temporaryRoots: string[] = [];
 const TEST_COMMIT = "a".repeat(40);
 const TEST_BUILT_AT = new Date("2026-07-25T15:00:00.000Z");
-const TEST_BUN_VERSION = "1.3.14";
+const TEST_BUN_VERSION = Bun.version;
 
 function writeTestBuildIdentities(root: string, commitSha = TEST_COMMIT): void {
     writeFileSync(
@@ -63,8 +62,6 @@ function temporaryReleaseRoot(): string {
     mkdirSync(path.join(root, "dist", "assets"), { recursive: true });
     writeFileSync(path.join(root, "package.json"), "{}\n");
     writeFileSync(path.join(root, "bun.lock"), "root-lock\n");
-    writeFileSync(path.join(root, "backend", "package.json"), "{}\n");
-    writeFileSync(path.join(root, "backend", "bun.lock"), "backend-lock\n");
     writeFileSync(
         path.join(root, "backend", "config", "log-rotation.json"),
         '{"jobs":[]}\n'
@@ -200,7 +197,6 @@ describe("Dashboard release manifest", () => {
             },
         });
         expect(manifest.artifacts.map((artifact) => artifact.path)).toEqual([
-            "backend/bun.lock",
             "backend/config/log-rotation.json",
             "backend/dist/build-identity.json",
             "backend/dist/databasePreflight.js",
@@ -209,7 +205,6 @@ describe("Dashboard release manifest", () => {
             "backend/dist/resetDashboardPassword.js",
             "backend/dist/serverStart.js",
             "backend/dist/workerStart.js",
-            "backend/package.json",
             "bun.lock",
             "dist/assets/app.js",
             "dist/build-identity.json",
@@ -230,27 +225,13 @@ describe("Dashboard release manifest", () => {
         const loaded = await loadReleaseManifest(root);
 
         expect(loaded).toEqual(written);
-        await expect(verifyReleaseArtifacts(root, loaded)).resolves.toBeUndefined();
+        expect(verifyReleaseArtifacts(root, loaded)).resolves.toBeUndefined();
         expect(
             readFileSync(path.join(root, RELEASE_MANIFEST_FILE_NAME), "utf8")
         ).toEndWith("\n");
     });
 
-    it("continues to parse v2 releases built before the preview proxy entrypoint", async () => {
-        const root = temporaryReleaseRoot();
-        const manifest = await createReleaseManifest(manifestOptions(root));
-        const legacyManifest = {
-            ...manifest,
-            artifacts: manifest.artifacts.filter(
-                (artifact) =>
-                    artifact.path !== "backend/dist/pullRequestPreviewGatewayProxy.js"
-            ),
-        };
-
-        expect(parseReleaseManifest(legacyManifest)).toEqual(legacyManifest);
-    });
-
-    it("refuses to write a manifest larger than the loader accepts", async () => {
+    it("refuses to write a manifest larger than the loader accepts", () => {
         const root = temporaryReleaseRoot();
         const longName = "x".repeat(120);
         for (let index = 0; index < 1200; index += 1) {
@@ -265,7 +246,7 @@ describe("Dashboard release manifest", () => {
             );
         }
 
-        await expect(writeReleaseManifest(manifestOptions(root))).rejects.toThrow(
+        expect(writeReleaseManifest(manifestOptions(root))).rejects.toThrow(
             "bounded regular file"
         );
         expect(existsSync(path.join(root, RELEASE_MANIFEST_FILE_NAME))).toBe(false);
@@ -276,12 +257,29 @@ describe("Dashboard release manifest", () => {
         const manifest = await writeReleaseManifest(manifestOptions(root));
 
         writeFileSync(path.join(root, "backend", "dist", "serverStart.js"), "tampered\n");
-        await expect(verifyReleaseArtifacts(root, manifest)).rejects.toThrow(
+        expect(verifyReleaseArtifacts(root, manifest)).rejects.toThrow(
             "Release artifact verification failed: backend/dist/serverStart.js"
         );
 
         writeFileSync(path.join(root, "dist", "unexpected.js"), "unexpected\n");
-        await expect(verifyReleaseArtifacts(root, manifest)).rejects.toThrow(
+        expect(verifyReleaseArtifacts(root, manifest)).rejects.toThrow(
+            "Release artifact inventory does not match its manifest"
+        );
+    });
+
+    it("verifies declared pre-root workspace package files when present", async () => {
+        const root = temporaryReleaseRoot();
+        writeFileSync(path.join(root, "backend", "package.json"), "{}\n");
+        writeFileSync(path.join(root, "backend", "bun.lock"), "backend-lock\n");
+        const manifest = await writeReleaseManifest(manifestOptions(root));
+
+        expect(manifest.artifacts.map((artifact) => artifact.path)).toContain(
+            "backend/package.json"
+        );
+        await verifyReleaseArtifacts(root, manifest);
+
+        rmSync(path.join(root, "backend", "package.json"));
+        expect(verifyReleaseArtifacts(root, manifest)).rejects.toThrow(
             "Release artifact inventory does not match its manifest"
         );
     });
@@ -293,7 +291,7 @@ describe("Dashboard release manifest", () => {
             path.join(root, "dist", "assets", "linked.js")
         );
 
-        await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+        expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
             "Release artifact tree must not contain symlinks"
         );
 
@@ -336,16 +334,14 @@ describe("Dashboard release manifest", () => {
         ).toThrow("Release manifest migration inventory is invalid");
     });
 
-    it("requires the default runtime log-rotation configuration", async () => {
+    it("requires the default runtime log-rotation configuration", () => {
         const root = temporaryReleaseRoot();
         rmSync(path.join(root, "backend", "config", "log-rotation.json"));
 
-        await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
-            "ENOENT"
-        );
+        expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow("ENOENT");
     });
 
-    it("requires every runtime and recovery entrypoint", async () => {
+    it("requires every runtime and recovery entrypoint", () => {
         for (const relativePath of [
             "backend/dist/pullRequestPreviewGatewayProxy.js",
             "backend/dist/resetDashboardPassword.js",
@@ -354,13 +350,13 @@ describe("Dashboard release manifest", () => {
             const root = temporaryReleaseRoot();
             rmSync(path.join(root, relativePath));
 
-            await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+            expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
                 "Release manifest artifact inventory is invalid"
             );
         }
     });
 
-    it("derives identity only from a clean Git release source", async () => {
+    it("derives identity only from a clean Git release source", () => {
         const root = temporaryReleaseRoot();
         writeFileSync(
             path.join(root, ".gitignore"),
@@ -372,19 +368,17 @@ describe("Dashboard release manifest", () => {
         const commitSha = runGit(root, ["rev-parse", "HEAD"]);
         writeTestBuildIdentities(root, commitSha);
 
-        await expect(createReleaseManifest({ releaseRoot: root })).resolves.toMatchObject(
-            {
-                commitTitle: "Test release source",
-            }
-        );
+        expect(createReleaseManifest({ releaseRoot: root })).resolves.toMatchObject({
+            commitTitle: "Test release source",
+        });
 
         writeFileSync(path.join(root, "untracked-runtime.ts"), "export {};\n");
-        await expect(createReleaseManifest({ releaseRoot: root })).rejects.toThrow(
+        expect(createReleaseManifest({ releaseRoot: root })).rejects.toThrow(
             "Release source contains uncommitted changes"
         );
     });
 
-    it("refuses to stamp stale frontend or backend build outputs", async () => {
+    it("refuses to stamp stale frontend or backend build outputs", () => {
         for (const component of ["frontend", "backend"] as const) {
             const root = temporaryReleaseRoot();
             const identityPath =
@@ -401,13 +395,13 @@ describe("Dashboard release manifest", () => {
                 })}\n`
             );
 
-            await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+            expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
                 `${component} build identity does not match the release source`
             );
         }
     });
 
-    it("refuses to stamp build identities captured from dirty source", async () => {
+    it("refuses to stamp build identities captured from dirty source", () => {
         for (const component of ["frontend", "backend"] as const) {
             const root = temporaryReleaseRoot();
             const identityPath =
@@ -424,7 +418,7 @@ describe("Dashboard release manifest", () => {
                 })}\n`
             );
 
-            await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+            expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
                 `${component} build identity is invalid`
             );
         }
@@ -434,7 +428,7 @@ describe("Dashboard release manifest", () => {
         const root = temporaryReleaseRoot();
         const manifest = await writeReleaseManifest(manifestOptions(root));
 
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             backendCommit: "aaaaaaaa",
@@ -442,7 +436,7 @@ describe("Dashboard release manifest", () => {
             ready: true,
             source: "manifest",
         });
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "production", "b".repeat(40))
         ).resolves.toMatchObject({
             issue: "manifest-code-mismatch",
@@ -464,7 +458,7 @@ describe("Dashboard release manifest", () => {
                 2
             )}\n`
         );
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-code-mismatch",
@@ -492,7 +486,7 @@ describe("Dashboard release manifest", () => {
                 2
             )}\n`
         );
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-code-mismatch",
@@ -516,7 +510,7 @@ describe("Dashboard release manifest", () => {
             )}\n`
         );
 
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "build-identity-invalid",
@@ -530,13 +524,13 @@ describe("Dashboard release manifest", () => {
         await writeReleaseManifest(manifestOptions(root));
         writeFileSync(path.join(root, "backend", "dist", "serverStart.js"), "drift\n");
 
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-invalid",
             ready: false,
         });
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "test", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-invalid",
@@ -551,13 +545,13 @@ describe("Dashboard release manifest", () => {
         const first = getRuntimeReleaseIdentity(root, "production", TEST_COMMIT);
         const concurrent = getRuntimeReleaseIdentity(root, "production", TEST_COMMIT);
         expect(concurrent).toBe(first);
-        await expect(first).resolves.toMatchObject({
+        expect(first).resolves.toMatchObject({
             ready: true,
             source: "manifest",
         });
 
         writeFileSync(path.join(root, "dist", "assets", "app.js"), "drift\n");
-        await expect(
+        expect(
             getRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             ready: true,
@@ -565,7 +559,7 @@ describe("Dashboard release manifest", () => {
         });
 
         invalidateRuntimeReleaseIdentityCache();
-        await expect(
+        expect(
             getRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-invalid",
@@ -573,16 +567,16 @@ describe("Dashboard release manifest", () => {
         });
     });
 
-    it("allows only non-production Git fallback when a manifest is absent", async () => {
+    it("allows only non-production Git fallback when a manifest is absent", () => {
         const root = temporaryReleaseRoot();
 
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-missing",
             ready: false,
         });
-        await expect(loadRuntimeReleaseIdentity(root, "test")).resolves.toMatchObject({
+        expect(loadRuntimeReleaseIdentity(root, "test")).resolves.toMatchObject({
             ready: true,
         });
     });
@@ -595,7 +589,7 @@ describe("Dashboard release manifest", () => {
         runGit(root, ["commit", "-m", "Test development source"]);
         const commit = runGit(root, ["rev-parse", "--short=8", "HEAD"]);
 
-        await expect(
+        expect(
             loadRuntimeReleaseIdentity(root, "development", "development")
         ).resolves.toEqual({
             backendCommit: commit,

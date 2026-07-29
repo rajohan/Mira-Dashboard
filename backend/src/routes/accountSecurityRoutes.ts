@@ -1,8 +1,25 @@
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import type { Server } from "bun";
 
+import type {
+    AccountSecuritySummary,
+    DashboardMfaMethod,
+    MfaStepUpResponse,
+    PasswordReauthenticationResponse,
+    TotpConfirmationResponse,
+    WebAuthnRegistrationResponse,
+} from "../../../contracts/accountSecurity.ts";
 import {
-    type AuthMethod,
+    parseAccountPasswordRequest,
+    parseMfaCodeRequest,
+    parsePasswordChangeRequest,
+    parseTotpConfirmationRequest,
+    parseTotpEnrollmentRequest,
+    parseWebAuthnAuthenticationRequest,
+    parseWebAuthnRegistrationRequest,
+} from "../../../contracts/accountSecurity.ts";
+import type { ContractParser } from "../../../contracts/runtime.ts";
+import {
     type AuthSession,
     changePasswordAndRotateSession,
     createSession,
@@ -20,14 +37,17 @@ import {
     authSession,
     clearPendingLoginCookie,
     clearSessionCookie,
-    HttpError,
     json,
-    readJson,
     sessionCookie,
     sessionIdFromCookie,
     withCookies,
 } from "../http.ts";
 import { currentRequestAuditContext } from "../requestAuditContext.ts";
+import {
+    type ParametersRequest,
+    readApiJsonOrError,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import { writeAuditEvent } from "../services/auditEvents.ts";
 import {
     authenticationThrottleResponse,
@@ -59,20 +79,6 @@ import {
     webAuthnConfig,
 } from "../services/webAuthn.ts";
 
-type ParametersRequest<T extends string> = Request & {
-    params: Record<T, string>;
-};
-
-interface SecurityBody {
-    code?: unknown;
-    currentPassword?: unknown;
-    factorId?: unknown;
-    label?: unknown;
-    newPassword?: unknown;
-    password?: unknown;
-    response?: unknown;
-}
-
 interface SecurityRequestContext {
     session: AuthSession;
     sessionToken: string;
@@ -94,20 +100,16 @@ const defaultWebAuthnDependencies: AccountSecurityWebAuthnDependencies = {
 
 const SESSION_ID_PATTERN = /^[a-f0-9]{32}$/u;
 
-async function readSecurityBody(request: Request): Promise<SecurityBody | Response> {
-    try {
-        const body = await readJson<unknown>(request, {
-            maxBytes: 256 * 1024,
-        });
-        if (!body || typeof body !== "object" || Array.isArray(body)) {
-            return json({ error: "Invalid request body" }, { status: 400 });
-        }
-        return body as SecurityBody;
-    } catch (error) {
-        return error instanceof HttpError
-            ? json({ error: error.message }, { status: error.statusCode })
-            : json({ error: "Invalid request body" }, { status: 400 });
-    }
+async function readSecurityBody<T>(
+    request: Request,
+    parser: ContractParser<T>
+): Promise<Response | T> {
+    return readApiJsonOrError(request, parser, {
+        code: "invalid_account_security_request",
+        context: "account-security.body",
+        maxBytes: 256 * 1024,
+        message: "Invalid request body",
+    });
 }
 
 function requestContext(request: Request): SecurityRequestContext | Response {
@@ -115,7 +117,11 @@ function requestContext(request: Request): SecurityRequestContext | Response {
     const session = sessionToken ? authSession(request) : undefined;
     return sessionToken && session
         ? { session, sessionToken }
-        : json({ error: "Unauthorized" }, { status: 401 });
+        : routeFailureResponse({
+              context: "account-security",
+              message: "Unauthorized",
+              status: 401,
+          });
 }
 
 function normalizedCode(value: unknown): string | undefined {
@@ -145,13 +151,12 @@ function registrationResponse(value: unknown): RegistrationResponseJSON | undefi
 }
 
 function recentVerificationRequired(): Response {
-    return json(
-        {
-            code: "recent_verification_required",
-            error: "Recent verification is required",
-        },
-        { status: 403 }
-    );
+    return routeFailureResponse({
+        code: "recent_verification_required",
+        context: "account-security",
+        message: "Recent verification is required",
+        status: 403,
+    });
 }
 
 function canManageFactors(session: AuthSession): boolean {
@@ -200,7 +205,7 @@ function recentRemainingMs(timestamp: string | undefined): number | undefined {
     return Math.max(0, Math.min(ttlMs, parsed + ttlMs - Date.now()));
 }
 
-function securitySummary(context: SecurityRequestContext) {
+function securitySummary(context: SecurityRequestContext): AccountSecuritySummary {
     const factors = getMultiFactorSummary(context.session.id);
     const totp = (() => {
         try {
@@ -255,7 +260,7 @@ function rotateAfterVerification(
     request: Request,
     server: Server<unknown>,
     context: SecurityRequestContext,
-    method: Exclude<AuthMethod, "password">
+    method: DashboardMfaMethod
 ): Response {
     const timestamp = new Date().toISOString();
     const rotated = rotateSession(context.sessionToken, {
@@ -265,12 +270,21 @@ function rotateAfterVerification(
         userAgent: request.headers.get("user-agent") ?? context.session.userAgent,
     });
     if (!rotated) {
-        return json({ error: "Session rotation failed" }, { status: 409 });
+        return routeFailureResponse({
+            context: "account-security",
+            message: "Session rotation failed",
+            status: 409,
+        });
     }
     securityEvent("account.step-up", String(context.session.id), { method });
-    return withCookies(json({ isOk: true, method, verifiedAt: timestamp }), [
-        sessionCookie(request, server, rotated),
-    ]);
+    return withCookies(
+        json({
+            isOk: true,
+            method,
+            verifiedAt: timestamp,
+        } satisfies MfaStepUpResponse),
+        [sessionCookie(request, server, rotated)]
+    );
 }
 
 function upgradeAfterFirstFactor(
@@ -291,12 +305,11 @@ function upgradeAfterFirstFactor(
     if (!rotated) {
         revokeUserSessions(context.session.id);
         return withCookies(
-            json(
-                {
-                    error: "MFA was enabled, but the session upgrade failed; sign in again",
-                },
-                { status: 409 }
-            ),
+            routeFailureResponse({
+                context: "account-security",
+                message: "MFA was enabled, but the session upgrade failed; sign in again",
+                status: 409,
+            }),
             [clearSessionCookie(request, server)]
         );
     }
@@ -322,11 +335,12 @@ export function createAccountSecurityRoutes(
                 const context = requestContext(request);
                 if (context instanceof Response) return context;
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "account-password",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(request, parseAccountPasswordRequest);
                 if (body instanceof Response) return body;
                 const password = normalizedPassword(body.password);
                 const user = findUserById(context.session.id);
@@ -336,7 +350,11 @@ export function createAccountSecurityRoutes(
                     !(await verifyPassword(password, user.password_hash))
                 ) {
                     recordAuthenticationFailure("account-password", context.session.id);
-                    return json({ error: "Invalid current password" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid current password",
+                        status: 400,
+                    });
                 }
                 clearAuthenticationFailures("account-password", context.session.id);
                 const timestamp = new Date().toISOString();
@@ -347,12 +365,20 @@ export function createAccountSecurityRoutes(
                         request.headers.get("user-agent") ?? context.session.userAgent,
                 });
                 if (!rotated) {
-                    return json({ error: "Session rotation failed" }, { status: 409 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Session rotation failed",
+                        status: 409,
+                    });
                 }
                 securityEvent("account.password-reauth", String(context.session.id));
-                return withCookies(json({ isOk: true, verifiedAt: timestamp }), [
-                    sessionCookie(request, server, rotated),
-                ]);
+                return withCookies(
+                    json({
+                        isOk: true,
+                        verifiedAt: timestamp,
+                    } satisfies PasswordReauthenticationResponse),
+                    [sessionCookie(request, server, rotated)]
+                );
             },
         },
 
@@ -367,11 +393,12 @@ export function createAccountSecurityRoutes(
                     return recentVerificationRequired();
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "account-password",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(request, parsePasswordChangeRequest);
                 if (body instanceof Response) return body;
                 const currentPassword = normalizedPassword(body.currentPassword);
                 const newPassword =
@@ -381,10 +408,11 @@ export function createAccountSecurityRoutes(
                         ? body.newPassword
                         : undefined;
                 if (!newPassword) {
-                    return json(
-                        { error: "New password must be 8-256 characters" },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "New password must be 8-256 characters",
+                        status: 400,
+                    });
                 }
                 const user = findUserById(context.session.id);
                 if (
@@ -393,16 +421,19 @@ export function createAccountSecurityRoutes(
                     !(await verifyPassword(currentPassword, user.password_hash))
                 ) {
                     recordAuthenticationFailure("account-password", context.session.id);
-                    return json({ error: "Invalid current password" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid current password",
+                        status: 400,
+                    });
                 }
                 clearAuthenticationFailures("account-password", context.session.id);
                 if (await verifyPassword(newPassword, user.password_hash)) {
-                    return json(
-                        {
-                            error: "New password must differ from the current password",
-                        },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "New password must differ from the current password",
+                        status: 400,
+                    });
                 }
                 const changed = await changePasswordAndRotateSession(
                     context.sessionToken,
@@ -415,10 +446,11 @@ export function createAccountSecurityRoutes(
                     }
                 );
                 if (!changed) {
-                    return json(
-                        { error: "Session changed; sign in and try again" },
-                        { status: 409 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Session changed; sign in and try again",
+                        status: 409,
+                    });
                 }
                 clearAuthenticationFailures("login-password", context.session.username);
                 securityEvent("account.password-changed", String(context.session.id), {
@@ -439,11 +471,12 @@ export function createAccountSecurityRoutes(
                 const context = requestContext(request);
                 if (context instanceof Response) return context;
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(request, parseMfaCodeRequest);
                 if (body instanceof Response) return body;
                 const code = normalizedCode(body.code);
                 const factor = code
@@ -451,7 +484,11 @@ export function createAccountSecurityRoutes(
                     : undefined;
                 if (!factor) {
                     recordAuthenticationFailure("second-factor", context.session.id);
-                    return json({ error: "Invalid authenticator code" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid authenticator code",
+                        status: 400,
+                    });
                 }
                 clearAuthenticationFailures("second-factor", context.session.id);
                 return rotateAfterVerification(request, server, context, "totp");
@@ -463,18 +500,23 @@ export function createAccountSecurityRoutes(
                 const context = requestContext(request);
                 if (context instanceof Response) return context;
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(request, parseMfaCodeRequest);
                 if (body instanceof Response) return body;
                 const code = normalizedCode(body.code);
                 const verified =
                     code && (await verifyRecoveryCodeForUser(context.session.id, code));
                 if (!verified) {
                     recordAuthenticationFailure("second-factor", context.session.id);
-                    return json({ error: "Invalid recovery code" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid recovery code",
+                        status: 400,
+                    });
                 }
                 clearAuthenticationFailures("second-factor", context.session.id);
                 return rotateAfterVerification(request, server, context, "recovery");
@@ -487,6 +529,7 @@ export function createAccountSecurityRoutes(
                 const context = requestContext(request);
                 if (context instanceof Response) return context;
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     context.session.id
                 );
@@ -499,10 +542,11 @@ export function createAccountSecurityRoutes(
                     });
                     return json({ options });
                 } catch {
-                    return json(
-                        { error: "Security-key verification is unavailable" },
-                        { status: 503 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Security-key verification is unavailable",
+                        status: 503,
+                    });
                 }
             },
         },
@@ -512,11 +556,15 @@ export function createAccountSecurityRoutes(
                 const context = requestContext(request);
                 if (context instanceof Response) return context;
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(
+                    request,
+                    parseWebAuthnAuthenticationRequest
+                );
                 if (body instanceof Response) return body;
                 const response = parseAuthenticationResponse(body.response);
                 const factor = response
@@ -531,10 +579,11 @@ export function createAccountSecurityRoutes(
                     : undefined;
                 if (!factor) {
                     recordAuthenticationFailure("second-factor", context.session.id);
-                    return json(
-                        { error: "Invalid security-key response" },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid security-key response",
+                        status: 400,
+                    });
                 }
                 clearAuthenticationFailures("second-factor", context.session.id);
                 return rotateAfterVerification(request, server, context, "webauthn");
@@ -550,27 +599,27 @@ export function createAccountSecurityRoutes(
                     return recentVerificationRequired();
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(request, parseTotpEnrollmentRequest);
                 if (body instanceof Response) return body;
                 let label: string;
                 try {
                     label = normalizeFactorLabel(body.label, "Authenticator app");
                 } catch (error) {
-                    return json(
-                        {
-                            error:
-                                error instanceof Error
-                                    ? error.message
-                                    : "Invalid factor label",
-                        },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message:
+                            error instanceof Error
+                                ? error.message
+                                : "Invalid factor label",
+                        status: 400,
+                    });
                 }
-                const enrollment = await createTotpEnrollment(
+                const enrollment = createTotpEnrollment(
                     context.session.id,
                     context.session.username,
                     label
@@ -590,17 +639,25 @@ export function createAccountSecurityRoutes(
                     return recentVerificationRequired();
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "second-factor",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(
+                    request,
+                    parseTotpConfirmationRequest
+                );
                 if (body instanceof Response) return body;
                 let factorId: string;
                 try {
                     factorId = normalizeFactorId(body.factorId);
                 } catch {
-                    return json({ error: "Invalid factor identifier" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid factor identifier",
+                        status: 400,
+                    });
                 }
                 const code = normalizedCode(body.code);
                 const confirmation = code
@@ -608,7 +665,11 @@ export function createAccountSecurityRoutes(
                     : undefined;
                 if (!confirmation) {
                     recordAuthenticationFailure("second-factor", context.session.id);
-                    return json({ error: "Invalid authenticator code" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid authenticator code",
+                        status: 400,
+                    });
                 }
                 clearAuthenticationFailures("second-factor", context.session.id);
                 securityEvent("account.totp-added", factorId);
@@ -617,7 +678,7 @@ export function createAccountSecurityRoutes(
                     isOk: true,
                     recoveryCodes: confirmation.recoveryCodes,
                     sessionRotated: confirmation.enabledMfa,
-                };
+                } satisfies TotpConfirmationResponse;
                 return confirmation.enabledMfa
                     ? upgradeAfterFirstFactor(
                           request,
@@ -642,15 +703,19 @@ export function createAccountSecurityRoutes(
                 try {
                     factorId = normalizeFactorId(request.params.factorId);
                 } catch {
-                    return json({ error: "Invalid factor identifier" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid factor identifier",
+                        status: 400,
+                    });
                 }
                 if (!didRemoveTotpFactor(context.session.id, factorId)) {
-                    return json(
-                        {
-                            error: "Factor not found or cannot remove the final second factor",
-                        },
-                        { status: 409 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message:
+                            "Factor not found or cannot remove the final second factor",
+                        status: 409,
+                    });
                 }
                 securityEvent("account.totp-removed", factorId);
                 return json({ isOk: true });
@@ -676,10 +741,11 @@ export function createAccountSecurityRoutes(
                     );
                     return json({ options });
                 } catch {
-                    return json(
-                        { error: "Security-key enrollment is unavailable" },
-                        { status: 503 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Security-key enrollment is unavailable",
+                        status: 503,
+                    });
                 }
             },
         },
@@ -691,21 +757,23 @@ export function createAccountSecurityRoutes(
                 if (!canManageFactors(context.session)) {
                     return recentVerificationRequired();
                 }
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(
+                    request,
+                    parseWebAuthnRegistrationRequest
+                );
                 if (body instanceof Response) return body;
                 let label: string;
                 try {
                     label = normalizeFactorLabel(body.label, "Security key");
                 } catch (error) {
-                    return json(
-                        {
-                            error:
-                                error instanceof Error
-                                    ? error.message
-                                    : "Invalid factor label",
-                        },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message:
+                            error instanceof Error
+                                ? error.message
+                                : "Invalid factor label",
+                        status: 400,
+                    });
                 }
                 const response = registrationResponse(body.response);
                 const registration = response
@@ -720,10 +788,11 @@ export function createAccountSecurityRoutes(
                       )
                     : undefined;
                 if (!registration) {
-                    return json(
-                        { error: "Invalid security-key response" },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid security-key response",
+                        status: 400,
+                    });
                 }
                 securityEvent(
                     "account.security-key-added",
@@ -737,7 +806,7 @@ export function createAccountSecurityRoutes(
                     isOk: true,
                     recoveryCodes: registration.confirmation.recoveryCodes,
                     sessionRotated: registration.confirmation.enabledMfa,
-                };
+                } satisfies WebAuthnRegistrationResponse;
                 return registration.confirmation.enabledMfa
                     ? upgradeAfterFirstFactor(
                           request,
@@ -763,12 +832,12 @@ export function createAccountSecurityRoutes(
                 }
                 const credentialId = request.params.credentialId;
                 if (!didRemoveWebAuthnCredential(context.session.id, credentialId)) {
-                    return json(
-                        {
-                            error: "Credential not found or cannot remove the final second factor",
-                        },
-                        { status: 409 }
-                    );
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message:
+                            "Credential not found or cannot remove the final second factor",
+                        status: 409,
+                    });
                 }
                 securityEvent(
                     "account.security-key-removed",
@@ -809,11 +878,12 @@ export function createAccountSecurityRoutes(
                     return recentVerificationRequired();
                 }
                 const throttled = authenticationThrottleResponse(
+                    request,
                     "account-password",
                     context.session.id
                 );
                 if (throttled) return throttled;
-                const body = await readSecurityBody(request);
+                const body = await readSecurityBody(request, parseAccountPasswordRequest);
                 if (body instanceof Response) return body;
                 const password = normalizedPassword(body.password);
                 const user = findUserById(context.session.id);
@@ -823,7 +893,11 @@ export function createAccountSecurityRoutes(
                     !(await verifyPassword(password, user.password_hash))
                 ) {
                     recordAuthenticationFailure("account-password", context.session.id);
-                    return json({ error: "Invalid current password" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid current password",
+                        status: 400,
+                    });
                 }
                 clearAuthenticationFailures("account-password", context.session.id);
                 disableMultiFactor(context.session.id);
@@ -853,10 +927,18 @@ export function createAccountSecurityRoutes(
                 }
                 const sessionId = request.params.sessionId;
                 if (!SESSION_ID_PATTERN.test(sessionId)) {
-                    return json({ error: "Invalid session identifier" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Invalid session identifier",
+                        status: 400,
+                    });
                 }
                 if (!didRevokeUserSession(context.session.id, sessionId)) {
-                    return json({ error: "Session not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "account-security",
+                        message: "Session not found",
+                        status: 404,
+                    });
                 }
                 securityEvent("account.session-revoked", sessionId, {
                     current: sessionId === context.session.sessionId,

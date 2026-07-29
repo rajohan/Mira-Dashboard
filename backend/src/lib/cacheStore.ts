@@ -9,8 +9,8 @@ export interface CacheEntryRow {
     last_attempt_at: string;
     expires_at: string;
     status: string;
-    error_code: string;
-    error_message: string;
+    error_code: string | undefined;
+    error_message: string | undefined;
     consecutive_failures: string;
     meta: string;
 }
@@ -23,13 +23,17 @@ interface SqliteCacheEntryRow {
     last_attempt_at: string;
     expires_at: string;
     status: string;
-    error_code: string | undefined;
-    error_message: string | undefined;
+    error_code: string | null | undefined;
+    error_message: string | null | undefined;
     consecutive_failures: number;
     metadata_json: string;
 }
 
-/** Parses JSON field. */
+/**
+ * Parses JSON field.
+ * @param value Value to process.
+ * @returns Parsed JSON field.
+ */
 export function parseJsonField<T>(value: string): T | undefined {
     if (!value) {
         return undefined;
@@ -64,7 +68,7 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | un
     if (!row) {
         return undefined;
     }
-    const expiresAtMs = row.expires_at === "" ? NaN : Date.parse(row.expires_at);
+    const expiresAtMs = row.expires_at === "" ? Number.NaN : Date.parse(row.expires_at);
     const isExpired =
         row.status === "fresh" &&
         Number.isFinite(expiresAtMs) &&
@@ -78,15 +82,19 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | un
         last_attempt_at: row.last_attempt_at,
         expires_at: row.expires_at,
         status: isExpired ? "stale" : row.status,
-        error_code: row.error_code ?? "",
-        error_message: row.error_message ?? "",
+        error_code: row.error_code ?? undefined,
+        error_message: row.error_message ?? undefined,
         consecutive_failures: String(row.consecutive_failures),
         meta: row.metadata_json,
     };
 }
 
-/** Returns cache entry. */
-export async function getCacheEntry(key: string): Promise<CacheEntryRow | undefined> {
+/**
+ * Returns cache entry.
+ * @param key Lookup key.
+ * @returns cache entry.
+ */
+export function getCacheEntry(key: string): CacheEntryRow | undefined {
     const row = database
         .prepare(
             `SELECT
@@ -110,15 +118,22 @@ export async function getCacheEntry(key: string): Promise<CacheEntryRow | undefi
     return mapCacheEntry(row);
 }
 
-/** Marks a cache entry stale without discarding its last successful payload. */
+/**
+ * Marks a cache entry stale without discarding its last successful payload.
+ * @param key Lookup key.
+ * @param now Now value.
+ */
 export function invalidateCacheEntry(key: string, now = new Date()): void {
     database
         .prepare("UPDATE cache_entries SET expires_at = ? WHERE key = ?")
         .run(now.toISOString(), key);
 }
 
-/** Returns all cache entries. */
-export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
+/**
+ * Returns all cache entries.
+ * @returns all cache entries.
+ */
+export function getAllCacheEntries(): CacheEntryRow[] {
     const rows = database
         .prepare(
             `SELECT
@@ -143,8 +158,11 @@ export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
         .filter((row): row is CacheEntryRow => row !== undefined);
 }
 
-/** Returns all cache entries without loading payload data. */
-export async function getCacheStatusEntries(): Promise<CacheEntryRow[]> {
+/**
+ * Returns all cache entries without loading payload data.
+ * @returns all cache entries without loading payload data.
+ */
+export function getCacheStatusEntries(): CacheEntryRow[] {
     const rows = database
         .prepare(
             `SELECT

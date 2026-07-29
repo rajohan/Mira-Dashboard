@@ -1,9 +1,9 @@
+import { describe, expect, it, jest } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Server } from "bun";
-import { describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
 import * as databaseMigrationRunnerModule from "../src/databaseMigrationRunner.ts";
@@ -64,6 +64,8 @@ import {
     parsePublicGithubPullRequests,
     validatePrNumber,
 } from "../src/services/pullRequests.ts";
+import { httpOrigin, httpUrl } from "./support/httpUrls.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 function serverWithAddress(address: string): Server<unknown> {
     return {
@@ -73,27 +75,39 @@ function serverWithAddress(address: string): Server<unknown> {
 
 const isCutoverActive = () => true;
 
+type TestRouteHandler = (
+    request: Request,
+    server: Server<unknown>
+) => Promise<Response> | Response;
+
 function canonicalPath(value: string): string {
     return path.join(realpathSync(path.dirname(value)), path.basename(value));
 }
 
-async function callTestRoute(
+function isTestRouteHandler(value: unknown): value is TestRouteHandler {
+    return typeof value === "function";
+}
+
+function callTestRoute(
     routes: Record<string, unknown>,
     path: string,
     server: Server<unknown>,
     init?: RequestInit
 ): Promise<Response> {
-    const entry = routes[path];
-    const handler =
-        typeof entry === "function"
-            ? entry
-            : typeof entry === "object" && entry !== null && "GET" in entry
-              ? entry.GET
-              : undefined;
-    if (typeof handler !== "function") {
-        throw new TypeError(`Missing test route: ${path}`);
-    }
-    return handler(new Request(`http://localhost${path}`, init), server);
+    return Promise.try(() => {
+        const entry = routes[path];
+        let handler: unknown;
+        if (typeof entry === "object" && entry !== null && "GET" in entry) {
+            handler = entry.GET;
+        }
+        if (isTestRouteHandler(entry)) {
+            handler = entry;
+        }
+        if (!isTestRouteHandler(handler)) {
+            throw new TypeError(`Missing test route: ${path}`);
+        }
+        return handler(new Request(`http://localhost${path}`, init), server);
+    });
 }
 
 describe("backend service utilities", () => {
@@ -128,7 +142,7 @@ describe("backend service utilities", () => {
             }),
         ]);
         expect(() => parsePublicGithubPullRequests([{ number: 335 }])).toThrow(
-            "GitHub public pull request response is invalid"
+            "publicPullRequests.0.base"
         );
     });
 
@@ -434,7 +448,7 @@ describe("backend service utilities", () => {
         const { sqlNullable } = await import("../src/database.ts");
         expect(sqlNullable("value")).toBe("value");
         expect(sqlNullable(0)).toBe(0);
-        expect(sqlNullable(undefined)).toBeNull();
+        expect(sqlNullable()).toBeNull();
     });
 
     it("normalizes optional backend values for API responses and environment defaults", () => {
@@ -652,6 +666,9 @@ describe("backend service utilities", () => {
         const deploymentId = `test-cutover-${Bun.randomUUIDv7()}`;
         const timestamp = new Date().toISOString();
         const originalNodeEnvironment = process.env.NODE_ENV;
+        const stderrSpy = jest
+            .spyOn(process.stderr, "write")
+            .mockImplementation(() => true);
         expect(isProductionDeploymentCutoverActive({ NODE_ENV: "test" })).toBe(false);
         try {
             database
@@ -676,7 +693,7 @@ describe("backend service utilities", () => {
             );
             expect(response.status).toBe(503);
             expect(response.headers.get("retry-after")).toBe("5");
-            await expect(response.json()).resolves.toEqual({
+            expect(response.json()).resolves.toEqual({
                 error: {
                     code: "deployment_cutover_in_progress",
                     message: "Dashboard writes are paused while the release is verified",
@@ -693,6 +710,7 @@ describe("backend service utilities", () => {
             database
                 .prepare("DELETE FROM deployment_jobs WHERE id = ?")
                 .run(deploymentId);
+            stderrSpy.mockRestore();
         }
         expect(isProductionDeploymentCutoverActive({ NODE_ENV: "production" })).toBe(
             false
@@ -708,7 +726,7 @@ describe("backend service utilities", () => {
         const invalidStatusError = Object.assign(new Error("bad"), { statusCode: 399 });
         expect(httpStatusCode(notFoundError)).toBe(404);
         expect(httpStatusCode(invalidStatusError)).toBe(500);
-        expect(httpStatusCode(undefined)).toBe(500);
+        expect(httpStatusCode()).toBe(500);
     });
 
     it("keeps filesystem helpers inside their configured root", () => {
@@ -852,8 +870,8 @@ describe("backend service utilities", () => {
     });
 
     it("serializes backup jobs without exposing live process handles", () => {
-        expect(mapBackupJob(undefined)).toBeUndefined();
-        const completed = Promise.resolve(undefined);
+        expect(mapBackupJob()).toBeUndefined();
+        const completed = Promise.resolve();
         expect(
             mapBackupJob({
                 id: "backup-1",
@@ -901,11 +919,11 @@ describe("backend service utilities", () => {
     });
 
     it("runs and limits local processes through the shared process helpers", async () => {
-        await expect(
+        expect(
             runProcess(process.execPath, ["--eval", "console.log('hello');"])
         ).resolves.toEqual({ code: 0, stdout: "hello\n", stderr: "" });
 
-        await expect(
+        expect(
             runProcess(process.execPath, ["--eval", "console.log('too much');"], {
                 maxBuffer: 4,
             })
@@ -931,12 +949,12 @@ describe("backend service utilities", () => {
             chunks.push(chunk);
         });
         expect(chunks.join("")).toBe("onetwo");
-        await expect(pipeProcessOutput(undefined, () => {})).resolves.toBeUndefined();
+        expect(pipeProcessOutput(undefined, () => {})).resolves.toBeUndefined();
     });
 
-    it("parses valid JSON request bodies", async () => {
+    it("parses valid JSON request bodies", () => {
         const validJsonBody = JSON.stringify({ ok: true });
-        await expect(
+        expect(
             readJson<{ ok: boolean }>(
                 new Request("http://localhost/api", {
                     body: validJsonBody,
@@ -946,14 +964,14 @@ describe("backend service utilities", () => {
         ).resolves.toEqual({ ok: true });
     });
 
-    it("rejects invalid JSON request bodies", async () => {
-        await expect(
+    it("rejects invalid JSON request bodies", () => {
+        expect(
             readJson(new Request("http://localhost/api", { body: "{", method: "POST" }))
         ).rejects.toThrow("Invalid JSON");
     });
 
-    it("enforces request body size limits", async () => {
-        await expect(
+    it("enforces request body size limits", () => {
+        expect(
             readRequestBytes(
                 new Request("http://localhost/api", {
                     body: "too large",
@@ -1021,6 +1039,7 @@ describe("backend service utilities", () => {
     });
 
     it("validates allowed dashboard origins", () => {
+        const mismatchedOrigin = httpOrigin("https://mira.lan:3100");
         expect(isAllowedDashboardOrigin(new Request("http://localhost:3100/api"))).toBe(
             true
         );
@@ -1041,8 +1060,7 @@ describe("backend service utilities", () => {
         expect(
             isAllowedDashboardOrigin(
                 new Request("https://mira.lan:3100/api", {
-                    // eslint-disable-next-line unicorn/prefer-https -- Verifies that a cross-scheme origin is rejected.
-                    headers: { origin: "http://mira.lan:3100" },
+                    headers: { origin: mismatchedOrigin },
                 })
             )
         ).toBe(false);
@@ -1056,6 +1074,7 @@ describe("backend service utilities", () => {
     });
 
     it("allows exact same-origin mutations on non-loopback hosts", () => {
+        const mismatchedOrigin = httpOrigin("https://mira.lan:3100");
         expect(
             isAllowedMutationSource(
                 new Request("https://mira.lan:3100/api/tasks", {
@@ -1071,8 +1090,7 @@ describe("backend service utilities", () => {
             isAllowedMutationSource(
                 new Request("https://mira.lan:3100/api/tasks", {
                     headers: {
-                        // eslint-disable-next-line unicorn/prefer-https -- Verifies that a cross-scheme origin is rejected.
-                        origin: "http://mira.lan:3100",
+                        origin: mismatchedOrigin,
                         "sec-fetch-site": "same-origin",
                     },
                     method: "POST",
@@ -1098,7 +1116,10 @@ describe("backend service utilities", () => {
             .mockImplementation(() => {
                 throw new Error("queue telemetry unavailable");
             });
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
+        const stderrSpy = jest
+            .spyOn(process.stderr, "write")
+            .mockImplementation(() => true);
         try {
             const response = await callTestRoute(
                 appRoutes,
@@ -1107,20 +1128,27 @@ describe("backend service utilities", () => {
             );
 
             expect(response.status).toBe(503);
-            await expect(response.json()).resolves.toMatchObject({
+            expect(response.json()).resolves.toMatchObject({
                 checks: {
                     worker: { ready: false },
                 },
                 status: "notReady",
             });
-            expect(warnSpy).toHaveBeenCalledWith(
-                "[Health] Failed to read job worker telemetry:",
-                expect.objectContaining({ message: "queue telemetry unavailable" })
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "health",
+                    error: expect.objectContaining({
+                        message: "queue telemetry unavailable",
+                    }),
+                    event: "health.worker_telemetry_read_failed",
+                    level: "warn",
+                })
             );
         } finally {
             summarySpy.mockRestore();
             releaseSummarySpy.mockRestore();
-            warnSpy.mockRestore();
+            structuredLogs.stop();
+            stderrSpy.mockRestore();
         }
     });
 
@@ -1131,7 +1159,10 @@ describe("backend service utilities", () => {
             .mockImplementation(() => {
                 throw databaseError;
             });
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
+        const stderrSpy = jest
+            .spyOn(process.stderr, "write")
+            .mockImplementation(() => true);
 
         try {
             const response = await callTestRoute(
@@ -1151,20 +1182,30 @@ describe("backend service utilities", () => {
                 status: "notReady",
             });
             expect(JSON.stringify(payload)).not.toContain(databaseError.message);
-            expect(warnSpy).toHaveBeenCalledWith(
-                "[Health] Database readiness failed:",
-                databaseError
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "health",
+                    error: expect.objectContaining({
+                        message: databaseError.message,
+                    }),
+                    event: "health.database_readiness_failed",
+                    level: "warn",
+                })
             );
         } finally {
             migrationSpy.mockRestore();
-            warnSpy.mockRestore();
+            structuredLogs.stop();
+            stderrSpy.mockRestore();
         }
     });
 
     it("fails closed cleanly when the attempted mutation audit cannot be stored", async () => {
         const handler = jest.fn(() => new Response("must not run"));
         const persistenceError = new Error("audit storage unavailable");
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
+        const stderrSpy = jest
+            .spyOn(process.stderr, "write")
+            .mockImplementation(() => true);
         const routes = withRequestPolicy(
             { "/api/tasks": handler },
             {
@@ -1181,30 +1222,45 @@ describe("backend service utilities", () => {
             }
         );
 
-        const response = await callTestRoute(
-            routes,
-            "/api/tasks",
-            serverWithAddress("127.0.0.1"),
-            { method: "POST" }
-        );
+        try {
+            const response = await callTestRoute(
+                routes,
+                "/api/tasks",
+                serverWithAddress("127.0.0.1"),
+                { method: "POST" }
+            );
 
-        expect(response.status).toBe(503);
-        await expect(response.json()).resolves.toEqual({
-            error: {
-                code: "service_unavailable",
-                message: "Audit trail unavailable",
-                requestId: expect.any(String),
-            },
-        });
-        expect(handler).not.toHaveBeenCalled();
-        expect(errorSpy).toHaveBeenCalledWith(
-            expect.stringContaining("attempted persistence failed"),
-            persistenceError
-        );
+            expect(response.status).toBe(503);
+            expect(response.json()).resolves.toEqual({
+                error: {
+                    code: "audit_unavailable",
+                    message: "Audit trail unavailable",
+                    requestId: expect.any(String),
+                },
+            });
+            expect(handler).not.toHaveBeenCalled();
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "http",
+                    error: expect.objectContaining({
+                        message: persistenceError.message,
+                    }),
+                    event: "audit.request_persistence_failed",
+                    level: "error",
+                    outcome: "attempted",
+                })
+            );
+        } finally {
+            structuredLogs.stop();
+            stderrSpy.mockRestore();
+        }
     });
 
     it("applies request policy auth, rate limit, and handler error behavior", async () => {
         resetRequestPolicyForTests();
+        const stderrSpy = jest
+            .spyOn(process.stderr, "write")
+            .mockImplementation(() => true);
         try {
             const routeEntries: Record<
                 string,
@@ -1248,8 +1304,7 @@ describe("backend service utilities", () => {
             expect(health.headers.get("x-frame-options")).toBe("DENY");
 
             const secureOrigin = withRequestSecurity(
-                // eslint-disable-next-line unicorn/prefer-https -- Simulates TLS termination at a trusted proxy.
-                new Request("http://dashboard.example/api/health/live", {
+                new Request(httpUrl("https://dashboard.example/api/health/live"), {
                     headers: { "x-forwarded-proto": "https" },
                 }),
                 new Response(),
@@ -1280,7 +1335,7 @@ describe("backend service utilities", () => {
                 }
             );
             expect(sameOriginMutation.status).toBe(401);
-            await expect(sameOriginMutation.json()).resolves.toEqual({
+            expect(sameOriginMutation.json()).resolves.toEqual({
                 error: {
                     code: "unauthorized",
                     message: "Unauthorized",
@@ -1326,9 +1381,9 @@ describe("backend service utilities", () => {
                 }
             );
             expect(crossOriginMutation.status).toBe(403);
-            await expect(crossOriginMutation.json()).resolves.toEqual({
+            expect(crossOriginMutation.json()).resolves.toEqual({
                 error: {
-                    code: "forbidden",
+                    code: "forbidden_origin",
                     message: "Forbidden request origin",
                     requestId: expect.any(String),
                 },
@@ -1358,7 +1413,7 @@ describe("backend service utilities", () => {
 
             const privateResponse = await callTestRoute(routes, "/api/private", server);
             expect(privateResponse.status).toBe(401);
-            await expect(privateResponse.json()).resolves.toEqual({
+            expect(privateResponse.json()).resolves.toEqual({
                 error: {
                     code: "unauthorized",
                     message: "Unauthorized",
@@ -1368,7 +1423,7 @@ describe("backend service utilities", () => {
 
             const syntaxResponse = await callTestRoute(routes, "/syntax", server);
             expect(syntaxResponse.status).toBe(400);
-            await expect(syntaxResponse.json()).resolves.toEqual({
+            expect(syntaxResponse.json()).resolves.toEqual({
                 error: {
                     code: "invalid_json",
                     message: "Invalid JSON",
@@ -1378,7 +1433,7 @@ describe("backend service utilities", () => {
 
             const statusResponse = await callTestRoute(routes, "/status-error", server);
             expect(statusResponse.status).toBe(409);
-            await expect(statusResponse.json()).resolves.toEqual({
+            expect(statusResponse.json()).resolves.toEqual({
                 error: {
                     code: "conflict",
                     message: "Job capacity is full",
@@ -1387,45 +1442,31 @@ describe("backend service utilities", () => {
             });
 
             resetRequestPolicyForTests();
-            const authRequest = new Request("http://localhost/api/auth/login", {
-                method: "POST",
-            });
-            const authLogin = routes["/api/auth/login"];
-            if (!authLogin) {
-                throw new Error("Missing auth login test route");
-            }
             for (let index = 0; index < 20; index += 1) {
-                const response = await authLogin(authRequest, server);
+                const response = await callTestRoute(routes, "/api/auth/login", server, {
+                    method: "POST",
+                });
                 expect(response.status).toBe(200);
             }
-            const limited = await authLogin(authRequest, server);
+            const limited = await callTestRoute(routes, "/api/auth/login", server, {
+                method: "POST",
+            });
             expect(limited.status).toBe(429);
             expect(limited.headers.get("retry-after")).toBeDefined();
 
             resetRequestPolicyForTests();
-            const originalConsoleError = console.error;
-            try {
-                Object.defineProperty(console, "error", {
-                    configurable: true,
-                    value: () => {},
-                });
-                const generic = await callTestRoute(routes, "/generic-error", server);
-                expect(generic.status).toBe(500);
-                await expect(generic.json()).resolves.toEqual({
-                    error: {
-                        code: "internal_error",
-                        message: "Internal server error",
-                        requestId: expect.any(String),
-                    },
-                });
-            } finally {
-                Object.defineProperty(console, "error", {
-                    configurable: true,
-                    value: originalConsoleError,
-                });
-            }
+            const generic = await callTestRoute(routes, "/generic-error", server);
+            expect(generic.status).toBe(500);
+            expect(generic.json()).resolves.toEqual({
+                error: {
+                    code: "internal_error",
+                    message: "Internal server error",
+                    requestId: expect.any(String),
+                },
+            });
         } finally {
             resetRequestPolicyForTests();
+            stderrSpy.mockRestore();
         }
     });
 });

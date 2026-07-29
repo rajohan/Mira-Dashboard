@@ -6,24 +6,41 @@ const AES_GCM_TAG_BYTES = 16;
 const ENCRYPTED_VALUE_PATTERN = /^v1\.([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{22,})$/u;
 const SHA256_HASH_PATTERN = /^[a-f0-9]{64}$/u;
 
-/** Returns cryptographically secure random bytes. */
+/**
+ * Returns cryptographically secure random bytes.
+ * @param byteLength Byte length value.
+ * @returns cryptographically secure random bytes.
+ */
 export function randomBytes(byteLength: number): Uint8Array<ArrayBuffer> {
     const bytes = new Uint8Array(byteLength);
     crypto.getRandomValues(bytes);
     return bytes;
 }
 
-/** Returns cryptographically secure random bytes encoded as lowercase hex. */
+/**
+ * Returns cryptographically secure random bytes encoded as lowercase hex.
+ * @param byteLength Byte length value.
+ * @returns cryptographically secure random bytes encoded as lowercase hex.
+ */
 export function randomHex(byteLength: number): string {
     return randomBytes(byteLength).toHex();
 }
 
-/** Returns a SHA-256 digest as lowercase hex. */
+/**
+ * Returns a SHA-256 digest as lowercase hex.
+ * @param value Value to process.
+ * @returns a SHA-256 digest as lowercase hex.
+ */
 export function sha256Hex(value: string): string {
     return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
-/** Compares two valid SHA-256 hex digests without timing-sensitive string equality. */
+/**
+ * Compares two valid SHA-256 hex digests without timing-sensitive string equality.
+ * @param storedHash Stored hash value.
+ * @param candidateHash Candidate hash value.
+ * @returns Are timing safe hashes equal result.
+ */
 export function areTimingSafeHashesEqual(
     storedHash: string,
     candidateHash: string
@@ -48,7 +65,11 @@ function bytesFromBase64Url(value: string): Uint8Array<ArrayBuffer> {
     return new Uint8Array(Uint8Array.fromBase64(value, { alphabet: "base64url" }));
 }
 
-/** Parses the external AES-256-GCM key without accepting ambiguous lengths. */
+/**
+ * Parses the external AES-256-GCM key without accepting ambiguous lengths.
+ * @param encodedKey Encoded key value.
+ * @returns Parsed the external AES-256-GCM key without accepting ambiguous lengths.
+ */
 export function secretEncryptionKeyBytes(
     encodedKey = process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY
 ): Uint8Array<ArrayBuffer> {
@@ -70,12 +91,13 @@ export function secretEncryptionKeyBytes(
     return new Uint8Array(key);
 }
 
-/** Returns whether a value uses the supported versioned encrypted envelope. */
-export function isEncryptedStoredSecret(value: string): boolean {
-    return ENCRYPTED_VALUE_PATTERN.test(value);
-}
-
-/** Encrypts a stored secret with versioned AES-256-GCM envelope encryption. */
+/**
+ * Encrypts a stored secret with versioned AES-256-GCM envelope encryption.
+ * @param plaintext Plaintext value.
+ * @param associatedData Associated data value.
+ * @param encodedKey Encoded key value.
+ * @returns Encrypt stored secret result.
+ */
 export function encryptStoredSecret(
     plaintext: string,
     associatedData: string,
@@ -100,7 +122,13 @@ export function encryptStoredSecret(
     return `v1.${base64Url(nonce)}.${base64Url(ciphertext)}`;
 }
 
-/** Decrypts one versioned stored secret and authenticates its storage context. */
+/**
+ * Decrypts one versioned stored secret and authenticates its storage context.
+ * @param envelope Envelope value.
+ * @param associatedData Associated data value.
+ * @param encodedKey Encoded key value.
+ * @returns Decrypt stored secret result.
+ */
 export function decryptStoredSecret(
     envelope: string,
     associatedData: string,

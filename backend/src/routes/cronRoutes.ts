@@ -3,14 +3,20 @@ import type {
     CronJobsResponse,
     CronMutationResponse,
 } from "../../../contracts/cron.ts";
+import {
+    parseCronToggleRequest,
+    parseCronUpdateRequest,
+} from "../../../contracts/cron.ts";
 import type { JobDisableIntent } from "../../../contracts/jobs.ts";
 import gateway from "../gateway.ts";
-import { json, readJson } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { json } from "../http.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
-    assertJobDisableIntentIsCurrent,
-    normalizeJobDisableIntent,
-} from "../services/jobDisableIntent.ts";
+    type ParametersRequest,
+    readApiJsonOrError,
+    routeErrorResponse,
+} from "../routeSupport.ts";
+import { assertJobDisableIntentIsCurrent } from "../services/jobDisableIntent.ts";
 import {
     getOpenClawCronDisableIntent,
     setOpenClawCronDisableIntent,
@@ -22,13 +28,14 @@ import {
 } from "../services/openClawCronSnapshot.ts";
 import { withCronTaskLinks } from "../services/taskAutomation.ts";
 
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
+const logger = createStructuredLogger("cron");
 
 function cronError(error: unknown, fallback: string): Response {
-    return json(
-        { error: errorMessage(error, fallback) },
-        { status: httpStatusCode(error) }
-    );
+    return routeErrorResponse(undefined, error, {
+        code: "cron_request_failed",
+        context: "cron",
+        message: fallback,
+    });
 }
 
 async function runCronMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -42,7 +49,7 @@ async function runCronMutation<T>(operation: () => Promise<T>): Promise<T> {
 async function updateCronWithDisableIntent(
     jobId: string,
     patch: Record<string, unknown>,
-    disableIntent: JobDisableIntent | undefined
+    disableIntent?: JobDisableIntent
 ): Promise<void> {
     const previousIntent = getOpenClawCronDisableIntent(jobId);
     setOpenClawCronDisableIntent(jobId, disableIntent);
@@ -52,10 +59,7 @@ async function updateCronWithDisableIntent(
         try {
             setOpenClawCronDisableIntent(jobId, previousIntent);
         } catch (rollbackError) {
-            console.error(
-                "[cronRoutes] Failed to restore OpenClaw cron metadata",
-                rollbackError
-            );
+            logger.error("cron.metadata_restore_failed", { error: rollbackError });
         }
         throw error;
     }
@@ -91,10 +95,9 @@ export const cronRoutes = {
                 try {
                     setOpenClawCronDisableIntent(request.params.id, previousIntent);
                 } catch (rollbackError) {
-                    console.error(
-                        "[cronRoutes] Failed to restore deleted cron metadata",
-                        rollbackError
-                    );
+                    logger.error("cron.deleted_metadata_restore_failed", {
+                        error: rollbackError,
+                    });
                 }
                 return cronError(error, "Failed to delete cron job");
             }
@@ -119,28 +122,13 @@ export const cronRoutes = {
     "/api/cron/jobs/:id/toggle": {
         POST: async (request: ParametersRequest<"id">) => {
             try {
-                const body = await readJson<{
-                    disableIntent?: unknown;
-                    enabled?: unknown;
-                }>(request);
-                if (!body || typeof body !== "object" || Array.isArray(body)) {
-                    return json(
-                        { error: "Request body must be an object" },
-                        { status: 400 }
-                    );
-                }
-                if (typeof body.enabled !== "boolean") {
-                    return json({ error: "enabled must be a boolean" }, { status: 400 });
-                }
-                if (body.enabled && body.disableIntent !== undefined) {
-                    return json(
-                        { error: "disableIntent is only valid when disabling a job" },
-                        { status: 400 }
-                    );
-                }
-                const disableIntent = body.enabled
-                    ? undefined
-                    : normalizeJobDisableIntent(body.disableIntent);
+                const body = await readApiJsonOrError(request, parseCronToggleRequest, {
+                    code: "invalid_cron_toggle",
+                    context: "cron.toggle",
+                    message: "Invalid cron toggle request",
+                });
+                if (body instanceof Response) return body;
+                const disableIntent = body.enabled ? undefined : body.disableIntent;
                 if (disableIntent) assertJobDisableIntentIsCurrent(disableIntent);
                 await runCronMutation(() =>
                     updateCronWithDisableIntent(
@@ -159,34 +147,22 @@ export const cronRoutes = {
     "/api/cron/jobs/:id/update": {
         POST: async (request: ParametersRequest<"id">) => {
             try {
-                const body = await readJson<{ patch?: unknown }>(request);
-                if (!body || typeof body !== "object" || Array.isArray(body)) {
-                    return json(
-                        { error: "Request body must be an object" },
-                        { status: 400 }
-                    );
-                }
-                const patch = body.patch;
-                if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
-                    return json({ error: "patch must be an object" }, { status: 400 });
-                }
-                const cronPatch = patch as Record<string, unknown>;
-                if (cronPatch.enabled === true) {
-                    await runCronMutation(() =>
-                        updateCronWithDisableIntent(
-                            request.params.id,
-                            cronPatch,
-                            undefined
-                        )
-                    );
-                } else {
-                    await runCronMutation(() =>
-                        gateway.request("cron.update", {
-                            jobId: request.params.id,
-                            patch: cronPatch,
-                        })
-                    );
-                }
+                const body = await readApiJsonOrError(request, parseCronUpdateRequest, {
+                    code: "invalid_cron_update",
+                    context: "cron.update",
+                    message: "Invalid cron update request",
+                });
+                if (body instanceof Response) return body;
+                const cronPatch = body.patch;
+                await runCronMutation(
+                    cronPatch.enabled === true
+                        ? () => updateCronWithDisableIntent(request.params.id, cronPatch)
+                        : () =>
+                              gateway.request("cron.update", {
+                                  jobId: request.params.id,
+                                  patch: cronPatch,
+                              })
+                );
                 return json({ isOk: true } satisfies CronMutationResponse);
             } catch (error) {
                 return cronError(error, "Failed to update cron job");

@@ -2,9 +2,21 @@ import readline from "node:readline";
 
 import { hashPassword } from "./auth.ts";
 import { database } from "./database.ts";
+import { writeCliError, writeCliOutput, writeCliPrompt } from "./lib/cliOutput.ts";
 import { writeAuditEvent } from "./services/auditEvents.ts";
 import { normalizeLoginPassword } from "./services/authenticationRequest.ts";
 import { clearAuthenticationFailures } from "./services/authenticationThrottle.ts";
+
+const PASSWORD_GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
+
+function removeLastGrapheme(value: string): string {
+    return [...PASSWORD_GRAPHEME_SEGMENTER.segment(value)]
+        .slice(0, -1)
+        .map(({ segment }) => segment)
+        .join("");
+}
 
 interface ResetArguments {
     shouldResetMfa: boolean;
@@ -27,7 +39,7 @@ function usage(): string {
 
 function parseArguments(arguments_: string[]): ResetArguments | undefined {
     if (arguments_.includes("--help") || arguments_.includes("-h")) {
-        console.log(usage());
+        writeCliOutput(usage());
         return undefined;
     }
     let username: string | undefined;
@@ -62,7 +74,7 @@ async function readSecret(prompt: string): Promise<string> {
     readline.emitKeypressEvents(process.stdin);
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdout.write(prompt);
+    writeCliPrompt(prompt);
 
     return new Promise<string>((resolve, reject) => {
         let value = "";
@@ -71,7 +83,7 @@ async function readSecret(prompt: string): Promise<string> {
             process.stdin.off("keypress", onKeypress);
             process.stdin.setRawMode(false);
             process.stdin.pause();
-            process.stdout.write("\n");
+            writeCliOutput("");
             if (error) {
                 reject(error);
             } else {
@@ -89,7 +101,7 @@ async function readSecret(prompt: string): Promise<string> {
                 return;
             }
             if (key.name === "backspace") {
-                value = [...value].slice(0, -1).join("");
+                value = removeLastGrapheme(value);
                 return;
             }
             if (character && !key.ctrl && !key.meta && value.length < 256) {
@@ -174,16 +186,17 @@ async function resetPassword(arguments_: ResetArguments): Promise<void> {
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "Password reset and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 
-    console.log(
+    writeCliOutput(
         arguments_.shouldResetMfa
             ? `Password and MFA reset for ${user.username}; all sessions revoked.`
             : `Password reset for ${user.username}; MFA preserved and all sessions revoked.`
@@ -196,8 +209,8 @@ try {
         await resetPassword(arguments_);
     }
 } catch (error) {
-    console.error(error instanceof Error ? error.message : "Password reset failed");
-    console.error(usage());
+    writeCliError(error instanceof Error ? error.message : "Password reset failed");
+    writeCliError(usage());
     process.exitCode = 1;
 } finally {
     database.close();

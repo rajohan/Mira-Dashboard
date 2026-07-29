@@ -21,14 +21,18 @@ const databaseOperationMetrics: MutableDatabaseOperationMetrics = {
 
 function isSqliteLockError(error: unknown): boolean {
     if (error === null || typeof error !== "object") return false;
-    const code = Reflect.get(error, "code");
+    const code: unknown = Reflect.get(error, "code");
     return (
         typeof code === "string" &&
         (code.startsWith("SQLITE_BUSY") || code.startsWith("SQLITE_LOCKED"))
     );
 }
 
-/** Records one synchronous SQLite operation without retaining SQL or bindings. */
+/**
+ * Records one synchronous SQLite operation without retaining SQL or bindings.
+ * @param durationMs Duration duration in milliseconds.
+ * @param error Error to inspect.
+ */
 export function recordDatabaseOperation(durationMs: number, error?: unknown): void {
     const boundedDuration =
         Math.round(Math.max(0, Number.isFinite(durationMs) ? durationMs : 0) * 100) / 100;

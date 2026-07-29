@@ -8,9 +8,19 @@ import type {
     PullRequestPreviewResponse,
     PullRequestsResponse,
 } from "../../../contracts/delivery.ts";
-import { json, jsonWithEtag, readJson } from "../http.ts";
+import {
+    parseDashboardRollbackRequest,
+    parsePullRequestApproveRequest,
+    parsePullRequestRejectRequest,
+} from "../../../contracts/delivery.ts";
+import { json, jsonWithEtag } from "../http.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import {
+    type ParametersRequest,
+    readApiJsonOrError,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import {
     getPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
@@ -31,23 +41,24 @@ import {
     validatePrNumber,
 } from "../services/pullRequests.ts";
 
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
-
 function routeError(error: unknown, fallback = "Pull request route failed"): Response {
-    return json(
-        { error: errorMessage(error, fallback) },
-        { status: httpStatusCode(error) }
-    );
+    return routeErrorResponse(undefined, error, {
+        code: "pull_request_failed",
+        context: "pull-request",
+        message: fallback,
+    });
 }
 
 function parsePullRequestNumber(value: unknown): number | Response {
     try {
         return validatePrNumber(value);
-    } catch (error) {
-        return json(
-            { error: errorMessage(error, "Invalid pull request number") },
-            { status: 400 }
-        );
+    } catch {
+        return routeFailureResponse({
+            code: "invalid_pull_request_number",
+            context: "pull-request",
+            message: "Invalid pull request number",
+            status: 400,
+        });
     }
 }
 
@@ -90,7 +101,7 @@ function pullRequestSnapshotJson(
     return request ? jsonWithEtag(request, data) : json(data);
 }
 
-async function runPullRequestMutation<T>(operation: () => Promise<T>): Promise<T> {
+async function runPullRequestMutation<T>(operation: () => Promise<T> | T): Promise<T> {
     try {
         return await operation();
     } finally {
@@ -117,8 +128,13 @@ export const pullRequestRoutes = {
             if (number instanceof Response) return number;
             try {
                 const body = request.body
-                    ? await readJson<{ deploy?: unknown } | undefined>(request)
-                    : undefined;
+                    ? await readApiJsonOrError(request, parsePullRequestApproveRequest, {
+                          code: "invalid_pull_request_approval",
+                          context: "pull-request.approve",
+                          message: "Invalid pull request approval",
+                      })
+                    : {};
+                if (body instanceof Response) return body;
                 const response = await runPullRequestMutation(() =>
                     runPullRequestApproval(number, body?.deploy === true)
                 );
@@ -134,8 +150,13 @@ export const pullRequestRoutes = {
             if (number instanceof Response) return number;
             try {
                 const body = request.body
-                    ? await readJson<{ comment?: unknown } | undefined>(request)
-                    : undefined;
+                    ? await readApiJsonOrError(request, parsePullRequestRejectRequest, {
+                          code: "invalid_pull_request_rejection",
+                          context: "pull-request.reject",
+                          message: "Invalid pull request rejection",
+                      })
+                    : {};
+                if (body instanceof Response) return body;
                 const comment =
                     typeof body?.comment === "string" && body.comment.trim()
                         ? body.comment.trim()
@@ -219,8 +240,8 @@ export const pullRequestRoutes = {
     "/api/pull-requests/deploy": {
         POST: async () => {
             try {
-                const response = await runPullRequestMutation(async () => ({
-                    deployment: await prepareAndStartDeployLatest(),
+                const response = await runPullRequestMutation(() => ({
+                    deployment: prepareAndStartDeployLatest(),
                     isOk: true as const,
                 }));
                 return json(response satisfies DeploymentActionResponse);
@@ -254,13 +275,16 @@ export const pullRequestRoutes = {
     "/api/pull-requests/releases/rollback": {
         POST: async (request: Request) => {
             try {
-                const body = await readJson<{ targetCommit?: unknown } | null>(request);
-                if (typeof body?.targetCommit !== "string") {
-                    return json(
-                        { error: "Rollback target commit is required" },
-                        { status: 400 }
-                    );
-                }
+                const body = await readApiJsonOrError(
+                    request,
+                    parseDashboardRollbackRequest,
+                    {
+                        code: "invalid_rollback_request",
+                        context: "pull-request.rollback",
+                        message: "Invalid rollback request",
+                    }
+                );
+                if (body instanceof Response) return body;
                 const targetCommit = body.targetCommit;
                 const response = await runPullRequestMutation(async () => ({
                     deployment: await prepareAndStartRollback(targetCommit),

@@ -1,7 +1,8 @@
 import type {
-    JobDisableIntent,
     JobResourceClass,
-    ScheduledJobPatch as PublicScheduledJobPatch,
+    ScheduledJob,
+    ScheduledJobPatch,
+    ScheduledJobRun,
     ScheduledJobRunStatus,
     ScheduledJobScheduleType,
     ScheduledJobTriggerType,
@@ -11,6 +12,7 @@ import { database, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { isJobResourceClass, withJobResourceClass } from "../lib/jobResources.ts";
 import { runWithLogContext } from "../lib/logContext.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { parseJobDisableIntent } from "./jobDisableIntent.ts";
 import {
     claimNextJobExecution,
@@ -20,7 +22,7 @@ import {
     getJobExecutionSummary,
     heartbeatJobExecution,
     insertJobExecution,
-    type JobExecution,
+    type JobExecutionRecord,
     protectRunningJobExecutionFromCancellation,
     recoverExpiredJobExecutions,
     registerJobWorker,
@@ -28,6 +30,8 @@ import {
     updateJobExecutionOutput,
 } from "./jobExecutionQueue.ts";
 import { waitForJobExecution } from "./queuedJobExecution.ts";
+
+const logger = createStructuredLogger("scheduled-jobs");
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -145,44 +149,6 @@ class ScheduledJobInterruptionError extends Error {
     }
 }
 
-export interface ScheduledJob {
-    id: string;
-    name: string;
-    description: string;
-    enabled: boolean;
-    scheduleType: ScheduledJobScheduleType;
-    intervalSeconds: number;
-    timeOfDay: string | undefined;
-    cronExpression: string | undefined;
-    actionKey: string;
-    actionPayload: Record<string, unknown>;
-    disableIntent: JobDisableIntent | undefined;
-    nextRunAt: string | undefined;
-    createdAt: string;
-    updatedAt: string;
-    lastRun: ScheduledJobRun | undefined;
-    resourceClass: JobResourceClass;
-    timeoutMs: number;
-    isQueued: boolean;
-    isRunning: boolean;
-}
-
-export interface ScheduledJobRun {
-    id: number;
-    jobId: string;
-    status: ScheduledJobRunStatus;
-    triggerType: ScheduledJobTriggerType;
-    startedAt: string;
-    finishedAt: string | undefined;
-    message: string | undefined;
-    output: Record<string, unknown>;
-    executionId: string | undefined;
-    queuedAt: string;
-    resourceClass: JobResourceClass;
-    cancelRequestedAt: string | undefined;
-    cancellable: boolean;
-}
-
 export interface ScheduledJobDefinition {
     id: string;
     name: string;
@@ -197,8 +163,6 @@ export interface ScheduledJobDefinition {
     resourceClass?: JobResourceClass;
     timeoutMs?: number;
 }
-
-type ScheduledJobPatch = PublicScheduledJobPatch;
 
 interface ScheduledJobRow {
     id: string;
@@ -911,7 +875,7 @@ function insertScheduledRun(
 }
 
 function isActiveExecutionConflict(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error, "");
     return (
         message.includes("UNIQUE constraint failed: job_executions.scheduled_job_id") ||
         message.includes("idx_job_executions_active_scheduled_job")
@@ -999,10 +963,10 @@ export async function runScheduledJob(
 }
 
 async function executeClaimedJobExecution(
-    execution: JobExecution,
+    execution: JobExecutionRecord,
     workerId: string,
     signal?: AbortSignal
-): Promise<JobExecution | ScheduledJobRun> {
+): Promise<JobExecutionRecord | ScheduledJobRun> {
     const currentJob = execution.scheduledJobId
         ? getScheduledJob(execution.scheduledJobId)
         : undefined;
@@ -1066,7 +1030,10 @@ async function executeClaimedJobExecution(
             const lease = heartbeatJobExecution(execution.id, workerId);
             if (!lease.hasLease || lease.cancelRequested) controller.abort();
         } catch (error) {
-            console.warn("[ScheduledJobs] Execution heartbeat failed:", error);
+            logger.warn("scheduled_jobs.execution_heartbeat_failed", {
+                error,
+                executionId: execution.id,
+            });
         }
     }, executorHeartbeatMs);
     heartbeat.unref();
@@ -1105,10 +1072,9 @@ async function executeClaimedJobExecution(
                     error.getHandlerSettled()
                 );
                 if (!didSettle) {
-                    console.warn(
-                        "[ScheduledJobs] Interrupted action did not settle during cleanup grace",
-                        { executionId: execution.id }
-                    );
+                    logger.warn("scheduled_jobs.interrupted_action_cleanup_timed_out", {
+                        executionId: execution.id,
+                    });
                 }
             }
             status = "failed";
@@ -1163,7 +1129,7 @@ async function runActionWithTimeout(
     let timeout: NodeJS.Timeout | undefined;
     try {
         timeout = setTimeout(() => {
-            console.warn("[ScheduledJobs] Scheduled job exceeded timeout", {
+            logger.warn("scheduled_jobs.execution_timed_out", {
                 timeoutMs,
             });
             interrupt("Scheduled job timed out");
@@ -1218,7 +1184,7 @@ function isStaleScheduledRunError(error: unknown): boolean {
     );
 }
 
-async function runDueJobs(): Promise<void> {
+function runDueJobs(): void {
     const dueAt = nowIso();
     const rows = database
         .prepare(
@@ -1233,7 +1199,7 @@ async function runDueJobs(): Promise<void> {
         } catch (error) {
             if (!isStaleScheduledRunError(error)) {
                 scheduledJobRuntimeState.schedulerQueueFailures += 1;
-                console.warn("[ScheduledJobs] Failed to queue due scheduled job:", error);
+                logger.warn("scheduled_jobs.due_job_queue_failed", { error });
             }
             // Keep later due jobs queueing even if a persisted row is stale.
         }
@@ -1241,7 +1207,7 @@ async function runDueJobs(): Promise<void> {
 }
 
 async function observeClaimedExecution(
-    execution: JobExecution,
+    execution: JobExecutionRecord,
     controller: AbortController
 ): Promise<void> {
     try {
@@ -1253,7 +1219,10 @@ async function observeClaimedExecution(
             )
         );
     } catch (error) {
-        console.warn("[ScheduledJobs] Queued execution failed unexpectedly:", error);
+        logger.warn("scheduled_jobs.queued_execution_failed", {
+            error,
+            executionId: execution.id,
+        });
     } finally {
         activeExecutionControllers.delete(execution.id);
         activeExecutionRuns.delete(execution.id);
@@ -1303,7 +1272,7 @@ function readSystemdUnitState(unit: string): SystemdUnitState {
     });
     const stderr = new TextDecoder().decode(result.stderr).trim();
     if (result.exitCode !== 0) {
-        console.warn("[ScheduledJobs] systemctl show failed", {
+        logger.warn("scheduled_jobs.systemd_unit_inspection_failed", {
             exitCode: result.exitCode,
             stderr,
             unit,
@@ -1311,7 +1280,7 @@ function readSystemdUnitState(unit: string): SystemdUnitState {
         return "unknown";
     }
     if (stderr) {
-        console.warn("[ScheduledJobs] systemctl show reported diagnostics", {
+        logger.warn("scheduled_jobs.systemd_unit_diagnostics", {
             stderr,
             unit,
         });
@@ -1392,7 +1361,7 @@ function didTerminalizeUnrecoverableDeploymentCutover(
             )
             .run(
                 timestamp,
-                "Interrupted legacy deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
+                "Interrupted deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
                 cutover.id
             );
         if (result.changes === 0) {
@@ -1405,13 +1374,10 @@ function didTerminalizeUnrecoverableDeploymentCutover(
     });
     const didTerminalize = terminalize();
     if (didTerminalize) {
-        console.warn(
-            "[ScheduledJobs] Terminalized unrecoverable legacy deployment cutover",
-            {
-                candidateCommit: cutover.candidateCommit,
-                cutoverId: cutover.id,
-            }
-        );
+        logger.warn("scheduled_jobs.deployment_cutover_terminalized", {
+            candidateCommit: cutover.candidateCommit,
+            cutoverId: cutover.id,
+        });
     }
     return didTerminalize;
 }
@@ -1450,10 +1416,10 @@ export function reconcileOrphanedDeploymentCutovers(
         try {
             state = readGuardianState(cutover.id);
         } catch (error) {
-            console.warn(
-                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
-                error
-            );
+            logger.warn("scheduled_jobs.deployment_guardian_inspection_failed", {
+                cutoverId: cutover.id,
+                error,
+            });
         }
         const shouldRecover =
             state === "inactive" ||
@@ -1480,10 +1446,10 @@ export function reconcileOrphanedDeploymentCutovers(
                 reconciled += 1;
             }
         } catch (error) {
-            console.warn(
-                "[ScheduledJobs] Failed to schedule orphaned deployment rollback:",
-                error
-            );
+            logger.warn("scheduled_jobs.orphaned_deployment_rollback_failed", {
+                cutoverId: cutover.id,
+                error,
+            });
         }
     }
     const sortedMissingHandlerIds = cutoversMissingRecoveryHandler.toSorted(
@@ -1494,10 +1460,9 @@ export function reconcileOrphanedDeploymentCutovers(
         warningKey &&
         scheduledJobRuntimeState.missingCutoverRecoveryWarningKey !== warningKey
     ) {
-        console.warn(
-            "[ScheduledJobs] Cannot recover orphaned deployment cutovers because no recovery handler is registered",
-            { cutoverIds: sortedMissingHandlerIds }
-        );
+        logger.warn("scheduled_jobs.deployment_recovery_handler_missing", {
+            cutoverIds: sortedMissingHandlerIds,
+        });
     }
     scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = warningKey || undefined;
     return reconciled;
@@ -1518,7 +1483,7 @@ function hasPendingDeploymentCutover(): boolean {
             now + deploymentCutoverReconcileIntervalMs;
         const reconciled = reconcileOrphanedDeploymentCutovers();
         if (reconciled > 0) {
-            console.warn("[ScheduledJobs] Reconciled orphaned deployment cutovers", {
+            logger.warn("scheduled_jobs.deployment_cutovers_reconciled", {
                 reconciled,
             });
         }
@@ -1562,7 +1527,7 @@ function executorTick(): void {
         const run = observeClaimedExecution(execution, controller);
         activeExecutionRuns.set(execution.id, run);
     } catch (error) {
-        console.warn("[ScheduledJobs] Executor tick failed:", error);
+        logger.warn("scheduled_jobs.executor_tick_failed", { error });
     } finally {
         scheduledJobRuntimeState.isExecutorTickRunning = false;
     }
@@ -1576,21 +1541,23 @@ function scheduleTick(): void {
     scheduledJobRuntimeState.schedulerTicks += 1;
     scheduledJobRuntimeState.lastSchedulerTickAt = nowIso();
     const startedAt = performance.now();
-    void (async () => {
-        try {
-            await runDueJobs();
-        } catch (error) {
-            scheduledJobRuntimeState.schedulerTickFailures += 1;
-            console.warn("[ScheduledJobs] Scheduler tick failed:", error);
-        } finally {
-            scheduledJobRuntimeState.lastSchedulerTickDurationMs =
-                Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
-            scheduledJobRuntimeState.isSchedulerTickRunning = false;
-        }
-    })();
+    try {
+        runDueJobs();
+    } catch (error) {
+        scheduledJobRuntimeState.schedulerTickFailures += 1;
+        logger.warn("scheduled_jobs.scheduler_tick_failed", { error });
+    } finally {
+        scheduledJobRuntimeState.lastSchedulerTickDurationMs =
+            Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
+        scheduledJobRuntimeState.isSchedulerTickRunning = false;
+    }
 }
 
-/** Returns queue, worker, and due-schedule telemetry without job payloads. */
+/**
+ * Returns queue, worker, and due-schedule telemetry without job payloads.
+ * @param timestamp Timestamp value.
+ * @returns queue, worker, and due-schedule telemetry without job payloads.
+ */
 export function getScheduledJobSchedulerMetrics(
     timestamp = Date.now()
 ): SchedulerMetrics {
@@ -1625,7 +1592,7 @@ export function getScheduledJobSchedulerMetrics(
         // Diagnostics must remain available while readiness reports a database fault.
     }
     const oldestDueAt = due.oldest_due_at ?? undefined;
-    const parsedOldestDueAt = oldestDueAt ? Date.parse(oldestDueAt) : NaN;
+    const parsedOldestDueAt = oldestDueAt ? Date.parse(oldestDueAt) : Number.NaN;
     return {
         ...queue,
         dueJobs: Number(due.count ?? 0),
@@ -1666,15 +1633,15 @@ export function startScheduledJobExecutor(releaseCommit = "development"): void {
     scheduledJobRuntimeState.workerId = workerIdForRelease(releaseCommit);
     resetExecutorClaimPause();
     const timestamp = nowIso();
-    const recoveredLegacyRuns = recoverOrphanedScheduledJobRuns(timestamp);
-    if (recoveredLegacyRuns > 0) {
-        console.warn("[ScheduledJobs] Recovered orphaned scheduled job runs", {
-            recovered: recoveredLegacyRuns,
+    const recoveredOrphanedRuns = recoverOrphanedScheduledJobRuns(timestamp);
+    if (recoveredOrphanedRuns > 0) {
+        logger.warn("scheduled_jobs.orphaned_runs_recovered", {
+            recovered: recoveredOrphanedRuns,
         });
     }
     const recovered = recoverExpiredJobExecutions(timestamp);
     if (recovered > 0) {
-        console.warn("[ScheduledJobs] Recovered expired job execution leases", {
+        logger.warn("scheduled_jobs.expired_execution_leases_recovered", {
             recovered,
         });
     }
@@ -1683,7 +1650,7 @@ export function startScheduledJobExecutor(releaseCommit = "development"): void {
         try {
             didHeartbeatJobWorker(scheduledJobRuntimeState.workerId);
         } catch (error) {
-            console.warn("[ScheduledJobs] Worker heartbeat failed:", error);
+            logger.warn("scheduled_jobs.worker_heartbeat_failed", { error });
         }
     }, executorHeartbeatMs);
     scheduledJobRuntimeState.workerHeartbeat.unref();

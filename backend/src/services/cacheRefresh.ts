@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 
-import type { JobResourceClass } from "../../../contracts/jobs.ts";
+import type { JobResourceClass, ScheduledJob } from "../../../contracts/jobs.ts";
 import type { CacheRefreshMetrics } from "../../../contracts/metrics.ts";
 import { database } from "../database.ts";
 import {
@@ -19,8 +19,10 @@ import {
     parseJsonField,
 } from "../lib/cacheStore.ts";
 import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
+import { errorMessage as caughtErrorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
-import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { nonEmptyEnvironmentFallback, unknownArray } from "../lib/values.ts";
 import {
     getContainers,
     getDockerUpdaterEvents,
@@ -29,7 +31,11 @@ import {
     getImages,
     getVolumes,
 } from "../routes/dockerRoutes.ts";
-import { writeCacheSuccess } from "./cacheEntryWriter.ts";
+import {
+    cacheExpiryIso,
+    type CacheTtlUnit,
+    writeCacheSuccess,
+} from "./cacheEntryWriter.ts";
 import { getDatabaseOverview, getIsolatedDatabaseOverview } from "./databaseOverview.ts";
 import { evaluateOpenClawNotifications } from "./openclawNotifications.ts";
 import { evaluateQuotaNotifications } from "./quotaNotifications.ts";
@@ -38,9 +44,10 @@ import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
-    type ScheduledJob,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
+
+const logger = createStructuredLogger("cache-refresh");
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -64,7 +71,6 @@ const BACKUP_STATUS_MAX_TTL_HOURS = 25;
 const dashboardProjectPaths = resolveDashboardProjectPaths();
 
 type JsonRecord = Record<string, unknown>;
-type CacheTtlUnit = "hours" | "minutes";
 
 interface CacheFailureOptions {
     key: string;
@@ -126,11 +132,6 @@ function nowIso(): string {
     return dateToISOString(new Date());
 }
 
-function ttlDate(ttl: number, unit: CacheTtlUnit): string {
-    const multiplier = 60 * 1000 * (unit === "hours" ? 60 : 1);
-    return dateToISOString(new Date(Date.now() + ttl * multiplier));
-}
-
 function backupStatusTtlHours(timestamps: Array<string | undefined>): number {
     let ttl = BACKUP_STATUS_MAX_TTL_HOURS;
     const now = Date.now();
@@ -150,7 +151,7 @@ function backupStatusTtlHours(timestamps: Array<string | undefined>): number {
 }
 
 function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    return caughtErrorMessage(error, "Cache refresh failed");
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -318,7 +319,7 @@ export function writeCacheFailure(options: CacheFailureOptions): void {
             options.key,
             options.source,
             timestamp,
-            ttlDate(options.ttl, options.ttlUnit),
+            cacheExpiryIso(options.ttl, options.ttlUnit),
             errorMessage(options.error),
             1,
             JSON.stringify({ ...options.metadata, lastFailureAt: timestamp })
@@ -340,7 +341,7 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
         if (!response.ok) {
             throw new Error(`HTTP ${response.status} for ${url}`);
         }
-        return (await response.json()) as unknown;
+        return await response.json();
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
             throw new Error(`Request timeout for ${url}`, { cause: error });
@@ -487,32 +488,32 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         });
     }
 
-    const results = await Promise.allSettled(
+    const results = await Promise.all(
         tasks.map(async (task) => {
             try {
-                return { task, value: await task.promise };
+                return {
+                    isSuccess: true as const,
+                    task,
+                    value: await task.promise,
+                };
             } catch (error) {
-                throw { task, error };
+                return { error, isSuccess: false as const, task };
             }
         })
     );
     let firstFailure: unknown;
     for (const result of results) {
-        if (result.status === "rejected") {
-            const failed = result.reason as {
-                error: unknown;
-                task: MoltbookFetchTask;
-            };
-            firstFailure ??= failed.error;
+        if (!result.isSuccess) {
+            firstFailure ??= result.error;
             for (const failedKey of failedKeysForMoltbookTask(
-                failed.task,
+                result.task,
                 requestedKeys
             )) {
                 failedKeys.add(failedKey);
             }
             continue;
         }
-        const { task, value } = result.value;
+        const { task, value } = result;
 
         if (task.kind === "home") {
             writes.push({
@@ -660,13 +661,9 @@ async function fetchSpydebergWeather() {
         const data = asRecord(await fetchJson(SPYDEBERG.openMeteoUrl));
         const current = asRecord(data.current);
         const daily = asRecord(data.daily);
-        const minTemps = Array.isArray(daily.temperature_2m_min)
-            ? daily.temperature_2m_min
-            : [];
-        const maxTemps = Array.isArray(daily.temperature_2m_max)
-            ? daily.temperature_2m_max
-            : [];
-        const weatherCodes = Array.isArray(daily.weather_code) ? daily.weather_code : [];
+        const minTemps = unknownArray(daily.temperature_2m_min);
+        const maxTemps = unknownArray(daily.temperature_2m_max);
+        const weatherCodes = unknownArray(daily.weather_code);
         return {
             source: "open-meteo",
             data: {
@@ -678,10 +675,10 @@ async function fetchSpydebergWeather() {
                 description: openMeteoCodeToDescription(current.weather_code),
                 minTempC: minTemps[0] ?? undefined,
                 maxTempC: maxTemps[0] ?? undefined,
-                forecast: (Array.isArray(daily.time) ? daily.time : [])
+                forecast: unknownArray(daily.time)
                     .slice(0, 3)
-                    .map((date: string, index: number) => ({
-                        date,
+                    .map((date, index) => ({
+                        date: typeof date === "string" ? date : "",
                         minTempC: minTemps[index] ?? undefined,
                         maxTempC: maxTemps[index] ?? undefined,
                         description: openMeteoCodeToDescription(weatherCodes[index]),
@@ -921,7 +918,7 @@ async function refreshSystemCache() {
         } catch (error) {
             statusError = errorMessage(error);
             statusFailure = error;
-            console.warn("[CacheRefresh] Failed to parse OpenClaw status JSON:", error);
+            logger.warn("cache_refresh.openclaw_status_parse_failed", { error });
         }
     }
     const doctorError =
@@ -938,10 +935,7 @@ async function refreshSystemCache() {
             security = JSON.parse(securityResult.value) as JsonRecord;
         } catch (error) {
             securityError = errorMessage(error);
-            console.warn(
-                "[CacheRefresh] Failed to parse OpenClaw security audit JSON:",
-                error
-            );
+            logger.warn("cache_refresh.security_audit_parse_failed", { error });
         }
     }
     const doctorWarnings =
@@ -959,7 +953,8 @@ async function refreshSystemCache() {
                   .filter((line) => line.startsWith("- WARNING:"))
                   .map((line) => line.replace(/^- WARNING:\s*/u, "").trim())
             : [];
-    const currentVersion = String(status.runtimeVersion || "unknown");
+    const currentVersion =
+        typeof status.runtimeVersion === "string" ? status.runtimeVersion : "unknown";
     const update = asRecord(status.update);
     const registry = asRecord(update.registry);
     let updateStatusError =
@@ -972,10 +967,7 @@ async function refreshSystemCache() {
             updateStatus = JSON.parse(updateStatusResult.value) as JsonRecord;
         } catch (error) {
             updateStatusError = errorMessage(error);
-            console.warn(
-                "[CacheRefresh] Failed to parse OpenClaw update status JSON:",
-                error
-            );
+            logger.warn("cache_refresh.update_status_parse_failed", { error });
         }
     }
     const latestVersion =
@@ -1256,7 +1248,7 @@ async function refreshWalgBackupCache() {
     const latest = backups[0] ?? undefined;
     const latestFreshnessMs = latest?.freshnessTime
         ? dateGetTime(new Date(latest.freshnessTime))
-        : NaN;
+        : Number.NaN;
     const latestAgeHours = Number.isFinite(latestFreshnessMs)
         ? (Date.now() - latestFreshnessMs) / 36e5
         : undefined;
@@ -1313,6 +1305,11 @@ async function checkOpenRouterQuota() {
     const totalCredits = toNumber(asRecord(creditsInfo.data).total_credits);
     const limit = toOptionalNumber(keyData.limit);
     const limitRemaining = toOptionalNumber(keyData.limit_remaining);
+    let percentUsed =
+        totalCredits > 0 ? Math.round((usage / totalCredits) * 100) : undefined;
+    if (limit !== undefined && limitRemaining !== undefined && limit > 0) {
+        percentUsed = Number((((limit - limitRemaining) / limit) * 100).toFixed(1));
+    }
     return {
         usage,
         totalCredits,
@@ -1322,12 +1319,7 @@ async function checkOpenRouterQuota() {
         limitReset:
             typeof keyData.limit_reset === "string" ? keyData.limit_reset : undefined,
         usageMonthly: toNumber(keyData.usage_monthly),
-        percentUsed:
-            limit !== undefined && limitRemaining !== undefined && limit > 0
-                ? Number((((limit - limitRemaining) / limit) * 100).toFixed(1))
-                : totalCredits > 0
-                  ? Math.round((usage / totalCredits) * 100)
-                  : undefined,
+        percentUsed,
     };
 }
 
@@ -1348,18 +1340,20 @@ async function checkElevenLabsQuota() {
     const resetSecCandidate = toOptionalNumber(
         subscription.next_character_count_reset_unix
     );
+    let resetAt: string | undefined;
+    if (resetSecCandidate !== undefined && resetSecCandidate > 0) {
+        resetAt = dateToISOString(new Date(resetSecCandidate * 1000));
+    }
+    if (resetMsCandidate !== undefined && resetMsCandidate > 0) {
+        resetAt = dateToISOString(new Date(resetMsCandidate));
+    }
     return {
         used,
         total,
         remaining: Math.max(total - used, 0),
         tier: toOptionalString(subscription.tier) || "unknown",
         percentUsed: total > 0 ? Math.round((used / total) * 100) : undefined,
-        resetAt:
-            resetMsCandidate !== undefined && resetMsCandidate > 0
-                ? dateToISOString(new Date(resetMsCandidate))
-                : resetSecCandidate !== undefined && resetSecCandidate > 0
-                  ? dateToISOString(new Date(resetSecCandidate * 1000))
-                  : undefined,
+        resetAt,
     };
 }
 
@@ -1477,7 +1471,7 @@ async function getHostSummary() {
             percent: toNumber(String(parts[4] ?? "0").replace("%", "")),
         };
     } catch (error) {
-        console.warn("[CacheRefresh] Failed to read host disk summary:", error);
+        logger.warn("cache_refresh.host_disk_summary_failed", { error });
     }
 
     const totalMemory = os.totalmem();
@@ -1801,7 +1795,7 @@ async function refreshQuotasCache() {
     return { refreshed: ["quotas.summary"] };
 }
 
-async function refreshLogRotationStateCache() {
+function refreshLogRotationStateCache() {
     const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
         .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | undefined };
@@ -1834,12 +1828,12 @@ async function refreshLogRotationStateCache() {
 
 async function refreshDockerSummaryCache() {
     const containers = await getContainers();
-    const [images, volumes, updaterServices, updaterEvents] = await Promise.all([
+    const [images, volumes] = await Promise.all([
         getImages(containers),
         getVolumes(containers),
-        getDockerUpdaterServices(),
-        getDockerUpdaterEvents(25),
     ]);
+    const updaterServices = getDockerUpdaterServices();
+    const updaterEvents = getDockerUpdaterEvents(25);
     const payload = {
         checkedAt: nowIso(),
         containers,
@@ -1868,9 +1862,7 @@ async function refreshDatabaseSummaryCache() {
     const isIsolated =
         process.env.NODE_ENV !== "production" &&
         process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1";
-    const previousEntry = isIsolated
-        ? await getCacheEntry(DATABASE_SUMMARY_KEY)
-        : undefined;
+    const previousEntry = isIsolated ? getCacheEntry(DATABASE_SUMMARY_KEY) : undefined;
     const previous = isIsolated
         ? parseJsonField<unknown>(previousEntry?.data || "")
         : undefined;
@@ -1917,7 +1909,10 @@ const cacheRefreshMetricsState: Omit<CacheRefreshMetrics, "averageDurationMs"> =
     totalDurationMs: 0,
 };
 
-/** Returns aggregate producer timing without cache keys or cached payloads. */
+/**
+ * Returns aggregate producer timing without cache keys or cached payloads.
+ * @returns aggregate producer timing without cache keys or cached payloads.
+ */
 export function getCacheRefreshMetrics(): CacheRefreshMetrics {
     return {
         ...cacheRefreshMetricsState,
@@ -2004,7 +1999,7 @@ export function cacheRefreshResourceClass(key: string): JobResourceClass {
 
 async function refreshCacheWithFailureRecord(
     key: string,
-    refresh: () => Promise<{ refreshed: string[] }>,
+    refresh: () => Promise<{ refreshed: string[] }> | { refreshed: string[] },
     failureKeys: string[] = [key]
 ) {
     try {
@@ -2368,22 +2363,25 @@ function getScheduledCacheKey(job: ScheduledJob): string {
 }
 
 function isCacheEntryFresh(key: string): boolean {
-    const keys =
-        key === "moltbook"
-            ? MOLTBOOK_CACHE_KEY_LIST
-            : key === "system.host" || key === "system.openclaw"
-              ? ["system.openclaw", "system.host"]
-              : [key];
+    let keys: readonly string[] = [key];
+    if (key === "system.host" || key === "system.openclaw") {
+        keys = ["system.openclaw", "system.host"];
+    }
+    if (key === "moltbook") {
+        keys = MOLTBOOK_CACHE_KEY_LIST;
+    }
     const statement = database.prepare(
         "SELECT status, expires_at FROM cache_entries WHERE key = ? LIMIT 1"
     );
     return keys.every((cacheKey) => {
         const row = statement.get(cacheKey) as
-            undefined | { status: string; expires_at: string };
+            | undefined
+            | { status: string; expires_at: string };
         if (!row || row.status !== "fresh") {
             return false;
         }
-        const expiresAtMs = row.expires_at === "" ? NaN : Date.parse(row.expires_at);
+        const expiresAtMs =
+            row.expires_at === "" ? Number.NaN : Date.parse(row.expires_at);
         return Number.isFinite(expiresAtMs) && expiresAtMs > Date.now();
     });
 }
@@ -2410,10 +2408,7 @@ export function seedMissingLocalCacheEntry(key: string): void {
         try {
             await refreshCacheProducer(key);
         } catch (error) {
-            console.warn(
-                `[CacheRefresh] Failed to seed missing cache entry ${key}:`,
-                error
-            );
+            logger.warn("cache_refresh.seed_failed", { cacheKey: key, error });
             throw error;
         }
     });
@@ -2459,10 +2454,10 @@ function queueMissingCacheSeeds(
                     ? (error as { statusCode?: unknown }).statusCode
                     : undefined;
             if (statusCode !== 409) {
-                console.warn(
-                    `[CacheRefresh] Failed to queue startup cache seed ${seedJob.key}:`,
-                    error
-                );
+                logger.warn("cache_refresh.startup_seed_queue_failed", {
+                    cacheKey: seedJob.key,
+                    error,
+                });
             }
         }
     }
@@ -2495,16 +2490,19 @@ export function registerCacheRefreshScheduledJobs(
         for (const job of registeredJobs) {
             const existing = getScheduledJob(job.id);
             const isAllowed = !allowedKeys || allowedKeys.has(job.actionPayload.key);
+            let timeOfDay: string | undefined =
+                "timeOfDay" in job && typeof job.timeOfDay === "string"
+                    ? job.timeOfDay
+                    : undefined;
+            if (existing) {
+                timeOfDay = existing.timeOfDay;
+            }
             upsertScheduledJob({
                 ...job,
                 enabled: isAllowed ? (existing?.enabled ?? true) : false,
                 scheduleType: existing?.scheduleType ?? job.scheduleType,
                 intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-                timeOfDay: existing
-                    ? existing.timeOfDay
-                    : "timeOfDay" in job && typeof job.timeOfDay === "string"
-                      ? job.timeOfDay
-                      : undefined,
+                timeOfDay,
                 cronExpression:
                     existing?.cronExpression ??
                     ("cronExpression" in job && typeof job.cronExpression === "string"

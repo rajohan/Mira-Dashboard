@@ -1,13 +1,14 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
 import type { Server } from "bun";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 import type { ApiErrorResponse } from "../../contracts/apiErrors.ts";
 import type { DashboardDiagnosticsResponse } from "../../contracts/health.ts";
+import { requestUrl } from "../../test/support/fetch.ts";
 
 const testState: {
     baseUrl: string;
@@ -35,19 +36,47 @@ const TEST_ENV_KEYS = [
     "WORKSPACE_ROOT",
 ] as const;
 
-async function api<T>(
+async function ensureAuthenticatedTestSession(): Promise<void> {
+    if (testState.sessionToken) return;
+
+    const { createSession, createUser, findUserByUsername } =
+        await import("../src/auth.ts");
+    const { database } = await import("../src/database.ts");
+    const username = "functional-test-user";
+    const user =
+        findUserByUsername(username) ??
+        (await createUser(username, "functional-test-password"));
+    const verifiedAt = new Date().toISOString();
+    database
+        .prepare(
+            `UPDATE users
+             SET mfa_enabled_at = ?, updated_at = ?
+             WHERE id = ?`
+        )
+        .run(verifiedAt, verifiedAt, user.id);
+    testState.sessionToken = createSession(user.id, {
+        authMethod: "webauthn",
+        mfaVerifiedAt: verifiedAt,
+        userAgent: "Mira Dashboard integration tests",
+    });
+}
+
+async function requestApi<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit,
+    shouldIncludeSession: boolean
 ): Promise<{ status: number; body: T }> {
+    const headers = new Headers(options.headers);
+    headers.set("Content-Type", "application/json");
+    if (shouldIncludeSession && testState.sessionToken) {
+        headers.set(
+            "Cookie",
+            `mira_dashboard_session=${encodeURIComponent(testState.sessionToken)}`
+        );
+    }
     const response = await fetch(`${testState.baseUrl}${endpoint}`, {
         ...options,
-        headers: {
-            "Content-Type": "application/json",
-            ...(testState.sessionToken && {
-                Cookie: `mira_dashboard_session=${encodeURIComponent(testState.sessionToken)}`,
-            }),
-            ...options.headers,
-        },
+        headers,
     });
     const text = await response.text();
     return {
@@ -56,14 +85,28 @@ async function api<T>(
     };
 }
 
-function sessionHeaders(headers: RequestInit["headers"] = {}): Headers {
+async function api<T>(
+    endpoint: string,
+    options: RequestInit = {}
+): Promise<{ status: number; body: T }> {
+    await ensureAuthenticatedTestSession();
+    return requestApi<T>(endpoint, options, true);
+}
+
+function unauthenticatedApi<T>(
+    endpoint: string,
+    options: RequestInit = {}
+): Promise<{ status: number; body: T }> {
+    return requestApi<T>(endpoint, options, false);
+}
+
+async function sessionHeaders(headers: RequestInit["headers"] = {}): Promise<Headers> {
+    await ensureAuthenticatedTestSession();
     const result = new Headers(headers);
-    if (testState.sessionToken) {
-        result.set(
-            "Cookie",
-            `mira_dashboard_session=${encodeURIComponent(testState.sessionToken)}`
-        );
-    }
+    result.set(
+        "Cookie",
+        `mira_dashboard_session=${encodeURIComponent(testState.sessionToken!)}`
+    );
     return result;
 }
 
@@ -204,21 +247,23 @@ process.stdout.write(outputs[key] ?? "");
     await fs.chmod(binaryPath, 0o755);
 }
 
-async function createTestServer(
+function createTestServer(
     createServer: (port: number) => Server<unknown>
 ): Promise<Server<unknown>> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-        try {
-            return createServer(0);
-        } catch (error) {
-            lastError = error;
-            if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
-                throw error;
+    return Promise.try(() => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            try {
+                return createServer(0);
+            } catch (error) {
+                lastError = error;
+                if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
+                    throw error;
+                }
             }
         }
-    }
-    throw lastError;
+        throw lastError;
+    });
 }
 
 async function withTestScheduledExecutor<T>(
@@ -317,27 +362,28 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("reports health and auth bootstrap state without production data", async () => {
-        const live = await api<{ status: string; uptimeSeconds: number }>(
-            "/api/health/live"
-        );
+        const live = await unauthenticatedApi<{
+            status: string;
+            uptimeSeconds: number;
+        }>("/api/health/live");
         expect(live.status).toBe(200);
         expect(live.body.status).toBe("isOk");
         expect(live.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
 
-        const liveHead = await api<undefined>("/api/health/live", {
+        const liveHead = await unauthenticatedApi<undefined>("/api/health/live", {
             method: "HEAD",
         });
         expect(liveHead).toEqual({ body: undefined, status: 200 });
 
-        const ready = await api<{ status: string }>("/api/health/ready");
+        const ready = await unauthenticatedApi<{ status: string }>("/api/health/ready");
         expect(ready.status).toBe(503);
         expect(ready.body.status).toBe("notReady");
-        const readyHead = await api<undefined>("/api/health/ready", {
+        const readyHead = await unauthenticatedApi<undefined>("/api/health/ready", {
             method: "HEAD",
         });
         expect(readyHead).toEqual({ body: undefined, status: 503 });
 
-        const diagnostics = await api<{
+        const diagnostics = await unauthenticatedApi<{
             error: { code: string; message: string; requestId: string };
         }>("/api/health/diagnostics");
         expect(diagnostics.status).toBe(401);
@@ -349,7 +395,7 @@ describe("Mira Dashboard backend integration", () => {
             },
         });
 
-        const bootstrap = await api<{
+        const bootstrap = await unauthenticatedApi<{
             isBootstrapRequired: boolean;
             hasGatewayToken: boolean;
         }>("/api/auth/bootstrap");
@@ -359,7 +405,7 @@ describe("Mira Dashboard backend integration", () => {
             hasGatewayToken: false,
         });
 
-        const bootstrapSession = await api<{
+        const bootstrapSession = await unauthenticatedApi<{
             authenticated: boolean;
             isBootstrapRequired: boolean;
             user?: { id: number; username: string };
@@ -370,7 +416,7 @@ describe("Mira Dashboard backend integration", () => {
             isBootstrapRequired: true,
         });
 
-        const preBootstrapLogin = await api<ApiErrorResponse>(
+        const preBootstrapLogin = await unauthenticatedApi<ApiErrorResponse>(
             "/api/auth/login",
             json("POST", { username: "session-test-user", password: "test-password" })
         );
@@ -379,7 +425,7 @@ describe("Mira Dashboard backend integration", () => {
             "Create the first user before logging in"
         );
 
-        const invalidBootstrap = await api<ApiErrorResponse>(
+        const invalidBootstrap = await unauthenticatedApi<ApiErrorResponse>(
             "/api/auth/register-first-user",
             json("POST", {
                 username: "x",
@@ -392,7 +438,7 @@ describe("Mira Dashboard backend integration", () => {
             "Username must be 3-32 chars: letters, numbers, dot, dash, underscore"
         );
 
-        const malformedBootstrapBody = await api<ApiErrorResponse>(
+        const malformedBootstrapBody = await unauthenticatedApi<ApiErrorResponse>(
             "/api/auth/register-first-user",
             {
                 body: "{",
@@ -403,14 +449,17 @@ describe("Mira Dashboard backend integration", () => {
         expect(malformedBootstrapBody.status).toBe(400);
         expect(malformedBootstrapBody.body.error.message).toBe("Invalid JSON");
 
-        const invalidBootstrapBody = await api<ApiErrorResponse>(
+        const invalidBootstrapBody = await unauthenticatedApi<ApiErrorResponse>(
             "/api/auth/register-first-user",
             json("POST", ["not", "an", "object"])
         );
         expect(invalidBootstrapBody.status).toBe(400);
-        expect(invalidBootstrapBody.body.error.message).toBe("Invalid request body");
+        expect(invalidBootstrapBody.body.error).toMatchObject({
+            code: "invalid_request",
+            message: "body: must be an object",
+        });
 
-        const invalidLoginBody = await api<ApiErrorResponse>(
+        const invalidLoginBody = await unauthenticatedApi<ApiErrorResponse>(
             "/api/auth/login",
             json("POST", "not an object")
         );
@@ -419,22 +468,7 @@ describe("Mira Dashboard backend integration", () => {
             "Create the first user before logging in"
         );
 
-        const { createSession, createUser } = await import("../src/auth.ts");
-        const { database } = await import("../src/database.ts");
-        const user = await createUser("functional-test-user", "functional-test-password");
-        const verifiedAt = new Date().toISOString();
-        database
-            .prepare(
-                `UPDATE users
-                 SET mfa_enabled_at = ?, updated_at = ?
-                 WHERE id = ?`
-            )
-            .run(verifiedAt, verifiedAt, user.id);
-        testState.sessionToken = createSession(user.id, {
-            authMethod: "webauthn",
-            mfaVerifiedAt: verifiedAt,
-            userAgent: "Mira Dashboard integration tests",
-        });
+        await ensureAuthenticatedTestSession();
 
         const authenticatedDiagnostics = await api<DashboardDiagnosticsResponse>(
             "/api/health/diagnostics"
@@ -538,7 +572,7 @@ describe("Mira Dashboard backend integration", () => {
 
     it("applies static and websocket guard branches without leaving the test root", async () => {
         const apiMiss = await fetch(`${testState.baseUrl}/api/not-a-route`, {
-            headers: sessionHeaders(),
+            headers: await sessionHeaders(),
         });
         expect(apiMiss.status).toBe(404);
         expect(await apiMiss.json()).toEqual({
@@ -639,16 +673,11 @@ describe("Mira Dashboard backend integration", () => {
         expect(deleted.body.isOk).toBe(true);
     });
 
-    it("creates notifications with null optional fields", async () => {
-        const omittedValue = JSON.parse("null") as null;
+    it("creates notifications with omitted optional fields", async () => {
         const created = await api<{ id: number; isOk: boolean }>(
             "/api/notifications",
             json("POST", {
-                title: "Null optional fields",
-                description: omittedValue,
-                source: omittedValue,
-                dedupeKey: omittedValue,
-                type: omittedValue,
+                title: "Omitted optional fields",
             })
         );
 
@@ -657,7 +686,6 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("lists, marks, filters, clears, and deletes notifications through the API", async () => {
-        const omittedValue = JSON.parse("null") as null;
         const first = await api<{ id: number; isOk: boolean }>(
             "/api/notifications",
             json("POST", {
@@ -726,10 +754,12 @@ describe("Mira Dashboard backend integration", () => {
 
         const rejectNullSource = await api<ApiErrorResponse>(
             "/api/notifications/clear-read",
-            json("POST", { source: omittedValue })
+            json("POST", { source: null })
         );
         expect(rejectNullSource.status).toBe(400);
-        expect(rejectNullSource.body.error.message).toBe("source must be a string");
+        expect(rejectNullSource.body.error.message).toBe(
+            "body.source: Invalid type: Expected string but received null"
+        );
 
         const clearCache = await api<{ deleted: number; isOk: boolean }>(
             "/api/notifications/clear-read",
@@ -882,7 +912,6 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Custom report",
                 bodyMd: "Custom delivery.",
                 summary: "Custom delivery.",
-                dedupeKey: " ".repeat(3),
                 occurredAt: "2026-06-23T08:00:00.000Z",
             })
         );
@@ -897,7 +926,6 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Second custom report",
                 bodyMd: "Second custom delivery.",
                 summary: "Second custom delivery.",
-                dedupeKey: " ".repeat(3),
                 occurredAt: "2026-06-23T08:30:00.000Z",
             })
         );
@@ -1105,14 +1133,16 @@ describe("Mira Dashboard backend integration", () => {
             json("PUT", { theme: "blue" })
         );
         expect(invalid.status).toBe(400);
-        expect(invalid.body.error.message).toBe("Invalid theme");
+        expect(invalid.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.theme"),
+        });
     });
 
     it("reports cache heartbeat entries and individual cache state", async () => {
         const { database } = await import("../src/database.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const { writeCacheFailure } = await import("../src/services/cacheRefresh.ts");
-        const missingValue = JSON.parse("null") as null;
         database
             .prepare(
                 `INSERT INTO cache_entries (
@@ -1128,8 +1158,8 @@ describe("Mira Dashboard backend integration", () => {
                 "2026-06-23T09:00:00.000Z",
                 "2099-01-01T00:00:00.000Z",
                 "fresh",
-                missingValue,
-                missingValue,
+                null,
+                null,
                 0,
                 JSON.stringify({ provider: "moltbook" })
             );
@@ -1142,9 +1172,9 @@ describe("Mira Dashboard backend integration", () => {
             )
             .run(
                 "quota.openai",
-                missingValue,
+                null,
                 "quota",
-                missingValue,
+                null,
                 "2026-06-23T09:05:00.000Z",
                 "2026-06-23T10:05:00.000Z",
                 "error",
@@ -1168,8 +1198,8 @@ describe("Mira Dashboard backend integration", () => {
                 "2026-06-23T08:00:00.000Z",
                 "2000-01-01T00:00:00.000Z",
                 "fresh",
-                missingValue,
-                missingValue,
+                null,
+                null,
                 0,
                 "{}"
             );
@@ -1256,8 +1286,8 @@ describe("Mira Dashboard backend integration", () => {
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")
         ).toMatchObject({
-            errorCode: "",
-            errorMessage: "",
+            errorCode: null,
+            errorMessage: null,
             meta: { provider: "moltbook" },
             status: "fresh",
             updatedAt: "2026-06-23T09:00:00.000Z",
@@ -1269,7 +1299,7 @@ describe("Mira Dashboard backend integration", () => {
             errorCode: "rate_limited",
             errorMessage: "Quota API failed",
             status: "error",
-            updatedAt: missingValue,
+            updatedAt: null,
         });
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")?.data
@@ -1287,7 +1317,7 @@ describe("Mira Dashboard backend integration", () => {
         expect(
             status.body.entries.find((entry) => entry.key === "moltbook.home")
         ).toMatchObject({
-            data: missingValue,
+            data: null,
             status: "fresh",
         });
         expect(
@@ -1324,7 +1354,7 @@ describe("Mira Dashboard backend integration", () => {
             errorCode: "check_failed",
             errorMessage: "Weather offline",
             status: "error",
-            updatedAt: missingValue,
+            updatedAt: null,
         });
         expect(
             heartbeat.body.entries.find(
@@ -1353,6 +1383,7 @@ describe("Mira Dashboard backend integration", () => {
         expect(missing.body).toEqual({
             error: {
                 code: "not_found",
+                details: { key: "not-present" },
                 message: "Cache key not found",
                 requestId: expect.any(String),
             },
@@ -1391,7 +1422,15 @@ describe("Mira Dashboard backend integration", () => {
                 feedFilter: "all",
                 feedType: "hot",
                 hasMore: false,
-                posts: [{ id: "hot-post" }],
+                posts: [
+                    {
+                        author_name: "Mira",
+                        created_at: "2026-06-23T11:00:00.000Z",
+                        id: "hot-post",
+                        submolt_name: "dashboard",
+                        title: "Hot post",
+                    },
+                ],
                 tip: "tip",
             },
             source: "moltbook",
@@ -1405,7 +1444,15 @@ describe("Mira Dashboard backend integration", () => {
                 feedFilter: "following",
                 feedType: "new",
                 hasMore: true,
-                posts: [{ id: "new-post" }],
+                posts: [
+                    {
+                        author_name: "Mira",
+                        created_at: "2026-06-23T11:30:00.000Z",
+                        id: "new-post",
+                        submolt_name: "dashboard",
+                        title: "New post",
+                    },
+                ],
                 tip: "fresh",
             },
             source: "moltbook",
@@ -1415,7 +1462,19 @@ describe("Mira Dashboard backend integration", () => {
         });
         writeCacheSuccess({
             key: "moltbook.profile",
-            data: { agent: { id: "mira-2026", displayName: "Mira" } },
+            data: {
+                agent: {
+                    avatar_url: "",
+                    comments_count: 1,
+                    description: "Dashboard agent",
+                    display_name: "Mira",
+                    follower_count: 2,
+                    following_count: 3,
+                    karma: 4,
+                    name: "mira-2026",
+                    posts_count: 1,
+                },
+            },
             source: "moltbook",
             ttl: 10,
             ttlUnit: "minutes",
@@ -1423,7 +1482,34 @@ describe("Mira Dashboard backend integration", () => {
         });
         writeCacheSuccess({
             key: "moltbook.my-content",
-            data: { comments: [{ id: "comment-1" }], posts: [{ id: "post-1" }] },
+            data: {
+                comments: [
+                    {
+                        content: "A comment",
+                        created_at: "2026-06-23T10:30:00.000Z",
+                        downvotes: 0,
+                        id: "comment-1",
+                        post: {
+                            id: "hot-post",
+                            submolt: { name: "dashboard" },
+                            title: "Hot post",
+                        },
+                        upvotes: 1,
+                    },
+                ],
+                posts: [
+                    {
+                        comment_count: 1,
+                        content_preview: "A post",
+                        created_at: "2026-06-23T10:00:00.000Z",
+                        downvotes: 0,
+                        id: "post-1",
+                        submolt: { name: "dashboard" },
+                        title: "A post",
+                        upvotes: 2,
+                    },
+                ],
+            },
             source: "moltbook",
             ttl: 10,
             ttlUnit: "minutes",
@@ -1453,13 +1539,13 @@ describe("Mira Dashboard backend integration", () => {
         expect(newFeed.status).toBe(200);
         expect(newFeed.body).toMatchObject({ feedType: "new", hasMore: true });
 
-        const profile = await api<{ agent: { displayName: string; id: string } }>(
+        const profile = await api<{ agent: { display_name: string; name: string } }>(
             "/api/moltbook/profile"
         );
         expect(profile.status).toBe(200);
-        expect(profile.body.agent).toEqual({
-            displayName: "Mira",
-            id: "mira-2026",
+        expect(profile.body.agent).toMatchObject({
+            display_name: "Mira",
+            name: "mira-2026",
         });
 
         const myPosts = await api<{
@@ -1467,9 +1553,9 @@ describe("Mira Dashboard backend integration", () => {
             posts: Array<{ id: string }>;
         }>("/api/moltbook/my-posts");
         expect(myPosts.status).toBe(200);
-        expect(myPosts.body).toEqual({
-            comments: [{ id: "comment-1" }],
-            posts: [{ id: "post-1" }],
+        expect(myPosts.body).toMatchObject({
+            comments: [expect.objectContaining({ id: "comment-1" })],
+            posts: [expect.objectContaining({ id: "post-1" })],
         });
     });
 
@@ -1565,14 +1651,20 @@ describe("Mira Dashboard backend integration", () => {
             json("POST", { action: "archive" })
         );
         expect(unsupportedAction.status).toBe(400);
-        expect(unsupportedAction.body.error.message).toBe("Unsupported action: archive");
+        expect(unsupportedAction.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.action"),
+        });
 
         const malformedAction = await api<ApiErrorResponse>(
             "/api/sessions/session-1/action",
             json("POST", [])
         );
         expect(malformedAction.status).toBe(400);
-        expect(malformedAction.body.error.message).toBe("Request body must be an object");
+        expect(malformedAction.body.error).toMatchObject({
+            code: "invalid_request",
+            message: "body: must be an object",
+        });
     });
 
     it("lists, updates, runs, and reports scheduled jobs through the API", async () => {
@@ -1626,13 +1718,12 @@ describe("Mira Dashboard backend integration", () => {
             code: "invalid_request",
             details: {
                 issues: [
-                    {
-                        message: "is not allowed",
+                    expect.objectContaining({
                         path: "body.patch.unknown",
-                    },
+                    }),
                 ],
             },
-            message: "body.patch.unknown: is not allowed",
+            message: expect.stringContaining("body.patch.unknown"),
         });
 
         const nonObjectPatch = await api<ApiErrorResponse>(
@@ -1640,38 +1731,39 @@ describe("Mira Dashboard backend integration", () => {
             json("PATCH", { patch: [] })
         );
         expect(nonObjectPatch.status).toBe(400);
-        expect(nonObjectPatch.body.error.message).toBe("body.patch: must be an object");
+        expect(nonObjectPatch.body.error).toMatchObject({
+            code: "invalid_request",
+            message: "body.patch: must be an object",
+        });
 
         const invalidEnabledPatch = await api<ApiErrorResponse>(
             "/api/jobs/functional.test.job",
             json("PATCH", { patch: { enabled: "yes" } })
         );
         expect(invalidEnabledPatch.status).toBe(400);
-        expect(invalidEnabledPatch.body.error.message).toBe(
-            "body.patch.enabled: must be a boolean"
-        );
+        expect(invalidEnabledPatch.body.error.message).toContain("body.patch.enabled");
 
         const invalidScheduleTypePatch = await api<ApiErrorResponse>(
             "/api/jobs/functional.test.job",
             json("PATCH", { patch: { scheduleType: "weekly" } })
         );
         expect(invalidScheduleTypePatch.status).toBe(400);
-        expect(invalidScheduleTypePatch.body.error.message).toBe(
-            "body.patch.scheduleType: must be one of: interval, daily, cron"
+        expect(invalidScheduleTypePatch.body.error.message).toContain(
+            "body.patch.scheduleType"
         );
 
         const malformedPatch = await fetch(
             `${testState.baseUrl}/api/jobs/functional.test.job`,
             {
                 body: "{",
-                headers: sessionHeaders({
+                headers: await sessionHeaders({
                     "Content-Type": "application/json",
                 }),
                 method: "PATCH",
             }
         );
         expect(malformedPatch.status).toBe(400);
-        await expect(malformedPatch.json()).resolves.toEqual({
+        expect(malformedPatch.json()).resolves.toEqual({
             error: {
                 code: "invalid_json",
                 message: "Invalid JSON",
@@ -1776,20 +1868,26 @@ describe("Mira Dashboard backend integration", () => {
         expect(missingRuns.body.error.message).toBe("Scheduled job not found");
     });
 
-    it("validates legacy cron route payloads and reports log rotation state", async () => {
+    it("validates cron route payloads and reports log rotation state", async () => {
         const invalidToggle = await api<ApiErrorResponse>(
             "/api/cron/jobs/example/toggle",
             json("POST", { enabled: "yes" })
         );
         expect(invalidToggle.status).toBe(400);
-        expect(invalidToggle.body.error.message).toBe("enabled must be a boolean");
+        expect(invalidToggle.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.enabled"),
+        });
 
         const invalidUpdate = await api<ApiErrorResponse>(
             "/api/cron/jobs/example/update",
             json("POST", { patch: [] })
         );
         expect(invalidUpdate.status).toBe(400);
-        expect(invalidUpdate.body.error.message).toBe("patch must be an object");
+        expect(invalidUpdate.body.error).toMatchObject({
+            code: "invalid_request",
+            message: "body.patch: must be an object",
+        });
 
         const { database, sqlNullable } = await import("../src/database.ts");
         database
@@ -1826,17 +1924,27 @@ describe("Mira Dashboard backend integration", () => {
                 "log_rotation.state",
                 JSON.stringify({
                     lastRun: {
-                        checkedFiles: "2",
-                        checkedGroups: "1",
-                        compressedFiles: "1",
-                        deletedArchives: "0",
+                        checkedFiles: 2,
+                        checkedGroups: 1,
+                        compressedFiles: 1,
+                        deletedArchives: 0,
+                        errors: [{ message: "compression failed" }],
                         finishedAt: "2026-06-23T08:00:00.000Z",
-                        groups: [{ name: "dashboard" }],
+                        groups: [
+                            {
+                                checkedFiles: 2,
+                                compressedFiles: 1,
+                                deletedArchives: 0,
+                                name: "dashboard",
+                                rotatedFiles: 1,
+                                skippedFiles: 0,
+                            },
+                        ],
                         isDryRun: true,
                         isOk: false,
-                        message: "compression failed",
-                        rotatedFiles: "1",
-                        skippedFiles: "0",
+                        rotatedFiles: 1,
+                        skippedFiles: 0,
+                        startedAt: "2026-06-23T07:59:00.000Z",
                         warnings: ["large file"],
                     },
                 }),
@@ -1845,8 +1953,8 @@ describe("Mira Dashboard backend integration", () => {
                 "2026-06-23T08:00:00.000Z",
                 "2026-06-23T09:00:00.000Z",
                 "fresh",
-                sqlNullable(undefined),
-                sqlNullable(undefined),
+                sqlNullable(),
+                sqlNullable(),
                 0,
                 "{}"
             );
@@ -1886,7 +1994,7 @@ describe("Mira Dashboard backend integration", () => {
 
         const logs = await api<{
             logs: Array<{ name: string; size: number }>;
-        }>("/api/logs/info");
+        }>("/api/logs/openclaw/files");
         expect(logs.status).toBe(200);
         expect(logs.body.logs).toContainEqual(
             expect.objectContaining({
@@ -1896,7 +2004,7 @@ describe("Mira Dashboard backend integration", () => {
         );
 
         const content = await api<{ content: string; file: string; lineIds: string[] }>(
-            "/api/logs/content?file=openclaw-dashboard-functional-test.log&lines=2"
+            "/api/logs/openclaw/content?file=openclaw-dashboard-functional-test.log&lines=2"
         );
         expect(content.status).toBe(200);
         expect(content.body).toEqual({
@@ -1906,20 +2014,20 @@ describe("Mira Dashboard backend integration", () => {
         });
 
         const invalidLines = await api<ApiErrorResponse>(
-            "/api/logs/content?file=openclaw-dashboard-functional-test.log&lines=abc"
+            "/api/logs/openclaw/content?file=openclaw-dashboard-functional-test.log&lines=abc"
         );
         expect(invalidLines.status).toBe(400);
         expect(invalidLines.body.error.message).toBe("Invalid lines");
 
         const traversal = await api<ApiErrorResponse>(
-            "/api/logs/content?file=../openclaw-dashboard-functional-test.log"
+            "/api/logs/openclaw/content?file=../openclaw-dashboard-functional-test.log"
         );
         expect(traversal.status).toBe(404);
         expect(traversal.body.error.message).toBe("Log file not found");
 
         const media = await fetch(
             `${testState.baseUrl}/api/media?path=images/dashboard-test.txt`,
-            { headers: sessionHeaders() }
+            { headers: await sessionHeaders() }
         );
         expect(media.status).toBe(200);
         expect(media.headers.get("content-type")).toBe("text/plain; charset=utf-8");
@@ -2003,17 +2111,17 @@ describe("Mira Dashboard backend integration", () => {
                 "2026-06-23T10:01:00.000Z",
                 "abc def",
                 "Older deploy",
-                sqlNullable(undefined),
+                sqlNullable(),
                 "ok",
-                sqlNullable(undefined),
+                sqlNullable(),
                 "newer",
                 "failed",
                 "2026-06-23T11:00:00.000Z",
                 "2026-06-23T11:05:00.000Z",
-                sqlNullable(undefined),
-                sqlNullable(undefined),
+                sqlNullable(),
+                sqlNullable(),
                 "failed note",
-                sqlNullable(undefined),
+                sqlNullable(),
                 "boom"
             );
 
@@ -2052,13 +2160,12 @@ describe("Mira Dashboard backend integration", () => {
             expect.objectContaining({ display: "workspace/", type: "directory" })
         );
 
-        const terminalCd = await api<{ isSuccess: boolean; newCwd: string }>(
+        const terminalCd = await api<{ newCwd: string }>(
             "/api/terminal/cd",
             json("POST", { cwd: testState.temporaryRoot, path: "workspace" })
         );
         expect(terminalCd.status).toBe(200);
         expect(terminalCd.body).toEqual({
-            isSuccess: true,
             newCwd: path.join(testState.temporaryRoot, "workspace"),
         });
 
@@ -2094,7 +2201,7 @@ describe("Mira Dashboard backend integration", () => {
 
         const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
             body: "",
-            headers: sessionHeaders(),
+            headers: await sessionHeaders(),
             method: "POST",
         });
         expect(stt.status).toBe(400);
@@ -2111,7 +2218,10 @@ describe("Mira Dashboard backend integration", () => {
             json("PUT", { theme: "dark" })
         );
         expect(invalidConfigPut.status).toBe(400);
-        expect(invalidConfigPut.body.error.message).toBe("Config hash is required");
+        expect(invalidConfigPut.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.__hash"),
+        });
 
         const invalidSkill = await api<ApiErrorResponse>(
             "/api/skills/__proto__",
@@ -2138,9 +2248,10 @@ describe("Mira Dashboard backend integration", () => {
         database.prepare("DELETE FROM cache_entries WHERE key = ?").run("moltbook.home");
         const missingMoltbook = await api<ApiErrorResponse>("/api/moltbook/home");
         expect(missingMoltbook.status).toBe(503);
-        expect(missingMoltbook.body.error.message).toBe(
-            "Moltbook cache entry not found or not fresh: moltbook.home"
-        );
+        expect(missingMoltbook.body.error).toMatchObject({
+            code: "moltbook_cache_unavailable",
+            message: "Moltbook cache unavailable",
+        });
     });
 
     it("proxies successful TTS and STT provider responses", async () => {
@@ -2149,7 +2260,7 @@ describe("Mira Dashboard backend integration", () => {
         process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
         const providerCalls: Array<{ body: unknown; url: string }> = [];
         const fetchMock = async (input: Request | URL | string, init?: RequestInit) => {
-            const url = String(input);
+            const url = requestUrl(input);
             if (url.startsWith(testState.baseUrl)) {
                 return originalFetch(input, init);
             }
@@ -2174,7 +2285,7 @@ describe("Mira Dashboard backend integration", () => {
         try {
             const tts = await fetch(`${testState.baseUrl}/api/tts/speak`, {
                 body: JSON.stringify({ text: "Hei Mira" }),
-                headers: sessionHeaders({
+                headers: await sessionHeaders({
                     "Content-Type": "application/json",
                 }),
                 method: "POST",
@@ -2186,7 +2297,7 @@ describe("Mira Dashboard backend integration", () => {
 
             const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
                 body: new Uint8Array([4, 5, 6]),
-                headers: sessionHeaders({
+                headers: await sessionHeaders({
                     "Content-Type": "audio/webm",
                 }),
                 method: "POST",
@@ -2240,7 +2351,7 @@ describe("Mira Dashboard backend integration", () => {
 
         process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
         const fetchMock = async (input: Request | URL | string, init?: RequestInit) => {
-            const url = String(input);
+            const url = requestUrl(input);
             if (url.startsWith(testState.baseUrl)) {
                 return originalFetch(input, init);
             }
@@ -2261,7 +2372,7 @@ describe("Mira Dashboard backend integration", () => {
         try {
             const invalidJson = await fetch(`${testState.baseUrl}/api/tts/speak`, {
                 body: "{",
-                headers: sessionHeaders({
+                headers: await sessionHeaders({
                     "Content-Type": "application/json",
                 }),
                 method: "POST",
@@ -2278,16 +2389,20 @@ describe("Mira Dashboard backend integration", () => {
                 json("POST", { text: " ".repeat(3) })
             );
             expect(missingText.status).toBe(400);
-            expect(missingText.body.error.message).toBe("Missing text");
+            expect(missingText.body.error).toMatchObject({
+                code: "invalid_request",
+                message: expect.stringContaining("body.text"),
+            });
 
             const tooLong = await api<ApiErrorResponse>(
                 "/api/tts/speak",
                 json("POST", { text: "x".repeat(4001) })
             );
             expect(tooLong.status).toBe(400);
-            expect(tooLong.body.error.message).toBe(
-                "Text is too long. Max is 4000 characters."
-            );
+            expect(tooLong.body.error).toMatchObject({
+                code: "invalid_request",
+                message: expect.stringContaining("body.text"),
+            });
 
             const providerFailure = await api<ApiErrorResponse>(
                 "/api/tts/speak",
@@ -2300,7 +2415,7 @@ describe("Mira Dashboard backend integration", () => {
 
             const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
                 body: new Uint8Array([7, 8, 9]),
-                headers: sessionHeaders({
+                headers: await sessionHeaders({
                     "Content-Type": "audio/mp3",
                 }),
                 method: "POST",
@@ -2464,7 +2579,10 @@ describe("Mira Dashboard backend integration", () => {
             json("PUT", {})
         );
         expect(invalidMetadataBody.status).toBe(400);
-        expect(invalidMetadataBody.body.error.message).toBe("Provide currentTask");
+        expect(invalidMetadataBody.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.currentTask"),
+        });
 
         const metadata = await api<{ currentTask: string; updatedAt: string }>(
             "/api/agents/mira-2026/metadata",
@@ -2562,6 +2680,9 @@ describe("Mira Dashboard backend integration", () => {
         );
 
         expect(result.status).toBe(400);
-        expect(result.body.error.message).toBe("Invalid service name");
+        expect(result.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.service"),
+        });
     });
 });

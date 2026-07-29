@@ -3,11 +3,17 @@ import path from "node:path";
 
 import { YAML } from "bun";
 
+import type { ScheduledJob } from "../../../contracts/jobs.ts";
 import { database, sqlNullable } from "../database.ts";
+import { errorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
-import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import {
+    nonEmptyEnvironmentFallback,
+    stringFallback,
+    unknownArray,
+} from "../lib/values.ts";
 import { dirtyDockerUpdaterPaths, syncDockerUpdaterChanges } from "./gitHygiene.ts";
-import type { ScheduledJob } from "./scheduledJobs.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -15,6 +21,8 @@ import {
     ScheduledJobActionError,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
+
+const logger = createStructuredLogger("docker-updater");
 
 const COMPOSE_FILENAMES = [
     "compose.yaml",
@@ -328,8 +336,7 @@ function isProjectComposeIncludeCompose(
     if (seen.has(contextKey)) {
         return false;
     }
-    const branchSeen = new Set(seen);
-    branchSeen.add(contextKey);
+    const branchSeen = new Set([...seen, contextKey]);
     try {
         const document = YAML.parse(
             fs.readFileSync(projectComposePath, "utf8")
@@ -666,7 +673,7 @@ function nowIso(): string {
 }
 
 function normalizeComposeLabelValue(value: unknown): string {
-    return String(value ?? "").replaceAll("$$", "$");
+    return stringFallback(value).replaceAll("$$", "$");
 }
 
 function normalizeLabels(rawLabels: unknown): Map<string, string> {
@@ -723,7 +730,7 @@ function normalizeDockerHubRepo(repo: string): string {
 }
 
 function caughtMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    return errorMessage(error, "Docker updater operation failed");
 }
 
 function asRecord(value: unknown): JsonRecord {
@@ -856,12 +863,13 @@ async function fetchRegistryResponse(
             return { authorization: options.authorization, response, clearTimer };
         }
         const tokenBody = asRecord(await tokenResponse.json());
-        const token =
-            typeof tokenBody.token === "string"
-                ? tokenBody.token
-                : typeof tokenBody.access_token === "string"
-                  ? tokenBody.access_token
-                  : undefined;
+        let token: string | undefined;
+        if (typeof tokenBody.access_token === "string") {
+            token = tokenBody.access_token;
+        }
+        if (typeof tokenBody.token === "string") {
+            token = tokenBody.token;
+        }
         if (!token) {
             return { response, clearTimer };
         }
@@ -1142,9 +1150,8 @@ function manifestDigestForPlatform(
     body: JsonRecord,
     platform: string
 ): string | undefined {
-    const manifest = (Array.isArray(body.manifests) ? body.manifests : []).find(
-        (candidate) =>
-            isImageMatchPlatform(asRecord(asRecord(candidate).platform), platform)
+    const manifest = unknownArray(body.manifests).find((candidate) =>
+        isImageMatchPlatform(asRecord(asRecord(candidate).platform), platform)
     );
     const digest = asRecord(manifest).digest;
     return typeof digest === "string" ? digest : undefined;
@@ -1519,7 +1526,7 @@ function insertEventBestEffort(
     try {
         insertEvent(service, eventType, message, details);
     } catch (error) {
-        console.error("[DockerUpdater] Failed to persist update event", {
+        logger.error("docker_updater.event_persist_failed", {
             error: caughtMessage(error),
             eventType,
             service: serviceLabel(service),
@@ -1572,7 +1579,7 @@ function createNotificationBestEffort(
     try {
         createNotification(title, description, dedupeKey, type, metadata);
     } catch (error) {
-        console.error("[DockerUpdater] Failed to persist notification", {
+        logger.error("docker_updater.notification_persist_failed", {
             dedupeKey,
             error: caughtMessage(error),
             title,
@@ -1777,7 +1784,7 @@ async function applyComposeUpdateUnlocked(
                     fs.renameSync(rollback.rollbackTempPath, rollback.composePath);
                 }
             } catch (rollbackError) {
-                console.error("[DockerUpdater] Failed to restore compose file", {
+                logger.error("docker_updater.compose_restore_failed", {
                     composePath: rollback.composePath,
                     rollbackError,
                 });
@@ -1790,7 +1797,7 @@ async function applyComposeUpdateUnlocked(
                 isRestored = true;
             }
         } catch (rollbackError) {
-            console.error("[DockerUpdater] Failed to restore compose file", {
+            logger.error("docker_updater.compose_restore_failed", {
                 composePath,
                 rollbackError,
             });
@@ -1808,24 +1815,17 @@ async function applyComposeUpdateUnlocked(
                     timeoutMs: 180_000,
                 });
                 if (rollbackResult.code !== 0) {
-                    console.error(
-                        "[DockerUpdater] Re-applying restored compose file failed",
-                        {
-                            code: rollbackResult.code,
-                            output:
-                                rollbackResult.stderr.trim() ||
-                                rollbackResult.stdout.trim(),
-                        }
-                    );
+                    logger.error("docker_updater.restored_compose_apply_failed", {
+                        code: rollbackResult.code,
+                        output:
+                            rollbackResult.stderr.trim() || rollbackResult.stdout.trim(),
+                    });
                 }
             } catch (rollbackError) {
-                console.error(
-                    "[DockerUpdater] Failed to re-apply restored compose file",
-                    {
-                        composePath,
-                        rollbackError,
-                    }
-                );
+                logger.error("docker_updater.restored_compose_apply_failed", {
+                    composePath,
+                    rollbackError,
+                });
             }
         }
         throw error;
@@ -1915,18 +1915,16 @@ function servicesFromCompose(composePath: string):
                 true
             );
             const currentTag = image.tag ?? (image.digest ? undefined : "latest");
-            const pinMode: "digest" | "tag" =
-                configuredPinMode === "digest" || configuredPinMode === "tag"
-                    ? configuredPinMode
-                    : image.pinMode === "digest"
-                      ? "digest"
-                      : "tag";
+            let pinMode: "digest" | "tag" = image.pinMode === "digest" ? "digest" : "tag";
+            if (configuredPinMode === "digest" || configuredPinMode === "tag") {
+                pinMode = configuredPinMode;
+            }
             let tagMatchType: "exact" | "regex" = "exact";
             const tagMatchPattern = tagPattern ?? currentTag;
             if (tagPattern && isTagPatternIsRegex) {
                 if (!isSafeTagRegexPattern(tagPattern)) {
                     const message = `Unsafe tag pattern regex for ${appSlug}/${serviceName}: ${tagPattern} (pattern failed safety checks)`;
-                    console.warn("[DockerUpdater] Ignoring unsafe tag pattern regex", {
+                    logger.warn("docker_updater.unsafe_tag_pattern_ignored", {
                         appSlug,
                         serviceName,
                         tagPattern,
@@ -1984,7 +1982,7 @@ function servicesFromCompose(composePath: string):
             services,
         };
     } catch (error) {
-        console.error("[DockerUpdater] Failed to discover compose services", {
+        logger.error("docker_updater.compose_discovery_failed", {
             composePath,
             error,
         });
@@ -1992,9 +1990,9 @@ function servicesFromCompose(composePath: string):
     }
 }
 
-export async function registerDockerUpdaterServices(
+export function registerDockerUpdaterServices(
     signal?: AbortSignal
-): Promise<DockerUpdaterStepResult> {
+): DockerUpdaterStepResult {
     signal?.throwIfAborted();
     let composeFiles: string[];
     try {
@@ -2462,7 +2460,7 @@ async function pruneDanglingImagesBestEffort(signal?: AbortSignal): Promise<void
         }
     } catch (error) {
         signal?.throwIfAborted();
-        console.error("[DockerUpdater] Failed to prune dangling images", {
+        logger.error("docker_updater.image_prune_failed", {
             error: caughtMessage(error),
         });
     }
@@ -2578,7 +2576,7 @@ export async function runDockerUpdaterService(
                       )
                       .get(serviceId) as ManagedServiceRow | undefined
               );
-    const register = await registerDockerUpdaterServices(signal);
+    const register = registerDockerUpdaterServices(signal);
     if (serviceId === undefined && shouldBlockGlobalUpdateForDiscoveryFailure(register)) {
         return [register];
     }
@@ -2772,14 +2770,17 @@ export function registerDockerUpdaterScheduledJobs(): void {
         "docker.updater",
         async (executionJob, signal, context) => {
             const rawServiceId = executionJob.actionPayload.serviceId;
-            const serviceId =
-                rawServiceId === undefined
-                    ? undefined
-                    : typeof rawServiceId === "number" &&
-                        Number.isSafeInteger(rawServiceId) &&
-                        rawServiceId > 0
-                      ? rawServiceId
-                      : NaN;
+            let serviceId: number | undefined = Number.NaN;
+            if (rawServiceId === undefined) {
+                serviceId = undefined;
+            }
+            if (
+                typeof rawServiceId === "number" &&
+                Number.isSafeInteger(rawServiceId) &&
+                rawServiceId > 0
+            ) {
+                serviceId = rawServiceId;
+            }
             if (Number.isNaN(serviceId)) {
                 throw Object.assign(new Error("Invalid Docker updater service id"), {
                     statusCode: 400,

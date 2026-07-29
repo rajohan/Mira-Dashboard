@@ -5,6 +5,10 @@ import path from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 
 import {
+    type DashboardSocketRequest,
+    readDashboardSocketRequest,
+} from "../../contracts/socket.ts";
+import {
     getAuthSessionFromSessionId,
     hasRecentMfaVerification,
     validateAuthenticationConfig,
@@ -22,6 +26,7 @@ import {
 } from "./requestPolicy.ts";
 import { withRequestSecurity } from "./requestSecurity.ts";
 import { routes } from "./routes.ts";
+import { routeFailureResponse } from "./routeSupport.ts";
 import { isProductionDeploymentCutoverActive } from "./services/deploymentCutoverState.ts";
 import { validateTotpStorageConfig } from "./services/multiFactorAuth.ts";
 import { validateWebAuthnConfig } from "./services/webAuthn.ts";
@@ -36,13 +41,6 @@ interface DashboardSocketData {
     userId: number;
 }
 
-interface DashboardSocketRequest {
-    id?: string;
-    method?: string;
-    type?: string;
-    userActivity?: boolean;
-}
-
 const SERVER_IDLE_TIMEOUT_SECONDS = 240;
 const DEPLOYMENT_CUTOVER_SOCKET_CLOSE_CODE = 1012;
 const DEPLOYMENT_CUTOVER_SOCKET_CLOSE_REASON = "Dashboard release cutover in progress";
@@ -50,17 +48,13 @@ const IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATED_ASSET_CACHE_CONTROL = "no-cache";
 const HASHED_ASSET_NAME = /-[\da-z]{8}\.[\da-z]+$/iu;
 
-function dashboardSocketRequest(data: string | Buffer): DashboardSocketRequest {
+function dashboardSocketRequest(
+    data: string | Buffer
+): DashboardSocketRequest | undefined {
     try {
-        const value = JSON.parse(data.toString()) as Record<string, unknown>;
-        return {
-            ...(typeof value.id === "string" && { id: value.id }),
-            ...(typeof value.method === "string" && { method: value.method }),
-            ...(typeof value.type === "string" && { type: value.type }),
-            ...(value.userActivity === true && { userActivity: true }),
-        };
+        return readDashboardSocketRequest(JSON.parse(data.toString()));
     } catch {
-        return {};
+        return undefined;
     }
 }
 
@@ -171,6 +165,10 @@ export function createServer(
             }
             const data = typeof message === "string" ? message : Buffer.from(message);
             const socketRequest = dashboardSocketRequest(data);
+            if (!socketRequest) {
+                ws.close(1008, "Invalid Dashboard request");
+                return;
+            }
             const session = getAuthSessionFromSessionId(ws.data.sessionToken, {
                 touchActivity: socketRequest.userActivity === true,
             });
@@ -311,7 +309,10 @@ async function staticResponse(request: Request, pathname: string): Promise<Respo
     }
     const decodedPathname = `/${decodedPath}`;
     if (decodedPathname === "/api" || decodedPathname.startsWith("/api/")) {
-        return Response.json({ error: "Not found" }, { status: 404 });
+        return routeFailureResponse(
+            { context: "static-routing", message: "Not found", status: 404 },
+            request
+        );
     }
     if (decodedPathname === "/health") {
         return new Response("Not found", { status: 404 });

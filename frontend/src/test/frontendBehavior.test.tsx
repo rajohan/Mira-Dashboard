@@ -1,0 +1,7388 @@
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+    createMemoryHistory,
+    createRootRoute,
+    createRoute,
+    createRouter,
+    Outlet,
+    RouterProvider,
+} from "@tanstack/react-router";
+import {
+    act,
+    fireEvent,
+    render,
+    renderHook,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createElement, type ReactNode } from "react";
+
+import type { CacheEnvelope } from "../../../contracts/cache";
+import type { DatabaseOverviewResponse } from "../../../contracts/database";
+import type { DashboardDiagnosticsResponse } from "../../../contracts/health";
+import type { AppObservabilityMetrics, Metrics } from "../../../contracts/metrics";
+import type { NotificationItem } from "../../../contracts/notifications";
+import type { OpenClawConfig } from "../../../contracts/openClawConfig";
+import { readSessionsResponsePayload } from "../../../contracts/socket";
+import type { Task, TaskUpdate } from "../../../contracts/tasks";
+import { parseWeatherData } from "../../../contracts/weather";
+import { requestBodyText, requestUrl } from "../../../test/support/fetch";
+import {
+    agentsCollection,
+    preloadAgentsCollection,
+    writeAgentsFromWebSocket,
+} from "../collections/agents";
+import {
+    logsCollection,
+    preloadLogsCollection,
+    writeLogFromWebSocket,
+} from "../collections/logs";
+import {
+    deleteSessionFromCollection,
+    preloadSessionsCollection,
+    replaceSessionsFromWebSocket,
+    sessionsCollection,
+} from "../collections/sessions";
+import {
+    attachmentKind,
+    type ChatHistoryMessage,
+    chatImageDownloadUrl,
+    chatImageUrl,
+    chatTransportAttachments,
+    extractImages,
+    extractThinkingBlocks,
+    extractToolCalls,
+    normalizeText,
+    optimisticAttachmentDisplay,
+} from "../components/features/chat/chatTypes";
+import {
+    base64ToText,
+    dataUrlToBase64,
+    dedupeMessages,
+    displayMimeType,
+    isRecoveredAssistantText,
+    mergeWithRecentOptimisticMessages,
+    messageDeleteKey,
+    messageIdentity,
+    readFileAsDataUrl,
+} from "../components/features/chat/chatUtilities";
+import {
+    buildSlashCommandSuggestions,
+    slashCommandCanonicalName,
+} from "../components/features/chat/slashCommands";
+import { normalizeOpenClawHistoryMessage } from "../components/features/chat/transport/openClawHistoryNormalizer";
+import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
+import {
+    formatBytes as formatDatabaseBytes,
+    formatNumber as formatDatabaseNumber,
+    postgresMaintenanceAttention,
+    truncateQuery,
+} from "../components/features/database/databaseUtilities";
+import {
+    formatBytes as formatDockerBytes,
+    formatDockerMemory,
+    formatFullVersionDisplay,
+    formatTimestamp,
+    formatUpdaterTransition,
+    formatVersionDisplay,
+} from "../components/features/docker/dockerFormatters";
+import { TaskDetailModal } from "../components/features/tasks/TaskDetailModal";
+import { TaskOverlay } from "../components/features/tasks/TaskOverlay";
+import { Layout } from "../components/layout/Layout";
+import { NotificationBell } from "../components/layout/NotificationBell";
+import { Badge } from "../components/ui/Badge";
+import { ConfirmModal } from "../components/ui/ConfirmModal";
+import { Dropdown } from "../components/ui/Dropdown";
+import { SearchInput } from "../components/ui/SearchInput";
+import {
+    useAgentsConfig,
+    useAgentsStatus,
+    useAgentStatus,
+    useAgentTaskHistory,
+} from "../hooks/useAgents";
+import { apiFetch } from "../hooks/useApi";
+import {
+    useClearKopiaBackupAttention,
+    useClearWalgBackupAttention,
+    useKopiaBackup,
+    useRunKopiaBackup,
+    useRunWalgBackup,
+    useWalgBackup,
+} from "../hooks/useBackups";
+import {
+    cacheKeys,
+    useCacheEntry,
+    useCacheHeartbeat,
+    useCacheStatus,
+    useRefreshCacheEntry,
+} from "../hooks/useCache";
+import {
+    useConfig,
+    useCreateBackup,
+    useRestartGateway,
+    useSkills,
+    useToggleSkill,
+    useUpdateConfig,
+} from "../hooks/useConfig";
+import {
+    useCronJobs,
+    useDeleteCronJob,
+    useRunCronJobNow,
+    useToggleCronJob,
+    useUpdateCronJob,
+} from "../hooks/useCron";
+import { useDatabaseOverview } from "../hooks/useDatabase";
+import {
+    deliveryKeys,
+    useApprovePullRequest,
+    useApprovePullRequestReview,
+    useDashboardDeployments,
+    useDashboardReleaseStatus,
+    useDeployDashboard,
+    useProductionCheckout,
+    usePullRequestPreview,
+    usePullRequests,
+    useRejectPullRequest,
+    useRollbackDashboard,
+    useStartPullRequestPreview,
+    useStopPullRequestPreview,
+    useUpdatePullRequestBranch,
+} from "../hooks/useDelivery";
+import { useDockerContainers } from "../hooks/useDocker";
+import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
+import { useHealth } from "../hooks/useHealth";
+import {
+    jobExecutionKeys,
+    refreshJobExecutionQueueWhilePending,
+} from "../hooks/useJobExecutions";
+import { useLogContent, useLogFiles } from "../hooks/useLogs";
+import { useMetrics } from "../hooks/useMetrics";
+import { useMoltbookData } from "../hooks/useMoltbook";
+import {
+    useCreateNotification,
+    useMarkAllNotificationsRead,
+} from "../hooks/useNotifications";
+import { OpenClawSocketProvider, useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "../hooks/useOpsActions";
+import { hasQuotaStatus, useQuotas } from "../hooks/useQuotas";
+import {
+    scheduledJobKeys,
+    useRunScheduledJobNow,
+    useScheduledJobRuns,
+    useScheduledJobs,
+    useUpdateScheduledJob,
+} from "../hooks/useScheduledJobs";
+import { useDeleteSession, useSessionAction } from "../hooks/useSessions";
+import {
+    taskKeys,
+    useAssignTask,
+    useCreateTaskUpdate,
+    useDeleteTask,
+    useDeleteTaskUpdate,
+    useMoveTask,
+    useTaskUpdates,
+    useUpdateTask,
+    useUpdateTaskUpdate,
+} from "../hooks/useTasks";
+import {
+    changeDirectory,
+    getCompletions,
+    stopTerminalJob,
+    useStartTerminalCommand,
+    useTerminalHistory,
+    useTerminalJob,
+} from "../hooks/useTerminal";
+import { useWeather } from "../hooks/useWeather";
+import { ApiError, UnauthorizedError } from "../lib/apiError";
+import {
+    notifyAuthSessionRotated,
+    UNAUTHORIZED_EVENT_NAME,
+    uninstallAuthSessionRotationSync,
+} from "../lib/authBoundary";
+import { messageFromError } from "../lib/errorMessage";
+import {
+    cancelSecurityVerification,
+    completeSecurityVerification,
+    refreshSecurityVerificationDeadline,
+    SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
+    SecurityVerificationCancelledError,
+    waitForSecurityVerification,
+} from "../lib/securityVerification";
+import { createSocketClient, socketReconnectDelayMs } from "../lib/socket/socketClient";
+import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
+import {
+    hasRecentUserActivity,
+    installUserActivityTracking,
+    resetUserActivityForTests,
+} from "../lib/userActivity";
+import { compareLogEntriesByLineId } from "../pages/logPageUtilities";
+import { Reports } from "../pages/Reports";
+import { Tasks } from "../pages/Tasks";
+import { authActions, authStore } from "../stores/authStore";
+import {
+    formatCronLastStatus,
+    formatCronTimestamp,
+    getCronJobId,
+    getCronJobName,
+    getCronStateValue,
+    getCronStatusVariant,
+    isCronExpressionValid,
+    sortCronJobs,
+} from "../utils/cronUtilities";
+import {
+    APP_TIME_ZONE,
+    appTimeZoneParts,
+    appTimeZoneShortMonth,
+    appTimeZoneShortWeekday,
+    appZonedUtcDate,
+    currentIsoString,
+    currentYear,
+    isoStringFromDate,
+    timestampFromDateString,
+} from "../utils/date";
+import {
+    getFileExtension,
+    getLanguage,
+    getSyntaxClass,
+    isBinaryFile,
+    isCodeFile,
+    isImageFile,
+    isJsonFile,
+    isMarkdownFile,
+} from "../utils/fileUtilities";
+import {
+    appDateTimeToTimestamp,
+    appTimeOfDayToUtcTimeOfDay,
+    formatDate,
+    formatDateStamp,
+    formatDuration,
+    formatLoad,
+    formatOsloClock,
+    formatOsloDate,
+    formatOsloTime,
+    formatSize,
+    formatTokenCount,
+    formatTokens,
+    formatUptime,
+    formatUtcTimeOfDayInAppTimeZone,
+    formatWeekdayShort,
+    getTokenPercent,
+} from "../utils/format";
+import {
+    formatLogTime,
+    getLevelColor,
+    getSubsystemColor,
+    parseLogLine,
+} from "../utils/logUtilities";
+import {
+    getSessionTypeVariant,
+    formatSessionType,
+    getTypeSortOrder,
+    sortSessionsByTypeAndActivity,
+} from "../utils/sessionUtilities";
+import { getColumnId, getPriority, isTaskMatchSearch } from "../utils/taskUtilities";
+
+function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
+    return {
+        number: overrides.number,
+        title: overrides.title,
+        body: overrides.body ?? "",
+        state: overrides.state ?? "OPEN",
+        labels: overrides.labels ?? [],
+        assignees: overrides.assignees ?? [{ login: "mira-2026", name: "Mira" }],
+        createdAt: overrides.createdAt ?? "2026-06-19T08:00:00.000Z",
+        updatedAt: overrides.updatedAt ?? "2026-06-19T08:00:00.000Z",
+        url: overrides.url ?? `/tasks/${overrides.number}`,
+        automation: overrides.automation,
+    };
+}
+
+function cacheEnvelopeFixture<T>(
+    key: string,
+    data: T,
+    overrides: Partial<Omit<CacheEnvelope<T>, "data" | "key">> = {}
+): CacheEnvelope<T> {
+    return {
+        consecutiveFailures: 0,
+        data,
+        errorCode: null,
+        errorMessage: null,
+        expiresAt: null,
+        key,
+        lastAttemptAt: "2026-06-23T08:00:00.000Z",
+        meta: {},
+        source: "backend",
+        status: "fresh",
+        updatedAt: "2026-06-23T08:00:00.000Z",
+        ...overrides,
+    };
+}
+
+function databaseOverviewFixture(): DatabaseOverviewResponse {
+    return {
+        bloatEstimates: [],
+        checkedAt: "2026-06-23T08:00:00.000Z",
+        databases: [],
+        deadTuples: [],
+        overview: {
+            averageCacheHitRatio: 99,
+            connections: {},
+            pgStatStatementsEnabled: true,
+            pgbouncer: {
+                avgQueryTime: 1,
+                avgTransactionTime: 2,
+                clientConnections: 1,
+                maxWait: 0,
+                serverConnections: 1,
+                waitingClients: 0,
+            },
+            torrentCounts: { bitmagnet: 2, comet: 1 },
+            totalBackends: 2,
+            totalDatabaseSizeBytes: 1024,
+        },
+        pgbouncerPools: [],
+        pgbouncerStats: [],
+        sqlite: {
+            attention: [],
+            backup: {
+                count: 0,
+                current: true,
+                reviewAgeHours: 48,
+            },
+            databaseBytes: 1024,
+            fileName: "mira-dashboard.db",
+            foreignKeysEnabled: true,
+            freeBytes: 0,
+            freePages: 0,
+            freePercent: 0,
+            journalMode: "wal",
+            migrations: { applied: 1, current: true, latest: 1 },
+            pageCount: 4,
+            pageSize: 256,
+            permissions: { secure: true },
+            shmBytes: 0,
+            status: "healthy",
+            storageBytes: 1024,
+            walAutoCheckpointPages: 1000,
+            walBytes: 0,
+        },
+        topQueries: [],
+    };
+}
+
+function appObservabilityMetrics(): AppObservabilityMetrics {
+    return {
+        cacheRefresh: {
+            active: 0,
+            averageDurationMs: 4,
+            coalesced: 2,
+            failures: 1,
+            lastDurationMs: 5,
+            maxDurationMs: 8,
+            refreshes: 3,
+            requests: 5,
+            totalDurationMs: 12,
+        },
+        database: {
+            available: true,
+            averageDurationMs: 1,
+            fileBytes: 4096,
+            freelistBytes: 0,
+            freelistPages: 0,
+            freelistPercent: 0,
+            latencyMs: 0.5,
+            lockErrors: 0,
+            maxDurationMs: 2,
+            operations: 4,
+            shmBytes: 0,
+            walBytes: 0,
+        },
+        gateway: {
+            connectFailures: 0,
+            connected: true,
+            connections: 1,
+            disconnects: 0,
+            pendingRequests: 0,
+            reconnects: 0,
+        },
+        processes: {
+            active: 0,
+            averageDurationMs: 10,
+            failed: 0,
+            lastDurationMs: 10,
+            maxDurationMs: 10,
+            started: 1,
+            succeeded: 1,
+            totalDurationMs: 10,
+        },
+        runtime: {
+            eventLoopDelayMs: 0.25,
+            externalBytes: 1024,
+            heapTotalBytes: 4096,
+            heapUsedBytes: 2048,
+            rssBytes: 8192,
+            uptimeSeconds: 123,
+        },
+        scheduler: {
+            activeResourceClasses: [],
+            dueJobs: 0,
+            executorActive: true,
+            executorTickRunning: false,
+            lastTickDurationMs: 1,
+            queueFailures: 0,
+            queued: 0,
+            running: 0,
+            scheduleLagMs: 0,
+            schedulerActive: true,
+            schedulerTickRunning: false,
+            tickFailures: 0,
+            ticks: 2,
+            workerCapacity: 2,
+            workerCount: 1,
+            workerOnline: true,
+        },
+    };
+}
+
+function dashboardDiagnostics(
+    overrides: {
+        backendCommit?: string;
+        frontendCommit?: string;
+        sessionCount?: number;
+    } = {}
+): DashboardDiagnosticsResponse {
+    const backendCommit = overrides.backendCommit ?? "backend-sha";
+    const frontendCommit = overrides.frontendCommit ?? "frontend-sha";
+    return {
+        checks: {
+            database: {
+                currentSchemaVersion: 1,
+                maximumCompatibleSchemaVersion: 1,
+                minimumCompatibleSchemaVersion: 1,
+                ready: true,
+                targetSchemaVersion: 1,
+            },
+            frontend: { ready: true },
+            release: {
+                backendCommit,
+                frontendCommit,
+                ready: true,
+                source: "manifest",
+            },
+            worker: { ready: true },
+        },
+        dependencies: { gatewayConnected: true },
+        observability: appObservabilityMetrics(),
+        releaseDetails: {
+            backendCommit,
+            frontendCommit,
+            ready: true,
+            source: "manifest",
+        },
+        sessionCount: overrides.sessionCount ?? 1,
+        status: "isReady",
+    };
+}
+
+function dashboardMetrics(): Metrics {
+    return {
+        ...appObservabilityMetrics(),
+        cpu: {
+            count: 4,
+            loadAvg: [0.1, 0.2, 0.3],
+            loadPercent: 5,
+            model: "test cpu",
+        },
+        disk: {
+            percent: 25,
+            total: 1000,
+            totalGB: 1,
+            used: 250,
+            usedGB: 0.25,
+        },
+        http: {
+            averageDurationMs: 2,
+            errors: 0,
+            maxDurationMs: 3,
+            requests: 2,
+            routes: [],
+        },
+        memory: {
+            free: 60,
+            percent: 40,
+            total: 100,
+            totalGB: 0.1,
+            used: 40,
+            usedGB: 0.04,
+        },
+        network: { downloadMbps: 1, uploadMbps: 2 },
+        polling: { snapshots: [] },
+        system: {
+            hostname: "dashboard-test",
+            platform: "linux",
+            uptime: 123,
+        },
+        timestamp: 123_456,
+        tokens: {
+            byAgent: [
+                {
+                    label: "Mira",
+                    model: "codex",
+                    tokens: 42,
+                    type: "MAIN",
+                },
+            ],
+            byModel: { codex: 42 },
+            sessionsByModel: { codex: 1 },
+            total: 42,
+        },
+    };
+}
+
+function createApi(tasks: Task[], taskUpdates: Record<number, TaskUpdate[]> = {}) {
+    return jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        return Promise.try(() => {
+            const url = requestUrl(input);
+            const method = init?.method ?? "GET";
+
+            if (url === "/api/tasks" && method === "GET") {
+                return Response.json(tasks);
+            }
+
+            const updatesMatch = /^\/api\/tasks\/(\d+)\/updates$/u.exec(url);
+            if (updatesMatch && method === "GET") {
+                return Response.json(taskUpdates[Number(updatesMatch[1])] ?? []);
+            }
+
+            if (url === "/api/tasks" && method === "POST") {
+                const payload = JSON.parse(requestBodyText(init?.body, "{}")) as {
+                    title: string;
+                    body: string;
+                    labels: string[];
+                    assignee: string;
+                };
+                const created = task({
+                    number: tasks.length + 1,
+                    title: payload.title,
+                    body: payload.body,
+                    labels: payload.labels.map((name) => ({ name })),
+                    assignees: [{ login: payload.assignee, name: payload.assignee }],
+                    updatedAt: "2026-06-19T09:00:00.000Z",
+                });
+                tasks.unshift(created);
+                return Response.json(created, { status: 201 });
+            }
+
+            throw new Error(`Unexpected frontend API call: ${method} ${url}`);
+        });
+    });
+}
+
+function notification(
+    overrides: Partial<NotificationItem> & Pick<NotificationItem, "id" | "title">
+): NotificationItem {
+    return {
+        id: overrides.id,
+        title: overrides.title,
+        description: overrides.description ?? "",
+        type: overrides.type ?? "info",
+        source: overrides.source,
+        dedupeKey: overrides.dedupeKey,
+        metadata: overrides.metadata ?? {},
+        isRead: overrides.isRead ?? false,
+        createdAt: overrides.createdAt ?? "2026-06-23T08:00:00.000Z",
+        updatedAt: overrides.updatedAt ?? "2026-06-23T08:00:00.000Z",
+        occurredAt: overrides.occurredAt ?? "2026-06-23T08:00:00.000Z",
+    };
+}
+
+function createNotificationsApi(notifications: NotificationItem[]) {
+    return jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        return Promise.try(() => {
+            const url = requestUrl(input);
+            const method = init?.method ?? "GET";
+
+            if (url === "/api/notifications" && method === "GET") {
+                return Response.json({
+                    items: notifications,
+                    readCount: notifications.filter((item) => item.isRead).length,
+                    unreadCount: notifications.filter((item) => !item.isRead).length,
+                });
+            }
+
+            const markReadMatch = /^\/api\/notifications\/(\d+)\/read$/u.exec(url);
+            if (markReadMatch && method === "POST") {
+                const id = Number(markReadMatch[1]);
+                notifications.splice(
+                    0,
+                    notifications.length,
+                    ...notifications.map((item) =>
+                        item.id === id ? { ...item, isRead: true } : item
+                    )
+                );
+                return Response.json({ isOk: true });
+            }
+
+            if (url === "/api/notifications/mark-all-read" && method === "POST") {
+                notifications.splice(
+                    0,
+                    notifications.length,
+                    ...notifications.map((item) => ({ ...item, isRead: true }))
+                );
+                return Response.json({ isOk: true });
+            }
+
+            if (url === "/api/notifications/clear-read" && method === "POST") {
+                const before = notifications.length;
+                notifications.splice(
+                    0,
+                    notifications.length,
+                    ...notifications.filter((item) => !item.isRead)
+                );
+                return Response.json({
+                    deleted: before - notifications.length,
+                    isOk: true,
+                });
+            }
+
+            const deleteMatch = /^\/api\/notifications\/(\d+)$/u.exec(url);
+            if (deleteMatch && method === "DELETE") {
+                const id = Number(deleteMatch[1]);
+                const before = notifications.length;
+                notifications.splice(
+                    0,
+                    notifications.length,
+                    ...notifications.filter((item) => item.id !== id)
+                );
+                return Response.json({
+                    deleted: before - notifications.length,
+                    isOk: true,
+                });
+            }
+
+            throw new Error(`Unexpected notification API call: ${method} ${url}`);
+        });
+    });
+}
+
+function getButtonByText(text: string, index = 0): HTMLButtonElement {
+    const button = screen.getAllByText(text)[index]?.closest("button");
+    if (!(button instanceof HTMLButtonElement)) {
+        throw new TypeError(`Button not found for text: ${text}`);
+    }
+    return button;
+}
+
+function renderWithQueryClient(children: ReactNode) {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    });
+
+    const view = render(
+        createElement(QueryClientProvider, { client: queryClient }, children)
+    );
+
+    return {
+        ...view,
+        queryClient,
+    };
+}
+
+function renderWithQueryClientAndRouter(children: ReactNode, initialEntry = "/") {
+    const rootRoute = createRootRoute({
+        component: () => createElement(Outlet),
+    });
+    const indexRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/",
+        component: () => createElement("div", undefined, children),
+    });
+    const reportsRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/reports",
+        component: () => createElement("div", undefined, children),
+    });
+    const router = createRouter({
+        history: createMemoryHistory({ initialEntries: [initialEntry] }),
+        routeTree: rootRoute.addChildren([indexRoute, reportsRoute]),
+    });
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    });
+    const view = render(
+        createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(RouterProvider, { router })
+        )
+    );
+
+    return {
+        ...view,
+        queryClient,
+        router,
+    };
+}
+
+function renderHookWithQueryClient<Result>(callback: () => Result) {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children);
+
+    return {
+        ...renderHook(callback, { wrapper }),
+        queryClient,
+    };
+}
+
+function openClawSocketWrapper({ children }: { children: ReactNode }) {
+    return createElement(OpenClawSocketProvider, undefined, children);
+}
+
+function patchWritableCollection(
+    collection: object,
+    entries: Array<[string, unknown]>,
+    utilities: {
+        writeDelete?: (key: string) => void;
+        writeUpsert?: (item: Partial<Record<string, unknown>>) => void;
+    }
+) {
+    const isReadyDescriptor = Object.getOwnPropertyDescriptor(collection, "isReady");
+    const iteratorDescriptor = Object.getOwnPropertyDescriptor(
+        collection,
+        Symbol.iterator
+    );
+    const utilitiesDescriptor = Object.getOwnPropertyDescriptor(collection, "utils");
+
+    Object.defineProperties(collection, {
+        isReady: {
+            configurable: true,
+            value: () => true,
+        },
+        [Symbol.iterator]: {
+            configurable: true,
+            value: function* collectionIterator() {
+                yield* entries;
+            },
+        },
+        utils: {
+            configurable: true,
+            value: utilities,
+        },
+    });
+
+    return () => {
+        if (isReadyDescriptor) {
+            Object.defineProperty(collection, "isReady", isReadyDescriptor);
+        } else {
+            delete (collection as Record<string, unknown>).isReady;
+        }
+
+        if (iteratorDescriptor) {
+            Object.defineProperty(collection, Symbol.iterator, iteratorDescriptor);
+        } else {
+            delete (collection as Record<symbol, unknown>)[Symbol.iterator];
+        }
+
+        if (utilitiesDescriptor) {
+            Object.defineProperty(collection, "utils", utilitiesDescriptor);
+        }
+    };
+}
+
+function chatMessage(
+    overrides: Partial<ChatHistoryMessage> & Pick<ChatHistoryMessage, "role">
+): ChatHistoryMessage {
+    return {
+        role: overrides.role,
+        content: overrides.content ?? overrides.text ?? "",
+        text: overrides.text ?? "",
+        images: overrides.images,
+        attachments: overrides.attachments,
+        thinking: overrides.thinking,
+        toolCalls: overrides.toolCalls,
+        toolResult: overrides.toolResult,
+        timestamp: overrides.timestamp,
+        local: overrides.local,
+        runId: overrides.runId,
+    };
+}
+
+type FakeWebSocketListener = (event: { code?: number; data?: string }) => void;
+
+class FakeWebSocket {
+    static instances: FakeWebSocket[] = [];
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+
+    private readonly listeners = new Map<string, FakeWebSocketListener[]>();
+    readonly sent: string[] = [];
+    readonly url: string;
+    readyState = FakeWebSocket.CONNECTING;
+
+    constructor(url: string) {
+        this.url = url;
+        FakeWebSocket.instances.push(this);
+    }
+
+    private dispatch(type: string, event: { code?: number; data?: string } = {}) {
+        const listeners = this.listeners.get(type) || [];
+        for (const listener of listeners) {
+            listener(event);
+        }
+    }
+
+    addEventListener(type: string, listener: FakeWebSocketListener) {
+        this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
+    }
+
+    send(data: string) {
+        this.sent.push(data);
+    }
+
+    close(code = 1000) {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.dispatch("close", { code });
+    }
+
+    open() {
+        this.readyState = FakeWebSocket.OPEN;
+        this.dispatch("open");
+    }
+
+    message(data: unknown) {
+        this.dispatch("message", { data: JSON.stringify(data) });
+    }
+
+    error() {
+        this.dispatch("error");
+    }
+}
+
+function latestSocketRequest(socket: FakeWebSocket): {
+    id: string;
+    method?: string;
+    timeoutMs?: number;
+} {
+    const serializedRequest = socket.sent.at(-1);
+    if (!serializedRequest) {
+        throw new Error("Expected a WebSocket request");
+    }
+    return JSON.parse(serializedRequest) as {
+        id: string;
+        method?: string;
+        timeoutMs?: number;
+    };
+}
+
+function claimSecurityVerification(event: Event): void {
+    event.preventDefault();
+}
+
+describe("Mira Dashboard frontend behavior", () => {
+    beforeEach(() => {
+        authActions.clearSession();
+        resetUserActivityForTests();
+    });
+
+    afterEach(() => {
+        uninstallAuthSessionRotationSync();
+        authActions.clearSession();
+        resetUserActivityForTests();
+    });
+
+    it("loads the app shell, router, login route, and local devtools modules", async () => {
+        const [
+            { default: App },
+            { normalizeChatSearch, router },
+            { Login },
+            { default: DashboardDevtools },
+        ] = await Promise.all([
+            import("../App"),
+            import("../router"),
+            import("../pages/Login"),
+            import("../components/devtools/DashboardDevtools"),
+        ]);
+
+        expect(App).toBeTypeOf("function");
+        expect(Login).toBeTypeOf("function");
+        expect(DashboardDevtools).toBeTypeOf("function");
+        expect(router.navigate).toBeTypeOf("function");
+        expect(Object.keys(router.routesByPath)).toContain("/delivery");
+        expect(Object.keys(router.routesByPath)).not.toContain("/pull-requests");
+        expect(normalizeChatSearch({ session: " agent:ops:main:heartbeat " })).toEqual({
+            session: "agent:ops:main:heartbeat",
+        });
+        expect(normalizeChatSearch({ session: " ".repeat(3) })).toEqual({});
+        expect(normalizeChatSearch({ session: 42 })).toEqual({});
+
+        const originalFetch = fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: (input: Parameters<typeof fetch>[0]) => {
+                return Promise.try(() => {
+                    const url = requestUrl(input);
+                    if (url === "/api/auth/session") {
+                        return Response.json({
+                            authenticated: false,
+                            isBootstrapRequired: true,
+                            user: undefined,
+                        });
+                    }
+                    if (url === "/api/auth/bootstrap") {
+                        return Response.json({
+                            hasGatewayToken: false,
+                            isBootstrapRequired: true,
+                        });
+                    }
+                    throw new Error(`Unexpected app shell fetch: ${url}`);
+                });
+            },
+            writable: true,
+        });
+
+        try {
+            await router.navigate({ to: "/login" });
+            const view = render(createElement(App));
+            await waitFor(() => {
+                expect(screen.getByText("Create first user")).toBeInTheDocument();
+            });
+            expect(screen.getByLabelText("Gateway Token")).toBeInTheDocument();
+            view.unmount();
+
+            const devtoolsView = render(createElement(DashboardDevtools));
+            expect(devtoolsView.container.firstChild).toBeTruthy();
+            devtoolsView.unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
+    it("renders the authenticated layout shell with navigation status and logout", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const originalFetch = fetch;
+        const originalWebSocket = WebSocket;
+        const apiCalls: string[] = [];
+        class LayoutWebSocket {
+            static readonly CONNECTING = 0;
+            static readonly OPEN = 1;
+            static readonly CLOSING = 2;
+            static readonly CLOSED = 3;
+            private readonly listeners = new Map<string, Array<() => void>>();
+            readyState = LayoutWebSocket.CONNECTING;
+            readonly sent: string[] = [];
+
+            addEventListener(type: string, listener: () => void) {
+                this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
+            }
+
+            send(data: string) {
+                this.sent.push(data);
+            }
+
+            close() {
+                this.readyState = LayoutWebSocket.CLOSED;
+            }
+        }
+        const fetchForLayoutShell = (
+            input: Parameters<typeof fetch>[0],
+            init?: RequestInit
+        ) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                apiCalls.push(`${init?.method ?? "GET"} ${url}`);
+                if (url === "/api/health/diagnostics") {
+                    return Response.json(dashboardDiagnostics());
+                }
+                if (url === "/api/cache/system.host") {
+                    return Response.json({
+                        consecutiveFailures: 0,
+                        data: {
+                            checkedAt: "2026-06-25T00:00:00.000Z",
+                            disk: {
+                                percent: 25,
+                                totalBytes: 1000,
+                                usedBytes: 250,
+                            },
+                            hostname: "dashboard-test",
+                            memory: {
+                                freeBytes: 600,
+                                freeMb: 600 / (1024 * 1024),
+                                totalBytes: 1000,
+                                usedBytes: 400,
+                            },
+                            platform: "linux",
+                            uptimeSeconds: 123,
+                            version: {
+                                checkedAt: 1_750_809_600_000,
+                                current: "2026.6.9",
+                                latest: "2026.6.9",
+                                updateAvailable: false,
+                            },
+                        },
+                        errorCode: null,
+                        errorMessage: null,
+                        expiresAt: null,
+                        key: "system.host",
+                        lastAttemptAt: "2026-06-25T00:00:00.000Z",
+                        meta: {},
+                        source: "system",
+                        status: "fresh",
+                        updatedAt: "2026-06-25T00:00:00.000Z",
+                    });
+                }
+                if (url === "/api/pull-requests") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                author: { login: "mira-2026" },
+                                baseRefName: "main",
+                                createdAt: "2026-06-25T00:00:00.000Z",
+                                headRefName: "test/layout",
+                                isDraft: false,
+                                number: 192,
+                                title: "Expand coverage",
+                                updatedAt: "2026-06-25T00:00:00.000Z",
+                                url: "https://github.test/pr/192",
+                            },
+                        ],
+                    });
+                }
+                if (url === "/api/notifications") {
+                    return Response.json({ items: [], readCount: 0, unreadCount: 0 });
+                }
+                if (url === "/api/auth/logout" && init?.method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+                if (url === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: false,
+                        user: undefined,
+                    });
+                }
+                throw new Error(
+                    `Unexpected layout shell fetch: ${init?.method ?? "GET"} ${url}`
+                );
+            });
+        };
+        Object.defineProperties(globalThis, {
+            fetch: {
+                configurable: true,
+                value: fetchForLayoutShell,
+                writable: true,
+            },
+            WebSocket: {
+                configurable: true,
+                value: LayoutWebSocket,
+                writable: true,
+            },
+        });
+
+        const rootRoute = createRootRoute({
+            component: () => createElement(Outlet),
+        });
+        const authenticatedRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            id: "authenticated",
+            component: () =>
+                createElement(
+                    Layout,
+                    undefined,
+                    createElement("section", undefined, "Layout child content")
+                ),
+        });
+        const indexRoute = createRoute({
+            getParentRoute: () => authenticatedRoute,
+            path: "/",
+            component: () => createElement("div", undefined, "Index child"),
+        });
+        const tasksRoute = createRoute({
+            getParentRoute: () => authenticatedRoute,
+            path: "/tasks",
+            validateSearch: (search: Record<string, unknown>) => ({
+                view: typeof search.view === "string" ? search.view : undefined,
+            }),
+            component: () => createElement("div", undefined, "Tasks child"),
+        });
+        const loginRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            path: "/login",
+            component: () => createElement("div", undefined, "Login route"),
+        });
+        const testRouter = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/"] }),
+            routeTree: rootRoute.addChildren([
+                loginRoute,
+                authenticatedRoute.addChildren([indexRoute, tasksRoute]),
+            ]),
+        });
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                mutations: { retry: false },
+                queries: { retry: false, staleTime: Infinity },
+            },
+        });
+        const routedShell = createElement(
+            OpenClawSocketProvider,
+            undefined,
+            createElement(RouterProvider, { router: testRouter })
+        );
+
+        try {
+            const view = render(
+                createElement(QueryClientProvider, { client: queryClient }, routedShell)
+            );
+            await waitFor(() => {
+                expect(screen.getByText("Mira Dashboard")).toBeInTheDocument();
+                expect(screen.getByText("Layout child content")).toBeInTheDocument();
+                expect(screen.getByLabelText("1 open pull requests")).toBeInTheDocument();
+            });
+
+            expect(screen.getByText("v2026.6.9")).toBeInTheDocument();
+            expect(screen.getByRole("link", { name: /Delivery/u })).toHaveAttribute(
+                "href",
+                "/delivery"
+            );
+            const systemStatus = screen.getByRole("button", {
+                name: /System status: .+\. Open details/u,
+            });
+            expect(screen.queryByText("WK")).not.toBeInTheDocument();
+            await userEvent.click(systemStatus);
+            expect(screen.getByText("System status")).toBeInTheDocument();
+            expect(screen.getByText("WebSocket")).toBeInTheDocument();
+            expect(screen.getAllByText("Backend")).toHaveLength(2);
+            expect(screen.getByText("Worker")).toBeInTheDocument();
+            expect(screen.getAllByText("online ●")).toHaveLength(2);
+            expect(screen.getByText("Frontend")).toBeInTheDocument();
+            expect(screen.getByText("Version mismatch")).toBeInTheDocument();
+            expect(screen.queryByText(/Version mismatch \(FE/u)).not.toBeInTheDocument();
+
+            const readyHealth = queryClient.getQueryData<DashboardDiagnosticsResponse>([
+                "health",
+            ]);
+            expect(readyHealth).toBeDefined();
+            if (!readyHealth) {
+                throw new TypeError("Expected health data after layout initialization");
+            }
+            act(() => {
+                queryClient.setQueryData<DashboardDiagnosticsResponse>(["health"], {
+                    ...readyHealth,
+                    checks: {
+                        ...readyHealth.checks,
+                        worker: { ready: false },
+                    },
+                    status: "notReady",
+                });
+            });
+            await waitFor(() => {
+                expect(screen.getByText(/Offline ○/u)).toBeInTheDocument();
+            });
+
+            const healthQuery = queryClient
+                .getQueryCache()
+                .find<DashboardDiagnosticsResponse>({ queryKey: ["health"] });
+            act(() => {
+                healthQuery?.setState({
+                    data: undefined,
+                    fetchStatus: "idle",
+                    status: "pending",
+                });
+            });
+            await waitFor(() => {
+                expect(screen.getByText(/status unavailable \?/u)).toBeInTheDocument();
+            });
+
+            await userEvent.click(screen.getByLabelText("Open navigation menu"));
+            expect(
+                screen.getAllByLabelText("Close navigation menu").length
+            ).toBeGreaterThan(1);
+
+            const pageScroll = screen.getByText("Layout child content").parentElement;
+            expect(pageScroll).toBeInstanceOf(HTMLDivElement);
+            if (!(pageScroll instanceof HTMLDivElement)) {
+                throw new TypeError("Layout page scroll container not found");
+            }
+            pageScroll.scrollTop = 480;
+            pageScroll.scrollLeft = 24;
+            await act(async () => {
+                await testRouter.navigate({ to: "/tasks" });
+            });
+            expect(pageScroll.scrollTop).toBe(0);
+            expect(pageScroll.scrollLeft).toBe(0);
+            expect(screen.getAllByLabelText("Close navigation menu")).toHaveLength(1);
+
+            pageScroll.scrollTop = 320;
+            pageScroll.scrollLeft = 16;
+            await act(async () => {
+                await testRouter.navigate({
+                    to: "/tasks",
+                    search: { view: "queued" },
+                });
+            });
+            expect(pageScroll.scrollTop).toBe(320);
+            expect(pageScroll.scrollLeft).toBe(16);
+
+            await userEvent.click(screen.getByText("Log out"));
+            await waitFor(() => {
+                expect(apiCalls).toContain("POST /api/auth/logout");
+            });
+            act(() => {
+                view.unmount();
+            });
+        } finally {
+            queryClient.clear();
+            Object.defineProperties(globalThis, {
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("drives login page bootstrap, failed login, successful login, and navigation", async () => {
+        const { Login } = await import("../pages/Login");
+        const originalFetch = fetch;
+        const calls: string[] = [];
+        let loginAttempts = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+                return Promise.try(() => {
+                    const url = requestUrl(input);
+                    calls.push(`${init?.method ?? "GET"} ${url}`);
+                    if (url === "/api/auth/bootstrap") {
+                        return Response.json({
+                            hasGatewayToken: true,
+                            isBootstrapRequired: false,
+                        });
+                    }
+                    if (url === "/api/auth/login" && init?.method === "POST") {
+                        const body = JSON.parse(requestBodyText(init.body, "{}")) as {
+                            password?: string;
+                            username?: string;
+                        };
+                        expect(body.username).toBe("raymond");
+                        loginAttempts += 1;
+                        if (body.password !== "correct-password") {
+                            return Response.json(
+                                {
+                                    error: {
+                                        code: "unauthorized",
+                                        message: "Invalid credentials",
+                                        requestId: "login-invalid-credentials",
+                                    },
+                                },
+                                { status: 401 }
+                            );
+                        }
+                        return Response.json({
+                            authenticated: true,
+                            mfaRequired: false,
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    if (url === "/api/auth/session") {
+                        return Response.json({
+                            authenticated: loginAttempts > 1,
+                            isBootstrapRequired: false,
+                            session:
+                                loginAttempts > 1
+                                    ? {
+                                          authMethod: "password",
+                                          expiresAt: "2026-08-24T12:00:00.000Z",
+                                          lastSeenAt: "2026-07-24T12:00:00.000Z",
+                                          mfaEnabled: true,
+                                          sessionId: "11111111111111111111111111111111",
+                                      }
+                                    : undefined,
+                            user:
+                                loginAttempts > 1
+                                    ? { id: 1, username: "raymond" }
+                                    : undefined,
+                        });
+                    }
+                    throw new Error(
+                        `Unexpected login fetch: ${init?.method ?? "GET"} ${url}`
+                    );
+                });
+            },
+            writable: true,
+        });
+
+        const rootRoute = createRootRoute({
+            component: () => createElement(Outlet),
+        });
+        const indexRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            path: "/",
+            component: () => createElement("div", undefined, "Logged in"),
+        });
+        const loginRoute = createRoute({
+            getParentRoute: () => rootRoute,
+            path: "/login",
+            component: Login,
+        });
+        const testRouter = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/login"] }),
+            routeTree: rootRoute.addChildren([indexRoute, loginRoute]),
+        });
+
+        try {
+            const view = render(createElement(RouterProvider, { router: testRouter }));
+            await waitFor(() => {
+                expect(screen.getByText("Continue")).toBeInTheDocument();
+                expect(screen.queryByLabelText("Gateway Token")).not.toBeInTheDocument();
+            });
+
+            await userEvent.type(screen.getByLabelText("Username"), " raymond ");
+            await userEvent.type(screen.getByLabelText("Password"), "wrong");
+            await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+            await waitFor(() => {
+                expect(screen.getByText("Invalid credentials")).toBeInTheDocument();
+                expect(calls).toContain("GET /api/auth/bootstrap");
+            });
+
+            const passwordInput = screen.getByLabelText("Password");
+            await userEvent.clear(passwordInput);
+            await userEvent.type(passwordInput, "correct-password");
+            await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+            await waitFor(() => {
+                expect(screen.getByText("Logged in")).toBeInTheDocument();
+            });
+            expect(calls).toContain("POST /api/auth/login");
+
+            view.unmount();
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
+    it("does not issue a frontend session until TOTP login completes", async () => {
+        const { Login } = await import("../pages/Login");
+        const originalFetch = fetch;
+        const calls: string[] = [];
+        let isFactorVerified = false;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+                return Promise.try(() => {
+                    const url = requestUrl(input);
+                    calls.push(`${init?.method ?? "GET"} ${url}`);
+                    if (url === "/api/auth/bootstrap") {
+                        return Response.json({
+                            hasGatewayToken: true,
+                            isBootstrapRequired: false,
+                        });
+                    }
+                    if (url === "/api/auth/login" && init?.method === "POST") {
+                        return Response.json(
+                            {
+                                authenticated: false,
+                                methods: ["totp", "recovery"],
+                                mfaRequired: true,
+                            },
+                            { status: 202 }
+                        );
+                    }
+                    if (url === "/api/auth/login/totp" && init?.method === "POST") {
+                        expect(JSON.parse(requestBodyText(init.body))).toEqual({
+                            code: "123456",
+                        });
+                        isFactorVerified = true;
+                        return Response.json({
+                            authenticated: true,
+                            mfaRequired: false,
+                        });
+                    }
+                    if (url === "/api/auth/session") {
+                        return Response.json({
+                            authenticated: isFactorVerified,
+                            isBootstrapRequired: false,
+                            session: isFactorVerified
+                                ? {
+                                      authMethod: "totp",
+                                      expiresAt: "2026-08-24T12:00:00.000Z",
+                                      lastSeenAt: "2026-07-24T12:00:00.000Z",
+                                      mfaEnabled: true,
+                                      sessionId: "11111111111111111111111111111111",
+                                  }
+                                : undefined,
+                            user: isFactorVerified
+                                ? { id: 1, username: "raymond" }
+                                : undefined,
+                        });
+                    }
+                    throw new Error(
+                        `Unexpected MFA login fetch: ${init?.method ?? "GET"} ${url}`
+                    );
+                });
+            },
+            writable: true,
+        });
+
+        const rootRoute = createRootRoute({
+            component: () => createElement(Outlet),
+        });
+        const indexRoute = createRoute({
+            component: () => createElement("div", undefined, "MFA session ready"),
+            getParentRoute: () => rootRoute,
+            path: "/",
+        });
+        const loginRoute = createRoute({
+            component: Login,
+            getParentRoute: () => rootRoute,
+            path: "/login",
+        });
+        const testRouter = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/login"] }),
+            routeTree: rootRoute.addChildren([indexRoute, loginRoute]),
+        });
+
+        try {
+            const view = render(createElement(RouterProvider, { router: testRouter }));
+            await screen.findByRole("button", { name: "Continue" });
+            await userEvent.type(screen.getByLabelText("Username"), "raymond");
+            await userEvent.type(screen.getByLabelText("Password"), "correct-password");
+            await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+            await screen.findByRole("button", {
+                name: "Authenticator app",
+            });
+            expect(calls).not.toContain("GET /api/auth/session");
+
+            await userEvent.click(
+                screen.getByRole("button", { name: "Authenticator app" })
+            );
+            await userEvent.type(screen.getByLabelText("6-digit code"), "123456");
+            await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+            await screen.findByText("MFA session ready");
+            expect(calls).toContain("POST /api/auth/login/totp");
+            expect(calls).toContain("GET /api/auth/session");
+            view.unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
+    it("handles API authorization failures through the shared auth boundary", () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const unauthorizedEvents: Event[] = [];
+        const unauthorizedHandler = (event: Event) => {
+            unauthorizedEvents.push(event);
+        };
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL) => {
+                return Promise.try(() => {
+                    if (requestUrl(input) === "/api/tasks") {
+                        return Response.json(
+                            {
+                                error: {
+                                    code: "unauthorized",
+                                    message: "Unauthorized",
+                                    requestId: "tasks-unauthorized",
+                                },
+                            },
+                            { status: 401 }
+                        );
+                    }
+                    if (requestUrl(input) === "/api/auth/session") {
+                        return Response.json({
+                            authenticated: false,
+                            isBootstrapRequired: false,
+                        });
+                    }
+                    throw new Error(
+                        `Unexpected authorization-boundary request: ${requestUrl(input)}`
+                    );
+                });
+            }),
+            writable: true,
+        });
+
+        try {
+            expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
+            expect(authStore.state.isAuthenticated).toBe(false);
+            expect(unauthorizedEvents).toHaveLength(1);
+            expect(fetch).toHaveBeenCalledTimes(2);
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("retries a stale 401 against the browser's rotated session", () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        let taskRequests = 0;
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL) => {
+                return Promise.try(() => {
+                    if (requestUrl(input) === "/api/auth/session") {
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "webauthn",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-25T04:01:00.000Z",
+                                mfaEnabled: true,
+                                sessionId: "22222222222222222222222222222222",
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    if (requestUrl(input) === "/api/tasks") {
+                        taskRequests += 1;
+                        return taskRequests === 1
+                            ? Response.json(
+                                  {
+                                      error: {
+                                          code: "unauthorized",
+                                          message: "Unauthorized",
+                                          requestId: "tasks-stale-session",
+                                      },
+                                  },
+                                  { status: 401 }
+                              )
+                            : Response.json({ isOk: true });
+                    }
+                    throw new Error(`Unexpected stale-401 request: ${requestUrl(input)}`);
+                });
+            }),
+            writable: true,
+        });
+
+        try {
+            notifyAuthSessionRotated();
+            expect(apiFetch("/tasks")).resolves.toEqual({ isOk: true });
+            expect(taskRequests).toBe(2);
+            expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("recovers a stale 401 independently of verification replay opt-out", () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        let confirmationRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+                    return Promise.try(() => {
+                        if (requestUrl(input) === "/api/auth/session") {
+                            return Response.json({
+                                authenticated: true,
+                                isBootstrapRequired: false,
+                                session: {
+                                    authMethod: "webauthn",
+                                    expiresAt: "2026-08-24T12:00:00.000Z",
+                                    lastSeenAt: "2026-07-25T04:01:00.000Z",
+                                    mfaEnabled: true,
+                                    sessionId: "22222222222222222222222222222222",
+                                },
+                                user: { id: 1, username: "raymond" },
+                            });
+                        }
+                        if (
+                            requestUrl(input) === "/api/account/security/totp/confirm" &&
+                            init?.method === "POST"
+                        ) {
+                            confirmationRequests += 1;
+                            return confirmationRequests === 1
+                                ? Response.json(
+                                      {
+                                          error: {
+                                              code: "unauthorized",
+                                              message: "Unauthorized",
+                                              requestId: "totp-stale-session",
+                                          },
+                                      },
+                                      { status: 401 }
+                                  )
+                                : Response.json({ isOk: true });
+                        }
+                        throw new Error(
+                            `Unexpected verification-opt-out recovery request: ${requestUrl(input)}`
+                        );
+                    });
+                }
+            ),
+            writable: true,
+        });
+
+        notifyAuthSessionRotated();
+        expect(
+            apiFetch("/account/security/totp/confirm", {
+                body: JSON.stringify({
+                    code: "123456",
+                    factorId: "01900000-0000-7000-8000-000000000099",
+                }),
+                canRetryAfterSecurityVerification: false,
+                method: "POST",
+            })
+        ).resolves.toEqual({ isOk: true });
+        expect(confirmationRequests).toBe(2);
+        expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+    });
+
+    it("refreshes idle-session activity only after a real browser interaction", () => {
+        expect(hasRecentUserActivity()).toBe(false);
+        installUserActivityTracking();
+        dispatchEvent(new Event("pointerdown"));
+        expect(hasRecentUserActivity()).toBe(true);
+    });
+
+    it("surfaces privileged-action step-up requirements through one global event", async () => {
+        const verificationEvents: CustomEvent[] = [];
+        const handler = (event: Event) => {
+            verificationEvents.push(event as CustomEvent);
+        };
+        addEventListener("mira:security-verification-required", handler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(() =>
+                Promise.try(() =>
+                    Response.json(
+                        {
+                            error: {
+                                code: "recent_verification_required",
+                                message: "Recent password verification is required",
+                                requestId: "privileged-step-up",
+                            },
+                        },
+                        { status: 403 }
+                    )
+                )
+            ),
+            writable: true,
+        });
+
+        try {
+            let error: unknown;
+            try {
+                await apiFetch("/restart", {
+                    method: "POST",
+                });
+            } catch (error_) {
+                error = error_;
+            }
+            expect(error).toBeInstanceOf(ApiError);
+            expect(error).toEqual(
+                expect.objectContaining({
+                    code: "recent_verification_required",
+                    status: 403,
+                })
+            );
+            expect(verificationEvents).toHaveLength(1);
+            expect(verificationEvents[0]?.detail).toEqual({
+                code: "recent_verification_required",
+            });
+        } finally {
+            removeEventListener("mira:security-verification-required", handler);
+        }
+    });
+
+    it("retries an API action once after the shared verification flow completes", async () => {
+        let requestCount = 0;
+        const verificationHandler = jest.fn(claimSecurityVerification);
+        addEventListener("mira:security-verification-required", verificationHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(() => {
+                return Promise.try(() => {
+                    requestCount += 1;
+                    return requestCount === 1
+                        ? Response.json(
+                              {
+                                  error: {
+                                      code: "step_up_required",
+                                      message: "Recent MFA verification is required",
+                                      requestId: "privileged-retry-step-up",
+                                  },
+                              },
+                              { status: 403 }
+                          )
+                        : Response.json({ isOk: true });
+                });
+            }),
+            writable: true,
+        });
+
+        try {
+            const request = apiFetch<{ isOk: boolean }>("/privileged", {
+                method: "POST",
+            });
+            await waitFor(() => {
+                expect(verificationHandler).toHaveBeenCalledTimes(1);
+            });
+            expect(requestCount).toBe(1);
+            completeSecurityVerification();
+            expect(request).resolves.toEqual({ isOk: true });
+            expect(requestCount).toBe(2);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+        }
+    });
+
+    it("does not replay a one-shot request body after verification", async () => {
+        let requestCount = 0;
+        const verificationHandler = jest.fn(claimSecurityVerification);
+        addEventListener("mira:security-verification-required", verificationHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(() => {
+                return Promise.try(() => {
+                    requestCount += 1;
+                    return requestCount === 1
+                        ? Response.json(
+                              {
+                                  error: {
+                                      code: "step_up_required",
+                                      message: "Recent MFA verification is required",
+                                      requestId: "privileged-stream-step-up",
+                                  },
+                              },
+                              { status: 403 }
+                          )
+                        : Response.json({ isOk: true });
+                });
+            }),
+            writable: true,
+        });
+
+        try {
+            const request = apiFetch<{ isOk: boolean }>("/privileged-stream", {
+                body: new ReadableStream<Uint8Array>(),
+                method: "POST",
+            });
+            const settledRequest = request.catch((error: unknown) => error);
+            await waitFor(() => {
+                expect(verificationHandler).toHaveBeenCalledTimes(1);
+            });
+            expect(requestCount).toBe(1);
+            completeSecurityVerification();
+            expect(await settledRequest).toBeInstanceOf(ApiError);
+            expect(requestCount).toBe(1);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+        }
+    });
+
+    it("bounds a claimed verification wait when the host never settles it", () => {
+        jest.useFakeTimers();
+        const verificationHandler = claimSecurityVerification;
+        const cancellationHandler = jest.fn();
+        addEventListener("mira:security-verification-required", verificationHandler);
+        addEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, cancellationHandler);
+        try {
+            const verification = waitForSecurityVerification("step_up_required", 1000);
+            jest.advanceTimersByTime(1000);
+            expect(verification).resolves.toBe(false);
+            expect(cancellationHandler).not.toHaveBeenCalled();
+            cancelSecurityVerification();
+            expect(cancellationHandler).toHaveBeenCalledTimes(1);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            removeEventListener(
+                SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
+                cancellationHandler
+            );
+            jest.useRealTimers();
+        }
+    });
+
+    it("refreshes every held request deadline when verification is submitted", () => {
+        jest.useFakeTimers();
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        try {
+            const verification = waitForSecurityVerification("step_up_required", 1000);
+            let outcome = "pending";
+            const observedSettlement = (async () => {
+                const isVerified = await verification;
+                outcome = isVerified ? "verified" : "cancelled";
+                return "settled" as const;
+            })();
+
+            jest.advanceTimersByTime(750);
+            refreshSecurityVerificationDeadline();
+            jest.advanceTimersByTime(750);
+            expect(
+                Promise.race([
+                    observedSettlement,
+                    new Promise<"pending">((resolve) => {
+                        queueMicrotask(() => resolve("pending"));
+                    }),
+                ])
+            ).resolves.toBe("pending");
+            expect(outcome).toBe("pending");
+
+            jest.advanceTimersByTime(250);
+            expect(verification).resolves.toBe(false);
+            expect(outcome).toBe("cancelled");
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            jest.useRealTimers();
+        }
+    });
+
+    it("parses successful, empty, and failed API responses consistently", () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/health/live" && method === "GET") {
+                    return Response.json({ status: "isOk" });
+                }
+
+                if (url === "/api/restart" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/empty" && method === "POST") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                if (url === "/api/tasks" && method === "POST") {
+                    return Response.json(
+                        {
+                            error: {
+                                code: "invalid_request",
+                                message: "title is required",
+                                requestId: "request-task-create",
+                            },
+                        },
+                        { status: 400 }
+                    );
+                }
+
+                if (url === "/api/broken" && method === "GET") {
+                    return new Response("not-json", { status: 500 });
+                }
+
+                throw new Error(`Unexpected API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        expect(apiFetch("/health/live")).resolves.toEqual({ status: "isOk" });
+        expect(apiFetch("/restart", { method: "POST" })).resolves.toEqual({
+            isOk: true,
+        });
+        expect(apiFetch("/empty", { method: "POST" })).resolves.toBeUndefined();
+        expect(
+            apiFetch("/tasks", { body: JSON.stringify({}), method: "POST" })
+        ).rejects.toThrow("title is required");
+        expect(apiFetch("/broken")).rejects.toThrow("HTTP 500");
+        const healthRequest = fetchMock.mock.calls.find(
+            ([input]) => input === "/api/health/live"
+        );
+        expect(healthRequest?.[1]).toEqual(
+            expect.objectContaining({ credentials: "include" })
+        );
+        expect(new Headers(healthRequest?.[1]?.headers).get("Content-Type")).toBe(
+            "application/json"
+        );
+    });
+
+    it("exposes strict API error metadata and retry guidance", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(() =>
+                Promise.try(() =>
+                    Response.json(
+                        {
+                            error: {
+                                code: "rate_limited",
+                                details: { scope: "diagnostics" },
+                                message: "Try again later",
+                                requestId: "response-body-request",
+                            },
+                        },
+                        {
+                            headers: {
+                                "Retry-After": "17",
+                                "X-Request-ID": "response-header-request",
+                            },
+                            status: 429,
+                        }
+                    )
+                )
+            ),
+            writable: true,
+        });
+
+        let error: unknown;
+        try {
+            await apiFetch("/diagnostics");
+        } catch (error_) {
+            error = error_;
+        }
+
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toEqual(
+            expect.objectContaining({
+                code: "rate_limited",
+                details: { scope: "diagnostics" },
+                message: "Try again later",
+                requestId: "response-header-request",
+                retryAfter: 17,
+                status: 429,
+            })
+        );
+    });
+
+    it("initializes, refreshes, and clears auth state through the shared auth store", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/auth/session" && method === "GET") {
+                    return Response.json({
+                        authenticated: true,
+                        isBootstrapRequired: false,
+                        user: { id: 2, username: "mira" },
+                    });
+                }
+
+                if (url === "/api/auth/logout" && method === "POST") {
+                    return new Response(undefined, { status: 204 });
+                }
+
+                throw new Error(`Unexpected auth API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        await authActions.initialize();
+        expect(authStore.state).toMatchObject({
+            isAuthenticated: true,
+            isInitialized: true,
+            user: { id: 2, username: "mira" },
+        });
+
+        await authActions.logout();
+        expect(authStore.state).toMatchObject({
+            isAuthenticated: false,
+            isInitialized: true,
+            user: undefined,
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/auth/logout",
+            expect.objectContaining({
+                credentials: "include",
+                method: "POST",
+            })
+        );
+    });
+
+    it("routes socket messages into dashboard connection state", () => {
+        expect(handleSocketMessage({})).toBeUndefined();
+        expect(handleSocketMessage({ type: "state", gatewayConnected: false })).toBe(
+            false
+        );
+        expect(handleSocketMessage({ type: "state" })).toBe(true);
+        expect(handleSocketMessage({ type: "connected" })).toBe(true);
+        expect(handleSocketMessage({ type: "disconnected" })).toBe(false);
+        expect(
+            handleSocketMessage({
+                payload: { data: { sessions: [{ id: "session-1", key: "session-1" }] } },
+                type: "response",
+            })
+        ).toBeUndefined();
+        expect(
+            handleSocketMessage({
+                event: "agents.list",
+                payload: [{ id: "mira-2026", status: "online" }],
+                type: "event",
+            })
+        ).toBeUndefined();
+        expect(
+            handleSocketMessage({
+                line: "2026-06-23T10:00:00.000Z info dashboard ready",
+                type: "log",
+            })
+        ).toBeUndefined();
+    });
+
+    it("reads every supported sessions.list response shape without routing unrelated responses", () => {
+        const responsePayloads: unknown[] = [
+            [],
+            { sessions: [] },
+            { result: { sessions: [] } },
+            { data: { sessions: [] } },
+        ];
+
+        for (const payload of responsePayloads) {
+            expect(readSessionsResponsePayload(payload)).toEqual([]);
+        }
+        expect(readSessionsResponsePayload({ unrelated: [] })).toBeUndefined();
+
+        const deletes: string[] = [];
+        const restore = patchWritableCollection(
+            sessionsCollection,
+            [["retained-session", { key: "retained-session" }]],
+            {
+                writeDelete: (key) => {
+                    deletes.push(key);
+                },
+            }
+        );
+        try {
+            handleSocketMessage({ payload: [], type: "response" });
+            handleSocketMessage({
+                gatewayConnected: false,
+                sessions: [],
+                type: "sessions",
+            });
+            expect(deletes).toEqual([]);
+        } finally {
+            restore();
+        }
+    });
+
+    it("uses bounded exponential WebSocket reconnect backoff with jitter", () => {
+        expect(socketReconnectDelayMs(0, () => 0.5)).toBe(2000);
+        expect(socketReconnectDelayMs(1, () => 0.5)).toBe(4000);
+        expect(socketReconnectDelayMs(2, () => 0)).toBe(6400);
+        expect(socketReconnectDelayMs(2, () => 1)).toBe(9600);
+        expect(socketReconnectDelayMs(20, () => 1)).toBe(30_000);
+    });
+
+    it("defers WebSocket connect and reconnect while the page is hidden", () => {
+        const originalWebSocket = WebSocket;
+        const visibilityDescriptor = Object.getOwnPropertyDescriptor(
+            document,
+            "visibilityState"
+        );
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            value: "hidden",
+        });
+        const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+        const client = createSocketClient({ url: "ws://dashboard.test/socket" });
+
+        try {
+            client.connect();
+            expect(FakeWebSocket.instances).toHaveLength(0);
+
+            Object.defineProperty(document, "visibilityState", {
+                configurable: true,
+                value: "visible",
+            });
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            socket.open();
+
+            Object.defineProperty(document, "visibilityState", {
+                configurable: true,
+                value: "hidden",
+            });
+            const timeoutCount = timeoutSpy.mock.calls.length;
+            socket.close();
+            expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCount);
+        } finally {
+            client.disconnect();
+            timeoutSpy.mockRestore();
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+            if (visibilityDescriptor) {
+                Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+            } else {
+                delete (document as unknown as { visibilityState?: string })
+                    .visibilityState;
+            }
+        }
+    });
+
+    it("drives socket client request, response, error, and disconnect behavior", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        const events: string[] = [];
+
+        try {
+            const client = createSocketClient({
+                url: "ws://dashboard.test/socket",
+                onOpen: () => {
+                    events.push("open");
+                },
+                onClose: () => {
+                    events.push("close");
+                },
+                onError: () => {
+                    events.push("error");
+                },
+                onMessage: () => {
+                    events.push("message");
+                },
+            });
+
+            expect(client.request("before-open")).rejects.toThrow(
+                "WebSocket not connected"
+            );
+
+            client.connect();
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            expect(FakeWebSocket.instances).toHaveLength(1);
+            expect(socket.url).toBe("ws://dashboard.test/socket");
+
+            socket.open();
+            expect(client.isOpen()).toBe(true);
+            expect(events).toContain("open");
+
+            const requestPromise = client.request<{ answer: number }>("answer", {
+                question: true,
+            });
+            expect(JSON.parse(socket.sent[0]!)).toEqual({
+                type: "req",
+                id: "1",
+                method: "answer",
+                params: { question: true },
+                timeoutMs: 30_000,
+                userActivity: false,
+            });
+            socket.message({
+                type: "response",
+                id: "1",
+                isOk: true,
+                payload: { answer: 42 },
+            });
+            expect(requestPromise).resolves.toEqual({ answer: 42 });
+
+            const rejectedPromise = client.request("fail");
+            socket.message({
+                type: "response",
+                id: "2",
+                isOk: false,
+                error: "nope",
+            });
+            expect(rejectedPromise).rejects.toBe("nope");
+
+            const verificationEvents: CustomEvent[] = [];
+            const verificationHandler = (event: Event) => {
+                verificationEvents.push(event as CustomEvent);
+            };
+            addEventListener("mira:security-verification-required", verificationHandler);
+            try {
+                const stepUpPromise = client.request("privileged.operation");
+                const stepUpRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: stepUpRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                expect(stepUpPromise).rejects.toBe("Recent MFA verification is required");
+                expect(verificationEvents).toHaveLength(1);
+                expect(verificationEvents[0]?.detail).toEqual({
+                    code: "step_up_required",
+                });
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    verificationHandler
+                );
+            }
+
+            const cancelledVerificationHandler = claimSecurityVerification;
+            addEventListener(
+                "mira:security-verification-required",
+                cancelledVerificationHandler
+            );
+            try {
+                const cancelledPromise = client.request("privileged.cancelled");
+                const cancelledRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: cancelledRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                cancelSecurityVerification();
+                expect(cancelledPromise).rejects.toBeInstanceOf(
+                    SecurityVerificationCancelledError
+                );
+                expect(latestSocketRequest(socket)).toEqual(cancelledRequest);
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    cancelledVerificationHandler
+                );
+            }
+
+            const resumableVerificationHandler = claimSecurityVerification;
+            addEventListener(
+                "mira:security-verification-required",
+                resumableVerificationHandler
+            );
+            try {
+                const resumablePromise = client.request<{ resumed: boolean }>(
+                    "privileged.resumable"
+                );
+                const blockedRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: blockedRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                completeSecurityVerification();
+                await waitFor(() =>
+                    expect(latestSocketRequest(socket).id).not.toBe(blockedRequest.id)
+                );
+                const retriedRequest = latestSocketRequest(socket);
+                expect(retriedRequest).toMatchObject({
+                    method: "privileged.resumable",
+                });
+                socket.message({
+                    type: "response",
+                    id: retriedRequest.id,
+                    isOk: true,
+                    payload: { resumed: true },
+                });
+                expect(resumablePromise).resolves.toEqual({ resumed: true });
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    resumableVerificationHandler
+                );
+            }
+
+            installUserActivityTracking();
+            dispatchEvent(new Event("pointerdown"));
+            const activeRequestPromise = client.request<{ active: boolean }>(
+                "active-request"
+            );
+            const activeRequest = latestSocketRequest(socket) as {
+                id: string;
+                userActivity?: boolean;
+            };
+            expect(activeRequest.userActivity).toBe(true);
+            socket.message({
+                type: "response",
+                id: activeRequest.id,
+                isOk: true,
+                payload: { active: true },
+            });
+            expect(activeRequestPromise).resolves.toEqual({ active: true });
+
+            socket.message({ type: "event", event: "agents.list", payload: [] });
+            socket.error();
+            expect(events).toContain("message");
+            expect(events).toContain("error");
+
+            const pendingPromise = client.request("pending");
+            socket.readyState = FakeWebSocket.CLOSED;
+            client.connect();
+            const replacementSocket = FakeWebSocket.instances[1]!;
+            replacementSocket.open();
+            const replacementPromise = client.request<{ current: boolean }>(
+                "replacement"
+            );
+            const replacementRequest = JSON.parse(replacementSocket.sent.at(-1)!) as {
+                id: string;
+            };
+            socket.close();
+            socket.error();
+            expect(pendingPromise).rejects.toThrow("WebSocket disconnected");
+            replacementSocket.message({
+                type: "response",
+                id: replacementRequest.id,
+                isOk: true,
+                payload: { current: true },
+            });
+            expect(replacementPromise).resolves.toEqual({ current: true });
+            expect(events.filter((event) => event === "error")).toHaveLength(1);
+
+            const timeoutPromise = client.request(
+                "custom-timeout",
+                {},
+                { timeoutMs: 20 }
+            );
+            expect(JSON.parse(replacementSocket.sent.at(-1)!)).toMatchObject({
+                method: "custom-timeout",
+                timeoutMs: 20,
+            });
+            expect(timeoutPromise).rejects.toThrow("Request timeout");
+
+            const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+            try {
+                const invalidTimeoutPromise = client.request<{ normalized: boolean }>(
+                    "invalid-timeout",
+                    {},
+                    { timeoutMs: Number.NaN }
+                );
+                const invalidTimeoutRequest = latestSocketRequest(replacementSocket);
+                expect(invalidTimeoutRequest.timeoutMs).toBe(30_000);
+                expect(timeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 30_000);
+                replacementSocket.message({
+                    type: "response",
+                    id: invalidTimeoutRequest.id,
+                    isOk: true,
+                    payload: { normalized: true },
+                });
+                expect(invalidTimeoutPromise).resolves.toEqual({
+                    normalized: true,
+                });
+
+                const clampedTimeoutPromise = client.request<{ clamped: boolean }>(
+                    "clamped-timeout",
+                    {},
+                    { timeoutMs: Number.MAX_SAFE_INTEGER }
+                );
+                const clampedTimeoutRequest = latestSocketRequest(replacementSocket);
+                expect(clampedTimeoutRequest.timeoutMs).toBe(2_147_483_647);
+                expect(timeoutSpy).toHaveBeenLastCalledWith(
+                    expect.any(Function),
+                    2_147_483_647
+                );
+                replacementSocket.message({
+                    type: "response",
+                    id: clampedTimeoutRequest.id,
+                    isOk: true,
+                    payload: { clamped: true },
+                });
+                expect(clampedTimeoutPromise).resolves.toEqual({
+                    clamped: true,
+                });
+
+                const timeoutCallCount = timeoutSpy.mock.calls.length;
+                const noDeadlinePromise = client.request<{ completed: boolean }>(
+                    "no-deadline",
+                    {},
+                    { shouldWaitIndefinitely: true, timeoutMs: 20 }
+                );
+                expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
+                const noDeadlineRequest = JSON.parse(replacementSocket.sent.at(-1)!) as {
+                    id: string;
+                    shouldWaitIndefinitely?: boolean;
+                };
+                expect(noDeadlineRequest).not.toHaveProperty("shouldWaitIndefinitely");
+                expect(noDeadlineRequest).not.toHaveProperty("timeoutMs");
+                replacementSocket.message({
+                    type: "response",
+                    id: noDeadlineRequest.id,
+                    isOk: true,
+                    payload: { completed: true },
+                });
+                expect(noDeadlinePromise).resolves.toEqual({ completed: true });
+            } finally {
+                timeoutSpy.mockRestore();
+            }
+
+            const clearTimeoutSpy = jest.spyOn(globalThis, "clearTimeout");
+            try {
+                const cyclicParameters: Record<string, unknown> = {};
+                cyclicParameters.self = cyclicParameters;
+                expect(
+                    client.request("cyclic-parameters", cyclicParameters)
+                ).rejects.toBeInstanceOf(TypeError);
+                expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+
+                const sendError = new Error("WebSocket send failed");
+                const sendSpy = jest
+                    .spyOn(replacementSocket, "send")
+                    .mockImplementationOnce(() => {
+                        throw sendError;
+                    });
+                try {
+                    expect(client.request("send-failure")).rejects.toBe(sendError);
+                } finally {
+                    sendSpy.mockRestore();
+                }
+                expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
+            } finally {
+                clearTimeoutSpy.mockRestore();
+            }
+
+            const disconnectedPromise = client.request("disconnect");
+            client.disconnect();
+            expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");
+            expect(client.isOpen()).toBe(false);
+            expect(events.filter((event) => event === "close")).toHaveLength(1);
+        } finally {
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("reconnects before retrying a verified request when no socket is open", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        const onMessage = jest.fn();
+        const client = createSocketClient({
+            onMessage,
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const originalSocket = FakeWebSocket.instances[0]!;
+            originalSocket.open();
+            let request: Promise<{ resumed: boolean }>;
+            const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+            try {
+                request = client.request<{ resumed: boolean }>(
+                    "privileged.reconnect",
+                    undefined,
+                    { timeoutMs: 9876 }
+                );
+                expect(
+                    timeoutSpy.mock.calls.filter(([, timeout]) => timeout === 9876)
+                ).toHaveLength(1);
+                const blockedRequest = latestSocketRequest(originalSocket);
+                originalSocket.message({
+                    type: "response",
+                    id: blockedRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                originalSocket.readyState = FakeWebSocket.CLOSED;
+
+                await act(async () => {
+                    completeSecurityVerification();
+                    await Promise.resolve();
+                });
+                expect(FakeWebSocket.instances).toHaveLength(2);
+                expect(
+                    timeoutSpy.mock.calls.filter(([, timeout]) => timeout === 9876)
+                ).toHaveLength(2);
+            } finally {
+                timeoutSpy.mockRestore();
+            }
+            const replacementSocket = FakeWebSocket.instances[1]!;
+            expect(replacementSocket.sent).toEqual([]);
+
+            replacementSocket.open();
+            await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+            const currentMessageCount = onMessage.mock.calls.length;
+            originalSocket.message({
+                type: "event",
+                event: "stale-after-session-rotation",
+            });
+            expect(onMessage).toHaveBeenCalledTimes(currentMessageCount);
+            const retriedRequest = latestSocketRequest(replacementSocket);
+            expect(retriedRequest).toMatchObject({
+                method: "privileged.reconnect",
+            });
+            replacementSocket.message({
+                type: "response",
+                id: retriedRequest.id,
+                isOk: true,
+                payload: { resumed: true },
+            });
+            expect(request).resolves.toEqual({ resumed: true });
+
+            let indefiniteRequest: Promise<{ resumed: boolean }>;
+            const indefiniteTimeoutSpy = jest.spyOn(globalThis, "setTimeout");
+            try {
+                const defaultTimeoutCallCount = indefiniteTimeoutSpy.mock.calls.filter(
+                    ([, timeout]) => timeout === 30_000
+                ).length;
+                indefiniteRequest = client.request<{ resumed: boolean }>(
+                    "privileged.indefinite",
+                    undefined,
+                    { shouldWaitIndefinitely: true }
+                );
+                const indefiniteBlockedRequest = latestSocketRequest(replacementSocket);
+                replacementSocket.message({
+                    type: "response",
+                    id: indefiniteBlockedRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                replacementSocket.readyState = FakeWebSocket.CLOSED;
+
+                await act(async () => {
+                    completeSecurityVerification();
+                    await Promise.resolve();
+                });
+                expect(FakeWebSocket.instances).toHaveLength(3);
+                expect(
+                    indefiniteTimeoutSpy.mock.calls.filter(
+                        ([, timeout]) => timeout === 30_000
+                    )
+                ).toHaveLength(defaultTimeoutCallCount);
+            } finally {
+                indefiniteTimeoutSpy.mockRestore();
+            }
+            const indefiniteSocket = FakeWebSocket.instances[2]!;
+            indefiniteSocket.open();
+            await waitFor(() => expect(indefiniteSocket.sent).toHaveLength(1));
+            const indefiniteRetry = latestSocketRequest(indefiniteSocket);
+            expect(indefiniteRetry).not.toHaveProperty("timeoutMs");
+            indefiniteSocket.message({
+                type: "response",
+                id: indefiniteRetry.id,
+                isOk: true,
+                payload: { resumed: true },
+            });
+            expect(indefiniteRequest).resolves.toEqual({ resumed: true });
+        } finally {
+            client.disconnect();
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("does not revive a verified request after terminal socket authorization failure", async () => {
+        const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
+        FakeWebSocket.instances = [];
+        Object.defineProperties(globalThis, {
+            WebSocket: {
+                configurable: true,
+                value: FakeWebSocket,
+                writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn(() =>
+                    Promise.try(() =>
+                        Response.json({
+                            authenticated: false,
+                            isBootstrapRequired: false,
+                            user: undefined,
+                        })
+                    )
+                ),
+                writable: true,
+            },
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        const client = createSocketClient({
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            socket.open();
+            const request = client.request("privileged.terminal");
+            const blockedRequest = latestSocketRequest(socket);
+            socket.message({
+                type: "response",
+                id: blockedRequest.id,
+                isOk: false,
+                code: "step_up_required",
+                error: "Recent MFA verification is required",
+            });
+            socket.close(4401);
+            await waitFor(() => expect(authStore.state.isAuthenticated).toBe(false));
+
+            completeSecurityVerification();
+            expect(request).rejects.toThrow("WebSocket authorization failed");
+            expect(FakeWebSocket.instances).toHaveLength(1);
+        } finally {
+            client.disconnect();
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("logs out without reconnecting after a confirmed 4401 WebSocket close", async () => {
+        const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
+        FakeWebSocket.instances = [];
+        Object.defineProperties(globalThis, {
+            WebSocket: {
+                configurable: true,
+                value: FakeWebSocket,
+                writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn(() =>
+                    Promise.try(() =>
+                        Response.json({
+                            authenticated: false,
+                            isBootstrapRequired: false,
+                            user: undefined,
+                        })
+                    )
+                ),
+                writable: true,
+            },
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "raymond" },
+        });
+        const unauthorized = Promise.withResolvers<void>();
+        const unauthorizedEvents: Event[] = [];
+        const unauthorizedHandler = (event: Event) => {
+            unauthorizedEvents.push(event);
+            unauthorized.resolve();
+        };
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+
+        try {
+            const client = createSocketClient({
+                url: "ws://dashboard.test/socket",
+            });
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            socket.open();
+            socket.close(4401);
+
+            await unauthorized.promise;
+            expect(authStore.state.isAuthenticated).toBe(false);
+            expect(unauthorizedEvents).toHaveLength(1);
+            expect(timeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 2000);
+            expect(FakeWebSocket.instances).toHaveLength(1);
+        } finally {
+            timeoutSpy.mockRestore();
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("reconnects a 4401 WebSocket when the browser has a rotated session", async () => {
+        const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
+        FakeWebSocket.instances = [];
+        Object.defineProperties(globalThis, {
+            WebSocket: {
+                configurable: true,
+                value: FakeWebSocket,
+                writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn((input: RequestInfo | URL) => {
+                    return Promise.try(() => {
+                        if (requestUrl(input) !== "/api/auth/session") {
+                            throw new Error(
+                                `Unexpected socket recovery request: ${requestUrl(input)}`
+                            );
+                        }
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "webauthn",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-25T04:01:00.000Z",
+                                mfaEnabled: true,
+                                sessionId: "22222222222222222222222222222222",
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    });
+                }),
+                writable: true,
+            },
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        const client = createSocketClient({
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const oldSocket = FakeWebSocket.instances[0]!;
+            oldSocket.open();
+            notifyAuthSessionRotated();
+            oldSocket.close(4401);
+
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+            expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
+            const rotatedSocket = FakeWebSocket.instances[1]!;
+            rotatedSocket.open();
+            expect(client.isOpen()).toBe(true);
+        } finally {
+            client.disconnect();
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("connects the OpenClaw socket provider, publishes messages, and cleans up", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const receivedMessages: unknown[] = [];
+        const lifecycle: string[] = [];
+
+        try {
+            const { result, unmount } = renderHook(
+                () =>
+                    useOpenClawSocket({
+                        onConnect: () => {
+                            lifecycle.push("connect");
+                        },
+                        onDisconnect: () => {
+                            lifecycle.push("disconnect");
+                        },
+                    }),
+                { wrapper: openClawSocketWrapper }
+            );
+
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+            const socket = FakeWebSocket.instances[0]!;
+            const unsubscribe = result.current.subscribe((message) => {
+                receivedMessages.push(message);
+            });
+
+            act(() => {
+                socket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            expect(lifecycle).toContain("connect");
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: "1",
+                    isOk: true,
+                    payload: { unrelated: [] },
+                });
+            });
+            expect(result.current.hasConfirmedSessionList).toBe(false);
+            act(() => {
+                socket.message({
+                    gatewayConnected: true,
+                    sessions: [],
+                    type: "state",
+                });
+            });
+            expect(result.current.hasConfirmedSessionList).toBe(false);
+            act(() => {
+                socket.message({
+                    gatewayConnected: false,
+                    sessions: [],
+                    type: "sessions",
+                });
+            });
+            expect(result.current.hasConfirmedSessionList).toBe(false);
+            for (const payload of [
+                [],
+                { sessions: [] },
+                { result: { sessions: [] } },
+                { data: { sessions: [] } },
+            ]) {
+                act(() => {
+                    socket.message({ gatewayConnected: true, type: "connected" });
+                });
+                await waitFor(() =>
+                    expect(result.current.hasConfirmedSessionList).toBe(false)
+                );
+                const previousRequestCount = socket.sent.length;
+                act(() => {
+                    dispatchEvent(new Event("focus"));
+                });
+                await waitFor(() =>
+                    expect(socket.sent.length).toBe(previousRequestCount + 1)
+                );
+                const sessionsRequest = JSON.parse(socket.sent.at(-1)!) as {
+                    id: string;
+                    method: string;
+                };
+                expect(sessionsRequest.method).toBe("sessions.list");
+                act(() => {
+                    socket.message({
+                        type: "response",
+                        id: sessionsRequest.id,
+                        isOk: true,
+                        payload,
+                    });
+                });
+                await waitFor(() =>
+                    expect(result.current.hasConfirmedSessionList).toBe(true)
+                );
+            }
+            act(() => {
+                socket.message({ gatewayConnected: true, type: "connected" });
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(false)
+            );
+            act(() => {
+                socket.message({ sessions: [], type: "sessions" });
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(true)
+            );
+            act(() => {
+                socket.message({ gatewayConnected: true, type: "connected" });
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(false)
+            );
+
+            const request = result.current.request<{ pong: true }>("ping", {
+                value: 1,
+            });
+            const pingRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            expect(JSON.parse(socket.sent.at(-1)!)).toEqual({
+                type: "req",
+                id: pingRequest.id,
+                method: "ping",
+                params: { value: 1 },
+                timeoutMs: 30_000,
+                userActivity: true,
+            });
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: pingRequest.id,
+                    isOk: true,
+                    payload: { pong: true },
+                });
+            });
+            expect(request).resolves.toEqual({ pong: true });
+
+            act(() => {
+                notifyAuthSessionRotated();
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+            const rotatedSocket = FakeWebSocket.instances[1]!;
+            expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+            act(() => {
+                rotatedSocket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+            act(() => {
+                authActions.setSession({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    user: { id: 1, username: "raymond" },
+                });
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            expect(FakeWebSocket.instances).toHaveLength(2);
+            expect(rotatedSocket.readyState).toBe(FakeWebSocket.OPEN);
+
+            act(() => {
+                authActions.setSession({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    session: {
+                        authMethod: "webauthn",
+                        expiresAt: "2026-08-24T12:00:00.000Z",
+                        lastSeenAt: "2026-07-25T04:01:00.000Z",
+                        mfaEnabled: true,
+                        sessionId: "22222222222222222222222222222222",
+                    },
+                    user: { id: 1, username: "raymond" },
+                });
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            expect(FakeWebSocket.instances).toHaveLength(2);
+            expect(rotatedSocket.readyState).toBe(FakeWebSocket.OPEN);
+
+            act(() => {
+                authActions.setSession({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    session: {
+                        authMethod: "webauthn",
+                        expiresAt: "2026-08-24T12:00:00.000Z",
+                        lastSeenAt: "2026-07-25T04:02:00.000Z",
+                        mfaEnabled: true,
+                        sessionId: "33333333333333333333333333333333",
+                    },
+                    user: { id: 2, username: "second-user" },
+                });
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3));
+            const identitySocket = FakeWebSocket.instances[2]!;
+            expect(rotatedSocket.readyState).toBe(FakeWebSocket.CLOSED);
+            act(() => {
+                identitySocket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+            act(() => {
+                identitySocket.message({ type: "state", gatewayConnected: false });
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(false));
+            expect(receivedMessages).toContainEqual({
+                type: "state",
+                gatewayConnected: false,
+            });
+
+            unsubscribe();
+            act(() => {
+                result.current.disconnect();
+            });
+            expect(result.current.isConnected).toBe(false);
+            unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("uses the socket response contracts for snapshots and compaction", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+
+        try {
+            const { result, unmount } = renderHook(() => useOpenClawChatTransport(), {
+                wrapper: openClawSocketWrapper,
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+            const socket = FakeWebSocket.instances[0]!;
+
+            act(() => {
+                socket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            await act(async () => {
+                socket.message({ type: "response", id: "1", isOk: true, payload: [] });
+                await Promise.resolve();
+            });
+
+            const snapshotPromise = result.current.snapshot("agent:main:main");
+            const snapshotRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            expect(snapshotRequest).toMatchObject({
+                method: "chat.runtimeSnapshot",
+                params: { sessionKey: "agent:main:main" },
+            });
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: snapshotRequest.id,
+                    isOk: true,
+                    payload: {
+                        completed: false,
+                        events: [],
+                        replayScope: "gateway-scope",
+                        runtimeGeneration: "backend-generation",
+                        throughSequence: 7,
+                    },
+                });
+            });
+            expect(snapshotPromise).resolves.toEqual({
+                completed: false,
+                events: [],
+                replayScope: "gateway-scope",
+                runtimeGeneration: "backend-generation",
+                throughSequence: 127,
+            });
+
+            const compactPromise = result.current.compact("agent:main:main");
+            const compactRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            expect(compactRequest).toMatchObject({
+                method: "sessions.compact",
+                params: { key: "agent:main:main" },
+            });
+            expect(compactRequest).not.toHaveProperty("timeoutMs");
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: compactRequest.id,
+                    isOk: true,
+                    payload: {},
+                });
+            });
+            expect(compactPromise).resolves.toBeUndefined();
+
+            const rejectedCompactPromise = result.current.compact("agent:main:main");
+            const rejectedRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: rejectedRequest.id,
+                    isOk: false,
+                    error: "compaction unavailable",
+                });
+            });
+            expect(rejectedCompactPromise).rejects.toBe("compaction unavailable");
+            unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("writes live agent, log, and session updates into ready collections", () => {
+        preloadAgentsCollection();
+        preloadLogsCollection();
+        preloadSessionsCollection();
+
+        const agentUpserts: Array<Partial<Record<string, unknown>>> = [];
+        const restoreAgents = patchWritableCollection(agentsCollection, [], {
+            writeUpsert: (item) => {
+                agentUpserts.push(item);
+            },
+        });
+        try {
+            writeAgentsFromWebSocket([
+                { id: "mira-2026", name: "Mira", status: "online" },
+            ]);
+            expect(agentUpserts).toEqual([
+                { id: "mira-2026", name: "Mira", status: "online" },
+            ]);
+        } finally {
+            restoreAgents();
+        }
+
+        const logUpserts: Array<Partial<Record<string, unknown>>> = [];
+        const restoreLogs = patchWritableCollection(logsCollection, [], {
+            writeUpsert: (item) => {
+                logUpserts.push(item);
+            },
+        });
+        try {
+            writeLogFromWebSocket(
+                '{"_meta":{"logLevelName":"INFO","date":"2026-06-23T08:00:00.000Z"},"0":"[gateway] connected"}',
+                "42"
+            );
+            writeLogFromWebSocket("");
+            writeLogFromWebSocket("{bad json");
+            handleSocketMessage({ type: "log_file", file: "openclaw.log" });
+            handleSocketMessage({
+                history: true,
+                line: "history from socket should be ignored",
+                lineId: "100",
+                type: "log",
+            });
+            handleSocketMessage({
+                line: "live from socket should be written while history is loading",
+                lineId: "101",
+                type: "log",
+            });
+            handleSocketMessage({
+                line: '{"component":"server","event":"server.started","level":"info"}',
+                type: "dashboard_log",
+            });
+            handleSocketMessage({ type: "log_history_complete", count: 1 });
+            expect(logUpserts[0]).toMatchObject({
+                level: "info",
+                lineId: "42",
+                subsystem: "gateway",
+                msg: "connected",
+            });
+            expect(logUpserts[1]).toMatchObject({
+                id: expect.stringContaining("{bad json"),
+                dedupeKey: "|||{bad json",
+                subsystem: "",
+                msg: "{bad json",
+                raw: "{bad json",
+            });
+            expect(logUpserts).toHaveLength(4);
+            expect(logUpserts[2]).toMatchObject({
+                lineId: "101",
+                msg: "live from socket should be written while history is loading",
+            });
+            expect(logUpserts[3]).toMatchObject({
+                msg: "server.started",
+                subsystem: "server",
+            });
+        } finally {
+            restoreLogs();
+        }
+
+        const sessionDeletes: string[] = [];
+        const sessionUpserts: Array<Partial<Record<string, unknown>>> = [];
+        const restoreSessions = patchWritableCollection(
+            sessionsCollection,
+            [
+                ["old-session", { key: "old-session" }],
+                ["fallback-id", { key: "fallback-id" }],
+            ],
+            {
+                writeDelete: (key) => {
+                    sessionDeletes.push(key);
+                },
+                writeUpsert: (item) => {
+                    sessionUpserts.push(item);
+                },
+            }
+        );
+        try {
+            replaceSessionsFromWebSocket([
+                {
+                    agentType: "",
+                    channel: "unknown",
+                    displayLabel: "Fallback",
+                    displayName: "",
+                    hookName: "",
+                    id: "fallback-id",
+                    key: " ".repeat(3),
+                    label: "",
+                    maxTokens: 0,
+                    model: "Unknown",
+                    tokenCount: 0,
+                    type: "MAIN",
+                },
+                { id: "", key: " ".repeat(3), type: "invalid" },
+            ]);
+            expect(sessionDeletes).toEqual(["old-session"]);
+            expect(sessionUpserts).toEqual([
+                {
+                    agentType: "",
+                    channel: "unknown",
+                    displayLabel: "Fallback",
+                    displayName: "",
+                    hookName: "",
+                    id: "fallback-id",
+                    key: " ".repeat(3),
+                    label: "",
+                    maxTokens: 0,
+                    model: "Unknown",
+                    tokenCount: 0,
+                    type: "MAIN",
+                },
+            ]);
+
+            deleteSessionFromCollection("fallback-id");
+            expect(sessionDeletes).toEqual(["old-session", "fallback-id"]);
+        } finally {
+            restoreSessions();
+        }
+    });
+
+    it("fetches log, file, job, backup, and pull request APIs through dashboard hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/logs/openclaw/files" && method === "GET") {
+                    return Response.json({
+                        logs: [
+                            {
+                                modified: "2026-07-28T12:00:00.000Z",
+                                name: "openclaw.log",
+                                size: 123,
+                            },
+                        ],
+                    });
+                }
+
+                if (
+                    url === "/api/logs/openclaw/content?file=openclaw.log&lines=50" &&
+                    method === "GET"
+                ) {
+                    return Response.json({
+                        content: "info line\nerror line",
+                        file: "openclaw.log",
+                        lineIds: ["10", "20"],
+                    });
+                }
+
+                if (url === "/api/files?path=src" && method === "GET") {
+                    return Response.json({
+                        files: [{ path: "src/main.tsx", name: "main.tsx", type: "file" }],
+                    });
+                }
+
+                if (url === "/api/files/src%2Fmain.tsx" && method === "GET") {
+                    return Response.json({
+                        content: "render app",
+                        isBinary: false,
+                        modified: "2026-07-28T12:00:00.000Z",
+                        path: "src/main.tsx",
+                        size: 10,
+                    });
+                }
+
+                if (url === "/api/config-files/openclaw.json" && method === "GET") {
+                    return Response.json({
+                        content: "{}",
+                        isBinary: false,
+                        modified: "2026-07-28T12:00:00.000Z",
+                        path: "config:openclaw.json",
+                        size: 2,
+                    });
+                }
+
+                if (url === "/api/agents/status" && method === "GET") {
+                    return Response.json({
+                        agents: [
+                            {
+                                currentTask: "Expanding tests",
+                                id: "main",
+                                model: "codex",
+                                status: "active",
+                            },
+                        ],
+                        timestamp: 1_782_475_200_000,
+                    });
+                }
+
+                if (url === "/api/agents/config" && method === "GET") {
+                    return Response.json({
+                        defaults: {
+                            model: { primary: "codex", fallbacks: ["kimi"] },
+                        },
+                        list: [
+                            {
+                                default: true,
+                                id: "main",
+                                model: { primary: "codex", fallbacks: ["kimi"] },
+                                subagents: { allowAgents: ["coder"] },
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/agents/tasks/history?limit=3" && method === "GET") {
+                    return Response.json({
+                        tasks: [
+                            {
+                                agentId: "main",
+                                id: 1,
+                                lastActivityAt: "2026-06-23T08:00:00.000Z",
+                                startedAt: "2026-06-23T07:00:00.000Z",
+                                status: "done",
+                                task: "Finished a coverage batch",
+                            },
+                        ],
+                        timestamp: 1_782_475_201_000,
+                    });
+                }
+
+                if (url === "/api/agents/main/status" && method === "GET") {
+                    return Response.json({
+                        currentTask: "Expanding tests",
+                        id: "main",
+                        model: "codex",
+                        status: "active",
+                    });
+                }
+
+                if (url === "/api/files/src%2Fmain.tsx" && method === "PUT") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        content: "updated",
+                    });
+                    return Response.json({
+                        isSuccess: true,
+                        modified: "2026-07-28T12:01:00.000Z",
+                        path: "src/main.tsx",
+                        size: 7,
+                    });
+                }
+
+                if (url === "/api/jobs" && method === "GET") {
+                    return Response.json({
+                        jobs: [
+                            {
+                                id: "job-1",
+                                name: "Job One",
+                                description: "Runs things",
+                                enabled: true,
+                                scheduleType: "interval",
+                                intervalSeconds: 60,
+                                actionKey: "test",
+                                actionPayload: {},
+                                createdAt: "2026-06-23T08:00:00.000Z",
+                                updatedAt: "2026-06-23T08:00:00.000Z",
+                                isQueued: false,
+                                isRunning: false,
+                                resourceClass: "light",
+                                timeoutMs: 60_000,
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/jobs/job-1/runs" && method === "GET") {
+                    return Response.json({
+                        runs: [
+                            {
+                                id: 1,
+                                jobId: "job-1",
+                                cancellable: false,
+                                queuedAt: "2026-06-23T08:00:00.000Z",
+                                resourceClass: "light",
+                                status: "success",
+                                triggerType: "manual",
+                                startedAt: "2026-06-23T08:00:00.000Z",
+                                output: { ok: true },
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/jobs/job-1" && method === "PATCH") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        patch: {
+                            enabled: false,
+                            disableIntent: {
+                                mode: "indefinite",
+                                comment: "Paused for hook coverage",
+                            },
+                        },
+                    });
+                    return Response.json({
+                        isOk: true,
+                        job: {
+                            actionKey: "test",
+                            actionPayload: {},
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            description: "Runs things",
+                            disableIntent: {
+                                comment: "Paused for hook coverage",
+                                mode: "indefinite",
+                            },
+                            enabled: false,
+                            id: "job-1",
+                            intervalSeconds: 60,
+                            isQueued: false,
+                            isRunning: false,
+                            name: "Job One",
+                            resourceClass: "light",
+                            scheduleType: "interval",
+                            timeoutMs: 60_000,
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    });
+                }
+
+                if (url === "/api/jobs/job-1/run" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        run: {
+                            id: 2,
+                            jobId: "job-1",
+                            cancellable: false,
+                            queuedAt: "2026-06-23T08:00:00.000Z",
+                            resourceClass: "light",
+                            status: "success",
+                            triggerType: "manual",
+                            startedAt: "2026-06-23T08:00:00.000Z",
+                            output: {},
+                        },
+                    });
+                }
+
+                if (url === "/api/backups/kopia" && method === "GET") {
+                    return Response.json({
+                        job: {
+                            endedAt: 1_782_475_200_000,
+                            id: "kopia-1",
+                            startedAt: 1_782_475_199_000,
+                            status: "done",
+                            stderr: "",
+                            stdout: "snapshot complete",
+                            type: "kopia",
+                        },
+                    });
+                }
+
+                if (url === "/api/backups/walg" && method === "GET") {
+                    return Response.json({});
+                }
+
+                if (url === "/api/backups/kopia/run" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        job: {
+                            id: "kopia-2",
+                            startedAt: 1_782_475_200_000,
+                            status: "running",
+                            stderr: "",
+                            stdout: "",
+                            type: "kopia",
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests" && method === "GET") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                number: 189,
+                                title: "Functional tests",
+                                url: "/pull/189",
+                                headRefName: "tests",
+                                baseRefName: "main",
+                                author: { login: "mira-2026" },
+                                createdAt: "2026-06-23T08:00:00.000Z",
+                                updatedAt: "2026-06-23T08:00:00.000Z",
+                                isDraft: false,
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/pull-requests/deployments" && method === "GET") {
+                    return Response.json({
+                        deployments: [
+                            {
+                                id: "deploy-1",
+                                status: "isOk",
+                                startedAt: "2026-06-23T08:00:00.000Z",
+                                updatedAt: "2026-06-23T08:01:00.000Z",
+                            },
+                        ],
+                    });
+                }
+
+                if (
+                    url === "/api/pull-requests/production-checkout" &&
+                    method === "GET"
+                ) {
+                    return Response.json({
+                        checkout: {
+                            root: "/srv/app",
+                            expectedRoot: "/srv/app",
+                            worktreeRoot: "/srv/app",
+                            branch: "main",
+                            expectedBranch: "main",
+                            head: "abc123",
+                            headCommit: "abc123",
+                            isClean: true,
+                            isProductionRoot: true,
+                            isSafeForDeploy: true,
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/releases" && method === "GET") {
+                    return Response.json({
+                        release: {
+                            current: {
+                                builtAt: "2026-06-23T08:00:00.000Z",
+                                commitSha: "a".repeat(40),
+                                commitTitle: "Current release",
+                                commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"a".repeat(40)}`,
+                                schema: {
+                                    maximumCompatible: 31,
+                                    minimumCompatible: 1,
+                                    target: 31,
+                                },
+                            },
+                            previous: {
+                                builtAt: "2026-06-22T08:00:00.000Z",
+                                commitSha: "b".repeat(40),
+                                commitTitle: "Previous release",
+                                commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"b".repeat(40)}`,
+                                schema: {
+                                    maximumCompatible: 31,
+                                    minimumCompatible: 1,
+                                    target: 31,
+                                },
+                            },
+                            rollback: { available: true },
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/preview" && method === "GET") {
+                    return Response.json({
+                        preview: {
+                            number: 189,
+                            status: "running",
+                            url: "https://dashboard.test:5173",
+                        },
+                    });
+                }
+
+                throw new Error(`Unexpected hook API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const logFiles = renderHookWithQueryClient(() => useLogFiles());
+        await waitFor(() => expect(logFiles.result.current.data).toHaveLength(1));
+        expect(logFiles.result.current.data?.[0]?.name).toBe("openclaw.log");
+
+        const logContent = renderHookWithQueryClient(() =>
+            useLogContent("openclaw.log", 50)
+        );
+        await waitFor(() =>
+            expect(logContent.result.current.data).toEqual({
+                content: "info line\nerror line",
+                file: "openclaw.log",
+                lineIds: ["10", "20"],
+            })
+        );
+
+        const files = renderHookWithQueryClient(() => useFiles("src"));
+        await waitFor(() =>
+            expect(files.result.current.data?.[0]?.path).toBe("src/main.tsx")
+        );
+
+        const fileContent = renderHookWithQueryClient(() =>
+            useFileContent("src/main.tsx")
+        );
+        await waitFor(() =>
+            expect(fileContent.result.current.data?.content).toBe("render app")
+        );
+
+        const configContent = renderHookWithQueryClient(() =>
+            useFileContent("config:openclaw.json")
+        );
+        await waitFor(() =>
+            expect(configContent.result.current.data?.content).toBe("{}")
+        );
+
+        const agentsStatus = renderHookWithQueryClient(() => useAgentsStatus());
+        await waitFor(() =>
+            expect(agentsStatus.result.current.data?.agents[0]?.currentTask).toBe(
+                "Expanding tests"
+            )
+        );
+
+        const agentsConfig = renderHookWithQueryClient(() => useAgentsConfig());
+        await waitFor(() =>
+            expect(agentsConfig.result.current.data?.defaults.model?.primary).toBe(
+                "codex"
+            )
+        );
+
+        const agentTaskHistory = renderHookWithQueryClient(() => useAgentTaskHistory(3));
+        await waitFor(() =>
+            expect(agentTaskHistory.result.current.data?.tasks[0]?.task).toBe(
+                "Finished a coverage batch"
+            )
+        );
+
+        const agentStatus = renderHookWithQueryClient(() => useAgentStatus("main"));
+        await waitFor(() =>
+            expect(agentStatus.result.current.data?.currentTask).toBe("Expanding tests")
+        );
+
+        const saveFile = renderHookWithQueryClient(() => useSaveFile());
+        await saveFile.result.current.mutateAsync({
+            path: "src/main.tsx",
+            content: "updated",
+        });
+
+        const jobs = renderHookWithQueryClient(() => useScheduledJobs());
+        await waitFor(() => expect(jobs.result.current.data?.[0]?.id).toBe("job-1"));
+
+        const jobRuns = renderHookWithQueryClient(() => useScheduledJobRuns("job-1"));
+        await waitFor(() =>
+            expect(jobRuns.result.current.data?.[0]?.status).toBe("success")
+        );
+
+        const updateJob = renderHookWithQueryClient(() => useUpdateScheduledJob());
+        await updateJob.result.current.mutateAsync({
+            id: "job-1",
+            patch: {
+                enabled: false,
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused for hook coverage",
+                },
+            },
+        });
+
+        const runJob = renderHookWithQueryClient(() => useRunScheduledJobNow());
+        runJob.queryClient.setQueryData(jobExecutionKeys.list(), {
+            executions: [],
+            summary: {
+                activeResourceClasses: [],
+                queued: 0,
+                running: 0,
+                workerCapacity: 1,
+                workerCount: 1,
+                workerOnline: true,
+            },
+        });
+        expect(runJob.result.current.mutateAsync({ id: "job-1" })).resolves.toEqual(
+            expect.objectContaining({ isOk: true })
+        );
+        expect(
+            runJob.queryClient.getQueryState(jobExecutionKeys.list())?.isInvalidated
+        ).toBe(true);
+
+        const kopia = renderHookWithQueryClient(() => useKopiaBackup());
+        await waitFor(() => expect(kopia.result.current.data?.job?.id).toBe("kopia-1"));
+
+        const walg = renderHookWithQueryClient(() => useWalgBackup());
+        await waitFor(() => expect(walg.result.current.data?.job).toBeUndefined());
+
+        const runKopia = renderHookWithQueryClient(() => useRunKopiaBackup());
+        runKopia.queryClient.setQueryData(scheduledJobKeys.list(), { jobs: [] });
+        runKopia.queryClient.setQueryData(scheduledJobKeys.runs("backup.kopia"), {
+            runs: [],
+        });
+        expect(runKopia.result.current.mutateAsync()).resolves.toEqual(
+            expect.objectContaining({ isOk: true })
+        );
+        expect(
+            runKopia.queryClient.getQueryState(scheduledJobKeys.list())?.isInvalidated
+        ).toBe(true);
+        expect(
+            runKopia.queryClient.getQueryState(scheduledJobKeys.runs("backup.kopia"))
+                ?.isInvalidated
+        ).toBe(true);
+
+        const pullRequests = renderHookWithQueryClient(() => usePullRequests());
+        await waitFor(() =>
+            expect(pullRequests.result.current.data?.[0]?.number).toBe(189)
+        );
+
+        const deployments = renderHookWithQueryClient(() => useDashboardDeployments());
+        await waitFor(() =>
+            expect(deployments.result.current.data?.[0]?.id).toBe("deploy-1")
+        );
+
+        const production = renderHookWithQueryClient(() => useProductionCheckout());
+        await waitFor(() =>
+            expect(production.result.current.data?.isSafeForDeploy).toBe(true)
+        );
+
+        const releases = renderHookWithQueryClient(() => useDashboardReleaseStatus());
+        await waitFor(() =>
+            expect(releases.result.current.data?.previous?.commitSha).toBe("b".repeat(40))
+        );
+
+        const preview = renderHookWithQueryClient(() => usePullRequestPreview());
+        await waitFor(() =>
+            expect(preview.result.current.data).toMatchObject({
+                number: 189,
+                status: "running",
+            })
+        );
+    });
+
+    it("fetches health and metrics through dashboard hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/health/diagnostics" && method === "GET") {
+                    return Response.json(
+                        dashboardDiagnostics({
+                            backendCommit: "abc123",
+                            frontendCommit: "abc123",
+                            sessionCount: 2,
+                        })
+                    );
+                }
+
+                if (url === "/api/metrics" && method === "GET") {
+                    return Response.json(dashboardMetrics());
+                }
+
+                throw new Error(`Unexpected health API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const health = renderHookWithQueryClient(() => useHealth());
+        await waitFor(() => expect(health.result.current.data?.status).toBe("isReady"));
+
+        const metrics = renderHookWithQueryClient(() => useMetrics());
+        await waitFor(() => expect(metrics.result.current.data?.tokens.total).toBe(42));
+    });
+
+    it("fetches and refreshes cache-backed dashboard data through hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/cache/heartbeat" && method === "GET") {
+                    return Response.json({
+                        count: 1,
+                        entries: [
+                            cacheEnvelopeFixture(
+                                "weather.spydeberg",
+                                { location: "Spydeberg" },
+                                { source: "weather" }
+                            ),
+                        ],
+                        cronJobs: { dataAvailable: true, items: [] },
+                        dashboardJobs: [],
+                        generatedAt: "2026-06-23T08:00:00.000Z",
+                        schemaVersion: 3,
+                        tasks: [],
+                    });
+                }
+
+                if (url === "/api/cache/status" && method === "GET") {
+                    return Response.json({
+                        generatedAt: "2026-06-23T08:00:00.000Z",
+                        count: 1,
+                        entries: [
+                            cacheEnvelopeFixture("weather.spydeberg", null, {
+                                expiresAt: "2026-06-23T09:00:00.000Z",
+                                source: "weather",
+                            }),
+                        ],
+                    });
+                }
+
+                if (url === "/api/cache/weather.spydeberg" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "weather.spydeberg",
+                            {
+                                location: "Spydeberg",
+                                temperatureC: 20,
+                                description: "Clear",
+                                forecast: [],
+                                fetchedAt: "2026-06-23T08:00:00.000Z",
+                            },
+                            { source: "weather" }
+                        )
+                    );
+                }
+
+                if (url === "/api/cache/quotas.summary" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "quotas.summary",
+                            {
+                                checkedAt: 123,
+                                cacheAgeMs: 100,
+                                openrouter: {
+                                    usage: 1,
+                                    totalCredits: 10,
+                                    remaining: 9,
+                                    limit: 10,
+                                    limitRemaining: 9,
+                                    limitReset: "monthly",
+                                    usageMonthly: 1,
+                                    percentUsed: 10,
+                                },
+                                elevenlabs: { status: "not_configured" },
+                                synthetic: { status: "error", note: "offline" },
+                                openai: {
+                                    fiveHourLeftPercent: 90,
+                                    weeklyLeftPercent: 80,
+                                    percentUsed: 10,
+                                },
+                            },
+                            { source: "quota" }
+                        )
+                    );
+                }
+
+                if (url === "/api/cache/moltbook.home" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "moltbook.home",
+                            {
+                                pendingRequestCount: 1,
+                                unreadMessageCount: 2,
+                                activityOnYourPostsCount: 0,
+                                activityOnYourPosts: [],
+                                postsFromAccountsYouFollowCount: 1,
+                                exploreCount: 1,
+                                nextActions: ["reply"],
+                                fetchedAt: "2026-06-23T08:00:00.000Z",
+                            },
+                            { source: "moltbook" }
+                        )
+                    );
+                }
+
+                if (url === "/api/cache/moltbook.feed.hot" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "moltbook.feed.hot",
+                            {
+                                hasMore: false,
+                                posts: [
+                                    {
+                                        post_id: "post-1",
+                                        title: "Hello",
+                                        content_preview: "Preview",
+                                        author_name: "mira",
+                                        upvotes: 3,
+                                        downvotes: 0,
+                                        comment_count: 1,
+                                        created_at: "2026-06-23T08:00:00.000Z",
+                                        submolt_name: "agents",
+                                    },
+                                ],
+                            },
+                            { source: "moltbook" }
+                        )
+                    );
+                }
+
+                if (url === "/api/cache/moltbook.feed.new" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "moltbook.feed.new",
+                            {
+                                hasMore: false,
+                                posts: [
+                                    {
+                                        id: "post-2",
+                                        title: "Nested author",
+                                        content: "Full post",
+                                        author: {
+                                            name: "raymond",
+                                            display_name: "Raymond",
+                                            avatar_url: "/avatar.png",
+                                        },
+                                        created_at: "2026-06-23T08:30:00.000Z",
+                                        submolt_name: "dashboard",
+                                        you_follow_author: true,
+                                    },
+                                ],
+                            },
+                            { source: "moltbook" }
+                        )
+                    );
+                }
+
+                if (url === "/api/cache/moltbook.profile" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "moltbook.profile",
+                            {
+                                agent: {
+                                    comments_count: 0,
+                                    description: "Dashboard agent",
+                                    display_name: "Mira",
+                                    follower_count: 0,
+                                    following_count: 0,
+                                    karma: 0,
+                                    name: "Mira",
+                                    posts_count: 0,
+                                },
+                            },
+                            { source: "moltbook" }
+                        )
+                    );
+                }
+
+                if (url === "/api/cache/moltbook.my-content" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "moltbook.my-content",
+                            { posts: [], comments: [] },
+                            { source: "moltbook" }
+                        )
+                    );
+                }
+
+                if (url === "/api/cache/weather.spydeberg/refresh" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        entry: cacheEnvelopeFixture(
+                            "weather.spydeberg",
+                            { location: "Spydeberg" },
+                            { source: "weather" }
+                        ),
+                    });
+                }
+
+                throw new Error(`Unexpected cache API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const cacheHeartbeat = renderHookWithQueryClient(() => useCacheHeartbeat());
+        await waitFor(() => expect(cacheHeartbeat.result.current.data?.count).toBe(1));
+        expect(cacheHeartbeat.result.current.data?.entries[0]?.data).toEqual({
+            location: "Spydeberg",
+        });
+
+        const cacheStatus = renderHookWithQueryClient(() => useCacheStatus());
+        await waitFor(() => expect(cacheStatus.result.current.data?.count).toBe(1));
+        expect(cacheStatus.result.current.data?.entries[0]?.data).toBeNull();
+
+        const weatherEntry = renderHookWithQueryClient(() =>
+            useCacheEntry("weather.spydeberg", parseWeatherData)
+        );
+        await waitFor(() =>
+            expect(weatherEntry.result.current.data?.data.location).toBe("Spydeberg")
+        );
+
+        const weather = renderHookWithQueryClient(() => useWeather());
+        await waitFor(() =>
+            expect(weather.result.current.data?.location).toBe("Spydeberg")
+        );
+
+        const quotas = renderHookWithQueryClient(() => useQuotas());
+        await waitFor(() =>
+            expect(quotas.result.current.data?.openrouter).toMatchObject({
+                remaining: 9,
+            })
+        );
+
+        const moltbook = renderHookWithQueryClient(() => useMoltbookData("hot"));
+        await waitFor(() => expect(moltbook.result.current.posts[0]?.id).toBe("post-1"));
+        await waitFor(() => expect(moltbook.result.current.profile?.name).toBe("Mira"));
+        await act(async () => {
+            await moltbook.result.current.refetch();
+        });
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/cache/moltbook.home",
+                expect.objectContaining({ credentials: "include" })
+            )
+        );
+
+        const newestMoltbook = renderHookWithQueryClient(() => useMoltbookData("new"));
+        await waitFor(() =>
+            expect(newestMoltbook.result.current.posts[0]).toMatchObject({
+                id: "post-2",
+                content: "Full post",
+                author: {
+                    name: "raymond",
+                    display_name: "Raymond",
+                    avatar_url: "/avatar.png",
+                },
+                upvotes: 0,
+                you_follow_author: true,
+            })
+        );
+
+        const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+        refreshCache.queryClient.setQueryData(scheduledJobKeys.list(), { jobs: [] });
+        expect(
+            refreshCache.result.current.mutateAsync(" weather.spydeberg ,, ")
+        ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
+        expect(
+            refreshCache.queryClient.getQueryState(scheduledJobKeys.list())?.isInvalidated
+        ).toBe(true);
+    });
+
+    it("attempts every requested cache refresh and retains partial successes", () => {
+        const originalFetch = fetch;
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                if (init?.method !== "POST") {
+                    throw new Error(`Unexpected cache API call: ${init?.method} ${url}`);
+                }
+                if (url === "/api/cache/cache.fail/refresh") {
+                    return Response.json(
+                        {
+                            error: {
+                                code: "internal_error",
+                                message: "refresh failed",
+                                requestId: "cache-refresh-failed",
+                            },
+                        },
+                        { status: 500 }
+                    );
+                }
+                const key = url.replace("/api/cache/", "").replace("/refresh", "");
+                return Response.json({
+                    entry: cacheEnvelopeFixture(key, { key }, { source: "test" }),
+                    isOk: true,
+                });
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        try {
+            const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+            expect(
+                refreshCache.result.current.mutateAsync(
+                    "cache.first,cache.fail,cache.last"
+                )
+            ).rejects.toThrow("refresh failed");
+
+            expect(fetchMock.mock.calls.map(([input]) => requestUrl(input))).toEqual([
+                "/api/cache/cache.first/refresh",
+                "/api/cache/cache.fail/refresh",
+                "/api/cache/cache.last/refresh",
+            ]);
+            expect(
+                refreshCache.queryClient.getQueryData(cacheKeys.entry("cache.first"))
+            ).toMatchObject({ key: "cache.first" });
+            expect(
+                refreshCache.queryClient.getQueryData(cacheKeys.entry("cache.last"))
+            ).toMatchObject({ key: "cache.last" });
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
+    it("refreshes the execution queue before dashboard job requests settle", async () => {
+        const originalFetch = fetch;
+        const cacheResponse = Promise.withResolvers<Response>();
+        const backupResponse = Promise.withResolvers<Response>();
+        const scheduledResponse = Promise.withResolvers<Response>();
+        const actionResponse = Promise.withResolvers<Response>();
+        const fetchMock = jest.fn(
+            (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+                if (method !== "POST") {
+                    throw new Error(
+                        `Unexpected queue refresh API call: ${method} ${url}`
+                    );
+                }
+                if (url === "/api/cache/quotas.summary/refresh") {
+                    return cacheResponse.promise;
+                }
+                if (url === "/api/backups/kopia/run") {
+                    return backupResponse.promise;
+                }
+                if (url === "/api/jobs/ops.log-rotation/run") {
+                    return scheduledResponse.promise;
+                }
+                if (url === "/api/exec/start") {
+                    return actionResponse.promise;
+                }
+                throw new Error(`Unexpected queue refresh API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        try {
+            const cache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+            const cacheInvalidations = jest.spyOn(cache.queryClient, "invalidateQueries");
+            let cacheRequest!: Promise<unknown>;
+            act(() => {
+                cacheRequest = cache.result.current.mutateAsync("quotas.summary");
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/cache/quotas.summary/refresh",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(cacheInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            cacheResponse.resolve(
+                Response.json({
+                    entry: cacheEnvelopeFixture("quotas.summary", {}),
+                    isOk: true,
+                })
+            );
+            await act(async () => {
+                await cacheRequest;
+            });
+            cache.unmount();
+            cache.queryClient.clear();
+
+            const backup = renderHookWithQueryClient(() => useRunKopiaBackup());
+            const backupInvalidations = jest.spyOn(
+                backup.queryClient,
+                "invalidateQueries"
+            );
+            let backupRequest!: Promise<unknown>;
+            act(() => {
+                backupRequest = backup.result.current.mutateAsync();
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/backups/kopia/run",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(backupInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            backupResponse.resolve(
+                Response.json({
+                    isOk: true,
+                    job: {
+                        id: "backup-1",
+                        startedAt: 1,
+                        status: "running",
+                        stderr: "",
+                        stdout: "",
+                        type: "kopia",
+                    },
+                })
+            );
+            await act(async () => {
+                await backupRequest;
+            });
+            backup.unmount();
+            backup.queryClient.clear();
+
+            const scheduled = renderHookWithQueryClient(() => useRunScheduledJobNow());
+            const scheduledInvalidations = jest.spyOn(
+                scheduled.queryClient,
+                "invalidateQueries"
+            );
+            let scheduledRequest!: Promise<unknown>;
+            act(() => {
+                scheduledRequest = scheduled.result.current.mutateAsync({
+                    id: "ops.log-rotation",
+                });
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/jobs/ops.log-rotation/run",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(scheduledInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            scheduledResponse.resolve(
+                Response.json({
+                    isOk: true,
+                    run: {
+                        cancellable: true,
+                        id: 1,
+                        jobId: "ops.log-rotation",
+                        output: {},
+                        queuedAt: "2026-06-23T08:00:00.000Z",
+                        resourceClass: "light",
+                        startedAt: "2026-06-23T08:00:00.000Z",
+                        status: "queued",
+                        triggerType: "manual",
+                    },
+                })
+            );
+            await act(async () => {
+                await scheduledRequest;
+            });
+            scheduled.unmount();
+            scheduled.queryClient.clear();
+
+            const action = renderHookWithQueryClient(() => useStartOpsAction());
+            const actionInvalidations = jest.spyOn(
+                action.queryClient,
+                "invalidateQueries"
+            );
+            let actionRequest!: Promise<unknown>;
+            act(() => {
+                actionRequest = action.result.current.mutateAsync(OPS_ACTIONS[0]!);
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/exec/start",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(actionInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            actionResponse.resolve(Response.json({ jobId: "action-1" }));
+            await act(async () => {
+                await actionRequest;
+            });
+            action.unmount();
+            action.queryClient.clear();
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
+    it("refreshes the execution queue again while a job request remains pending", async () => {
+        jest.useFakeTimers();
+        const queryClient = new QueryClient();
+        const invalidations = jest.spyOn(queryClient, "invalidateQueries");
+        const request = Promise.withResolvers<void>();
+
+        try {
+            const trackedRequest = refreshJobExecutionQueueWhilePending(
+                queryClient,
+                request.promise
+            );
+            expect(invalidations).toHaveBeenCalledTimes(1);
+
+            jest.advanceTimersByTime(500);
+            expect(invalidations).toHaveBeenCalledTimes(2);
+
+            request.resolve();
+            await trackedRequest;
+        } finally {
+            jest.useRealTimers();
+            queryClient.clear();
+        }
+    });
+
+    it("clears cached Docker stats once live containers report no stats", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method || "GET";
+
+                if (url === "/api/cache/docker.summary" && method === "GET") {
+                    return Response.json({
+                        key: "docker.summary",
+                        source: "docker",
+                        status: "fresh",
+                        consecutiveFailures: 0,
+                        data: {
+                            checkedAt: "2026-07-09T18:00:00.000Z",
+                            containers: [
+                                {
+                                    command: "server",
+                                    createdAt: "2026-07-09T17:00:00.000Z",
+                                    finishedAt: undefined,
+                                    health: "unknown",
+                                    id: "stopped123",
+                                    image: "app:latest",
+                                    imageId: "sha256:image",
+                                    ipAddresses: {},
+                                    mounts: [],
+                                    name: "stopped-app",
+                                    ports: [],
+                                    project: undefined,
+                                    restartCount: 0,
+                                    runningFor: "1 hour",
+                                    service: undefined,
+                                    startedAt: "2026-07-09T17:00:00.000Z",
+                                    state: "exited",
+                                    stats: {
+                                        blockIO: "0 B / 0 B",
+                                        cpu: "12.3%",
+                                        memory: "128 MiB / 1 GiB",
+                                        memoryPercent: "12%",
+                                        netIO: "0 B / 0 B",
+                                        pids: "1",
+                                    },
+                                    status: "Exited",
+                                },
+                            ],
+                            images: [],
+                            updaterEvents: [],
+                            updaterServices: [],
+                            updaterSummary: {
+                                autoPolicy: 0,
+                                enabled: 0,
+                                failed: 0,
+                                notifyPolicy: 0,
+                                total: 0,
+                                updateAvailable: 0,
+                            },
+                            volumes: [],
+                        },
+                        meta: {},
+                    });
+                }
+
+                if (url === "/api/docker/containers" && method === "GET") {
+                    return Response.json({
+                        containers: [
+                            {
+                                command: "server",
+                                createdAt: "2026-07-09T17:00:00.000Z",
+                                finishedAt: undefined,
+                                health: "unknown",
+                                id: "stopped123",
+                                image: "app:latest",
+                                imageId: "sha256:image",
+                                ipAddresses: {},
+                                mounts: [],
+                                name: "stopped-app",
+                                ports: [],
+                                project: undefined,
+                                restartCount: 0,
+                                runningFor: "1 hour",
+                                service: undefined,
+                                startedAt: "2026-07-09T17:00:00.000Z",
+                                state: "exited",
+                                stats: undefined,
+                                status: "Exited",
+                            },
+                        ],
+                        mode: "live",
+                    });
+                }
+
+                throw new Error(`Unexpected Docker hook API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const containers = renderHookWithQueryClient(() => useDockerContainers());
+        await waitFor(() => expect(containers.result.current.data).toHaveLength(1));
+        await waitFor(() =>
+            expect(containers.result.current.data?.[0]?.stats).toBeUndefined()
+        );
+    });
+
+    it("fetches and mutates cron jobs through hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/cron/jobs" && method === "GET") {
+                    return Response.json({
+                        jobs: [{ id: "cron-1", name: "Cron One", enabled: true }],
+                    });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/toggle" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        enabled: false,
+                        disableIntent: {
+                            mode: "indefinite",
+                            comment: "Paused for hook coverage",
+                        },
+                    });
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/update" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        patch: { schedule: { kind: "interval", every: "5m" } },
+                    });
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/run" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/cron/jobs/cron-1/delete" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                throw new Error(`Unexpected cron API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const cronJobs = renderHookWithQueryClient(() => useCronJobs());
+        await waitFor(() => expect(cronJobs.result.current.data?.[0]?.id).toBe("cron-1"));
+
+        const toggleCron = renderHookWithQueryClient(() => useToggleCronJob());
+        await toggleCron.result.current.mutateAsync({
+            id: "cron-1",
+            enabled: false,
+            disableIntent: {
+                mode: "indefinite",
+                comment: "Paused for hook coverage",
+            },
+        });
+
+        const updateCron = renderHookWithQueryClient(() => useUpdateCronJob());
+        await updateCron.result.current.mutateAsync({
+            id: "cron-1",
+            patch: { schedule: { kind: "interval", every: "5m" } },
+        });
+
+        const runCron = renderHookWithQueryClient(() => useRunCronJobNow());
+        await runCron.result.current.mutateAsync({ id: "cron-1" });
+
+        const deleteCron = renderHookWithQueryClient(() => useDeleteCronJob());
+        await deleteCron.result.current.mutateAsync({ id: "cron-1" });
+    });
+
+    it("fetches and mutates config, skills, and service operations through hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/config" && method === "GET") {
+                    return Response.json({
+                        __hash: "hash-1",
+                        agents: { defaults: { model: { primary: "codex" } } },
+                    });
+                }
+
+                if (url === "/api/config" && method === "PUT") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        __hash: "hash-1",
+                        agents: { defaults: { model: { primary: "codex" } } },
+                    });
+                    return Response.json({ isOk: true, result: { hash: "hash-2" } });
+                }
+
+                if (url === "/api/skills" && method === "GET") {
+                    return Response.json({
+                        skills: [
+                            {
+                                name: "weather",
+                                path: "skills.entries.weather",
+                                enabled: true,
+                                source: "workspace",
+                            },
+                        ],
+                    });
+                }
+
+                if (url === "/api/skills/weather" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        __hash: "hash-1",
+                        enabled: false,
+                    });
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/backup" && method === "POST") {
+                    return Response.json({
+                        createdAt: "2026-06-23T08:00:00.000Z",
+                        hash: "hash-1",
+                        config: { agents: {} },
+                    });
+                }
+
+                if (url === "/api/restart" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                throw new Error(`Unexpected config API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const config = renderHookWithQueryClient(() => useConfig());
+        await waitFor(() => expect(config.result.current.data?.__hash).toBe("hash-1"));
+
+        const skills = renderHookWithQueryClient(() => useSkills());
+        await waitFor(() =>
+            expect(skills.result.current.data?.[0]?.name).toBe("weather")
+        );
+
+        const toggleSkill = renderHookWithQueryClient(() => useToggleSkill());
+        toggleSkill.queryClient.setQueryData(["config"], { __hash: "hash-1" });
+        await toggleSkill.result.current.mutateAsync({
+            name: "weather",
+            enabled: false,
+        });
+
+        const updateConfig = renderHookWithQueryClient(() => useUpdateConfig());
+        await updateConfig.result.current.mutateAsync({
+            __hash: "hash-1",
+            agents: { defaults: { model: { primary: "codex" } } },
+        });
+        expect(
+            updateConfig.queryClient.getQueryData<{ __hash?: string }>(["config"])?.__hash
+        ).toBe("hash-2");
+
+        const restartGateway = renderHookWithQueryClient(() => useRestartGateway());
+        expect(restartGateway.result.current.mutateAsync()).resolves.toBeUndefined();
+
+        const backup = renderHookWithQueryClient(() => useCreateBackup());
+        expect(backup.result.current.mutateAsync()).resolves.toMatchObject({
+            hash: "hash-1",
+        });
+    });
+
+    it("preserves cached nested config when update response only returns a hash", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/config" && method === "GET") {
+                    return Response.json({
+                        __hash: "hash-1",
+                        agents: {
+                            defaults: { model: { primary: "codex" } },
+                            list: [{ id: "ops", name: "Ops" }],
+                        },
+                    });
+                }
+
+                if (url === "/api/config" && method === "PUT") {
+                    return Response.json({ isOk: true, result: { hash: "hash-2" } });
+                }
+
+                throw new Error(`Unexpected config API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const updateConfig = renderHookWithQueryClient(() => useUpdateConfig());
+        updateConfig.queryClient.setQueryData<OpenClawConfig>(["config"], {
+            __hash: "hash-1",
+            agents: {
+                defaults: { model: { primary: "codex" } },
+                list: [{ id: "ops", name: "Ops" }],
+            },
+        });
+        await updateConfig.result.current.mutateAsync({
+            agents: { defaults: { model: { primary: "gpt-5.5" } } },
+        });
+
+        expect(
+            updateConfig.queryClient.getQueryData<OpenClawConfig>(["config"])
+        ).toMatchObject({
+            __hash: "hash-2",
+            agents: {
+                defaults: { model: { primary: "codex" } },
+                list: [{ id: "ops", name: "Ops" }],
+            },
+        });
+    });
+
+    it("keeps stale database overview data while mutating sessions through hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/cache/database.summary" && method === "GET") {
+                    return Response.json(
+                        cacheEnvelopeFixture(
+                            "database.summary",
+                            databaseOverviewFixture(),
+                            { status: "stale" }
+                        )
+                    );
+                }
+
+                if (url === "/api/sessions/session-1/action" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        action: "compact",
+                    });
+                    return Response.json({ action: "compact", isSuccess: true });
+                }
+
+                if (url === "/api/sessions/session-1" && method === "DELETE") {
+                    return Response.json({ isSuccess: true, result: {} });
+                }
+
+                throw new Error(`Unexpected database/session API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+        await waitFor(() =>
+            expect(database.result.current.data?.overview.totalBackends).toBe(2)
+        );
+
+        const sessionAction = renderHookWithQueryClient(() => useSessionAction());
+        await sessionAction.result.current.mutateAsync({
+            key: "session-1",
+            action: "compact",
+        });
+
+        const deleteSession = renderHookWithQueryClient(() => useDeleteSession());
+        await deleteSession.result.current.mutateAsync("session-1");
+    });
+
+    it("rejects invalid database summary cache payloads", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                return Promise.try(() => {
+                    const url = requestUrl(input);
+                    const method = init?.method ?? "GET";
+                    if (url === "/api/cache/database.summary" && method === "GET") {
+                        return Response.json(
+                            cacheEnvelopeFixture("database.summary", "", {
+                                errorCode: "invalid_payload",
+                                errorMessage: "Invalid database summary",
+                                status: "error",
+                            })
+                        );
+                    }
+                    if (
+                        url === "/api/cache/database.summary/refresh" &&
+                        method === "POST"
+                    ) {
+                        return Response.json(
+                            {
+                                error: {
+                                    code: "invalid_payload",
+                                    message: "Invalid database summary",
+                                    requestId: "invalid-database-summary",
+                                },
+                            },
+                            { status: 502 }
+                        );
+                    }
+
+                    throw new Error(`Unexpected database API call: ${method} ${url}`);
+                });
+            }),
+            writable: true,
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+
+        await waitFor(() => expect(database.result.current.isError).toBe(true));
+        expect(database.result.current.data).toBeUndefined();
+    });
+
+    it("keeps valid database data from an error cache envelope", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                return Promise.try(() => {
+                    const url = requestUrl(input);
+                    const method = init?.method ?? "GET";
+                    if (url === "/api/cache/database.summary" && method === "GET") {
+                        return Response.json(
+                            cacheEnvelopeFixture(
+                                "database.summary",
+                                databaseOverviewFixture(),
+                                {
+                                    errorCode: "database_unavailable",
+                                    errorMessage:
+                                        "Database metrics temporarily unavailable",
+                                    status: "error",
+                                }
+                            )
+                        );
+                    }
+
+                    throw new Error(`Unexpected database API call: ${method} ${url}`);
+                });
+            }),
+            writable: true,
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+
+        await waitFor(() => expect(database.result.current.isSuccess).toBe(true));
+        expect(database.result.current.data?.overview.totalBackends).toBe(2);
+        expect(database.result.current.error?.message).toBe(
+            "Database metrics temporarily unavailable"
+        );
+    });
+
+    it("runs terminal and exec operations through hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/exec/start" && method === "POST") {
+                    const body = JSON.parse(requestBodyText(init?.body)) as {
+                        args?: string[];
+                        command?: string;
+                        cwd?: string;
+                        shell?: boolean;
+                    };
+                    if (body.command === "bash") {
+                        expect(body).toEqual({
+                            args: ["-lc", "pwd"],
+                            command: "bash",
+                            cwd: "/tmp",
+                        });
+                    } else {
+                        expect(body).toMatchObject({
+                            command: OPS_ACTIONS[0]!.command,
+                            shell: true,
+                        });
+                    }
+                    return Response.json({ jobId: "job-1" });
+                }
+
+                if (url === "/api/exec/job-1" && method === "GET") {
+                    return Response.json({
+                        jobId: "job-1",
+                        status: "done",
+                        code: 0,
+                        stdout: "/tmp",
+                        stderr: "",
+                        startedAt: 1,
+                        endedAt: 2,
+                    });
+                }
+
+                if (url === "/api/exec/missing-job" && method === "GET") {
+                    return Response.json(
+                        {
+                            error: {
+                                code: "not_found",
+                                message: "Exec job not found",
+                                requestId: "request-missing-exec-job",
+                            },
+                        },
+                        { status: 404 }
+                    );
+                }
+
+                if (url === "/api/terminal/complete" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        partial: "sr",
+                        cwd: "/tmp",
+                    });
+                    return Response.json({
+                        commonPrefix: "src",
+                        completions: [
+                            { completion: "src", display: "src/", type: "directory" },
+                        ],
+                    });
+                }
+
+                if (url === "/api/terminal/cd" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        path: "src",
+                        cwd: "/tmp",
+                    });
+                    return Response.json({ newCwd: "/tmp/src" });
+                }
+
+                if (url === "/api/exec/job-1/stop" && method === "POST") {
+                    return Response.json({
+                        isSuccess: true,
+                        message: "Stop signal sent",
+                    });
+                }
+
+                throw new Error(`Unexpected terminal API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const terminalStart = renderHookWithQueryClient(() => useStartTerminalCommand());
+        expect(
+            terminalStart.result.current.mutateAsync({ command: "pwd", cwd: "/tmp" })
+        ).resolves.toEqual({ jobId: "job-1" });
+
+        const opsStart = renderHookWithQueryClient(() => useStartOpsAction());
+        expect(opsStart.result.current.mutateAsync(OPS_ACTIONS[0]!)).resolves.toEqual({
+            jobId: "job-1",
+        });
+
+        const opsJob = renderHookWithQueryClient(() => useExecJob("job-1"));
+        await waitFor(() => expect(opsJob.result.current.data?.status).toBe("done"));
+
+        const terminalJob = renderHookWithQueryClient(() => useTerminalJob("job-1"));
+        await waitFor(() => expect(terminalJob.result.current.data?.stdout).toBe("/tmp"));
+
+        const missingTerminalJob = renderHookWithQueryClient(() =>
+            useTerminalJob("missing-job")
+        );
+        await waitFor(() =>
+            expect(missingTerminalJob.result.current.data).toMatchObject({
+                code: 1,
+                jobId: "missing-job",
+                status: "done",
+                stderr: "Terminal job is no longer available",
+            })
+        );
+
+        expect(getCompletions("sr", "/tmp")).resolves.toMatchObject({
+            commonPrefix: "src",
+        });
+        expect(changeDirectory("src", "/tmp")).resolves.toEqual({
+            newCwd: "/tmp/src",
+        });
+        expect(stopTerminalJob("job-1")).resolves.toBeUndefined();
+
+        const terminalHistory = renderHookWithQueryClient(() => useTerminalHistory());
+        let historyId = "";
+        act(() => {
+            historyId = terminalHistory.result.current.addCommand({
+                command: "pwd",
+                cwd: "/tmp",
+                jobId: "job-1",
+                status: "running",
+                stdout: "",
+                stderr: "",
+                startedAt: 1,
+            });
+        });
+        expect(terminalHistory.result.current.history).toHaveLength(1);
+        act(() => {
+            terminalHistory.result.current.updateCommand(historyId, {
+                status: "done",
+                stdout: "/tmp",
+            });
+        });
+        expect(terminalHistory.result.current.history[0]).toMatchObject({
+            status: "done",
+            stdout: "/tmp",
+        });
+        act(() => {
+            terminalHistory.result.current.clearHistory();
+        });
+        expect(terminalHistory.result.current.history).toEqual([]);
+    });
+
+    it("mutates pull request review and deploy operations through hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/pull-requests/189/approve" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        deploy: true,
+                    });
+                    return Response.json({ isOk: true, message: "approved" });
+                }
+
+                if (
+                    url === "/api/pull-requests/189/review-approval" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        isOk: true,
+                        message: "review approved",
+                        pullRequest: {
+                            number: 189,
+                            title: "Updated review",
+                            url: "/pull/189",
+                            headRefName: "tests",
+                            baseRefName: "main",
+                            author: {},
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T09:00:00.000Z",
+                            isDraft: false,
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/update-branch" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        message: "updated",
+                        pullRequest: {
+                            number: 189,
+                            title: "Updated branch",
+                            url: "/pull/189",
+                            headRefName: "tests",
+                            baseRefName: "main",
+                            author: {},
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T09:00:00.000Z",
+                            isDraft: false,
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/reject" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        comment: "needs work",
+                    });
+                    return Response.json({ isOk: true, message: "rejected" });
+                }
+
+                if (url === "/api/pull-requests/deploy" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        deployment: {
+                            id: "deploy-2",
+                            status: "building",
+                            startedAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/releases/rollback" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        targetCommit: "b".repeat(40),
+                    });
+                    return Response.json({
+                        isOk: true,
+                        deployment: {
+                            id: "rollback-1",
+                            status: "building",
+                            startedAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/preview/start" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({});
+                    return Response.json({
+                        isOk: true,
+                        preview: {
+                            number: 189,
+                            status: "running",
+                            url: "https://dashboard.test:5173",
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/preview/stop" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({});
+                    return Response.json({
+                        isOk: true,
+                        preview: { number: 189, status: "stopped" },
+                    });
+                }
+
+                throw new Error(`Unexpected pull request API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const approvePullRequest = renderHookWithQueryClient(() =>
+            useApprovePullRequest()
+        );
+        await approvePullRequest.result.current.mutateAsync({
+            number: 189,
+            willDeploy: true,
+        });
+
+        const approveReview = renderHookWithQueryClient(() =>
+            useApprovePullRequestReview()
+        );
+        expect(
+            approveReview.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({ message: "review approved" });
+
+        const updateBranch = renderHookWithQueryClient(() =>
+            useUpdatePullRequestBranch()
+        );
+        expect(
+            updateBranch.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({ message: "updated" });
+
+        const rejectPullRequest = renderHookWithQueryClient(() => useRejectPullRequest());
+        await rejectPullRequest.result.current.mutateAsync({
+            number: 189,
+            comment: "needs work",
+        });
+
+        const deploy = renderHookWithQueryClient(() => useDeployDashboard());
+        expect(deploy.result.current.mutateAsync()).resolves.toMatchObject({
+            deployment: { id: "deploy-2" },
+        });
+
+        const rollback = renderHookWithQueryClient(() => useRollbackDashboard());
+        expect(
+            rollback.result.current.mutateAsync({
+                targetCommit: "b".repeat(40),
+            })
+        ).resolves.toMatchObject({ deployment: { id: "rollback-1" } });
+
+        const startPreview = renderHookWithQueryClient(() =>
+            useStartPullRequestPreview()
+        );
+        expect(
+            startPreview.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({
+            number: 189,
+            status: "running",
+        });
+        expect(
+            startPreview.queryClient.getQueryData(deliveryKeys.preview())
+        ).toMatchObject({
+            number: 189,
+            status: "running",
+        });
+
+        const stopPreview = renderHookWithQueryClient(() => useStopPullRequestPreview());
+        expect(
+            stopPreview.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({
+            number: 189,
+            status: "stopped",
+        });
+        expect(
+            stopPreview.queryClient.getQueryData(deliveryKeys.preview())
+        ).toMatchObject({
+            number: 189,
+            status: "stopped",
+        });
+    });
+
+    it("drives task update, move, assignment, deletion, and progress update hooks", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/tasks/1/updates" && method === "GET") {
+                    return Response.json([
+                        {
+                            id: 7,
+                            taskId: 1,
+                            author: "mira-2026",
+                            messageMd: "Initial update",
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    ]);
+                }
+
+                if (url === "/api/tasks/1" && method === "PATCH") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        title: "Updated task",
+                        automation: null,
+                    });
+                    return Response.json(task({ number: 1, title: "Updated task" }));
+                }
+
+                if (url === "/api/tasks/1/move" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        columnLabel: "done",
+                    });
+                    return Response.json(
+                        task({
+                            number: 1,
+                            title: "Moved task",
+                            labels: [{ name: "done" }],
+                        })
+                    );
+                }
+
+                if (url === "/api/tasks/1/assign" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        assignee: "mira-2026",
+                    });
+                    return Response.json(
+                        task({
+                            number: 1,
+                            title: "Assigned task",
+                            assignees: [{ login: "mira-2026", name: "Mira" }],
+                        })
+                    );
+                }
+
+                if (url === "/api/tasks/1" && method === "DELETE") {
+                    return Response.json({ isOk: true });
+                }
+
+                if (url === "/api/tasks/1/updates" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        author: "mira-2026",
+                        messageMd: "Progress",
+                    });
+                    return Response.json({
+                        id: 8,
+                        taskId: 1,
+                        author: "mira-2026",
+                        messageMd: "Progress",
+                        createdAt: "2026-06-23T09:00:00.000Z",
+                    });
+                }
+
+                if (url === "/api/tasks/1/updates/7" && method === "PATCH") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        messageMd: "Edited",
+                    });
+                    return Response.json({
+                        id: 7,
+                        taskId: 1,
+                        author: "rajohan",
+                        messageMd: "Edited",
+                        createdAt: "2026-06-23T08:00:00.000Z",
+                    });
+                }
+
+                if (url === "/api/tasks/1/updates/7" && method === "DELETE") {
+                    return Response.json({ isOk: true });
+                }
+
+                throw new Error(`Unexpected task API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const updates = renderHookWithQueryClient(() => useTaskUpdates(1));
+        await waitFor(() =>
+            expect(updates.result.current.data?.[0]?.messageMd).toBe("Initial update")
+        );
+
+        const updateTask = renderHookWithQueryClient(() => useUpdateTask());
+        updateTask.queryClient.setQueryData(taskKeys.list(), [
+            task({ number: 1, title: "Old task" }),
+        ]);
+        expect(
+            updateTask.result.current.mutateAsync({
+                number: 1,
+                updates: { title: "Updated task", automation: null },
+            })
+        ).resolves.toMatchObject({ title: "Updated task" });
+
+        const moveTask = renderHookWithQueryClient(() => useMoveTask());
+        expect(
+            moveTask.result.current.mutateAsync({ number: 1, columnLabel: "done" })
+        ).resolves.toMatchObject({ title: "Moved task" });
+
+        const assignTask = renderHookWithQueryClient(() => useAssignTask());
+        expect(
+            assignTask.result.current.mutateAsync({
+                number: 1,
+                assignee: "mira-2026",
+            })
+        ).resolves.toMatchObject({ title: "Assigned task" });
+
+        const createUpdate = renderHookWithQueryClient(() => useCreateTaskUpdate());
+        const createUpdateInvalidateQueries = jest.spyOn(
+            createUpdate.queryClient,
+            "invalidateQueries"
+        );
+        expect(
+            createUpdate.result.current.mutateAsync({
+                taskId: 1,
+                author: "mira-2026",
+                messageMd: "Progress",
+            })
+        ).resolves.toMatchObject({ id: 8, messageMd: "Progress" });
+        expect(createUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.updates(1),
+        });
+        expect(createUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.list(),
+        });
+
+        const editUpdate = renderHookWithQueryClient(() => useUpdateTaskUpdate());
+        const editUpdateInvalidateQueries = jest.spyOn(
+            editUpdate.queryClient,
+            "invalidateQueries"
+        );
+        expect(
+            editUpdate.result.current.mutateAsync({
+                taskId: 1,
+                updateId: 7,
+                messageMd: "Edited",
+            })
+        ).resolves.toMatchObject({ author: "rajohan", messageMd: "Edited" });
+        expect(editUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.updates(1),
+        });
+        expect(editUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.list(),
+        });
+
+        const deleteUpdate = renderHookWithQueryClient(() => useDeleteTaskUpdate());
+        const deleteUpdateInvalidateQueries = jest.spyOn(
+            deleteUpdate.queryClient,
+            "invalidateQueries"
+        );
+        expect(
+            deleteUpdate.result.current.mutateAsync({ taskId: 1, updateId: 7 })
+        ).resolves.toBeUndefined();
+        expect(deleteUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.updates(1),
+        });
+        expect(deleteUpdateInvalidateQueries).toHaveBeenCalledWith({
+            queryKey: taskKeys.list(),
+        });
+
+        const deleteTask = renderHookWithQueryClient(() => useDeleteTask());
+        expect(
+            deleteTask.result.current.mutateAsync({ number: 1 })
+        ).resolves.toBeUndefined();
+    });
+
+    it("drives backup attention, notification creation, quota guards, overlay, and date format behavior", () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/backups/walg/run" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        job: {
+                            id: "walg-1",
+                            type: "walg",
+                            status: "running",
+                            stdout: "",
+                            stderr: "",
+                            startedAt: 1,
+                        },
+                    });
+                }
+
+                if (
+                    url === "/api/backups/kopia/clear-needs-attention" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        isOk: true,
+                        cleared: {
+                            id: "kopia-attention",
+                            type: "kopia",
+                            status: "needs_attention",
+                            stdout: "warn",
+                            stderr: "",
+                            startedAt: 1,
+                        },
+                    });
+                }
+
+                if (
+                    url === "/api/backups/walg/clear-needs-attention" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        isOk: true,
+                        cleared: {
+                            id: "walg-attention",
+                            type: "walg",
+                            status: "needs_attention",
+                            stdout: "warn",
+                            stderr: "",
+                            startedAt: 1,
+                        },
+                    });
+                }
+
+                if (url === "/api/notifications" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        title: "Functional coverage",
+                        description: "Created from a hook",
+                        source: "tests",
+                    });
+                    return Response.json({ isOk: true, id: 123 });
+                }
+
+                if (url === "/api/notifications/mark-all-read" && method === "POST") {
+                    return Response.json({ isOk: true });
+                }
+
+                throw new Error(`Unexpected extended hook API call: ${method} ${url}`);
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const runWalg = renderHookWithQueryClient(() => useRunWalgBackup());
+        runWalg.queryClient.setQueryData(scheduledJobKeys.list(), { jobs: [] });
+        runWalg.queryClient.setQueryData(scheduledJobKeys.runs("backup.walg"), {
+            runs: [],
+        });
+        expect(runWalg.result.current.mutateAsync()).resolves.toMatchObject({
+            job: { id: "walg-1", status: "running" },
+        });
+        expect(
+            runWalg.queryClient.getQueryState(scheduledJobKeys.list())?.isInvalidated
+        ).toBe(true);
+        expect(
+            runWalg.queryClient.getQueryState(scheduledJobKeys.runs("backup.walg"))
+                ?.isInvalidated
+        ).toBe(true);
+
+        const clearKopia = renderHookWithQueryClient(() =>
+            useClearKopiaBackupAttention()
+        );
+        expect(clearKopia.result.current.mutateAsync()).resolves.toMatchObject({
+            cleared: { id: "kopia-attention" },
+        });
+
+        const clearWalg = renderHookWithQueryClient(() => useClearWalgBackupAttention());
+        expect(clearWalg.result.current.mutateAsync()).resolves.toMatchObject({
+            cleared: { id: "walg-attention" },
+        });
+
+        const createNotification = renderHookWithQueryClient(() =>
+            useCreateNotification()
+        );
+        expect(
+            createNotification.result.current.mutateAsync({
+                title: "Functional coverage",
+                description: "Created from a hook",
+                source: "tests",
+            })
+        ).resolves.toEqual({ isOk: true, id: 123 });
+
+        const markAllRead = renderHookWithQueryClient(() =>
+            useMarkAllNotificationsRead()
+        );
+        expect(markAllRead.result.current.mutateAsync()).resolves.toEqual({
+            isOk: true,
+        });
+
+        expect(hasQuotaStatus({ status: "error", note: "offline" })).toBe(true);
+        expect(hasQuotaStatus({ status: "fresh" })).toBe(false);
+        expect(hasQuotaStatus()).toBe(false);
+
+        render(
+            createElement(TaskOverlay, {
+                task: task({
+                    number: 9,
+                    title: "Recurring overlay task",
+                    labels: [{ name: "priority-low" }],
+                    automation: {
+                        type: "cron",
+                        recurring: true,
+                        cronJobId: "cron-9",
+                    },
+                }),
+            })
+        );
+        expect(screen.getByText("#9")).toBeInTheDocument();
+        expect(screen.getByText("LOW")).toBeInTheDocument();
+        expect(screen.getByText("Recurring")).toBeInTheDocument();
+
+        const osloDate = new Date("2026-06-23T12:34:56.000Z");
+        expect(formatDate(osloDate)).toBe("23.06.2026, 14:34");
+        expect(formatOsloClock(osloDate)).toBe("14:34");
+        expect(formatDateStamp(osloDate)).toBe("2026-06-23");
+        expect(formatOsloTime(osloDate)).toBe("14:34:56");
+        expect(formatOsloDate(osloDate)).toContain("Tuesday 23. Jun 2026");
+        expect(formatDuration()).toBe("Unknown");
+        expect(formatLoad([0.1234, 2])).toBe("0.12, 2.00");
+        expect(formatTokenCount(999)).toBe("999");
+        expect(getTokenPercent(undefined, 100)).toBe(0);
+        expect(getTokenPercent(150, 100)).toBe(100);
+    });
+
+    it("drives notification filtering and mutations through the bell menu", async () => {
+        const notifications = [
+            notification({
+                id: 1,
+                title: "Cache refresh failed",
+                description: "Needs attention",
+                metadata: { reportId: 42 },
+                type: "warning",
+                occurredAt: "2026-06-23T10:00:00.000Z",
+            }),
+            notification({
+                id: 2,
+                title: "Backup complete",
+                isRead: true,
+                type: "success",
+                occurredAt: "2026-06-23T09:00:00.000Z",
+            }),
+            notification({
+                id: 3,
+                title: "Workspace sync failed",
+                isRead: true,
+                type: "error",
+                occurredAt: "2026-06-23T08:00:00.000Z",
+            }),
+        ];
+        const fetchMock = createNotificationsApi(notifications);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        const user = userEvent.setup();
+
+        renderWithQueryClientAndRouter(createElement(NotificationBell));
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: /open notifications, 1 unread/i,
+            })
+        );
+        expect(await screen.findByText("Cache refresh failed")).toBeInTheDocument();
+        expect(screen.getByText("Backup complete")).toBeInTheDocument();
+        expect(screen.getByText("Workspace sync failed")).toBeInTheDocument();
+        expect(screen.getByText("error")).toHaveClass("bg-red-500/20", "text-red-400");
+        expect(screen.getByText("Open report").closest("a")?.getAttribute("href")).toBe(
+            "/reports?reportId=42"
+        );
+
+        await user.click(screen.getByRole("menuitemradio", { name: "Error" }));
+        expect(screen.getByText("Workspace sync failed")).toBeInTheDocument();
+        expect(screen.queryByText("Cache refresh failed")).not.toBeInTheDocument();
+        expect(screen.queryByText("Backup complete")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("menuitemradio", { name: "Unread" }));
+        expect(screen.getByText("Cache refresh failed")).toBeInTheDocument();
+        expect(screen.queryByText("Backup complete")).not.toBeInTheDocument();
+
+        await user.click(getButtonByText("Mark read"));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/notifications/1/read",
+                expect.objectContaining({ method: "POST" })
+            )
+        );
+
+        await user.click(screen.getByRole("menuitemradio", { name: "All" }));
+        expect(await screen.findByText("Backup complete")).toBeInTheDocument();
+
+        await user.click(getButtonByText("Clear"));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/notifications/1",
+                expect.objectContaining({ method: "DELETE" })
+            )
+        );
+
+        await user.click(getButtonByText("Clear all read"));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/notifications/clear-read",
+                expect.objectContaining({ body: "{}", method: "POST" })
+            )
+        );
+        await waitFor(() =>
+            expect(screen.queryByText("Backup complete")).not.toBeInTheDocument()
+        );
+    });
+
+    it("renders dashboard reports and switches report filters", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const [path, query = ""] = url.split("?", 2);
+                const reportType = new URLSearchParams(query).get("type");
+                if (path === "/api/reports" && reportType === "heartbeat") {
+                    return Response.json({
+                        items: [
+                            {
+                                id: 11,
+                                type: "heartbeat",
+                                status: "warning",
+                                title: "Heartbeat warning",
+                                bodyMd: "Git check needs attention.",
+                                summary: "Git check needs attention.",
+                                source: "openclaw",
+                                sourceJobId: "ops-check",
+                                dedupeKey: "heartbeat:warning:git",
+                                metadata: {},
+                                createdAt: "2026-06-23T07:00:00.000Z",
+                                updatedAt: "2026-06-23T07:00:00.000Z",
+                                occurredAt: "2026-06-23T07:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+                if (path === "/api/reports") {
+                    return Response.json({
+                        items: [
+                            {
+                                id: 10,
+                                type: "daily_brief",
+                                status: "ok",
+                                title: "Daily brief",
+                                bodyMd: "# Brief\n\n- Review PRs",
+                                summary: "Review PRs",
+                                source: "openclaw",
+                                sourceJobId: "daily-brief",
+                                dedupeKey: "brief:2026-06-23",
+                                metadata: {},
+                                createdAt: "2026-06-23T06:00:00.000Z",
+                                updatedAt: "2026-06-23T06:00:00.000Z",
+                                occurredAt: "2026-06-23T06:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+                return Response.json({ items: [] });
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        const user = userEvent.setup();
+        renderWithQueryClientAndRouter(createElement(Reports), "/reports");
+
+        expect(await screen.findAllByText("Daily brief")).not.toHaveLength(0);
+        expect(await screen.findAllByText("Review PRs")).not.toHaveLength(0);
+        await user.click(screen.getByRole("button", { name: /heartbeat/i }));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/reports?type=heartbeat",
+                expect.any(Object)
+            )
+        );
+        expect(await screen.findAllByText("Heartbeat warning")).not.toHaveLength(0);
+        await waitFor(() =>
+            expect(screen.getAllByText("Git check needs attention.")).toHaveLength(2)
+        );
+    });
+
+    it("loads linked dashboard report details outside the first report page", async () => {
+        const fetchMock = jest.fn((input: RequestInfo | URL) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                const [path, query = ""] = url.split("?", 2);
+                const reportType = new URLSearchParams(query).get("type");
+                if (path === "/api/reports" && reportType === "heartbeat") {
+                    return Response.json({
+                        items: [
+                            {
+                                id: 11,
+                                type: "heartbeat",
+                                status: "warning",
+                                title: "Linked page heartbeat",
+                                bodyMd: "",
+                                summary: "Heartbeat summary.",
+                                source: "openclaw",
+                                sourceJobId: "ops-check",
+                                dedupeKey: "heartbeat:warning:cache",
+                                metadata: {},
+                                createdAt: "2026-06-23T10:00:00.000Z",
+                                updatedAt: "2026-06-23T10:00:00.000Z",
+                                occurredAt: "2026-06-23T10:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+                if (path === "/api/reports") {
+                    return Response.json({
+                        items: [
+                            {
+                                id: 10,
+                                type: "daily_brief",
+                                status: "ok",
+                                title: "Newest brief",
+                                bodyMd: "Newest body.",
+                                summary: "Newest summary.",
+                                source: "openclaw",
+                                sourceJobId: "daily-brief",
+                                dedupeKey: "brief:latest",
+                                metadata: {},
+                                createdAt: "2026-06-23T09:00:00.000Z",
+                                updatedAt: "2026-06-23T09:00:00.000Z",
+                                occurredAt: "2026-06-23T09:00:00.000Z",
+                            },
+                        ],
+                    });
+                }
+                if (url === "/api/reports/99") {
+                    return Response.json({
+                        report: {
+                            id: 99,
+                            type: "daily_summary",
+                            status: "ok",
+                            title: "Linked old summary",
+                            bodyMd: "Linked body.",
+                            summary: "Linked summary.",
+                            source: "openclaw",
+                            sourceJobId: "daily-summary",
+                            dedupeKey: "summary:old",
+                            metadata: {},
+                            createdAt: "2026-06-20T20:00:00.000Z",
+                            updatedAt: "2026-06-20T20:00:00.000Z",
+                            occurredAt: "2026-06-20T20:00:00.000Z",
+                        },
+                    });
+                }
+                return Response.json({ items: [] });
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const user = userEvent.setup();
+        renderWithQueryClientAndRouter(createElement(Reports), "/reports?reportId=99");
+
+        expect(await screen.findAllByText("Linked old summary")).not.toHaveLength(0);
+        expect(screen.getByText("Linked body.")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /heartbeat/i }));
+        expect(await screen.findAllByText("Linked page heartbeat")).not.toHaveLength(0);
+        await waitFor(() =>
+            expect(screen.queryByText("Linked old summary")).not.toBeInTheDocument()
+        );
+    });
+
+    it("keeps log, file, cron, session, and format utilities aligned with UI behavior", () => {
+        const structured = parseLogLine(
+            '{"_meta":{"logLevelName":"WARN","date":"2026-06-23T08:00:00.000Z"},"0":"[agent/main] Ready"}',
+            1
+        );
+        expect(structured).toMatchObject({
+            level: "warn",
+            subsystem: "main",
+            msg: "Ready",
+        });
+        expect(parseLogLine("gateway: connected", 2)).toMatchObject({
+            subsystem: "gateway",
+            msg: "connected",
+        });
+        expect(parseLogLine("[agent/main] Ready", 3)).toMatchObject({
+            subsystem: "main",
+            msg: "Ready",
+        });
+        expect(
+            parseLogLine(
+                String.raw`{"0":"{\"module\":\"worker\",\"message\":\"Nested ready\"}"}`,
+                4
+            )
+        ).toMatchObject({ subsystem: "worker", msg: "Nested ready" });
+        expect(parseLogLine('{"level":"debug","message":{"ok":true}}', 5)).toMatchObject({
+            level: "debug",
+            msg: '{"ok":true}',
+        });
+        expect(parseLogLine("fallback: connected")).toMatchObject({
+            id: expect.stringContaining("fallback:"),
+            lineId: expect.stringContaining("fallback:"),
+            subsystem: "fallback",
+            msg: "connected",
+        });
+        expect(
+            compareLogEntriesByLineId({ lineId: "10" }, { lineId: "20" })
+        ).toBeLessThan(0);
+        expect(
+            compareLogEntriesByLineId({ lineId: "20" }, { lineId: "10" })
+        ).toBeGreaterThan(0);
+        expect(compareLogEntriesByLineId({ lineId: "10" }, {})).toBeLessThan(0);
+        expect(compareLogEntriesByLineId({}, { lineId: "10" })).toBeGreaterThan(0);
+        expect(
+            compareLogEntriesByLineId({ lineId: " " }, { lineId: "10" })
+        ).toBeGreaterThan(0);
+        expect(compareLogEntriesByLineId({}, {})).toBe(0);
+        expect(parseLogLine("")).toBeUndefined();
+        expect(formatLogTime("not-a-date")).toBe("--:--:--");
+        expect(formatLogTime()).toBe("");
+        expect(getLevelColor("fatal")).toContain("text-red");
+        expect(getLevelColor("error")).toContain("text-red");
+        expect(getLevelColor("warn")).toContain("yellow");
+        expect(getLevelColor("trace")).toContain("primary-500");
+        expect(getLevelColor("unknown")).toContain("primary-400");
+        expect(getSubsystemColor()).toBe("");
+        expect(getSubsystemColor("exec")).toContain("green");
+        expect(getSubsystemColor("tools")).toContain("orange");
+        expect(getSubsystemColor("agent")).toContain("purple");
+        expect(getSubsystemColor("gateway")).toContain("cyan");
+        expect(getSubsystemColor("cron")).toContain("pink");
+        expect(getSubsystemColor("session")).toContain("indigo");
+        expect(getSubsystemColor("http")).toContain("teal");
+        expect(getSubsystemColor("memory")).toContain("emerald");
+        expect(getSubsystemColor("ws")).toContain("amber");
+        expect(getSubsystemColor("other")).toContain("purple");
+
+        expect(getFileExtension("README.MD")).toBe("md");
+        expect(isMarkdownFile("notes.markdown")).toBe(true);
+        expect(isJsonFile("config.json5")).toBe(true);
+        expect(isCodeFile("main.tsx")).toBe(true);
+        expect(isImageFile("avatar.webp")).toBe(true);
+        expect(isBinaryFile("archive.zip")).toBe(true);
+        expect(getLanguage("query.graphql")).toBe("graphql");
+        expect(getSyntaxClass("config.yaml")).toBe("text-purple-400");
+
+        expect(isCronExpressionValid("*/15 0-23 * * 1-5")).toBe(true);
+        expect(isCronExpressionValid("0,30 9,18 * 1-12 0,7")).toBe(true);
+        expect(isCronExpressionValid("5-55/10 * * * *")).toBe(true);
+        expect(isCronExpressionValid("* * * *")).toBe(false);
+        expect(isCronExpressionValid("60 * * * *")).toBe(false);
+        expect(isCronExpressionValid("*/0 * * * *")).toBe(false);
+        expect(isCronExpressionValid("30-10 * * * *")).toBe(false);
+        expect(isCronExpressionValid("0,,30 * * * *")).toBe(false);
+        const sortedCronJobs = sortCronJobs([
+            { id: "b", name: "Beta", enabled: false },
+            { jobId: "a", name: "Alpha", enabled: true },
+        ] as never);
+        expect(sortedCronJobs.map((job) => getCronJobName(job))).toEqual([
+            "Alpha",
+            "Beta",
+        ]);
+        expect(getCronJobId({ jobId: "job-id" })).toBe("job-id");
+        expect(getCronStateValue({ state: { lastStatus: "ok" } }, "lastStatus")).toBe(
+            "ok"
+        );
+        expect(formatCronTimestamp("bad")).toBe("—");
+        expect(formatCronLastStatus(" success ")).toBe("SUCCESS");
+        expect(formatCronLastStatus()).toBe("UNKNOWN");
+        expect(getCronStatusVariant("completed")).toBe("success");
+        expect(getCronStatusVariant("in_progress")).toBe("warning");
+        expect(getCronStatusVariant("failed")).toBe("error");
+        expect(getCronStatusVariant("not-started")).toBe("default");
+
+        const sortedSessions = sortSessionsByTypeAndActivity([
+            {
+                key: "cron",
+                type: "cron",
+                updatedAt: 3,
+                displayLabel: "Cron",
+            },
+            {
+                key: "agent:main:main",
+                type: "main",
+                updatedAt: 1,
+                displayLabel: "Main",
+            },
+            {
+                key: "sub",
+                type: "subagent",
+                agentType: "researcher",
+                updatedAt: 2,
+                displayLabel: "Research",
+            },
+        ] as never);
+        expect(sortedSessions.map((session) => session.key)).toEqual([
+            "agent:main:main",
+            "sub",
+            "cron",
+        ]);
+        expect(formatSessionType(sortedSessions[1]!)).toBe("RESEARCHER");
+        expect(getTypeSortOrder("unknown")).toBe(4);
+
+        expect(formatSize(1536)).toBe("1.5 KB");
+        expect(formatSize(-1)).toBe("Unknown");
+        expect(formatSize(Infinity)).toBe("Unknown");
+        expect(formatSize(0)).toBe("0 B");
+        expect(formatSize(1024 ** 4)).toBe("1.0 TB");
+        expect(formatLoad([0.1234, 2, 15.678])).toBe("0.12, 2.00, 15.68");
+        expect(formatUptime(90_061)).toBe("1d 1h");
+        expect(formatUptime(7261)).toBe("2h 1m");
+        expect(formatUptime(59)).toBe("0m");
+        expect(formatTokens(12_345, 200_000)).toBe("12.3k / 200k");
+        expect(formatTokenCount(1_250_000)).toBe("1.25M");
+        expect(formatTokenCount(12_500)).toBe("12.5K");
+        expect(formatTokenCount(999)).toBe("999");
+        expect(getTokenPercent(60, 120)).toBe(50);
+        expect(getTokenPercent(undefined, 120)).toBe(0);
+        expect(getTokenPercent(60, 0)).toBe(0);
+        expect(getTokenPercent(150, 120)).toBe(100);
+        expect(formatDate("bad")).toBe("bad");
+        expect(formatOsloClock("bad")).toBe("--:--");
+        expect(formatDateStamp(new Date("bad"))).toBe("unknown-date");
+        expect(formatOsloTime(new Date("bad"))).toBe("--:--:--");
+        expect(formatOsloDate(new Date("bad"))).toBe("Unknown date");
+        expect(formatWeekdayShort(new Date("bad"))).toBe("---");
+        expect(formatDuration()).toBe("Unknown");
+        expect(formatUtcTimeOfDayInAppTimeZone("bad")).toBe("--:--");
+        expect(formatUtcTimeOfDayInAppTimeZone("12:30", "2026-01-15T00:00:00.000Z")).toBe(
+            "13:30"
+        );
+        expect(appTimeOfDayToUtcTimeOfDay("bad")).toBe("bad");
+        expect(appTimeOfDayToUtcTimeOfDay("13:30", "2026-01-15T00:00:00.000Z")).toBe(
+            "12:30"
+        );
+        expect(appDateTimeToTimestamp(2026, 6, 23, 14, 34)).toBe(
+            Date.parse("2026-06-23T12:34:00.000Z")
+        );
+        expect(appDateTimeToTimestamp(2026, 2, 30, 14, 34)).toBeUndefined();
+        expect(appDateTimeToTimestamp(2026, 3, 29, 2, 30)).toBeUndefined();
+    });
+
+    it("keeps chat utility behavior stable for slash commands, diagnostics, and optimistic messages", () => {
+        expect(messageFromError(new Error("  failed  "), "fallback")).toBe("failed");
+        expect(messageFromError("failed", "fallback")).toBe("failed");
+        expect(
+            messageFromError({ error: { message: "nested API failure" } }, "fallback")
+        ).toBe("nested API failure");
+        expect(messageFromError({}, "fallback")).toBe("fallback");
+        expect(messageFromError("[object Object]", "fallback")).toBe("fallback");
+        expect(dataUrlToBase64("data:text/plain;base64,SGVsbG8=")).toBe("SGVsbG8=");
+        expect(dataUrlToBase64("SGVsbG8=")).toBe("SGVsbG8=");
+        expect(base64ToText("SGVsbG8=")).toBe("Hello");
+        expect(base64ToText("***")).toBeUndefined();
+        expect(readFileAsDataUrl(new File(["hello"], "hello.txt"))).resolves.toMatch(
+            /^data:/
+        );
+        expect(displayMimeType(new File(["hello"], "hello.txt"))).toBe("text/plain");
+        expect(displayMimeType(new File(["image"], "photo.PNG"))).toBe("image/png");
+        expect(
+            displayMimeType(
+                new File(["image"], "photo.png", {
+                    type: "application/octet-stream",
+                })
+            )
+        ).toBe("image/png");
+        expect(displayMimeType(new File(["vector"], "diagram.svg"))).toBe(
+            "image/svg+xml"
+        );
+        expect(displayMimeType(new File(["unknown"], "payload.bin"))).toBe(
+            "application/octet-stream"
+        );
+        expect(
+            displayMimeType(new File(["hello"], "hello.txt", { type: "text/plain" }))
+        ).toBe("text/plain");
+
+        expect(slashCommandCanonicalName("/abort")).toBe("/stop");
+        expect(
+            buildSlashCommandSuggestions("/model gpt", [
+                { id: "openai/gpt-5.5" },
+                { label: "ollama/glm-5" },
+            ])
+        ).toContainEqual(
+            expect.objectContaining({
+                value: "/model openai/gpt-5.5",
+                title: "openai/gpt-5.5",
+            })
+        );
+        expect(buildSlashCommandSuggestions("hello", [])).toEqual([]);
+        expect(buildSlashCommandSuggestions("/think", [])).toContainEqual(
+            expect.objectContaining({ requiresArgument: false, value: "/think " })
+        );
+        expect(buildSlashCommandSuggestions("/bash", [])).toContainEqual(
+            expect.objectContaining({ requiresArgument: true, value: "/bash " })
+        );
+
+        const toolResult = chatMessage({
+            role: "tool",
+            text: "",
+            timestamp: "2026-06-23T08:00:00.000Z",
+            toolResult: { id: "tool-1", name: "exec", content: "done" },
+        });
+        expect(messageIdentity(toolResult)).toContain("tool-result::tool-1::exec");
+        expect(messageDeleteKey(toolResult)).toContain("tool-result::tool-1::exec");
+
+        const textToolMessage = chatMessage({
+            role: "assistant",
+            text: "Checking",
+            timestamp: "2026-06-23T08:00:01.000Z",
+            toolCalls: [{ id: "tool-a", name: "exec" }],
+        });
+        expect(messageDeleteKey(textToolMessage)).toContain("tool-a");
+        expect(
+            messageDeleteKey({
+                ...textToolMessage,
+                toolCalls: [{ id: "tool-b", name: "exec" }],
+            })
+        ).not.toBe(messageDeleteKey(textToolMessage));
+
+        const textMediaMessage = chatMessage({
+            attachments: [
+                {
+                    fileName: "first.txt",
+                    id: "first",
+                    kind: "file",
+                    mimeType: "text/plain",
+                },
+            ],
+            role: "assistant",
+            text: "Generated file",
+            timestamp: "2026-06-23T08:00:02.000Z",
+        });
+        expect(
+            messageDeleteKey({
+                ...textMediaMessage,
+                attachments: [
+                    {
+                        fileName: "second.txt",
+                        id: "second",
+                        kind: "file",
+                        mimeType: "text/plain",
+                    },
+                ],
+            })
+        ).not.toBe(messageDeleteKey(textMediaMessage));
+
+        const duplicateMessages = dedupeMessages([
+            chatMessage({ role: "assistant", text: "same" }),
+            chatMessage({ role: "assistant", text: "same" }),
+            chatMessage({ role: "user", text: "different" }),
+        ]);
+        expect(duplicateMessages.map((message) => message.text)).toEqual([
+            "same",
+            "different",
+        ]);
+
+        const distinctUrlOnlyImages = dedupeMessages([
+            chatMessage({
+                images: [
+                    {
+                        image_url: { url: "https://files.example.test/first.png" },
+                        mimeType: "image/png",
+                        type: "image_url",
+                    },
+                ],
+                role: "assistant",
+                runId: "run-images",
+                text: "",
+            }),
+            chatMessage({
+                images: [
+                    {
+                        image_url: { url: "https://files.example.test/second.png" },
+                        mimeType: "image/png",
+                        type: "image_url",
+                    },
+                ],
+                role: "assistant",
+                runId: "run-images",
+                text: "",
+            }),
+        ]);
+        expect(distinctUrlOnlyImages).toHaveLength(2);
+
+        const duplicateUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ local: true, role: "user", text: "same question" }),
+        ]);
+        expect(duplicateUserMessages).toHaveLength(1);
+        expect(duplicateUserMessages[0]?.text).toBe("same question");
+
+        const intentionalRepeatedUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ role: "user", text: "same question" }),
+        ]);
+        expect(intentionalRepeatedUserMessages).toHaveLength(2);
+
+        const oneOptimisticCopyOfRepeatedUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ local: true, role: "user", text: "same question" }),
+        ]);
+        expect(oneOptimisticCopyOfRepeatedUserMessages).toHaveLength(2);
+
+        const queuedRepeatedUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "repeat" }),
+            chatMessage({ role: "user", text: "different" }),
+            chatMessage({ role: "user", text: "repeat" }),
+        ]);
+        expect(queuedRepeatedUserMessages.map((message) => message.text)).toEqual([
+            "repeat",
+            "different",
+            "repeat",
+        ]);
+
+        const repeatedResponseMessages = dedupeMessages([
+            chatMessage({ role: "assistant", text: "same" }),
+            chatMessage({ role: "user", text: "repeat" }),
+            chatMessage({ role: "assistant", text: "same" }),
+        ]);
+        expect(repeatedResponseMessages.map((message) => message.text)).toEqual([
+            "same",
+            "repeat",
+            "same",
+        ]);
+
+        expect(
+            isRecoveredAssistantText(
+                "This is a sufficiently long assistant response",
+                "sufficiently long assistant"
+            )
+        ).toBe(true);
+        expect(isRecoveredAssistantText("", "assistant")).toBe(false);
+        expect(isRecoveredAssistantText("short", "short")).toBe(true);
+        expect(isRecoveredAssistantText("short", "different")).toBe(false);
+
+        const previousMessages = [
+            chatMessage({
+                role: "user",
+                text: "optimistic",
+                local: true,
+                timestamp: new Date().toISOString(),
+            }),
+            chatMessage({ role: "system", text: "local system" }),
+            chatMessage({
+                role: "assistant",
+                text: "This assistant response was recovered from local state",
+                local: true,
+                timestamp: new Date().toISOString(),
+            }),
+        ];
+        const nextMessages = [
+            chatMessage({
+                role: "assistant",
+                text: "assistant response was recovered",
+                timestamp: new Date(Date.now() + 1000).toISOString(),
+            }),
+            chatMessage({ role: "assistant", text: "no timestamp" }),
+        ];
+        expect(
+            mergeWithRecentOptimisticMessages(previousMessages, nextMessages).map(
+                (message) => message.text
+            )
+        ).toEqual([
+            "optimistic",
+            "assistant response was recovered",
+            "no timestamp",
+            "local system",
+        ]);
+
+        const repeatedTurnMessages = mergeWithRecentOptimisticMessages(
+            [
+                chatMessage({ role: "user", text: "OK" }),
+                chatMessage({ role: "assistant", text: "Earlier answer" }),
+                chatMessage({
+                    local: true,
+                    role: "user",
+                    text: "OK",
+                    timestamp: new Date().toISOString(),
+                }),
+            ],
+            [
+                chatMessage({ role: "user", text: "OK" }),
+                chatMessage({ role: "assistant", text: "Earlier answer" }),
+            ]
+        );
+        expect(
+            repeatedTurnMessages.filter(
+                (message) => message.role === "user" && message.text === "OK"
+            )
+        ).toHaveLength(2);
+
+        const repeatedAnswerWithCurrentDiagnostics = mergeWithRecentOptimisticMessages(
+            [
+                chatMessage({ role: "user", text: "first" }),
+                chatMessage({ role: "assistant", text: "OK" }),
+                chatMessage({ role: "user", text: "second" }),
+                chatMessage({
+                    local: true,
+                    role: "assistant",
+                    text: "OK",
+                    thinking: [{ text: "current turn reasoning" }],
+                    timestamp: new Date().toISOString(),
+                }),
+            ],
+            [
+                chatMessage({ role: "user", text: "first" }),
+                chatMessage({ role: "assistant", text: "OK" }),
+                chatMessage({ role: "user", text: "second" }),
+            ]
+        );
+        expect(repeatedAnswerWithCurrentDiagnostics.at(-1)).toMatchObject({
+            local: true,
+            role: "assistant",
+            text: "OK",
+            thinking: [{ text: "current turn reasoning" }],
+        });
+    });
+
+    it("keeps stored delete keys compatible while scoping runtime rows", () => {
+        const existingHistoryMessage = chatMessage({
+            role: "assistant",
+            runId: "run-1",
+            text: "answer",
+            timestamp: "2026-06-23T08:00:00.000Z",
+        });
+
+        expect(messageDeleteKey(existingHistoryMessage)).toBe(
+            "assistant::2026-06-23T08:00:00.000Z::run-1::answer"
+        );
+        expect(
+            messageDeleteKey({
+                ...existingHistoryMessage,
+                runtimeKey: "runtime-assistant",
+            })
+        ).toBe("assistant::2026-06-23T08:00:00.000Z::run-1::runtime-assistant::answer");
+    });
+
+    it("rejects same-origin API images outside canonical media paths", () => {
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            expect([
+                chatImageUrl({
+                    image_url: { url: "https://dashboard.test/api/settings" },
+                    type: "image_url",
+                }),
+                chatImageUrl({
+                    image_url: { url: "/api/chat/media/outgoing/../../../settings" },
+                    type: "image_url",
+                }),
+            ]).toEqual([undefined, undefined]);
+        } finally {
+            location.assign(previousLocation);
+        }
+    });
+
+    it("bounds absolute same-origin managed image URLs", () => {
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            const managedUrl =
+                "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full";
+            expect(
+                chatImageUrl({
+                    image_url: { url: managedUrl },
+                    type: "image_url",
+                })
+            ).toBe(`${managedUrl}?preview=image`);
+        } finally {
+            location.assign(previousLocation);
+        }
+    });
+
+    it("keeps external image URLs click-only", () => {
+        const externalImage = {
+            image_url: { url: "https://files.example.test/generated.png" },
+            type: "image_url" as const,
+        };
+        expect(chatImageDownloadUrl(externalImage)).toBe(
+            "https://files.example.test/generated.png"
+        );
+        expect(chatImageUrl(externalImage)).toBeUndefined();
+    });
+
+    it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {
+        const contentBlocks = [
+            { type: "text", text: "hello" },
+            { type: "thinking", thinking: "considering" },
+            { type: "toolCall", id: "call-1", name: "exec", arguments: { cmd: "pwd" } },
+            { type: "image", data: "abc", mimeType: "image/png" },
+        ];
+        expect(extractImages(contentBlocks)).toHaveLength(1);
+        expect(extractThinkingBlocks(contentBlocks)).toEqual([{ text: "considering" }]);
+        expect(extractToolCalls(contentBlocks)).toEqual([
+            { id: "call-1", name: "exec", arguments: { cmd: "pwd" } },
+        ]);
+        expect(normalizeText(contentBlocks)).toBe("hello\n\n[image]");
+        const managedImage = {
+            image_url: {
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+            },
+            mimeType: "image/png",
+            type: "image_url",
+        } as const;
+        expect(chatImageUrl(managedImage)).toBe(
+            `${managedImage.image_url.url}?preview=image`
+        );
+        const managedImageWithFragment = {
+            ...managedImage,
+            image_url: { url: `${managedImage.image_url.url}#thumbnail` },
+        } as const;
+        expect(chatImageUrl(managedImageWithFragment)).toBe(
+            `${managedImage.image_url.url}?preview=image#thumbnail`
+        );
+        expect(
+            chatImageUrl({
+                image_url: { url: "/api/settings" },
+                mimeType: "image/png",
+                type: "image_url",
+            })
+        ).toBeUndefined();
+        const managedSvgImage = {
+            ...managedImage,
+            image_url: {
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174001/full",
+            },
+            mimeType: "image/svg+xml; charset=utf-8",
+        } as const;
+        expect(chatImageUrl(managedSvgImage)).toBe(
+            `${managedSvgImage.image_url.url}?preview=image`
+        );
+        expect(
+            chatImageUrl({
+                image_url: { url: "/api/media?path=%2Ftmp%2Furl-only-logo.svg" },
+                type: "image_url",
+            })
+        ).toBe("/api/media?path=%2Ftmp%2Furl-only-logo.svg&preview=image");
+        expect(
+            chatImageUrl({
+                data: "/9j/4AAQSkZJRgABAQAAAQABAAD",
+                mimeType: "image/jpeg",
+                type: "image",
+            })
+        ).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD");
+        expect(extractImages([managedImage])).toEqual([managedImage]);
+        expect(normalizeText([managedImage])).toBe("[image]");
+        expect(attachmentKind("image/png")).toBe("image");
+        expect(attachmentKind("application/json")).toBe("text");
+        expect(attachmentKind("application/json; charset=utf-8")).toBe("text");
+        expect(attachmentKind("IMAGE/SVG+XML; charset=utf-8")).toBe("image");
+        expect(attachmentKind("application/pdf")).toBe("file");
+
+        const sendAttachment = {
+            id: "att-1",
+            file: new File(["hello"], "hello.txt", { type: "text/plain" }),
+            fileName: "hello.txt",
+            mimeType: "text/plain",
+            sizeBytes: 5,
+            contentBase64: "aGVsbG8=",
+            kind: "text" as const,
+        };
+        expect(chatTransportAttachments([sendAttachment])).toEqual([
+            {
+                type: "text",
+                mimeType: "text/plain",
+                fileName: "hello.txt",
+                content: "aGVsbG8=",
+            },
+        ]);
+        expect(optimisticAttachmentDisplay([sendAttachment])[0]).toMatchObject({
+            id: "att-1",
+            fileName: "hello.txt",
+            kind: "text",
+        });
+
+        const normalized = normalizeOpenClawHistoryMessage({
+            role: "assistant",
+            content: `Here\nMEDIA:images/result.png\n<file name="note.txt" mime="text/plain">hello</file>`,
+            timestamp: 1_782_172_800_000,
+        });
+        expect(normalized.text).toBe("Here");
+        expect(normalized.timestamp).toBe("2026-06-23T00:00:00.000Z");
+        expect(normalized.attachments?.map((attachment) => attachment.fileName)).toEqual([
+            "result.png",
+            "note.txt",
+        ]);
+        expect(
+            normalizeOpenClawHistoryMessage({
+                content: "still working",
+                role: "assistant",
+                stopReason: "toolUse",
+            }).isFinal
+        ).toBeUndefined();
+        expect(
+            normalizeOpenClawHistoryMessage({
+                content: "done",
+                role: "assistant",
+                stopReason: "stop",
+            }).isFinal
+        ).toBe(true);
+
+        const normalizedMediaReferences = normalizeOpenClawHistoryMessage({
+            MediaPaths: ["/tmp/data.csv", "/tmp/readme.md", "/tmp/logo.svg"],
+            content: "",
+            role: "user",
+        });
+        expect(normalizedMediaReferences.attachments).toMatchObject([
+            {
+                fileName: "data.csv",
+                kind: "text",
+                mimeType: "text/csv",
+                url: "/api/media?path=%2Ftmp%2Fdata.csv",
+            },
+            {
+                fileName: "readme.md",
+                kind: "text",
+                mimeType: "text/markdown",
+            },
+            {
+                dataUrl: "/api/media?path=%2Ftmp%2Flogo.svg&preview=image",
+                fileName: "logo.svg",
+                kind: "image",
+                mimeType: "image/svg+xml",
+            },
+        ]);
+
+        const normalizedManagedAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "report.csv",
+                        mimeType: "text/csv",
+                        url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedManagedAttachment.attachments?.[0]).toMatchObject({
+            fileName: "report.csv",
+            kind: "text",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+        });
+        const normalizedSignedAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        url: "https://files.example.test/report.csv?token=signed-value",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedSignedAttachment.attachments?.[0]).toMatchObject({
+            fileName: "report.csv",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "https://files.example.test/report.csv?token=signed-value",
+        });
+        const normalizedFriendlyLabelAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "Sales report",
+                        url: "https://files.example.test/report.csv?token=signed-value",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedFriendlyLabelAttachment.attachments?.[0]).toMatchObject({
+            fileName: "Sales report",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "https://files.example.test/report.csv?token=signed-value",
+        });
+        const normalizedLocalProxyAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        url: "/api/media?path=%2Ftmp%2Fproxy-report.csv",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedLocalProxyAttachment.attachments?.[0]).toMatchObject({
+            fileName: "proxy-report.csv",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "/api/media?path=%2Ftmp%2Fproxy-report.csv",
+        });
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            const absoluteLocalProxyUrl =
+                "https://dashboard.test/api/media?path=%2Ftmp%2Fabsolute-report.csv";
+            const normalizedAbsoluteLocalProxyAttachment =
+                normalizeOpenClawHistoryMessage({
+                    content: [
+                        {
+                            attachment: {
+                                url: absoluteLocalProxyUrl,
+                            },
+                            type: "attachment",
+                        },
+                    ],
+                    role: "assistant",
+                });
+            expect(normalizedAbsoluteLocalProxyAttachment.attachments?.[0]).toMatchObject(
+                {
+                    fileName: "absolute-report.csv",
+                    kind: "text",
+                    mimeType: "text/csv",
+                    url: absoluteLocalProxyUrl,
+                }
+            );
+        } finally {
+            location.assign(previousLocation);
+        }
+        const normalizedManagedSvgAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "logo.svg",
+                        mimeType: "image/svg+xml; charset=utf-8",
+                        url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedManagedSvgAttachment.attachments?.[0]).toMatchObject({
+            dataUrl:
+                "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full?preview=image",
+            fileName: "logo.svg",
+            kind: "image",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full",
+        });
+
+        expect(formatDatabaseNumber(123_456)).toBe("123,456");
+        expect(formatDatabaseNumber(Number.NaN)).toBe("0");
+        expect(formatDatabaseBytes(0)).toBe("0 B");
+        expect(formatDatabaseBytes(1536)).toBe("1.5 KB");
+        expect(truncateQuery("short", 12)).toBe("short");
+        expect(truncateQuery("select " + "x".repeat(20), 12)).toBe("select xxxxx...");
+        expect(
+            postgresMaintenanceAttention({
+                status: "not_assessed",
+                hintCount: 4,
+                requiresBloatReview: false,
+                isBloatAssessmentIncomplete: true,
+                unassessedTableCount: 2,
+                unassessedPhysicalBytes: 2_147_483_648,
+                slowQueryCount: 2,
+                highDeadTupleTableCount: 2,
+                physicalTableBytes: 0,
+                estimatedReclaimableBytes: 0,
+                estimatedReclaimablePercent: 0,
+                reviewThresholdBytes: 5_368_709_120,
+                reviewMinimumBytes: 1_073_741_824,
+                reviewThresholdPercent: 25,
+            })
+        ).toEqual([
+            "2 large tables exceed the dead-tuple threshold. Review autovacuum",
+            "2 queries average at least 500 ms. Review query performance",
+            "Bloat could not be assessed for 2.0 GB across 2 tables",
+        ]);
+        expect(formatDockerBytes(0)).toBe("0 B");
+        expect(formatDockerBytes(1024 ** 2)).toBe("1.0 MB");
+        expect(formatDockerMemory()).toBe("—");
+        expect(formatDockerMemory("512MiB / 1GiB")).toBe("512 MB / 1.0 GB");
+        expect(formatDockerMemory("bad")).toBe("bad");
+        expect(formatTimestamp("not-a-date")).toBe("not-a-date");
+        expect(formatTimestamp()).toBe("—");
+        expect(formatVersionDisplay(undefined, "sha256:abcdef1234567890")).toBe(
+            "sha256:abcde"
+        );
+        expect(formatVersionDisplay()).toBe("—");
+        expect(formatFullVersionDisplay("v1", "digest")).toBe("v1 (digest)");
+        expect(formatFullVersionDisplay()).toBe("—");
+        expect(
+            formatUpdaterTransition({
+                fromTag: "old",
+                toTag: undefined,
+                fromDigest: undefined,
+                toDigest: "sha256:newdigest",
+            })
+        ).toBe("old → sha256:newdi");
+
+        const osloParts = appTimeZoneParts(new Date("2026-06-23T12:34:56.000Z"));
+        expect(osloParts.year).toBe(2026);
+        expect(appTimeZoneShortWeekday(new Date("2026-06-23T12:00:00.000Z"))).toBe("Tue");
+        expect(appTimeZoneShortMonth(new Date("2026-06-23T12:00:00.000Z"))).toBe("Jun");
+        expect(
+            appZonedUtcDate(new Date("2026-06-23T12:34:56.789Z")).getUTCFullYear()
+        ).toBe(2026);
+        expect(currentIsoString()).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+        expect(() => isoStringFromDate("bad")).toThrow(RangeError);
+        expect(timestampFromDateString("bad")).toBeUndefined();
+        expect(currentYear()).toBeGreaterThanOrEqual(2026);
+        expect(APP_TIME_ZONE).toBe("Europe/Oslo");
+    });
+
+    it("drives task detail modal editing, assignment, movement, and progress updates", async () => {
+        const user = userEvent.setup();
+        const onClose = jest.fn();
+        const onMove = jest.fn(async () => {});
+        const onAssign = jest.fn(async () => {});
+        const onDelete = jest.fn();
+        const onUpdate = jest.fn(() =>
+            Promise.try(() => task({ number: 7, title: "Edited detail task" }))
+        );
+        const onAddUpdate = jest.fn(async () => {});
+        const onEditUpdate = jest.fn(async () => {});
+        const onDeleteUpdate = jest.fn();
+        const detailTask = task({
+            number: 7,
+            title: "Detail task",
+            body: "**Investigate** behavior",
+            labels: [{ name: "priority-high" }, { name: "in-progress" }],
+            assignees: [{ login: "mira-2026", name: "Mira" }],
+            automation: {
+                type: "cron",
+                recurring: true,
+                cronJobId: "cron-7",
+                scheduleSummary: "Every hour",
+                sessionTarget: "agent:main:main",
+                enabled: false,
+                lastRunStatus: "success",
+                lastRunAtMs: Date.UTC(2026, 5, 23, 8),
+                nextRunAtMs: Date.UTC(2026, 5, 23, 9),
+                lastDurationMs: 125_000,
+                model: "codex",
+                thinking: "high",
+                source: "cron",
+            },
+        });
+
+        render(
+            createElement(TaskDetailModal, {
+                task: detailTask,
+                onClose,
+                onMove,
+                onAssign,
+                onDelete,
+                onUpdate,
+                updates: [
+                    {
+                        id: 11,
+                        taskId: 7,
+                        author: "mira-2026",
+                        messageMd: "First **progress** update",
+                        createdAt: "2026-06-23T08:00:00.000Z",
+                    },
+                ],
+                onAddUpdate,
+                onEditUpdate,
+                onDeleteUpdate,
+            })
+        );
+
+        expect(screen.getByText("#7: Detail task")).toBeInTheDocument();
+        expect(screen.getByText("Backed by OpenClaw cron")).toBeInTheDocument();
+        expect(screen.getByText("2m 5s")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Add Update" })).toBeDisabled();
+
+        await user.click(screen.getByRole("button", { name: "Mark Done" }));
+        expect(onMove).toHaveBeenCalledWith("done");
+
+        await user.click(screen.getByRole("button", { name: "Assign to Raymond" }));
+        expect(onAssign).toHaveBeenCalledWith("rajohan");
+
+        await user.click(screen.getByRole("button", { name: "Edit" }));
+        await user.clear(screen.getByLabelText("Title"));
+        await user.type(screen.getByLabelText("Title"), "Edited detail task");
+        await user.clear(screen.getByLabelText("Cron job ID"));
+        await user.type(screen.getByLabelText("Cron job ID"), "cron-edited");
+        await user.click(screen.getByRole("button", { name: "Save Changes" }));
+        expect(onUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                title: "Edited detail task",
+                automation: expect.objectContaining({
+                    cronJobId: "cron-edited",
+                }),
+            })
+        );
+
+        await user.type(screen.getByLabelText("Add progress update"), "More progress");
+        const addUpdateButton = screen.getByRole("button", { name: "Add Update" });
+        expect(addUpdateButton).toBeEnabled();
+        await user.click(addUpdateButton);
+        expect(onAddUpdate).toHaveBeenCalledWith("More progress");
+
+        await user.click(
+            screen.getByRole("button", { name: "Edit progress update #11" })
+        );
+        await user.clear(screen.getByLabelText("Message for progress update #11"));
+        const saveUpdateButton = screen.getByRole("button", { name: "Save" });
+        expect(saveUpdateButton).toBeDisabled();
+        await user.type(
+            screen.getByLabelText("Message for progress update #11"),
+            "Edited progress"
+        );
+        expect(saveUpdateButton).toBeEnabled();
+        await user.click(saveUpdateButton);
+        expect(onEditUpdate).toHaveBeenCalledWith(11, "Edited progress");
+
+        await user.click(
+            screen.getByRole("button", { name: "Delete progress update #11" })
+        );
+        expect(onDeleteUpdate).toHaveBeenCalledWith(11);
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        expect(onDelete).toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Close task details" }));
+        expect(onClose).toHaveBeenCalled();
+    }, 10_000);
+
+    it("restores the task assignment button when its callback fails", async () => {
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+        const assignError = new Error("assign failed");
+        const assignDeferred = Promise.withResolvers<void>();
+        const onAssign = jest.fn(() => assignDeferred.promise);
+
+        try {
+            render(
+                createElement(TaskDetailModal, {
+                    task: task({
+                        number: 8,
+                        title: "Action failure task",
+                        labels: [{ name: "priority-medium" }, { name: "todo" }],
+                        assignees: [{ login: "mira-2026", name: "Mira" }],
+                    }),
+                    onClose: jest.fn(),
+                    onMove: jest.fn(async () => {}),
+                    onAssign,
+                    onDelete: jest.fn(),
+                    onUpdate: jest.fn(() =>
+                        Promise.try(() =>
+                            task({ number: 8, title: "Action failure task" })
+                        )
+                    ),
+                    updates: [],
+                    onAddUpdate: jest.fn(async () => {}),
+                    onEditUpdate: jest.fn(async () => {}),
+                    onDeleteUpdate: jest.fn(),
+                })
+            );
+
+            const assignButton = screen.getByRole("button", {
+                name: "Assign to Raymond",
+            });
+            act(() => {
+                fireEvent.click(assignButton);
+            });
+            expect(assignButton).toBeDisabled();
+
+            await act(async () => {
+                assignDeferred.reject(assignError);
+                try {
+                    await assignDeferred.promise;
+                } catch {
+                    // Expected rejection path for the loading-state regression.
+                }
+            });
+            await waitFor(() => expect(assignButton).toBeEnabled());
+
+            expect(consoleError).toHaveBeenCalledWith(
+                "Failed to assign task:",
+                assignError
+            );
+        } finally {
+            consoleError.mockRestore();
+        }
+    }, 10_000);
+
+    it("renders shared UI controls with accessible confirm, search, and badge behavior", async () => {
+        const user = userEvent.setup();
+        const onConfirm = jest.fn();
+        const onCancel = jest.fn();
+        const onSearch = jest.fn();
+
+        render(
+            createElement(
+                "div",
+                undefined,
+                createElement(ConfirmModal, {
+                    isOpen: true,
+                    title: "Delete task",
+                    message: "This cannot be undone.",
+                    confirmLabel: "Delete",
+                    danger: true,
+                    onConfirm,
+                    onCancel,
+                }),
+                createElement(SearchInput, {
+                    value: "cache",
+                    label: "Search tasks",
+                    onChange: onSearch,
+                }),
+                <Badge className="mt-1" variant="cron">
+                    CRON
+                </Badge>
+            )
+        );
+
+        expect(screen.getByText("This cannot be undone.")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        expect(onConfirm).toHaveBeenCalled();
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(onCancel).toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Clear search tasks" }));
+        expect(onSearch).toHaveBeenCalledWith("");
+        expect(screen.getByText("CRON")).toHaveClass("mt-1");
+        expect(getSessionTypeVariant("subagent")).toBe("subagent");
+        expect(getSessionTypeVariant()).toBe("default");
+    });
+
+    it("renders dropdown menu actions and disabled items", async () => {
+        const user = userEvent.setup();
+        const onDropdownAction = jest.fn();
+
+        render(
+            createElement(Dropdown, {
+                label: "Actions",
+                items: [
+                    { label: "Run now", onClick: onDropdownAction },
+                    {
+                        label: "Disabled action",
+                        disabled: true,
+                        onClick: onDropdownAction,
+                    },
+                ],
+            })
+        );
+        await user.click(screen.getByRole("button", { name: "Actions" }));
+        const disabled = screen.getByRole("menuitem", { name: "Disabled action" });
+        expect(disabled).toHaveAttribute("aria-disabled", "true");
+
+        await user.click(screen.getByRole("menuitem", { name: "Run now" }));
+        expect(onDropdownAction).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders the task board from the API and creates a task through the real hooks", async () => {
+        const tasks = [
+            task({
+                number: 1,
+                title: "Ship Bun test reset",
+                labels: [{ name: "priority-high" }, { name: "in-progress" }],
+            }),
+        ];
+        const fetchMock = createApi(tasks);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        const user = userEvent.setup();
+
+        renderWithQueryClient(createElement(Tasks));
+
+        expect(await screen.findByText("Ship Bun test reset")).toBeInTheDocument();
+        expect(screen.getByText("In Progress")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /new task/i }));
+        await user.type(screen.getByLabelText("Title"), "Write useful tests");
+        await user.type(
+            screen.getByLabelText("Description (optional)"),
+            "Cover behavior"
+        );
+        await user.click(
+            within(screen.getByRole("dialog")).getByRole("button", { name: "Raymond" })
+        );
+        await user.click(screen.getByRole("button", { name: /^Create Task$/i }));
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/tasks",
+                expect.objectContaining({ method: "POST" })
+            )
+        );
+        expect(await screen.findByText("Write useful tests")).toBeInTheDocument();
+    });
+
+    it("keeps task cards inside scrollable columns at every breakpoint", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi([
+                task({
+                    number: 1,
+                    title: "Stay inside the task column",
+                    labels: [{ name: "in-progress" }],
+                }),
+            ]),
+            writable: true,
+        });
+
+        const { container } = renderWithQueryClient(createElement(Tasks));
+
+        await screen.findByText("Stay inside the task column");
+        const taskColumn = container.querySelector('[data-column="in-progress"]');
+
+        expect(taskColumn).toHaveClass(
+            "max-h-100",
+            "overflow-y-auto",
+            "lg:max-h-none",
+            "lg:min-h-0",
+            "lg:overscroll-y-contain"
+        );
+        expect(taskColumn).not.toHaveClass("overscroll-contain");
+        expect(taskColumn?.parentElement).toHaveClass("lg:min-h-0");
+        expect(taskColumn?.parentElement?.parentElement).toHaveClass(
+            "min-h-0",
+            "lg:overflow-y-hidden"
+        );
+    });
+
+    it("keeps the task-card assignee aligned to the card edge for short titles", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi([
+                task({
+                    number: 1,
+                    title: "Short",
+                    labels: [{ name: "in-progress" }],
+                }),
+            ]),
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        const taskButton = await screen.findByRole("button", {
+            name: "Open task #1: Short",
+        });
+        expect(taskButton).toHaveClass("peer", "absolute", "inset-0");
+        expect(taskButton).not.toHaveClass("focus:ring-2", "focus:ring-accent-400");
+
+        const cardContent = taskButton.nextElementSibling;
+        expect(cardContent).toHaveClass(
+            "pointer-events-none",
+            "relative",
+            "z-10",
+            "min-w-0",
+            "pl-3"
+        );
+        expect(cardContent).not.toHaveClass("ml-3");
+
+        const cardFooter = cardContent?.lastElementChild;
+        expect(cardFooter).toHaveClass(
+            "flex",
+            "items-center",
+            "justify-between",
+            "gap-2"
+        );
+        expect(cardFooter?.lastElementChild).toHaveClass("flex", "items-center", "gap-1");
+
+        const cardFocusRing = cardContent?.nextElementSibling;
+        expect(cardFocusRing).toHaveAttribute("aria-hidden", "true");
+        expect(cardFocusRing).toHaveClass(
+            "pointer-events-none",
+            "absolute",
+            "inset-0",
+            "rounded-lg",
+            "peer-focus-visible:ring-2",
+            "peer-focus-visible:ring-accent-400"
+        );
+    });
+
+    it("keeps progress update delete confirmation disabled while deletion is pending", async () => {
+        const tasks = [
+            task({
+                number: 1,
+                title: "Confirm progress delete",
+                labels: [{ name: "priority-high" }, { name: "in-progress" }],
+            }),
+        ];
+        const updates: Record<number, TaskUpdate[]> = {
+            1: [
+                {
+                    id: 11,
+                    taskId: 1,
+                    author: "mira-2026",
+                    messageMd: "Pending delete update",
+                    createdAt: "2026-06-23T08:00:00.000Z",
+                },
+            ],
+        };
+        const deleteDeferred = Promise.withResolvers<Response>();
+        let deleteCalls = 0;
+        const baseFetch = createApi(tasks, updates);
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/tasks/1/updates/11" && method === "DELETE") {
+                    deleteCalls += 1;
+                    return deleteDeferred.promise;
+                }
+
+                return baseFetch(input, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+        const user = userEvent.setup();
+
+        renderWithQueryClient(createElement(Tasks));
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: "Open task #1: Confirm progress delete",
+            })
+        );
+        expect(await screen.findByText("Pending delete update")).toBeInTheDocument();
+
+        await user.click(
+            screen.getByRole("button", { name: "Delete progress update #11" })
+        );
+        const dialog = screen.getByRole("dialog", {
+            name: "Delete progress update",
+        });
+        const confirmButton = within(dialog).getByRole("button", { name: "Delete" });
+        act(() => {
+            fireEvent.click(confirmButton);
+        });
+
+        await waitFor(() => {
+            expect(deleteCalls).toBe(1);
+            expect(
+                within(dialog).getByRole("button", { name: "Deleting..." })
+            ).toBeDisabled();
+        });
+
+        updates[1] = [];
+        await act(async () => {
+            deleteDeferred.resolve(Response.json({ isOk: true }));
+            await deleteDeferred.promise;
+        });
+        await waitFor(() => {
+            expect(
+                screen.queryByRole("dialog", { name: "Delete progress update" })
+            ).not.toBeInTheDocument();
+        });
+        expect(deleteCalls).toBe(1);
+    });
+
+    it("filters the task board by assignee and search text", async () => {
+        const tasks = [
+            task({
+                number: 10,
+                title: "Mira backend follow-up",
+                assignees: [{ login: "mira-2026", name: "Mira" }],
+                labels: [{ name: "priority-high" }],
+            }),
+            task({
+                number: 11,
+                title: "Raymond review queue",
+                assignees: [{ login: "rajohan", name: "Raymond" }],
+                labels: [{ name: "blocked" }],
+            }),
+            task({
+                number: 12,
+                title: "Recurring cron check",
+                assignees: [{ login: "mira-2026", name: "Mira" }],
+                labels: [{ name: "priority-medium" }],
+                automation: {
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "cron-check",
+                },
+            }),
+        ];
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi(tasks),
+            writable: true,
+        });
+        const user = userEvent.setup();
+
+        renderWithQueryClient(createElement(Tasks));
+
+        expect(await screen.findByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+        expect(screen.getByText("Recurring cron check")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Recurring" }));
+        expect(screen.queryByText("Mira backend follow-up")).not.toBeInTheDocument();
+        expect(screen.queryByText("Raymond review queue")).not.toBeInTheDocument();
+        expect(screen.getByText("Recurring cron check")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Manual" }));
+        expect(screen.getByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+        expect(screen.queryByText("Recurring cron check")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Mira" }));
+        expect(screen.getByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.queryByText("Raymond review queue")).not.toBeInTheDocument();
+        expect(screen.queryByText("Recurring cron check")).not.toBeInTheDocument();
+
+        await user.type(screen.getByPlaceholderText("Search tasks..."), "nothing");
+        expect(
+            screen.getByText("No tasks match the current filters.")
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Clear filters" }));
+        expect(await screen.findByText("Mira backend follow-up")).toBeInTheDocument();
+        expect(screen.getByText("Raymond review queue")).toBeInTheDocument();
+        expect(screen.getByText("Recurring cron check")).toBeInTheDocument();
+    });
+
+    it("keeps task board ordering aligned with triage priority", async () => {
+        const tasks = [
+            task({
+                number: 20,
+                title: "Low priority newer",
+                labels: [{ name: "priority-low" }, { name: "in-progress" }],
+                updatedAt: "2026-06-23T12:00:00.000Z",
+            }),
+            task({
+                number: 21,
+                title: "High priority older",
+                labels: [{ name: "priority-high" }, { name: "in-progress" }],
+                updatedAt: "2026-06-23T08:00:00.000Z",
+            }),
+            task({
+                number: 22,
+                title: "Medium priority middle",
+                labels: [{ name: "priority-medium" }, { name: "in-progress" }],
+                updatedAt: "2026-06-23T10:00:00.000Z",
+            }),
+            task({
+                number: 23,
+                title: "Done newer low",
+                labels: [{ name: "priority-low" }, { name: "done" }],
+                state: "CLOSED",
+                updatedAt: "2026-06-24T08:00:00.000Z",
+            }),
+            task({
+                number: 24,
+                title: "Done older high",
+                labels: [{ name: "priority-high" }, { name: "done" }],
+                state: "CLOSED",
+                updatedAt: "2026-06-22T08:00:00.000Z",
+            }),
+        ];
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi(tasks),
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        await screen.findByText("High priority older");
+
+        const taskOpenLabels = screen
+            .getAllByRole("button", { name: /Open task #/u })
+            .map((button) => button.getAttribute("aria-label"));
+        expect(taskOpenLabels).toEqual([
+            "Open task #21: High priority older",
+            "Open task #22: Medium priority middle",
+            "Open task #20: Low priority newer",
+            "Open task #23: Done newer low",
+            "Open task #24: Done older high",
+        ]);
+    });
+
+    it("renders empty and retry states for the task board", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json(
+                    {
+                        error: {
+                            code: "service_unavailable",
+                            message: "Tasks unavailable",
+                            requestId: "tasks-unavailable",
+                        },
+                    },
+                    { status: 503 }
+                )
+            )
+            .mockResolvedValueOnce(Response.json([]));
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        expect(await screen.findByText("Tasks unavailable")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Retry" }));
+        expect(await screen.findByText("No tasks yet.")).toBeInTheDocument();
+        expect(
+            screen.getByText("Create a task when there is new work to track.")
+        ).toBeInTheDocument();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps loaded tasks visible when a refresh fails", async () => {
+        const user = userEvent.setup();
+        const fetchMock = jest
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json([
+                    task({
+                        number: 1,
+                        title: "Keep the cached task visible",
+                    }),
+                ])
+            )
+            .mockResolvedValueOnce(
+                Response.json(
+                    {
+                        error: {
+                            code: "service_unavailable",
+                            message: "Tasks temporarily unavailable",
+                            requestId: "tasks-refresh-unavailable",
+                        },
+                    },
+                    { status: 503 }
+                )
+            );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        expect(
+            await screen.findByText("Keep the cached task visible")
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+        expect(
+            await screen.findByText(
+                "Task refresh failed. Showing the last loaded tasks. Tasks temporarily unavailable"
+            )
+        ).toBeInTheDocument();
+        expect(screen.getByText("Keep the cached task visible")).toBeInTheDocument();
+    });
+
+    it("keeps task classification and search aligned with dashboard behavior", () => {
+        const unlabelled = task({ number: 2, title: "Default priority" });
+        const lowPriority = task({
+            number: 4,
+            title: "Triage database cleanup",
+            labels: [{ name: "priority-low" }],
+        });
+        const completed = task({
+            number: 5,
+            title: "Merged dashboard PR",
+            labels: [],
+            state: "CLOSED",
+        });
+        const blocked = task({
+            number: 3,
+            title: "Waiting on deploy",
+            labels: [{ name: "blocked" }],
+            automation: {
+                type: "cron",
+                recurring: true,
+                cronJobId: "daily-check",
+                scheduleSummary: "Every 1h",
+            },
+        });
+
+        expect(getPriority(unlabelled.labels)).toBe("medium");
+        expect(getPriority(lowPriority.labels)).toBe("low");
+        expect(getColumnId(blocked)).toBe("blocked");
+        expect(isTaskMatchSearch(unlabelled, "medium")).toBe(true);
+        expect(isTaskMatchSearch(unlabelled, "new")).toBe(true);
+        expect(isTaskMatchSearch(lowPriority, "priority-low")).toBe(true);
+        expect(isTaskMatchSearch(completed, "done")).toBe(true);
+        expect(isTaskMatchSearch(blocked, "daily-check")).toBe(true);
+        expect(isTaskMatchSearch(blocked, "#3")).toBe(true);
+        expect(isTaskMatchSearch(blocked, "not-present")).toBe(false);
+    });
+});
