@@ -500,7 +500,7 @@ describe("development stack", () => {
                 MIRA_DASHBOARD_DB_PATH: config.databasePath,
                 MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
                 MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
-                MIRA_DASHBOARD_FRONTEND_PATH: root,
+                MIRA_DASHBOARD_FRONTEND_PATH: path.join(root, "frontend"),
                 MIRA_DASHBOARD_LOGS_ROOT: path.join(stateRoot, "logs", "openclaw"),
                 OPENCLAW_GATEWAY_TOKEN: "development-gateway-token",
                 OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789/",

@@ -797,12 +797,15 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 {
                     repos: [
                         {
-                            key: "dashboard",
-                            name: "Mira Dashboard",
                             branch: "test/broaden-fullstack-coverage",
-                            remote: "https://github.com/rajohan/Mira-Dashboard",
+                            category: "project",
+                            checkedAt: "2026-06-24T08:00:00.000Z",
                             dirty: true,
                             exists: true,
+                            key: "dashboard",
+                            name: "Mira Dashboard",
+                            path: "/home/ubuntu/projects/mira-dashboard/production/checkout",
+                            remote: "https://github.com/rajohan/Mira-Dashboard",
                             statusSummary: {
                                 staged: 0,
                                 modified: 1,
@@ -814,12 +817,15 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                             },
                         },
                         {
-                            key: "workspace",
-                            name: "Workspace",
                             branch: "main",
-                            remote: "origin",
+                            category: "workspace",
+                            checkedAt: "2026-06-24T08:00:00.000Z",
                             dirty: false,
                             exists: true,
+                            key: "workspace",
+                            name: "Workspace",
+                            path: "/home/ubuntu/.openclaw",
+                            remote: "origin",
                             statusSummary: {
                                 staged: 0,
                                 modified: 0,

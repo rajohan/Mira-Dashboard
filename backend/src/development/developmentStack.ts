@@ -1008,7 +1008,7 @@ export function developmentBackendEnvironment(
         MIRA_DASHBOARD_DB_PATH: config.databasePath,
         MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: `mira_dashboard_dev_${config.frontendPort}`,
         MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
-        MIRA_DASHBOARD_FRONTEND_PATH: config.repositoryRoot,
+        MIRA_DASHBOARD_FRONTEND_PATH: path.join(config.repositoryRoot, "frontend"),
         MIRA_DASHBOARD_HOST: config.backendHost,
         MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: path.join(
             config.stateRoot,

@@ -14,12 +14,15 @@ export const gitStatusSummarySchema = v.strictObject({
 
 export const gitRepoSummarySchema = v.strictObject({
     branch: v.optional(v.string()),
+    category: v.picklist(["infra", "project", "workspace"]),
+    checkedAt: v.optional(v.pipe(v.string(), v.isoTimestamp())),
     dirty: v.boolean(),
     error: v.optional(v.string()),
     exists: v.boolean(),
     head: v.optional(v.string()),
     key: v.pipe(v.string(), v.nonEmpty()),
     name: v.pipe(v.string(), v.nonEmpty()),
+    path: v.pipe(v.string(), v.nonEmpty()),
     remote: v.optional(v.string()),
     statusError: v.optional(v.string()),
     statusShort: v.optional(v.array(v.string())),

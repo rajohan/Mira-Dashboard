@@ -16,8 +16,15 @@ export const pullRequestAuthorSchema = v.object({
     name: v.optional(v.string()),
 });
 
+const optionalPullRequestAuthorSchema = v.optional(
+    v.pipe(
+        v.nullable(pullRequestAuthorSchema),
+        v.transform((value) => value ?? undefined)
+    )
+);
+
 export const pullRequestReviewSchema = v.object({
-    author: v.optional(pullRequestAuthorSchema),
+    author: optionalPullRequestAuthorSchema,
     state: v.optional(v.string()),
     submittedAt: v.optional(v.string()),
 });
@@ -29,7 +36,7 @@ export const pullRequestReviewConnectionSchema = v.object({
 /** GitHub owns this evolving payload, so only Dashboard-consumed fields are retained. */
 export const pullRequestSummarySchema = v.object({
     additions: v.optional(finiteNumberSchema),
-    author: pullRequestAuthorSchema,
+    author: optionalPullRequestAuthorSchema,
     baseRefName: trimmedNonEmptyStringSchema,
     body: v.optional(v.string()),
     canReviewerApprove: v.optional(v.boolean()),

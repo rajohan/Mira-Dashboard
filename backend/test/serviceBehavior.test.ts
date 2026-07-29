@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { parseGitWorkspaceSummary } from "../../contracts/git.ts";
 import { parseJsonText, requestUrl } from "../../test/support/fetch.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
@@ -191,6 +192,7 @@ set -euo pipefail
 if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
   printf '%s\n' '{"number":1,"title":"Ready PR","body":"","url":"https://github.test/pr/1","headRefName":"ready","headRefOid":"head1","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T08:00:00.000Z","updatedAt":"2026-06-24T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-06-24T08:30:00.000Z","author":{"login":"rajohan"}}]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T08:45:00.000Z"}]}'
   printf '%s\n' '{"number":2,"title":"Blocked cached PR","body":"","url":"https://github.test/pr/2","headRefName":"blocked","headRefOid":"head2","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"APPROVED","latestOpinionatedReviews":{"nodes":[]},"additions":2,"deletions":1,"changedFiles":2,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T10:45:00.000Z"}]}'
+  printf '%s\n' '{"number":3,"title":"Ghost-authored PR","body":"","url":"https://github.test/pr/3","headRefName":"ghost","headRefOid":"head3","baseRefName":"main","author":null,"createdAt":"2026-06-24T11:00:00.000Z","updatedAt":"2026-06-24T12:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-06-24T11:30:00.000Z","author":null}]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
 elif [[ "$1 $2 $3" == "pr view 2" && "$*" == *"--json state"* ]]; then
   printf '%s\n' '{"state":"OPEN"}'
 elif [[ "$1 $2 $3" == "pr view 99" && "$*" == *"--json state"* ]]; then
@@ -3287,15 +3289,22 @@ fi
         } = await import("../src/services/pullRequests.ts");
 
         const pullRequests = await listDashboardPullRequests();
-        expect(pullRequests.map((pullRequest) => pullRequest.number)).toEqual([2, 1]);
+        expect(pullRequests.map((pullRequest) => pullRequest.number)).toEqual([3, 2, 1]);
         expect(pullRequests[0]).toMatchObject({
+            canReviewerApprove: true,
+            number: 3,
+            previewEligible: false,
+            reviewerApproved: false,
+        });
+        expect(pullRequests[0]?.author).toBeUndefined();
+        expect(pullRequests[1]).toMatchObject({
             number: 2,
             title: "Blocked refreshed PR",
             headRefOid: "head2b",
             reviewerApproved: true,
             canReviewerApprove: false,
         });
-        expect(pullRequests[1]).toMatchObject({
+        expect(pullRequests[2]).toMatchObject({
             number: 1,
             reviewerApproved: true,
             canReviewerApprove: false,
@@ -3905,27 +3914,17 @@ fi
             )
             .get() as { data_json: string; metadata_json: string; status: string };
         expect(row.status).toBe("fresh");
-        const data = JSON.parse(row.data_json) as {
-            dirtyCount: number;
-            dirtyRepos: string[];
-            missingRepos: string[];
-            repos: Array<{
-                branch?: string;
-                dirty: boolean;
-                exists: boolean;
-                key: string;
-                remote?: string;
-                statusSummary: Record<string, number>;
-                statusTruncated?: boolean;
-            }>;
-        };
+        const data = parseGitWorkspaceSummary(JSON.parse(row.data_json));
         expect(data.dirtyRepos).toEqual(["openclaw", "mira-dashboard", "docker"]);
         expect(data.missingRepos).toEqual([]);
         expect(data.dirtyCount).toBe(3);
         expect(data.repos.find((repo) => repo.key === "mira-dashboard")).toMatchObject({
             branch: "main",
+            category: "project",
+            checkedAt: expect.any(String),
             dirty: true,
             exists: true,
+            path: expect.any(String),
             remote: "https://example.com/checkout.git",
             statusSummary: {
                 conflicted: 1,

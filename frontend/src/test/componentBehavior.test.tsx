@@ -3275,10 +3275,13 @@ describe("shared component helpers", () => {
                 repos: [
                     {
                         branch: "main",
+                        category: "workspace",
+                        checkedAt: "2026-07-15T12:00:00.000Z",
                         dirty: false,
                         exists: true,
                         key: "workspace",
                         name: "Cached workspace",
+                        path: "/home/ubuntu/.openclaw",
                         remote: undefined,
                         statusSummary: {
                             conflicted: 0,
@@ -3522,10 +3525,12 @@ describe("shared component helpers", () => {
                             repos: [
                                 {
                                     branch: "stale/missing-checkout",
+                                    category: "workspace",
                                     dirty: false,
                                     exists: false,
                                     key: "workspace",
                                     name: "Mira Workspace",
+                                    path: "/home/ubuntu/.openclaw",
                                     remote: undefined,
                                     statusSummary: {
                                         conflicted: 0,
@@ -3539,10 +3544,13 @@ describe("shared component helpers", () => {
                                 },
                                 {
                                     branch: "feature/legacy-cache",
+                                    category: "project",
+                                    checkedAt: "2026-07-13T10:00:00.000Z",
                                     dirty: false,
                                     exists: true,
                                     key: "legacy",
                                     name: "Legacy Cache Repo",
+                                    path: "/home/ubuntu/projects/legacy-cache",
                                     remote: undefined,
                                     statusSummary: {
                                         conflicted: 0,
