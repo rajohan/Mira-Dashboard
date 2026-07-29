@@ -18,6 +18,7 @@ import {
     databaseMigrationInventorySha256,
     getRuntimeReleaseIdentity,
     invalidateRuntimeReleaseIdentityCache,
+    isBunRuntimeCompatible,
     loadReleaseManifest,
     loadRuntimeReleaseIdentity,
     parseReleaseManifest,
@@ -33,11 +34,15 @@ const TEST_COMMIT = "a".repeat(40);
 const TEST_BUILT_AT = new Date("2026-07-25T15:00:00.000Z");
 const TEST_BUN_VERSION = Bun.version;
 
-function writeTestBuildIdentities(root: string, commitSha = TEST_COMMIT): void {
+function writeTestBuildIdentities(
+    root: string,
+    commitSha = TEST_COMMIT,
+    bunVersion = TEST_BUN_VERSION
+): void {
     writeFileSync(
         path.join(root, "dist", "build-identity.json"),
         `${JSON.stringify({
-            bunVersion: TEST_BUN_VERSION,
+            bunVersion,
             commitSha,
             component: "frontend",
             formatVersion: 1,
@@ -46,7 +51,7 @@ function writeTestBuildIdentities(root: string, commitSha = TEST_COMMIT): void {
     writeFileSync(
         path.join(root, "backend", "dist", "build-identity.json"),
         `${JSON.stringify({
-            bunVersion: TEST_BUN_VERSION,
+            bunVersion,
             commitSha,
             component: "backend",
             formatVersion: 1,
@@ -132,6 +137,15 @@ afterEach(() => {
 });
 
 describe("Dashboard release manifest", () => {
+    it("accepts only same-major Bun runtime upgrades", () => {
+        expect(isBunRuntimeCompatible("1.3.14", "1.3.14")).toBe(true);
+        expect(isBunRuntimeCompatible("1.3.14", "1.4.0")).toBe(true);
+        expect(isBunRuntimeCompatible("1.4.0", "1.3.14")).toBe(false);
+        expect(isBunRuntimeCompatible("1.4.0", "2.0.0")).toBe(false);
+        expect(isBunRuntimeCompatible("invalid", "1.4.0")).toBe(false);
+        expect(isBunRuntimeCompatible("1.4.0", "invalid")).toBe(false);
+    });
+
     it("accepts only runtime identities that can safely start services", () => {
         expect(
             requireRunnableReleaseCommit(
@@ -488,6 +502,37 @@ describe("Dashboard release manifest", () => {
         );
         expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
+        ).resolves.toMatchObject({
+            issue: "manifest-code-mismatch",
+            ready: false,
+            source: "manifest",
+        });
+    });
+
+    it("keeps an older same-major release runnable on a newer Bun host", async () => {
+        const root = temporaryReleaseRoot();
+        const releaseBunVersion = "1.3.14";
+        writeTestBuildIdentities(root, TEST_COMMIT, releaseBunVersion);
+        await writeReleaseManifest({
+            ...manifestOptions(root),
+            bunVersion: releaseBunVersion,
+        });
+
+        expect(
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT, "1.4.0")
+        ).resolves.toMatchObject({
+            ready: true,
+            source: "manifest",
+        });
+        expect(
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT, "1.3.13")
+        ).resolves.toMatchObject({
+            issue: "manifest-code-mismatch",
+            ready: false,
+            source: "manifest",
+        });
+        expect(
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT, "2.0.0")
         ).resolves.toMatchObject({
             issue: "manifest-code-mismatch",
             ready: false,

@@ -56,6 +56,7 @@ const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
 const SHA_256_PATTERN = /^[\da-f]{64}$/u;
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const RUNTIME_COMMIT_PATTERN = /^[\da-f]{8,40}$/u;
+const SEMVER_MAJOR_PATTERN = /^(0|[1-9]\d*)\./u;
 
 export interface ReleaseManifestArtifact {
     path: string;
@@ -83,6 +84,29 @@ export interface DashboardReleaseManifest {
         minimumCompatible: number;
         target: number;
     };
+}
+
+/**
+ * Allows a release to run on the same or a newer Bun runtime within one major.
+ * Invalid versions, downgrades, and major-version changes fail closed.
+ * @param releaseVersion Runtime version recorded by the release manifest.
+ * @param hostVersion Runtime version available on the host.
+ * @returns Whether the host runtime is forward-compatible with the release.
+ */
+export function isBunRuntimeCompatible(
+    releaseVersion: string,
+    hostVersion = Bun.version
+): boolean {
+    const releaseMajor = SEMVER_MAJOR_PATTERN.exec(releaseVersion)?.[1];
+    const hostMajor = SEMVER_MAJOR_PATTERN.exec(hostVersion)?.[1];
+    if (!releaseMajor || releaseMajor !== hostMajor) {
+        return false;
+    }
+    try {
+        return Bun.semver.order(hostVersion, releaseVersion) >= 0;
+    } catch {
+        return false;
+    }
 }
 
 export function requireRunnableReleaseCommit(
@@ -761,7 +785,8 @@ function developmentRuntimeReleaseIdentity(releaseRoot: string): RuntimeReleaseI
 export async function loadRuntimeReleaseIdentity(
     releaseRoot = PROCESS_RELEASE_ROOT,
     environment = process.env.NODE_ENV,
-    backendBuildCommit = getBackendBuildCommit()
+    backendBuildCommit = getBackendBuildCommit(),
+    hostBunVersion = Bun.version
 ): Promise<RuntimeReleaseIdentity> {
     if (environment !== "production" && backendBuildCommit === "development") {
         return developmentRuntimeReleaseIdentity(releaseRoot);
@@ -792,7 +817,7 @@ export async function loadRuntimeReleaseIdentity(
         }
         const isManifestMatchesCode =
             manifest.commitSha === backendBuildCommit &&
-            manifest.bunVersion === Bun.version &&
+            isBunRuntimeCompatible(manifest.bunVersion, hostBunVersion) &&
             manifest.schema.target === DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target &&
             manifest.schema.minimumCompatible ===
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum &&

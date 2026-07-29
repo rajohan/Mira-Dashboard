@@ -109,6 +109,14 @@ The executor fails closed unless both units use the expected project root and
 run from managed `current/backend`. A deployment never modifies the running
 release.
 
+Release manifests record the Bun runtime used for both component builds. A
+release may run on that version or a newer runtime within the same Bun major.
+Runtime downgrades, major-version changes, malformed versions, and component
+build identities that differ from the manifest all fail closed. Keep the exact
+older runtime available during a runtime-channel cutover until both managed
+release slots were built by code that implements this forward-compatibility
+rule, so the first automatic rollback can still start the older code.
+
 The release parser temporarily permits the obsolete `backend/package.json` and
 `backend/bun.lock` artifacts so the single managed rollback slot created before
 the root-package consolidation remains verifiable. Neither file is produced or

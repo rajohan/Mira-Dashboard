@@ -22,6 +22,7 @@ import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     type DashboardReleaseManifest,
+    isBunRuntimeCompatible,
     loadReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
     verifyReleaseArtifacts,
@@ -714,11 +715,12 @@ export function assertReleaseCanOpenLiveSchema(
 }
 
 export function assertDashboardReleaseHostRuntimeCompatible(
-    release: ManagedDashboardRelease
+    release: ManagedDashboardRelease,
+    hostBunVersion = Bun.version
 ): void {
-    if (release.manifest.bunVersion !== Bun.version) {
+    if (!isBunRuntimeCompatible(release.manifest.bunVersion, hostBunVersion)) {
         throw new Error(
-            `Release ${release.commitSha} requires Bun ${release.manifest.bunVersion}; host runs ${Bun.version}`
+            `Release ${release.commitSha} requires Bun ${release.manifest.bunVersion} or newer within the same major; host runs ${hostBunVersion}`
         );
     }
 }

@@ -665,7 +665,7 @@ describe("Dashboard immutable release manager", () => {
         expect(existsSync(path.join(root, "previous"))).toBe(false);
     });
 
-    it("blocks same-schema migration rewrites and mismatched Bun runtimes", async () => {
+    it("blocks same-schema migration rewrites and unsafe Bun runtimes", async () => {
         const registryRoot = temporaryReleasesRoot();
         await createManagedRelease(registryRoot, FIRST_COMMIT);
         const rewrittenPath = await createManagedRelease(registryRoot, SECOND_COMMIT);
@@ -701,6 +701,30 @@ describe("Dashboard immutable release manager", () => {
         expect(
             activateDashboardRelease(FIRST_COMMIT, runtimeRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("requires Bun 0.0.0");
+
+        const forwardCompatibleRoot = temporaryReleasesRoot();
+        await createManagedRelease(
+            forwardCompatibleRoot,
+            FIRST_COMMIT,
+            FIRST_COMMIT,
+            "1.3.14"
+        );
+        const forwardCompatibleRelease = await loadManagedRelease(
+            forwardCompatibleRoot,
+            FIRST_COMMIT
+        );
+        expect(() =>
+            assertDashboardReleaseHostRuntimeCompatible(forwardCompatibleRelease, "1.4.0")
+        ).not.toThrow();
+        expect(() =>
+            assertDashboardReleaseHostRuntimeCompatible(
+                forwardCompatibleRelease,
+                "1.3.13"
+            )
+        ).toThrow("requires Bun 1.3.14 or newer within the same major");
+        expect(() =>
+            assertDashboardReleaseHostRuntimeCompatible(forwardCompatibleRelease, "2.0.0")
+        ).toThrow("requires Bun 1.3.14 or newer within the same major");
     });
 
     it("checks the effective live schema after a code-only rollback", async () => {
