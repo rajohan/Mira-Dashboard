@@ -3,6 +3,7 @@ import path from "node:path";
 
 import tailwindPlugin from "bun-plugin-tailwind";
 
+import { currentBunRuntimeIdentity } from "../backend/src/managedBunRuntime.ts";
 import {
     isReleaseBuildCommit,
     resolveBuildSourceIdentity,
@@ -90,7 +91,7 @@ export async function buildFrontend({
         path.join(resolvedOutdir, "build-identity.json"),
         `${JSON.stringify(
             {
-                bunVersion: Bun.version,
+                bunVersion: currentBunRuntimeIdentity(),
                 commitSha,
                 component: "frontend",
                 formatVersion: 1,

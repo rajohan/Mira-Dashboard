@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { currentBunRuntimeIdentity } from "../backend/src/managedBunRuntime.ts";
 import { resolveBuildSourceIdentity } from "./buildSourceIdentity.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -42,7 +43,7 @@ await writeFile(
     path.join(outdir, "build-identity.json"),
     `${JSON.stringify(
         {
-            bunVersion: Bun.version,
+            bunVersion: currentBunRuntimeIdentity(),
             commitSha,
             component: "backend",
             formatVersion: 1,

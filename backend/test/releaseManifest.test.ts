@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { databaseMigrationIdentities } from "../src/databaseMigrations/index.ts";
+import { currentBunRuntimeIdentity } from "../src/managedBunRuntime.ts";
 import {
     createReleaseManifest,
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
@@ -31,13 +32,17 @@ import {
 const temporaryRoots: string[] = [];
 const TEST_COMMIT = "a".repeat(40);
 const TEST_BUILT_AT = new Date("2026-07-25T15:00:00.000Z");
-const TEST_BUN_VERSION = Bun.version;
+const TEST_BUN_VERSION = currentBunRuntimeIdentity();
 
-function writeTestBuildIdentities(root: string, commitSha = TEST_COMMIT): void {
+function writeTestBuildIdentities(
+    root: string,
+    commitSha = TEST_COMMIT,
+    bunVersion = TEST_BUN_VERSION
+): void {
     writeFileSync(
         path.join(root, "dist", "build-identity.json"),
         `${JSON.stringify({
-            bunVersion: TEST_BUN_VERSION,
+            bunVersion,
             commitSha,
             component: "frontend",
             formatVersion: 1,
@@ -46,7 +51,7 @@ function writeTestBuildIdentities(root: string, commitSha = TEST_COMMIT): void {
     writeFileSync(
         path.join(root, "backend", "dist", "build-identity.json"),
         `${JSON.stringify({
-            bunVersion: TEST_BUN_VERSION,
+            bunVersion,
             commitSha,
             component: "backend",
             formatVersion: 1,
@@ -493,6 +498,42 @@ describe("Dashboard release manifest", () => {
             ready: false,
             source: "manifest",
         });
+    });
+
+    it("requires the exact revision-qualified Bun build identity at runtime", async () => {
+        const root = temporaryReleaseRoot();
+        const otherRuntime = "99.0.0+deadbeef";
+        writeTestBuildIdentities(root, TEST_COMMIT, otherRuntime);
+        await writeReleaseManifest({
+            ...manifestOptions(root),
+            bunVersion: otherRuntime,
+        });
+
+        expect(
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
+        ).resolves.toMatchObject({
+            issue: "manifest-code-mismatch",
+            ready: false,
+            source: "manifest",
+        });
+    });
+
+    it("rejects malformed Bun versions in manifests and build identities", async () => {
+        const root = temporaryReleaseRoot();
+        expect(
+            createReleaseManifest({
+                ...manifestOptions(root),
+                bunVersion: "1.3",
+            })
+        ).rejects.toThrow("Release Bun runtime version is invalid");
+
+        const manifest = await writeReleaseManifest(manifestOptions(root));
+        expect(() =>
+            parseReleaseManifest({
+                ...manifest,
+                bunVersion: "1.3.14foo",
+            })
+        ).toThrow("Release manifest identity is invalid");
     });
 
     it("rejects a manifest built by another Bun runtime", async () => {

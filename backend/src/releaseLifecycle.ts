@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import path from "node:path";
 
 import {
     assertMiraDatabasePathSafeForEnvironment,
@@ -6,6 +7,8 @@ import {
 } from "./database.ts";
 import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import { writeCliError, writeCliOutput } from "./lib/cliOutput.ts";
+import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
+import { resolveManagedBunRuntimeRoot } from "./managedBunRuntime.ts";
 import type {
     DashboardReleaseManagerOptions,
     DashboardReleaseState,
@@ -234,7 +237,13 @@ export async function runReleaseLifecycleCommand(
                 );
             }
             const retainCount = commitSha === undefined ? 3 : Number(commitSha);
-            return pruneDashboardReleases(retainCount, releasesRoot);
+            const productionReleasesRoot =
+                resolveDashboardProjectPaths().productionReleasesRoot;
+            const runtimeRoot =
+                path.resolve(releasesRoot) === path.resolve(productionReleasesRoot)
+                    ? resolveManagedBunRuntimeRoot()
+                    : undefined;
+            return pruneDashboardReleases(retainCount, releasesRoot, runtimeRoot);
         }
         default: {
             throw new TypeError(
