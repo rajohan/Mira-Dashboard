@@ -11,6 +11,7 @@ export interface DashboardProjectPaths {
     developmentRoot: string;
     developmentWorktreeRoot: string;
     productionCheckoutRoot: string;
+    productionBunRuntimeRoot: string;
     productionDatabasePath: string;
     productionLogRotationLockFile: string;
     productionOpenClawHome: string;
@@ -32,6 +33,7 @@ export function dashboardProjectPaths(projectRoot: string): DashboardProjectPath
         developmentRoot,
         developmentWorktreeRoot: path.join(developmentRoot, "worktrees"),
         productionCheckoutRoot: path.join(productionRoot, "checkout"),
+        productionBunRuntimeRoot: path.join(productionRoot, "runtimes", "bun"),
         productionDatabasePath: path.join(productionStateRoot, "mira-dashboard.db"),
         productionLogRotationLockFile: path.join(
             productionStateRoot,

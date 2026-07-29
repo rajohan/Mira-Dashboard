@@ -14,6 +14,11 @@ import {
 import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
+import {
+    currentBunRuntimeIdentity,
+    isBunRuntimeVersion,
+    isCurrentBunRuntime,
+} from "./managedBunRuntime.ts";
 
 export { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 
@@ -382,8 +387,7 @@ async function loadComponentBuildIdentity(
         typeof value.commitSha !== "string" ||
         !COMMIT_SHA_PATTERN.test(value.commitSha) ||
         typeof value.bunVersion !== "string" ||
-        !value.bunVersion ||
-        value.bunVersion.length > 64
+        !isBunRuntimeVersion(value.bunVersion)
     ) {
         throw new TypeError(`${component} build identity is invalid`);
     }
@@ -438,7 +442,10 @@ export async function createReleaseManifest(
     const commitTitle =
         options.commitTitle ?? gitOutput(releaseRoot, ["log", "-1", "--pretty=%s"]);
     assertCommitIdentity(commitSha, commitTitle);
-    const bunVersion = options.bunVersion ?? Bun.version;
+    const bunVersion = options.bunVersion ?? currentBunRuntimeIdentity();
+    if (!isBunRuntimeVersion(bunVersion)) {
+        throw new TypeError("Release Bun runtime version is invalid");
+    }
     const [backendBuild, frontendBuild] = await Promise.all([
         loadComponentBuildIdentity(releaseRoot, "backend"),
         loadComponentBuildIdentity(releaseRoot, "frontend"),
@@ -613,8 +620,7 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         value.components.frontendCommit !== expectedShortCommit ||
         Number.isNaN(Date.parse(value.builtAt)) ||
         new Date(value.builtAt).toISOString() !== value.builtAt ||
-        !value.bunVersion ||
-        value.bunVersion.length > 64
+        !isBunRuntimeVersion(value.bunVersion)
     ) {
         throw new TypeError("Release manifest identity is invalid");
     }
@@ -792,7 +798,7 @@ export async function loadRuntimeReleaseIdentity(
         }
         const isManifestMatchesCode =
             manifest.commitSha === backendBuildCommit &&
-            manifest.bunVersion === Bun.version &&
+            isCurrentBunRuntime(manifest.bunVersion) &&
             manifest.schema.target === DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target &&
             manifest.schema.minimumCompatible ===
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum &&
