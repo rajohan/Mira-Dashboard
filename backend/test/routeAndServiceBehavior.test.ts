@@ -1015,6 +1015,165 @@ describe("backend route and service behavior", () => {
         );
         expect(getInvalid.status).toBe(400);
 
+        const missingId = 2_147_483_647;
+        const getMissing = await taskRoutes["/api/tasks/:id"].GET(
+            requestWithParameters(`/api/tasks/${missingId}`, {
+                id: String(missingId),
+            })
+        );
+        expect(getMissing.status).toBe(404);
+
+        const patchInvalidId = await taskRoutes["/api/tasks/:id"].PATCH(
+            requestWithParameters(
+                "/api/tasks/invalid",
+                { id: "invalid" },
+                { body: JSON.stringify({ title: "Ignored" }), method: "PATCH" }
+            )
+        );
+        expect(patchInvalidId.status).toBe(400);
+        const patchMissing = await taskRoutes["/api/tasks/:id"].PATCH(
+            requestWithParameters(
+                `/api/tasks/${missingId}`,
+                { id: String(missingId) },
+                { body: JSON.stringify({ title: "Missing" }), method: "PATCH" }
+            )
+        );
+        expect(patchMissing.status).toBe(404);
+
+        const deleteInvalidId = taskRoutes["/api/tasks/:id"].DELETE(
+            requestWithParameters("/api/tasks/invalid", { id: "invalid" })
+        );
+        expect(deleteInvalidId.status).toBe(400);
+        const deleteMissing = taskRoutes["/api/tasks/:id"].DELETE(
+            requestWithParameters(`/api/tasks/${missingId}`, {
+                id: String(missingId),
+            })
+        );
+        expect(deleteMissing.status).toBe(404);
+
+        const assignInvalidId = await taskRoutes["/api/tasks/:id/assign"].POST(
+            requestWithParameters(
+                "/api/tasks/invalid/assign",
+                { id: "invalid" },
+                {
+                    body: JSON.stringify({ assignee: "mira-2026" }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(assignInvalidId.status).toBe(400);
+        const assignMissing = await taskRoutes["/api/tasks/:id/assign"].POST(
+            requestWithParameters(
+                `/api/tasks/${missingId}/assign`,
+                { id: String(missingId) },
+                {
+                    body: JSON.stringify({ assignee: "mira-2026" }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(assignMissing.status).toBe(404);
+
+        const moveInvalidId = await taskRoutes["/api/tasks/:id/move"].POST(
+            requestWithParameters(
+                "/api/tasks/invalid/move",
+                { id: "invalid" },
+                {
+                    body: JSON.stringify({ columnLabel: "todo" }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(moveInvalidId.status).toBe(400);
+        const moveMissing = await taskRoutes["/api/tasks/:id/move"].POST(
+            requestWithParameters(
+                `/api/tasks/${missingId}/move`,
+                { id: String(missingId) },
+                {
+                    body: JSON.stringify({ columnLabel: "todo" }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(moveMissing.status).toBe(404);
+
+        const listUpdatesInvalidId = taskRoutes["/api/tasks/:id/updates"].GET(
+            requestWithParameters("/api/tasks/invalid/updates", { id: "invalid" })
+        );
+        expect(listUpdatesInvalidId.status).toBe(400);
+        const createUpdateInvalidId = await taskRoutes["/api/tasks/:id/updates"].POST(
+            requestWithParameters(
+                "/api/tasks/invalid/updates",
+                { id: "invalid" },
+                {
+                    body: JSON.stringify({
+                        author: "mira-2026",
+                        messageMd: "Ignored",
+                    }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(createUpdateInvalidId.status).toBe(400);
+        const createUpdateMissing = await taskRoutes["/api/tasks/:id/updates"].POST(
+            requestWithParameters(
+                `/api/tasks/${missingId}/updates`,
+                { id: String(missingId) },
+                {
+                    body: JSON.stringify({
+                        author: "mira-2026",
+                        messageMd: "Missing",
+                    }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(createUpdateMissing.status).toBe(404);
+
+        const editUpdateInvalidIds = await taskRoutes[
+            "/api/tasks/:id/updates/:updateId"
+        ].PATCH(
+            requestWithParameters(
+                "/api/tasks/invalid/updates/invalid",
+                { id: "invalid", updateId: "invalid" },
+                {
+                    body: JSON.stringify({ messageMd: "Ignored" }),
+                    method: "PATCH",
+                }
+            )
+        );
+        expect(editUpdateInvalidIds.status).toBe(400);
+        const editUpdateMissing = await taskRoutes[
+            "/api/tasks/:id/updates/:updateId"
+        ].PATCH(
+            requestWithParameters(
+                `/api/tasks/${id}/updates/${missingId}`,
+                { id: String(id), updateId: String(missingId) },
+                {
+                    body: JSON.stringify({ messageMd: "Missing" }),
+                    method: "PATCH",
+                }
+            )
+        );
+        expect(editUpdateMissing.status).toBe(404);
+
+        const deleteUpdateInvalidIds = taskRoutes[
+            "/api/tasks/:id/updates/:updateId"
+        ].DELETE(
+            requestWithParameters("/api/tasks/invalid/updates/invalid", {
+                id: "invalid",
+                updateId: "invalid",
+            })
+        );
+        expect(deleteUpdateInvalidIds.status).toBe(400);
+        const deleteUpdateMissing = taskRoutes["/api/tasks/:id/updates/:updateId"].DELETE(
+            requestWithParameters(`/api/tasks/${id}/updates/${missingId}`, {
+                id: String(id),
+                updateId: String(missingId),
+            })
+        );
+        expect(deleteUpdateMissing.status).toBe(404);
+
         const patch = await taskRoutes["/api/tasks/:id"].PATCH(
             requestWithParameters(
                 `/api/tasks/${id}`,
@@ -1182,6 +1341,58 @@ describe("backend route and service behavior", () => {
         expect(taskNotifications.at(-1)).toBe(
             `Task deleted: #${id} Coverage route task updated. This Mira-assigned task changed and may need attention when the current work is clear.`
         );
+    });
+
+    it("maps job execution validation, missing records, and queue failures", async () => {
+        const jobExecutionQueue = await import("../src/services/jobExecutionQueue.ts");
+        const { jobExecutionRoutes } =
+            await import("../src/routes/jobExecutionRoutes.ts");
+        const missingExecutionId = "018f47a2-9b7c-7cc8-a123-456789abcdef";
+
+        const missingExecution = jobExecutionRoutes["/api/job-executions/:id"].GET(
+            requestWithParameters(`/api/job-executions/${missingExecutionId}`, {
+                id: missingExecutionId,
+            })
+        );
+        expect(missingExecution.status).toBe(404);
+
+        const invalidCancel = jobExecutionRoutes["/api/job-executions/:id/cancel"].POST(
+            requestWithParameters("/api/job-executions/invalid/cancel", {
+                id: "invalid",
+            })
+        );
+        expect(invalidCancel.status).toBe(400);
+
+        const missingCancel = jobExecutionRoutes["/api/job-executions/:id/cancel"].POST(
+            requestWithParameters(`/api/job-executions/${missingExecutionId}/cancel`, {
+                id: missingExecutionId,
+            })
+        );
+        expect(missingCancel.status).toBe(404);
+
+        const listFailure = jest
+            .spyOn(jobExecutionQueue, "listJobExecutions")
+            .mockImplementationOnce(() => {
+                throw new Error("Queue unavailable");
+            });
+        const failedList = jobExecutionRoutes["/api/job-executions"].GET(
+            new Request("https://test.local/api/job-executions")
+        );
+        expect(failedList.status).toBe(500);
+        listFailure.mockRestore();
+
+        const lookupFailure = jest
+            .spyOn(jobExecutionQueue, "getJobExecution")
+            .mockImplementationOnce(() => {
+                throw new Error("Queue unavailable");
+            });
+        const failedLookup = jobExecutionRoutes["/api/job-executions/:id"].GET(
+            requestWithParameters(`/api/job-executions/${missingExecutionId}`, {
+                id: missingExecutionId,
+            })
+        );
+        expect(failedLookup.status).toBe(500);
+        lookupFailure.mockRestore();
     });
 
     it("file route listing, hidden path rejection, text writes, binary reads, and directory errors", async () => {
@@ -1364,6 +1575,85 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(hardLinkedWrite.status).toBe(403);
+
+        const absolutePathRead = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/%2Fetc%2Fpasswd")
+        );
+        expect(absolutePathRead.status).toBe(403);
+
+        const missingDirectoryList = fileRoutes["/api/files"].GET(
+            new Request("https://test.local/api/files?path=missing")
+        );
+        expect(missingDirectoryList.status).toBe(404);
+
+        const malformedPathWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/%E0%A4%A", {
+                body: JSON.stringify({ content: "ignored" }),
+                method: "PUT",
+            })
+        );
+        expect(malformedPathWrite.status).toBe(400);
+
+        const readmePath = path.join(workspaceRoot, "notes", "readme.txt");
+        chmodSync(readmePath, 0);
+        const unreadableFile = await fileRoutes["/api/files/*"].GET(
+            new Request("https://test.local/api/files/notes/readme.txt")
+        );
+        expect(unreadableFile.status).toBe(403);
+        chmodSync(readmePath, 0o600);
+
+        const oversizedExistingPath = path.join(
+            workspaceRoot,
+            "notes",
+            "oversized-existing.txt"
+        );
+        writeFileSync(oversizedExistingPath, Buffer.alloc(1024 * 1024 + 1));
+        const oversizedExistingWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/oversized-existing.txt", {
+                body: JSON.stringify({ content: "replacement" }),
+                method: "PUT",
+            })
+        );
+        expect(oversizedExistingWrite.status).toBe(413);
+
+        const fifoPath = path.join(workspaceRoot, "notes", "pipe.txt");
+        const fifoResult = Bun.spawnSync({
+            cmd: ["/usr/bin/mkfifo", fifoPath],
+            stderr: "pipe",
+            stdout: "pipe",
+        });
+        expect(fifoResult.exitCode).toBe(0);
+        const fifoWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/notes/pipe.txt", {
+                body: JSON.stringify({ content: "replacement" }),
+                method: "PUT",
+            })
+        );
+        expect(fifoWrite.status).toBe(400);
+
+        const missingWorkspaceParent = createTemporaryRoot(
+            "mira-file-route-missing-workspace-"
+        );
+        process.env.WORKSPACE_ROOT = path.join(missingWorkspaceParent, "workspace");
+        const createdWorkspaceWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/created.txt", {
+                body: JSON.stringify({ content: "created" }),
+                method: "PUT",
+            })
+        );
+        expect(createdWorkspaceWrite.status).toBe(200);
+        const fsModule = await import("node:fs");
+        const missingParentRace = jest
+            .spyOn(fsModule.default, "existsSync")
+            .mockReturnValueOnce(false);
+        const missingParentWrite = await fileRoutes["/api/files/*"].PUT(
+            new Request("https://test.local/api/files/missing/child.txt", {
+                body: JSON.stringify({ content: "missing parent" }),
+                method: "PUT",
+            })
+        );
+        missingParentRace.mockRestore();
+        expect(missingParentWrite.status).toBe(404);
     });
 
     it("stores and clears intentional disable metadata for OpenClaw cron jobs", async () => {
@@ -2010,6 +2300,66 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(oversizedExistingWrite.status).toBe(413);
+
+        const hardLinkedConfigRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts"
+            )
+        );
+        expect(hardLinkedConfigRead.status).toBe(403);
+
+        const malformedPathWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/%E0%A4%A", {
+                body: JSON.stringify({ content: "{}\n" }),
+                method: "PUT",
+            })
+        );
+        expect(malformedPathWrite.status).toBe(400);
+
+        const openclawConfig = path.join(root, "openclaw.json");
+        chmodSync(openclawConfig, 0);
+        const unreadableConfig = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json")
+        );
+        expect(unreadableConfig.status).toBe(403);
+        chmodSync(openclawConfig, 0o600);
+
+        rmSync(openclawConfig);
+        mkdirSync(openclawConfig);
+        const directoryRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json")
+        );
+        expect(directoryRead.status).toBe(403);
+        const directoryConfigWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({ content: "{}\n" }),
+                method: "PUT",
+            })
+        );
+        expect(directoryConfigWrite.status).toBe(400);
+
+        unlinkSync(linkedConfig);
+        const missingConfiguredRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request(
+                "https://test.local/api/config-files/hooks/transforms/agentmail.ts"
+            )
+        );
+        expect(missingConfiguredRead.status).toBe(404);
+
+        process.env.OPENCLAW_HOME = "relative-openclaw-home";
+        const unconfiguredList = configFileRoutes["/api/config-files"].GET();
+        expect(unconfiguredList.status).toBe(500);
+        const unconfiguredRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json")
+        );
+        expect(unconfiguredRead.status).toBe(500);
+        const unconfiguredWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({ content: "{}\n" }),
+                method: "PUT",
+            })
+        );
+        expect(unconfiguredWrite.status).toBe(500);
     });
 
     it("defensive route contracts for Docker, pull requests, cache, database, and backup APIs", async () => {
@@ -3462,6 +3812,96 @@ describe("backend route and service behavior", () => {
         const { mediaRoutes } = await import("../src/routes/mediaRoutes.ts");
         const mediaPath =
             "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full";
+
+        const invalidPreviewMode = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=download`)
+        );
+        expect(invalidPreviewMode.status).toBe(400);
+
+        gatewayFetch.mockRejectedValueOnce(new Error("Gateway unavailable"));
+        const unavailableGateway = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+        expect(unavailableGateway.status).toBe(502);
+
+        gatewayFetch.mockResolvedValueOnce(new Response("missing", { status: 404 }));
+        const missingGatewayMedia = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+        expect(missingGatewayMedia.status).toBe(404);
+
+        gatewayFetch.mockResolvedValueOnce(new Response("failed", { status: 500 }));
+        const failedGatewayMedia = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+        expect(failedGatewayMedia.status).toBe(502);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("binary", {
+                headers: { "Content-Type": "application/octet-stream" },
+            })
+        );
+        const unavailableTextPreview = await mediaRoutes[
+            "/api/chat/media/outgoing/*"
+        ].GET(new Request(`https://dashboard.test${mediaPath}?preview=text`));
+        expect(unavailableTextPreview.status).toBe(415);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("plain", {
+                headers: { "Content-Type": "text/plain" },
+            })
+        );
+        const unavailableImagePreview = await mediaRoutes[
+            "/api/chat/media/outgoing/*"
+        ].GET(new Request(`https://dashboard.test${mediaPath}?preview=image`));
+        expect(unavailableImagePreview.status).toBe(415);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response(
+                new ReadableStream<Uint8Array>({
+                    pull() {
+                        throw new Error("Gateway text body failed");
+                    },
+                }),
+                {
+                    headers: { "Content-Type": "text/plain" },
+                }
+            )
+        );
+        const failedTextPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=text`)
+        );
+        expect(failedTextPreview.status).toBe(504);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("oversized", {
+                headers: {
+                    "Content-Length": String(16 * 1024 * 1024 + 1),
+                    "Content-Type": "image/png",
+                },
+            })
+        );
+        const oversizedImagePreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=image`)
+        );
+        expect(oversizedImagePreview.status).toBe(413);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("<svg></svg>", {
+                headers: {
+                    "Content-Disposition": 'inline; filename="fallback.svg"',
+                    "Content-Type": "application/octet-stream",
+                },
+            })
+        );
+        const extensionBasedSvgPreview = await mediaRoutes[
+            "/api/chat/media/outgoing/*"
+        ].GET(new Request(`https://dashboard.test${mediaPath}?preview=image`));
+        expect(extensionBasedSvgPreview.status).toBe(200);
+        expect(extensionBasedSvgPreview.headers.get("Content-Type")).toBe(
+            "image/svg+xml"
+        );
+
         const proxied = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
             new Request(`https://dashboard.test${mediaPath}`)
         );
@@ -3473,7 +3913,7 @@ describe("backend route and service behavior", () => {
         );
         expect(proxied.headers.get("Cache-Control")).toBe("private, no-store");
         expect([...new Uint8Array(await proxied.arrayBuffer())]).toEqual([1, 2, 3]);
-        expect(gatewayFetch).toHaveBeenCalledTimes(1);
+        expect(gatewayFetch).toHaveBeenCalledTimes(9);
         const gatewayRequestArguments = gatewayRequests[0];
         if (!gatewayRequestArguments) {
             throw new Error("Gateway request arguments were not captured");
@@ -3647,7 +4087,7 @@ describe("backend route and service behavior", () => {
             )
         );
         expect(rejected.status).toBe(404);
-        expect(gatewayFetch).toHaveBeenCalledTimes(8);
+        expect(gatewayFetch).toHaveBeenCalledTimes(16);
     });
 
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {
@@ -4172,6 +4612,17 @@ describe("backend route and service behavior", () => {
             .run("{not-json");
         const malformed = opsRoutes["/api/ops/log-rotation/status"].GET();
         expect(malformed.json()).resolves.toEqual({
+            isSuccess: true,
+            lastRun: undefined,
+        });
+
+        database
+            .prepare(
+                "UPDATE cache_entries SET data_json = ? WHERE key = 'log_rotation.state'"
+            )
+            .run(JSON.stringify({ lastRun: {} }));
+        const invalidLastRun = opsRoutes["/api/ops/log-rotation/status"].GET();
+        expect(invalidLastRun.json()).resolves.toEqual({
             isSuccess: true,
             lastRun: undefined,
         });

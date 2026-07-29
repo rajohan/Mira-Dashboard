@@ -25,6 +25,7 @@ import {
     ensureDashboardReleaseLayout,
     managedReleasePath,
 } from "../src/releaseManager.ts";
+import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import {
     createReleaseFixture,
@@ -7432,6 +7433,76 @@ fi
                 )
                 .get()
         ).toEqual({ cancellable: 0, status: "success" });
+
+        gateway.request = (method) =>
+            Promise.try(() => {
+                if (method === "config.get") {
+                    return { hash: "hash-empty", parsed: {} };
+                }
+                if (method === "config.patch") {
+                    return { hash: "hash-updated" };
+                }
+                throw new Error(`unexpected gateway method: ${method}`);
+            });
+        const missingStoredSecret = await openclawConfigRoutes["/api/config"].PUT(
+            new Request("https://dashboard.test/api/config", {
+                body: JSON.stringify({
+                    __hash: "hash-empty",
+                    apiToken: CONFIG_REDACTION_SENTINEL,
+                }),
+                method: "PUT",
+            })
+        );
+        expect(missingStoredSecret.status).toBe(400);
+
+        gateway.request = () =>
+            Promise.try(() => {
+                throw new Error("Gateway config unavailable");
+            });
+        const failedConfigRead = await openclawConfigRoutes["/api/config"].GET();
+        const failedSkillsRead = await openclawConfigRoutes["/api/skills"].GET();
+        const failedBackup = await openclawConfigRoutes["/api/backup"].POST();
+        expect(failedConfigRead.status).toBe(500);
+        expect(failedSkillsRead.status).toBe(500);
+        expect(failedBackup.status).toBe(500);
+        const failedConfigUpdate = await openclawConfigRoutes["/api/config"].PUT(
+            new Request("https://dashboard.test/api/config", {
+                body: JSON.stringify({ __hash: "hash-1", theme: "failure" }),
+                method: "PUT",
+            })
+        );
+        expect(failedConfigUpdate.status).toBe(500);
+
+        gateway.request = (method) =>
+            Promise.try(() => {
+                if (method === "config.patch") {
+                    throw new Error("Gateway config patch unavailable");
+                }
+                return { hash: "hash-1", parsed: {} };
+            });
+        const failedSkillRequest = new Request(
+            "https://dashboard.test/api/skills/workspaceSkill",
+            {
+                body: JSON.stringify({ __hash: "hash-1", enabled: true }),
+                method: "POST",
+            }
+        );
+        const failedSkillUpdate = await openclawConfigRoutes["/api/skills/:name"].POST(
+            Object.assign(failedSkillRequest, { params: { name: "workspaceSkill" } })
+        );
+        expect(failedSkillUpdate.status).toBe(500);
+
+        const failingBin = path.join(routeRoot, "openclaw-failing");
+        writeFileSync(
+            failingBin,
+            "#!/usr/bin/env bash\necho restart failed >&2\nexit 1\n"
+        );
+        chmodSync(failingBin, 0o755);
+        process.env.OPENCLAW_BIN = failingBin;
+        const failedRestart = await openclawConfigRoutes["/api/restart"].POST(
+            new Request("https://test.local/api/restart", { method: "POST" })
+        );
+        expect(failedRestart.status).toBe(500);
     });
 
     it("normalizes cron and session route contracts through a patched gateway", async () => {
@@ -7676,6 +7747,23 @@ fi
             apiErrorExpectation(expect.stringContaining("body.action"), "invalid_request")
         );
 
+        const invalidSessionActionRequest = new Request(
+            "https://dashboard.test/api/sessions/action",
+            {
+                body: JSON.stringify({ action: "reset" }),
+                method: "POST",
+            }
+        );
+        const invalidSessionAction = await sessionRoutes["/api/sessions/:id/action"].POST(
+            Object.assign(invalidSessionActionRequest, { params: { id: " " } })
+        );
+        expect(invalidSessionAction.status).toBe(400);
+
+        const invalidSessionDelete = await sessionRoutes["/api/sessions/:id"].DELETE({
+            params: { id: " " },
+        } as Request & { params: { id: string } });
+        expect(invalidSessionDelete.status).toBe(400);
+
         const deleteRequest = {
             params: { id: "agent:main:main" },
         } as Request & { params: { id: string } };
@@ -7688,6 +7776,22 @@ fi
             method: "chat.send",
             parameters: { message: "/compact", sessionKey: "agent:main:main" },
         });
+
+        gateway.sendSessionMessage = () =>
+            Promise.reject(new Error("Gateway session action unavailable"));
+        const failedSessionActionRequest = new Request(
+            "https://dashboard.test/api/sessions/action",
+            {
+                body: JSON.stringify({ action: "reset" }),
+                method: "POST",
+            }
+        );
+        const failedSessionAction = await sessionRoutes["/api/sessions/:id/action"].POST(
+            Object.assign(failedSessionActionRequest, {
+                params: { id: "agent:main:main" },
+            })
+        );
+        expect(failedSessionAction.status).toBe(500);
     });
 
     it("validates Docker route input and maps updater rows without running Docker", async () => {

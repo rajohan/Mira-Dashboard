@@ -1,4 +1,16 @@
 import { afterEach, describe, expect, it, jest } from "bun:test";
+import {
+    existsSync,
+    linkSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import {
     getDatabaseOperationMetrics,
@@ -8,15 +20,37 @@ import {
 import { hashedLogCorrelation, runWithLogContext } from "../src/lib/logContext.ts";
 import { getRuntimeMetrics } from "../src/lib/runtimeMetrics.ts";
 import {
+    createStructuredLogger,
     enableStructuredLogOutputForTests,
     redactLogFields,
     structuredLog,
     subscribeToStructuredLogs,
 } from "../src/lib/structuredLogger.ts";
 
+const cleanupCallbacks: Array<() => void> = [];
+
 afterEach(() => {
+    while (cleanupCallbacks.length > 0) cleanupCallbacks.pop()?.();
     resetDatabaseOperationMetricsForTests();
 });
+
+function temporaryRoot(prefix: string): string {
+    const root = mkdtempSync(path.join(tmpdir(), prefix));
+    cleanupCallbacks.push(() => rmSync(root, { force: true, recursive: true }));
+    return root;
+}
+
+function useApplicationLogPath(logPath: string): void {
+    const original = process.env.MIRA_DASHBOARD_APPLICATION_LOG_PATH;
+    process.env.MIRA_DASHBOARD_APPLICATION_LOG_PATH = logPath;
+    cleanupCallbacks.push(() => {
+        if (original === undefined) {
+            delete process.env.MIRA_DASHBOARD_APPLICATION_LOG_PATH;
+        } else {
+            process.env.MIRA_DASHBOARD_APPLICATION_LOG_PATH = original;
+        }
+    });
+}
 
 describe("application observability", () => {
     it("redacts secrets recursively without mutating caller-owned fields", () => {
@@ -59,6 +93,38 @@ describe("application observability", () => {
         expect(result.message).toBe("upstream sent Basic [REDACTED]");
         expect(String(result.oversized)).toEndWith("…[Truncated]");
         expect(String(result.oversized).length).toBeLessThan(oversized.length);
+    });
+
+    it("sanitizes non-JSON values, cycles, and excessive nesting", () => {
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+        const codedError = Object.assign(new Error("failed"), {
+            code: "EFAIL",
+            statusCode: 503,
+        });
+
+        expect(
+            redactLogFields({
+                bigint: 42n,
+                circular,
+                codedError,
+                function: () => 0,
+                nested: { one: { two: { three: { four: { five: "hidden" } } } } },
+                symbol: Symbol("observability"),
+            })
+        ).toEqual({
+            bigint: "42",
+            circular: { self: "[Circular]" },
+            codedError: {
+                code: "EFAIL",
+                message: "failed",
+                name: "Error",
+                statusCode: 503,
+            },
+            function: expect.any(String),
+            nested: { one: { two: { three: { four: "[Truncated]" } } } },
+            symbol: "Symbol(observability)",
+        });
     });
 
     it("emits correlated newline-safe JSON events", () => {
@@ -122,6 +188,134 @@ describe("application observability", () => {
             });
         } finally {
             unsubscribe();
+            disableOutput();
+        }
+    });
+
+    it("keeps listener failures isolated and scopes component loggers", () => {
+        const output = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        const disableOutput = enableStructuredLogOutputForTests();
+        const unsubscribe = subscribeToStructuredLogs(() => {
+            throw new Error("listener failed");
+        });
+
+        try {
+            const logger = createStructuredLogger("coverage-component");
+            expect(() => logger.warn("observability.listener_failure")).not.toThrow();
+            logger.error("observability.component", { value: 7 });
+
+            expect(output).toHaveBeenCalledTimes(2);
+            expect(JSON.parse(String(output.mock.calls[1]?.[0]).trimEnd())).toMatchObject(
+                {
+                    component: "coverage-component",
+                    event: "observability.component",
+                    level: "error",
+                    value: 7,
+                }
+            );
+        } finally {
+            unsubscribe();
+            disableOutput();
+        }
+    });
+
+    it("writes private newline-delimited application logs and reuses the descriptor", () => {
+        const root = temporaryRoot("mira-structured-log-");
+        const logPath = path.join(root, "dashboard.ndjson");
+        useApplicationLogPath(logPath);
+        jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        const disableOutput = enableStructuredLogOutputForTests();
+
+        try {
+            structuredLog("warn", "observability.file_first", { secret: "hidden" });
+            structuredLog("error", "observability.file_second");
+
+            const records = readFileSync(logPath, "utf8")
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(records).toHaveLength(2);
+            expect(records[0]).toMatchObject({
+                event: "observability.file_first",
+                secret: "[REDACTED]",
+            });
+            expect(records[1]).toMatchObject({ event: "observability.file_second" });
+            expect(statSync(logPath).mode & 0o777).toBe(0o600);
+
+            process.env.MIRA_DASHBOARD_APPLICATION_LOG_PATH = "relative.log";
+            structuredLog("warn", "observability.invalid_path");
+        } finally {
+            disableOutput();
+        }
+    });
+
+    it("rotates an oversized application log before appending", () => {
+        const root = temporaryRoot("mira-structured-log-rotation-");
+        const logPath = path.join(root, "dashboard.ndjson");
+        writeFileSync(logPath, Buffer.alloc(16 * 1024 * 1024, 120));
+        useApplicationLogPath(logPath);
+        jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        const disableOutput = enableStructuredLogOutputForTests();
+
+        try {
+            structuredLog("warn", "observability.rotated");
+
+            const content = readFileSync(logPath, "utf8");
+            expect(content).not.toContain("xxxxx");
+            expect(JSON.parse(content.trim())).toMatchObject({
+                event: "observability.rotated",
+            });
+            expect(statSync(logPath).size).toBeLessThan(16 * 1024 * 1024);
+        } finally {
+            process.env.MIRA_DASHBOARD_APPLICATION_LOG_PATH = "relative.log";
+            structuredLog("warn", "observability.close_rotated_file");
+            disableOutput();
+        }
+    });
+
+    it("disables unsafe application log files once without disrupting stderr", () => {
+        const root = temporaryRoot("mira-structured-log-unsafe-");
+        const logPath = path.join(root, "dashboard.ndjson");
+        writeFileSync(logPath, "");
+        linkSync(logPath, path.join(root, "dashboard-linked.ndjson"));
+        useApplicationLogPath(logPath);
+        const output = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        const disableOutput = enableStructuredLogOutputForTests();
+
+        try {
+            structuredLog("warn", "observability.unsafe_file");
+            structuredLog("warn", "observability.disabled_file");
+
+            expect(output).toHaveBeenCalledTimes(3);
+            const disabledEvent = JSON.parse(
+                String(output.mock.calls[1]?.[0]).trimEnd()
+            ) as Record<string, unknown>;
+            expect(disabledEvent).toMatchObject({
+                event: "structured_log.application_file_disabled",
+                level: "error",
+                service: "mira-dashboard",
+            });
+            expect(readFileSync(logPath, "utf8")).toBe("");
+        } finally {
+            disableOutput();
+        }
+    });
+
+    it("disables an application log whose parent directory is unavailable", () => {
+        const root = temporaryRoot("mira-structured-log-missing-");
+        const logPath = path.join(root, "missing", "dashboard.ndjson");
+        useApplicationLogPath(logPath);
+        const output = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        const disableOutput = enableStructuredLogOutputForTests();
+
+        try {
+            structuredLog("warn", "observability.missing_parent");
+            mkdirSync(path.dirname(logPath), { recursive: true });
+            structuredLog("warn", "observability.still_disabled");
+
+            expect(output).toHaveBeenCalledTimes(3);
+            expect(existsSync(logPath)).toBe(false);
+        } finally {
             disableOutput();
         }
     });
