@@ -3268,6 +3268,73 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("keeps standalone fork controls available when its head matches main", async () => {
+        const defaultFetch = globalThis.fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                if (requestUrl(input) === "/api/pull-requests") {
+                    return Promise.resolve(
+                        Response.json({
+                            pullRequests: [
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "main",
+                                    createdAt: "2026-07-30T07:00:00.000Z",
+                                    headRefName: "main",
+                                    headRefOid: "e".repeat(40),
+                                    isCrossRepository: true,
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 372,
+                                    previewEligible: false,
+                                    reviewDecision: "APPROVED",
+                                    reviewerApproved: true,
+                                    statusCheckRollup: [{ status: "SUCCESS" }],
+                                    title: "Fork default branch",
+                                    updatedAt: "2026-07-30T08:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/372",
+                                },
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "main",
+                                    createdAt: "2026-07-30T08:00:00.000Z",
+                                    headRefName: "ordinary-root",
+                                    headRefOid: "f".repeat(40),
+                                    isCrossRepository: false,
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 373,
+                                    previewEligible: false,
+                                    reviewDecision: "APPROVED",
+                                    reviewerApproved: true,
+                                    statusCheckRollup: [{ status: "SUCCESS" }],
+                                    title: "Ordinary root PR",
+                                    updatedAt: "2026-07-30T09:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/373",
+                                },
+                            ],
+                        })
+                    );
+                }
+                return defaultFetch(input, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+
+        expect(await screen.findByText("Fork default branch")).toBeInTheDocument();
+        expect(screen.queryByText(/ambiguous or incomplete dependent chain/u)).toBeNull();
+        expect(screen.getAllByRole("button", { name: "Merge only" })).toHaveLength(2);
+        expect(screen.getAllByRole("button", { name: "Reject" })).toHaveLength(2);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("groups native stacks and merges through the selected layer with cleanup details", async () => {
         const user = userEvent.setup();
         const defaultFetch = globalThis.fetch;

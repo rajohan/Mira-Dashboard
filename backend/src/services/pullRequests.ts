@@ -1389,19 +1389,21 @@ async function runCommand(
  * @param arguments_ Arguments value.
  * @param parser Runtime value parser.
  * @param signal Signal used to cancel the operation.
+ * @param timeoutMs Maximum command runtime.
  * @returns Promise resolving to the run gh json result.
  */
 async function runGhJson<T>(
     arguments_: string[],
     parser: ContractParser<T>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs = 60_000
 ): Promise<T> {
     const { code, stderr, stdout } = await runProcess("gh", arguments_, {
         cwd: getDashboardRoot(),
         env: buildCommandEnvironment(),
         maxBuffer: MAX_BUFFER,
         signal,
-        timeoutMs: 60_000,
+        timeoutMs,
     });
     if (code !== 0) {
         throw new Error(
@@ -2129,6 +2131,14 @@ function validatePullRequestStackCandidate(
                 { statusCode: 409 }
             );
         }
+        if (pullRequest.isCrossRepository === true) {
+            throw Object.assign(
+                new Error(
+                    `PR #${number} is cross-repository and cannot join a GitHub stack`
+                ),
+                { statusCode: 409 }
+            );
+        }
         return pullRequest;
     });
 
@@ -2153,6 +2163,47 @@ function validatePullRequestStackCandidate(
                     `PR #${pullRequest?.number ?? numbers[index]} must target ${
                         previousPullRequest?.headRefName ?? "the branch below it"
                     }`
+                ),
+                { statusCode: 409 }
+            );
+        }
+    }
+
+    const candidatePullRequests = pullRequests.filter(
+        (pullRequest) =>
+            pullRequest.stack === undefined && pullRequest.isCrossRepository !== true
+    );
+    const childrenByBase = new Map<string, PullRequestSummary[]>();
+    for (const pullRequest of candidatePullRequests) {
+        const children = childrenByBase.get(pullRequest.baseRefName) ?? [];
+        children.push(pullRequest);
+        childrenByBase.set(pullRequest.baseRefName, children);
+    }
+
+    for (const [index, pullRequest] of orderedPullRequests.entries()) {
+        const expectedChild = orderedPullRequests[index + 1];
+        const children = childrenByBase.get(pullRequest.headRefName) ?? [];
+        if (children.length > 1) {
+            throw Object.assign(
+                new Error(
+                    `PR #${pullRequest.number} has multiple open dependent pull requests; only a complete linear chain can become a GitHub stack`
+                ),
+                { statusCode: 409 }
+            );
+        }
+        const child = children[0];
+        if (expectedChild && child?.number !== expectedChild.number) {
+            throw Object.assign(
+                new Error(
+                    `PR #${expectedChild.number} is not the current dependent of PR #${pullRequest.number}`
+                ),
+                { statusCode: 409 }
+            );
+        }
+        if (!expectedChild && child) {
+            throw Object.assign(
+                new Error(
+                    `PR #${child.number} depends on PR #${pullRequest.number} and must be included in the GitHub stack`
                 ),
                 { statusCode: 409 }
             );
@@ -2270,7 +2321,15 @@ async function getPullRequestState(
     signal?: AbortSignal
 ): Promise<GitHubPullRequestState> {
     return runGhJson(
-        ["pr", "view", String(number), "--repo", DASHBOARD_REPO, "--json", "state"],
+        [
+            "pr",
+            "view",
+            String(number),
+            "--repo",
+            DASHBOARD_REPO,
+            "--json",
+            "state,headRefOid",
+        ],
         parseGitHubPullRequestState,
         signal
     );
@@ -3928,30 +3987,26 @@ async function mergePullRequestStack(
     // Keep both the local refetch and GitHub's request-side SHA precondition:
     // neither a stale Delivery page nor a push in the final request window may
     // merge a different selected head than the one the user confirmed.
-    let result: GitHubAsyncPullRequestMergeResult;
-    try {
-        result = await runGhJsonWithResultBody(
-            [
-                "api",
-                "-X",
-                "PUT",
-                `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async`,
-                "-F",
-                "merge_method=squash",
-                "-F",
-                "merge_action=default",
-                "-f",
-                `sha=${expectedHeadSha}`,
-            ],
-            parseGitHubAsyncPullRequestMergeResult,
-            signal,
-            STACK_MERGE_TIMEOUT_MS
-        );
-    } catch (error) {
-        const reconciled = await reconcileCompletedPullRequestStackMerge(number);
-        if (reconciled) return reconciled;
-        throw error;
-    }
+    // A command failure is intentionally not reconciled from PR state alone:
+    // without a successful response, Delivery cannot attribute an external
+    // merge to this exact-head request and must retain worktrees/deploy state.
+    let result = await runGhJsonWithResultBody(
+        [
+            "api",
+            "-X",
+            "PUT",
+            `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async`,
+            "-F",
+            "merge_method=squash",
+            "-F",
+            "merge_action=default",
+            "-f",
+            `sha=${expectedHeadSha}`,
+        ],
+        parseGitHubAsyncPullRequestMergeResult,
+        signal,
+        STACK_MERGE_TIMEOUT_MS
+    );
     if (
         result.details.expected_head_sha &&
         result.details.expected_head_sha !== expectedHeadSha
@@ -3978,33 +4033,31 @@ async function mergePullRequestStack(
     }
 
     const deadline = Date.now() + STACK_MERGE_TIMEOUT_MS;
-    try {
-        while (result.status === "pending") {
-            const uuid = result.details.uuid;
-            if (!uuid) {
-                throw new Error(
-                    "GitHub stack merge returned pending without a result id"
-                );
-            }
-            if (Date.now() >= deadline) {
-                throw new Error(`GitHub stack merge for PR #${number} timed out`);
-            }
-            signal?.throwIfAborted();
-            await Bun.sleep(STACK_MERGE_POLL_INTERVAL_MS);
-            signal?.throwIfAborted();
-            result = await runGhJson(
-                [
-                    "api",
-                    `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async/${uuid}`,
-                ],
-                parseGitHubAsyncPullRequestMergeResult,
-                signal
-            );
+    while (result.status === "pending") {
+        const uuid = result.details.uuid;
+        if (!uuid) {
+            throw new Error("GitHub stack merge returned pending without a result id");
         }
-    } catch (error) {
-        const reconciled = await reconcileCompletedPullRequestStackMerge(number);
-        if (reconciled) return reconciled;
-        throw error;
+        const remainingBeforePoll = deadline - Date.now();
+        if (remainingBeforePoll <= 0) {
+            throw new Error(`GitHub stack merge for PR #${number} timed out`);
+        }
+        signal?.throwIfAborted();
+        await Bun.sleep(Math.min(STACK_MERGE_POLL_INTERVAL_MS, remainingBeforePoll));
+        signal?.throwIfAborted();
+        const remainingRequestTime = deadline - Date.now();
+        if (remainingRequestTime <= 0) {
+            throw new Error(`GitHub stack merge for PR #${number} timed out`);
+        }
+        result = await runGhJson(
+            [
+                "api",
+                `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async/${uuid}`,
+            ],
+            parseGitHubAsyncPullRequestMergeResult,
+            signal,
+            Math.min(60_000, remainingRequestTime)
+        );
     }
 
     if (result.status === "failed") {
@@ -4069,30 +4122,6 @@ function requireExpectedStackHeads(
             number: entry.number,
         };
     });
-}
-
-async function reconcileCompletedPullRequestStackMerge(
-    number: number
-): Promise<GitHubAsyncPullRequestMergeResult | undefined> {
-    try {
-        const pullRequest = await getPullRequestState(number);
-        if (pullRequest.state !== "MERGED") return undefined;
-        logger.warn("github.stack_merge_reconciled", {
-            number,
-            recoveryAction:
-                "Delivery confirmed the selected pull request merged after losing the async merge response",
-        });
-        return {
-            details: {
-                message:
-                    "Delivery confirmed the selected pull request merged after the async response was interrupted.",
-            },
-            status: "merged",
-        };
-    } catch (error) {
-        logger.warn("github.stack_merge_reconciliation_failed", { error, number });
-        return undefined;
-    }
 }
 
 /**
@@ -4291,12 +4320,15 @@ export async function approvePullRequest(
                 );
             }
             const unconfirmedPullRequests: number[] = [];
-            for (const pullRequest of stackPullRequests) {
+            for (const [index, pullRequest] of stackPullRequests.entries()) {
                 const state = await getPullRequestState(
                     pullRequest.number,
                     options.signal
                 );
-                if (state.state !== "MERGED") {
+                if (
+                    state.state !== "MERGED" ||
+                    state.headRefOid !== expectedStackHeads?.[index]?.headSha
+                ) {
                     unconfirmedPullRequests.push(pullRequest.number);
                 }
             }

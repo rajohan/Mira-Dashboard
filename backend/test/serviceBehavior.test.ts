@@ -393,6 +393,7 @@ function writeFakeGhForPullRequestStackMerge(
     options: {
         changedHeadNumber?: 11 | 12 | 13;
         closedNumber?: 11 | 12 | 13;
+        mismatchedConfirmedHeadNumber?: 11 | 12 | 13;
         unconfirmedNumber?: 11 | 12 | 13;
     } = {}
 ): void {
@@ -404,6 +405,12 @@ function writeFakeGhForPullRequestStackMerge(
     const currentPullRequestHeadShas = { ...pullRequestHeadShas };
     if (options.changedHeadNumber) {
         currentPullRequestHeadShas[options.changedHeadNumber] = "9".repeat(40);
+    }
+    const confirmedPullRequestHeadShas = { ...currentPullRequestHeadShas };
+    if (options.mismatchedConfirmedHeadNumber) {
+        confirmedPullRequestHeadShas[options.mismatchedConfirmedHeadNumber] = "8".repeat(
+            40
+        );
     }
     const defaultPullRequestState =
         status === "pending-missing-id" || status === "pending-options-mismatch"
@@ -464,18 +471,21 @@ set -- "$@" "" "" "" ""
 if [[ "$1 $2 $3" == "pr view 11" && "$*" == *"--json state"* ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
+          headRefOid: confirmedPullRequestHeadShas[11],
           state: options.unconfirmedNumber === 11 ? "CLOSED" : defaultPullRequestState,
       })
   )}
 elif [[ "$1 $2 $3" == "pr view 12" && "$*" == *"--json state"* ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
+          headRefOid: confirmedPullRequestHeadShas[12],
           state: options.unconfirmedNumber === 12 ? "CLOSED" : defaultPullRequestState,
       })
   )}
 elif [[ "$1 $2 $3" == "pr view 13" && "$*" == *"--json state"* ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
+          headRefOid: confirmedPullRequestHeadShas[13],
           state: options.unconfirmedNumber === 13 ? "CLOSED" : defaultPullRequestState,
       })
   )}
@@ -682,13 +692,18 @@ function writeFakeGhForPullRequestStackCreation(
     binaryPath: string,
     logPath: string,
     options: {
+        ambiguousChild?: boolean;
         apiUnavailable?: boolean;
+        bottomIsCrossRepository?: boolean;
+        continuation?: boolean;
         existingStackNumber?: number;
         topBaseRefName?: string;
     } = {}
 ): void {
     const bottomSha = "4".repeat(40);
     const topSha = "5".repeat(40);
+    const ambiguousChildSha = "6".repeat(40);
+    const continuationSha = "7".repeat(40);
     writeFileSync(
         binaryPath,
         String.raw`#!/usr/bin/env bash
@@ -708,6 +723,7 @@ elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
           deletions: 0,
           headRefName: "stack-create-bottom",
           headRefOid: bottomSha,
+          isCrossRepository: options.bottomIsCrossRepository ?? false,
           isDraft: false,
           mergeable: "MERGEABLE",
           mergeStateStatus: "CLEAN",
@@ -740,6 +756,7 @@ elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
           deletions: 0,
           headRefName: "stack-create-top",
           headRefOid: topSha,
+          isCrossRepository: false,
           isDraft: false,
           mergeable: "MERGEABLE",
           mergeStateStatus: "CLEAN",
@@ -751,6 +768,60 @@ elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
           url: "https://github.test/pr/22",
       })
   )}
+  ${
+      options.ambiguousChild
+          ? `printf '%s\\n' ${JSON.stringify(
+                JSON.stringify({
+                    additions: 1,
+                    author: { login: "mira-2026" },
+                    baseRefName: "stack-create-bottom",
+                    body: "",
+                    changedFiles: 1,
+                    createdAt: "2026-07-30T10:02:00.000Z",
+                    deletions: 0,
+                    headRefName: "stack-create-parallel",
+                    headRefOid: ambiguousChildSha,
+                    isCrossRepository: false,
+                    isDraft: false,
+                    mergeable: "MERGEABLE",
+                    mergeStateStatus: "CLEAN",
+                    number: 23,
+                    reviewDecision: null,
+                    statusCheckRollup: [{ conclusion: "success", name: "ci" }],
+                    title: "Create parallel child",
+                    updatedAt: "2026-07-30T11:02:00.000Z",
+                    url: "https://github.test/pr/23",
+                })
+            )}`
+          : ""
+  }
+  ${
+      options.continuation
+          ? `printf '%s\\n' ${JSON.stringify(
+                JSON.stringify({
+                    additions: 1,
+                    author: { login: "mira-2026" },
+                    baseRefName: "stack-create-top",
+                    body: "",
+                    changedFiles: 1,
+                    createdAt: "2026-07-30T10:03:00.000Z",
+                    deletions: 0,
+                    headRefName: "stack-create-continuation",
+                    headRefOid: continuationSha,
+                    isCrossRepository: false,
+                    isDraft: false,
+                    mergeable: "MERGEABLE",
+                    mergeStateStatus: "CLEAN",
+                    number: 24,
+                    reviewDecision: null,
+                    statusCheckRollup: [{ conclusion: "success", name: "ci" }],
+                    title: "Create continuation",
+                    updatedAt: "2026-07-30T11:03:00.000Z",
+                    url: "https://github.test/pr/24",
+                })
+            )}`
+          : ""
+  }
 elif [[ "$1 $2 $3" == "pr view 22" ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
@@ -4146,6 +4217,37 @@ fi
         ).toMatchObject({ message: "PR #22 must target stack-create-bottom" });
 
         writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog, {
+            ambiguousChild: true,
+        });
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 22]))
+        ).toMatchObject({
+            message:
+                "PR #21 has multiple open dependent pull requests; only a complete linear chain can become a GitHub stack",
+            statusCode: 409,
+        });
+
+        writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog, {
+            continuation: true,
+        });
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 22]))
+        ).toMatchObject({
+            message: "PR #24 depends on PR #22 and must be included in the GitHub stack",
+            statusCode: 409,
+        });
+
+        writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog, {
+            bottomIsCrossRepository: true,
+        });
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 22]))
+        ).toMatchObject({
+            message: "PR #21 is cross-repository and cannot join a GitHub stack",
+            statusCode: 409,
+        });
+
+        writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog, {
             apiUnavailable: true,
         });
         expect(
@@ -4795,15 +4897,25 @@ fi
             ghLog,
             "request-error-merged"
         );
-        const reconciledResult = await approvePullRequest(13, false, {
-            expectedHeadSha: "3".repeat(40),
-            expectedStackHeads: expectedStackHeadsThrough(13),
-            mergeStack: true,
+        writeFileSync(gitLog, "");
+        for (const branch of ["stack-bottom", "stack-middle", "stack-top"]) {
+            mkdirSync(path.join(worktreeRoot, branch), { recursive: true });
+        }
+        expect(
+            await captureRejection(() =>
+                approvePullRequest(13, false, {
+                    expectedHeadSha: "3".repeat(40),
+                    expectedStackHeads: expectedStackHeadsThrough(13),
+                    mergeStack: true,
+                })
+            )
+        ).toMatchObject({
+            message: expect.stringContaining("request interrupted"),
         });
-        expect(reconciledResult).toMatchObject({
-            isOk: true,
-            mergeStatus: "merged",
-        });
+        for (const branch of ["stack-bottom", "stack-middle", "stack-top"]) {
+            expect(existsSync(path.join(worktreeRoot, branch))).toBe(true);
+        }
+        expect(await Bun.file(gitLog).text()).not.toContain("worktree remove");
 
         writeFileSync(ghLog, "");
         writeFakeGhForPullRequestStackMerge(
@@ -5039,7 +5151,7 @@ fi
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
         const { approvePullRequest } = await import("../src/services/pullRequests.ts");
 
-        for (const scenario of ["closed", "unconfirmed"] as const) {
+        for (const scenario of ["closed", "head-mismatch", "unconfirmed"] as const) {
             const fakeRoot = createTemporaryRoot(`mira-pr-stack-${scenario}-guard-root-`);
             const worktreeRoot = path.join(fakeRoot, "worktrees");
             const fakeBin = createTemporaryRoot(`mira-pr-stack-${scenario}-guard-bin-`);
@@ -5049,12 +5161,22 @@ fi
             for (const branch of branches) {
                 mkdirSync(path.join(worktreeRoot, branch), { recursive: true });
             }
+            const mergeOptions: Parameters<
+                typeof writeFakeGhForPullRequestStackMerge
+            >[4] = {};
+            if (scenario === "closed") {
+                mergeOptions.closedNumber = 12;
+            } else if (scenario === "head-mismatch") {
+                mergeOptions.mismatchedConfirmedHeadNumber = 12;
+            } else {
+                mergeOptions.unconfirmedNumber = 12;
+            }
             writeFakeGhForPullRequestStackMerge(
                 path.join(fakeBin, "gh"),
                 ghLog,
                 "merged",
                 13,
-                scenario === "closed" ? { closedNumber: 12 } : { unconfirmedNumber: 12 }
+                mergeOptions
             );
             writeFakeGitForPullRequestStackMerge(
                 path.join(fakeBin, "git"),

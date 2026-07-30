@@ -117,6 +117,7 @@ export const publicGitHubPullRequestsSchema = v.pipe(
 );
 
 export const gitHubPullRequestStateSchema = v.object({
+    headRefOid: v.optional(fullCommitShaSchema),
     state: v.picklist(["CLOSED", "MERGED", "OPEN"]),
 });
 

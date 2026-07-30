@@ -1232,8 +1232,12 @@ export function Delivery() {
         }
         if (
             !pr.stack &&
+            pr.isCrossRepository !== true &&
+            pr.headRefName !== DEFAULT_BASE &&
             unstackedPullRequests.some(
-                (pullRequest) => pullRequest.baseRefName === pr.headRefName
+                (pullRequest) =>
+                    pullRequest.number !== pr.number &&
+                    pullRequest.baseRefName === pr.headRefName
             )
         ) {
             return (
