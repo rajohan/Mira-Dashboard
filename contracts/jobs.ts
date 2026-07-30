@@ -96,6 +96,8 @@ export const jobExecutionSchema = v.strictObject({
 
 export const jobExecutionSummarySchema = v.strictObject({
     activeResourceClasses: v.array(jobResourceClassSchema),
+    claimsPaused: v.optional(v.boolean()),
+    claimsPausedAt: v.optional(v.string()),
     oldestQueuedAgeMs: v.optional(finiteNumberSchema),
     oldestQueuedAt: v.optional(v.string()),
     queued: finiteNumberSchema,
@@ -118,6 +120,20 @@ export const jobExecutionResponseSchema = v.strictObject({
 export const jobExecutionCancelResponseSchema = v.strictObject({
     execution: jobExecutionSchema,
     isOk: successLiteralSchema,
+});
+
+export const jobWorkerClaimsPatchSchema = strictJsonObjectSchema({
+    paused: v.boolean(),
+});
+
+export const jobWorkerClaimsStateSchema = v.strictObject({
+    paused: v.boolean(),
+    updatedAt: v.string(),
+});
+
+export const jobWorkerClaimsMutationResponseSchema = v.strictObject({
+    isOk: successLiteralSchema,
+    state: jobWorkerClaimsStateSchema,
 });
 
 export const scheduledJobRunSchema = v.strictObject({
@@ -204,6 +220,11 @@ export type JobExecutionResponse = v.InferOutput<typeof jobExecutionResponseSche
 export type JobExecutionCancelResponse = v.InferOutput<
     typeof jobExecutionCancelResponseSchema
 >;
+export type JobWorkerClaimsPatch = v.InferOutput<typeof jobWorkerClaimsPatchSchema>;
+export type JobWorkerClaimsState = v.InferOutput<typeof jobWorkerClaimsStateSchema>;
+export type JobWorkerClaimsMutationResponse = v.InferOutput<
+    typeof jobWorkerClaimsMutationResponseSchema
+>;
 export type ScheduledJobScheduleType = v.InferOutput<
     typeof scheduledJobScheduleTypeSchema
 >;
@@ -276,6 +297,16 @@ export function parseJobExecutionCancelResponse(
     value: unknown
 ): JobExecutionCancelResponse {
     return parseContract(jobExecutionCancelResponseSchema, value, "response");
+}
+
+export function parseJobWorkerClaimsPatch(value: unknown): JobWorkerClaimsPatch {
+    return parseContract(jobWorkerClaimsPatchSchema, value);
+}
+
+export function parseJobWorkerClaimsMutationResponse(
+    value: unknown
+): JobWorkerClaimsMutationResponse {
+    return parseContract(jobWorkerClaimsMutationResponseSchema, value, "response");
 }
 
 /**

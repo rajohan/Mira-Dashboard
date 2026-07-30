@@ -3,12 +3,15 @@ import type {
     JobExecutionCancelResponse,
     JobExecutionResponse,
     JobExecutionsResponse,
+    JobWorkerClaimsMutationResponse,
 } from "../../../contracts/jobs.ts";
+import { parseJobWorkerClaimsPatch } from "../../../contracts/jobs.ts";
 import { json } from "../http.ts";
 import { httpStatusCode } from "../lib/errors.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
     type ParametersRequest,
+    readApiJson,
     routeErrorResponse,
     routeFailureResponse,
 } from "../routeSupport.ts";
@@ -19,6 +22,7 @@ import {
     type JobExecutionRecord,
     listJobExecutions,
 } from "../services/jobExecutionQueue.ts";
+import { setJobWorkerClaimsPaused } from "../services/jobWorkerControl.ts";
 
 const logger = createStructuredLogger("job-execution-route");
 
@@ -54,6 +58,15 @@ function executionLimit(request: Request): number {
     return Number(value);
 }
 
+function includeClaimsState(request: Request): boolean {
+    return (
+        new URL(request.url).searchParams
+            .get("include")
+            ?.split(",")
+            .includes("claims") === true
+    );
+}
+
 function isValidExecutionId(id: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
         id
@@ -64,11 +77,17 @@ export const jobExecutionRoutes = {
     "/api/job-executions": {
         GET: (request: Request) => {
             try {
+                const summary = getJobExecutionSummary();
+                const backwardCompatibleSummary = { ...summary };
+                delete backwardCompatibleSummary.claimsPaused;
+                delete backwardCompatibleSummary.claimsPausedAt;
                 return json({
                     executions: listJobExecutions(executionLimit(request)).map(
                         (execution) => publicExecution(execution)
                     ),
-                    summary: getJobExecutionSummary(),
+                    summary: includeClaimsState(request)
+                        ? summary
+                        : backwardCompatibleSummary,
                 } satisfies JobExecutionsResponse);
             } catch (error) {
                 logger.error("job_execution.queue_lookup_failed", { error });
@@ -76,6 +95,23 @@ export const jobExecutionRoutes = {
                     context: "job-execution",
                     message: "Job execution queue lookup failed",
                     status: 500,
+                });
+            }
+        },
+    },
+    "/api/job-executions/claims": {
+        PATCH: async (request: Request) => {
+            try {
+                const patch = await readApiJson(request, parseJobWorkerClaimsPatch);
+                return json({
+                    isOk: true,
+                    state: setJobWorkerClaimsPaused(patch.paused),
+                } satisfies JobWorkerClaimsMutationResponse);
+            } catch (error) {
+                return routeErrorResponse(request, error, {
+                    code: "job_worker_claims_update_failed",
+                    context: "job-execution.claims",
+                    message: "Job worker claim state update failed",
                 });
             }
         },

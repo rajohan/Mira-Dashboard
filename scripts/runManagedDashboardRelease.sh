@@ -55,7 +55,7 @@ bun_version="$(
     /usr/bin/jq --exit-status --raw-output \
         '.bunVersion
          | select(type == "string" and length > 0 and length <= 64)
-         | select(test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"))' \
+         | select(test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)$"))' \
         "$manifest_path"
 )" || {
     echo "Managed Dashboard release manifest has no valid Bun runtime" >&2
@@ -75,9 +75,13 @@ if [[ "$(/usr/bin/stat --format='%h' -- "$runtime_path")" != "1" ]]; then
     echo "Managed Dashboard Bun runtime must not have external hard links" >&2
     exit 78
 fi
-runtime_revision="$("$runtime_path" --revision)"
-runtime_version="$("$runtime_path" --version)"
-if [[ "$runtime_revision" != "$bun_version" && "$runtime_version" != "$bun_version" ]]; then
+if ! runtime_revision="$(
+    /usr/bin/timeout --signal=KILL 5s "$runtime_path" --revision 2>/dev/null
+)"; then
+    echo "Managed Dashboard Bun runtime revision probe failed" >&2
+    exit 78
+fi
+if [[ "$runtime_revision" != "$bun_version" ]]; then
     echo "Managed Dashboard Bun runtime version does not match the release" >&2
     exit 78
 fi

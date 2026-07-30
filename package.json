@@ -14,6 +14,7 @@
         "build": "bun run build:frontend && bun run build:backend",
         "build:frontend": "bun node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit && bun scripts/buildFrontend.ts",
         "build:backend": "bun node_modules/typescript/bin/tsc -p tsconfig.node.json --noEmit && bun scripts/buildBackend.ts",
+        "deploy:bootstrap": "bash scripts/bootstrapProduction.sh",
         "deploy:prepare": "bun run build:frontend && bun run deploy:prepare:backend && bun run release:manifest",
         "deploy:prepare:backend": "bun run build:backend && bun --cwd backend dist/databasePreflight.js",
         "auth:reset-password": "NODE_ENV=production doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun --cwd backend dist/resetDashboardPassword.js",

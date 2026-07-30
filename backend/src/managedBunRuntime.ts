@@ -8,13 +8,12 @@ import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 
 const BUN_RUNTIME_VERSION_PATTERN =
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*))(?:\.(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*)))*)?(?:\+[\dA-Za-z-]+(?:\.[\dA-Za-z-]+)*)?$/u;
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*))(?:\.(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*)))*)?\+[\dA-Za-z-]+(?:\.[\dA-Za-z-]+)*$/u;
 const BUN_RUNTIME_VERSION_MAX_LENGTH = 64;
 const RETIRED_RUNTIME_DIRECTORY_PATTERN =
     /^\.retired-[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 const RUNTIME_CHECK_TIMEOUT_MS = 5000;
 let currentRuntimeIdentity: string | undefined;
-let currentRuntimeVersion: string | undefined;
 
 export interface ManagedBunRuntimeInstallOptions {
     runtimeRoot?: string;
@@ -27,7 +26,8 @@ export interface ManagedBunRuntimePruneResult {
 }
 
 /**
- * Accepts only bounded, complete semantic versions that are safe as path segments.
+ * Accepts only bounded, revision-qualified semantic versions that are safe as
+ * path segments.
  * @param value Candidate Bun version.
  * @returns Whether the candidate is a strict Bun runtime version.
  */
@@ -41,7 +41,9 @@ export function isBunRuntimeVersion(value: string): boolean {
 
 function assertBunRuntimeVersion(value: string): string {
     if (!isBunRuntimeVersion(value)) {
-        throw new TypeError("Managed Bun runtime version must be valid semver");
+        throw new TypeError(
+            "Managed Bun runtime version must be revision-qualified semver"
+        );
     }
     return value;
 }
@@ -116,20 +118,11 @@ function isSingleLinkRegularExecutable(filePath: string): boolean {
     }
 }
 
-/**
- * Reads a Bun executable's strict version without inheriting application secrets.
- * @param executablePath Absolute executable path.
- * @param argument Bun identity flag.
- * @returns Reported Bun version, or undefined when verification fails.
- */
-function bunExecutableReportedIdentity(
-    executablePath: string,
-    argument: "--revision" | "--version"
-): string | undefined {
+function readBunRevisionIdentity(executablePath: string): string | undefined {
     if (!isCanonicalRegularExecutable(executablePath)) {
         return undefined;
     }
-    const result = spawnSync(executablePath, [argument], {
+    const result = spawnSync(executablePath, ["--revision"], {
         encoding: "utf8",
         env: {
             LANG: "C",
@@ -151,7 +144,7 @@ function bunExecutableReportedIdentity(
  * @returns Revision-qualified Bun identity, or undefined when verification fails.
  */
 export function bunExecutableRuntimeIdentity(executablePath: string): string | undefined {
-    return bunExecutableReportedIdentity(executablePath, "--revision");
+    return readBunRevisionIdentity(executablePath);
 }
 
 /**
@@ -169,7 +162,7 @@ export function currentBunRuntimeIdentity(): string {
 }
 
 /**
- * Checks an executable against either a revision-qualified or legacy version identity.
+ * Checks an executable against its revision-qualified release identity.
  * @param executablePath Absolute executable path.
  * @param identity Release-manifest Bun identity.
  * @returns Whether the executable exactly satisfies the release identity.
@@ -181,27 +174,19 @@ export function bunExecutableMatchesRuntime(
     if (!isBunRuntimeVersion(identity)) {
         return false;
     }
-    return (
-        bunExecutableRuntimeIdentity(executablePath) === identity ||
-        bunExecutableReportedIdentity(executablePath, "--version") === identity
-    );
+    return bunExecutableRuntimeIdentity(executablePath) === identity;
 }
 
 /**
  * Checks whether an identity matches the Bun process running Dashboard.
  * @param identity Release-manifest Bun identity.
- * @returns Whether the current process satisfies the exact or legacy identity.
+ * @returns Whether the current process satisfies the exact identity.
  */
 export function isCurrentBunRuntime(identity: string): boolean {
     if (!isBunRuntimeVersion(identity)) {
         return false;
     }
-    const revision = currentBunRuntimeIdentity();
-    currentRuntimeVersion ??= bunExecutableReportedIdentity(
-        process.execPath,
-        "--version"
-    );
-    return identity === revision || identity === currentRuntimeVersion;
+    return identity === currentBunRuntimeIdentity();
 }
 
 /**

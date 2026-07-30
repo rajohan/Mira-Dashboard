@@ -25,7 +25,7 @@ export const moltbookHomeSchema = v.strictObject({
 });
 
 const moltbookAuthorSchema = v.object({
-    avatar_url: v.optional(v.string()),
+    avatar_url: v.optional(v.nullable(v.string())),
     display_name: v.optional(v.string()),
     name: trimmedNonEmptyStringSchema,
 });
@@ -63,7 +63,7 @@ export const moltbookFeedSchema = v.object({
 });
 
 export const moltbookProfileSchema = v.object({
-    avatar_url: v.optional(v.string()),
+    avatar_url: v.optional(v.nullable(v.string())),
     comments_count: finiteNumberSchema,
     description: v.string(),
     display_name: v.string(),
@@ -165,9 +165,14 @@ export function parseMoltbookFeed(value: unknown, path = "moltbookFeed"): Moltbo
  */
 export function moltbookPostFromPayload(post: MoltbookFeedPostPayload): MoltbookPost {
     return {
-        author: post.author ?? {
-            name: post.author_name ?? "unknown",
-        },
+        author: post.author
+            ? {
+                  ...post.author,
+                  avatar_url: post.author.avatar_url ?? undefined,
+              }
+            : {
+                  name: post.author_name ?? "unknown",
+              },
         comment_count: post.comment_count ?? 0,
         content: post.content ?? post.content_preview ?? "",
         created_at: post.created_at,

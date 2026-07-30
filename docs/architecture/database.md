@@ -105,6 +105,7 @@ edit a released migration. Add the next numbered file instead.
 | `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.                       | Keyed operator intent; removed explicitly when intent is cleared.        |
 | `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation.               | Terminal: 90 days/20,000 rows; queued/running rows retained.             |
 | `job_workers`                      | Worker capacity and liveness heartbeats.                                            | Stale heartbeats removed after 24 hours.                                 |
+| `job_worker_control`               | Singleton operator pause state for new worker claims.                               | Updated only by the recent-MFA worker control.                           |
 | `chat_runtime_snapshots`           | Durable OpenClaw chat replay/session snapshots.                                     | Per-scope live cap plus global 30-day/200-row maintenance safety net.    |
 | `chat_runtime_snapshot_events`     | Ordered durable replay events for those snapshots.                                  | Follows retained snapshots; orphan rows are removed.                     |
 | `docker_managed_services`          | Docker updater managed service inventory.                                           | Reconciled with current Compose inventory.                               |

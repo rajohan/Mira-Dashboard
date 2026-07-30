@@ -38,87 +38,19 @@ git clone https://github.com/rajohan/Mira-Dashboard.git \
 cd /home/ubuntu/projects/mira-dashboard/production/checkout
 ```
 
-Select the repository runtime channel, then install dependencies:
+Select the repository runtime channel:
 
 ```bash
 bun upgrade --canary
 bun --revision
-bun install --frozen-lockfile
 ```
-
-Create the managed runtime roots:
-
-```bash
-install -d -m 0755 \
-  /home/ubuntu/projects/mira-dashboard/development/worktrees \
-  /home/ubuntu/projects/mira-dashboard/production/releases \
-  /home/ubuntu/projects/mira-dashboard/production/runtimes
-install -d -m 0700 \
-  /home/ubuntu/projects/mira-dashboard/development/state \
-  /home/ubuntu/projects/mira-dashboard/production/state
-```
-
-## Publish The Initial Managed Release
-
-Build, preflight, checksum, and publish the checked-out commit from an isolated
-worktree:
-
-```bash
-export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
-cd "$MIRA_DASHBOARD_PROJECT_ROOT/production/checkout"
-CANDIDATE_SHA="$(git rev-parse HEAD)"
-
-# A new host has no live database to preflight yet. Initialize and migrate the
-# empty state database once from this exact checked-out candidate.
-(
-  cd backend
-  env \
-    NODE_ENV=production \
-    bun -e '
-      const { database } = await import("./src/database.ts");
-      try {
-        const result = database.query("PRAGMA quick_check").get();
-        if (!result || Object.values(result)[0] !== "ok") {
-          throw new Error("Fresh Dashboard database failed quick_check");
-        }
-      } finally {
-        database.close();
-      }
-    '
-)
-
-env \
-  NODE_ENV=production \
-  bun backend/src/releaseDeployment.ts stage "$CANDIDATE_SHA"
-```
-
-Activate it before installing/starting the managed systemd units:
-
-```bash
-export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
-cd "$MIRA_DASHBOARD_PROJECT_ROOT/production/checkout"
-CANDIDATE_SHA="$(git rev-parse HEAD)"
-env \
-  NODE_ENV=production \
-  bun backend/src/releaseLifecycle.ts activate "$CANDIDATE_SHA"
-```
-
-The one-shot initialization creates the fresh database in WAL mode and applies
-the immutable migration registry. The staging command then installs frozen
-dependencies, runs the normal database-aware `deploy:prepare`, and atomically
-publishes only manifest-declared artifacts. It also copies the exact verified
-Bun executable into `production/runtimes/bun/<version>/bun`; the managed units
-select that runtime from the active release manifest, including across future
-major-version upgrades and rollback.
-The control checkout is not a production runtime directory. See
-[Production deploy](production-deploy.md) for the release/state layout,
-automatic rollback, retention, and recovery contract.
 
 ## Configure Secrets
 
 Dashboard reads production secrets through Doppler project/config
-`rajohan/prd`. Do not start `serverStart.js` manually to test them; the managed
-systemd units below own the only production web and worker processes.
+`rajohan/prd`. Configure and verify them before running the production
+bootstrap because that command starts both managed services. Do not start
+`serverStart.js` manually to test them.
 
 See [Secrets and environment](secrets-and-env.md) for the full list. The
 minimum production setup normally needs:
@@ -129,11 +61,49 @@ minimum production setup normally needs:
 - one stable HTTPS hostname configured through
   `MIRA_DASHBOARD_WEBAUTHN_RP_ID` and
   `MIRA_DASHBOARD_WEBAUTHN_ORIGINS` for security keys;
-- separate minimum-scope `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS` entries for
-  heartbeat, task tracking, and report producers;
 - `MIRA_GITHUB_TOKEN` for Dashboard PR operations;
 - optional provider keys for Moltbook, ElevenLabs, OpenRouter, and Synthetic
   health checks depending on enabled Dashboard features.
+
+The automation credential hashes are intentionally added immediately after the
+initial bootstrap by following the provisioning section below. Their temporary
+absence does not block service startup; it only leaves those local API callers
+unauthorized until both services are restarted with the generated hashes.
+
+## Run The Production Bootstrap
+
+Run one command from the clean production checkout as the `ubuntu` user:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
+bun run deploy:bootstrap
+```
+
+The command performs the complete first managed activation:
+
+1. enables systemd linger through `sudo loginctl` if it is not already enabled;
+2. installs frozen control-checkout dependencies;
+3. creates the production release, runtime, state, and development-worktree
+   directories with their required modes;
+4. verifies that the production checkout is clean and resolves its exact full SHA;
+5. initializes SQLite in WAL mode, applies every immutable migration, and runs
+   `PRAGMA quick_check`;
+6. stages and preflights the SHA from an isolated worktree, then caches its
+   exact revision-qualified Bun executable;
+7. activates the release, atomically installs and verifies both tracked
+   systemd unit files, and reloads the user manager;
+8. enables and restarts both services, then polls within a bounded startup window
+   until both become enabled and running.
+
+Run the command as the managed user, not with `sudo`; only its one
+`loginctl enable-linger` child needs root. A normal sudo prompt may appear on a
+host without passwordless sudo. Re-running the same checked-out SHA is safe and
+repairs missing unit/runtime state. The command refuses to replace a different
+existing current release; use the normal Dashboard deployment path for that.
+
+The control checkout is not a production runtime directory. See
+[Production deploy](production-deploy.md) for the release/state layout,
+automatic rollback, retention, and recovery contract.
 
 ## Provision Local OpenClaw API Callers
 
@@ -155,6 +125,13 @@ the corresponding ids, SHA-256 validator hashes, and minimum scopes. Combine
 those four printed objects into the JSON array supplied through the Doppler
 secret `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`.
 
+After adding or replacing that Doppler value, restart both managed services so
+they load the new validator hashes:
+
+```bash
+systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
+```
+
 Do not copy the full token files into Doppler, SQLite, shell history, prompts,
 cron payloads, reports, or host backups. A replacement host gets newly
 generated tokens and an updated hash-only Doppler array. See
@@ -162,35 +139,20 @@ generated tokens and an updated hash-only Doppler array. See
 for the exact file names, scopes, wrapper behavior, rotation, and denied-route
 tests.
 
-## Create The Systemd User Services
+## Managed Systemd User Services
 
-Run this section from an interactive shell as the `ubuntu` user. Use `sudo` only
-for the explicit `loginctl` command; the install and `systemctl --user` commands
-must target `ubuntu`'s user manager.
-
-Install the tracked web and worker units:
-
-```bash
-cd /home/ubuntu/projects/mira-dashboard/production/checkout
-install -d -m 0755 /home/ubuntu/.config/systemd/user
-install -m 0644 systemd/mira-dashboard.service \
-  /home/ubuntu/.config/systemd/user/mira-dashboard.service
-install -m 0644 systemd/mira-dashboard-worker.service \
-  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
-```
+`deploy:bootstrap` installs, enables, restarts, and verifies the tracked web and
+worker units. No separate unit-file installation or `daemon-reload` is needed.
 
 The web role owns HTTP, WebSocket, and the Gateway bridge. The worker role owns
 scheduled-job registration, queue claims, cache startup seeds, and action
 execution. Both units have explicit CPU, IO, memory, and task guardrails. Heavy
 worker children are additionally placed in transient resource-class scopes.
 
-Enable and start both:
+Optional status checks:
 
 ```bash
-sudo loginctl enable-linger ubuntu
 loginctl show-user ubuntu -p Linger
-systemctl --user daemon-reload
-systemctl --user enable --now mira-dashboard.service mira-dashboard-worker.service
 systemctl --user status mira-dashboard.service --no-pager
 systemctl --user status mira-dashboard-worker.service --no-pager
 ```
@@ -247,11 +209,11 @@ Healthy response shape:
 {
     "checks": {
         "database": {
-            "currentSchemaVersion": 6,
-            "maximumCompatibleSchemaVersion": 6,
+            "currentSchemaVersion": 8,
+            "maximumCompatibleSchemaVersion": 8,
             "minimumCompatibleSchemaVersion": 6,
             "ready": true,
-            "targetSchemaVersion": 6
+            "targetSchemaVersion": 8
         },
         "frontend": { "ready": true },
         "release": {

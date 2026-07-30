@@ -86,14 +86,17 @@ The Dashboard worker owns the deployment:
 3. Install frozen frontend and backend dependencies.
 4. Run `deploy:prepare` against the stable production database.
 5. Verify the release manifest, component identities, schema contract, and
-   every checksummed artifact.
+   every checksummed artifact, including the complete web/worker systemd unit
+   bundle.
 6. Copy only declared artifacts to a hidden directory and atomically publish
    it as `releases/<full-sha>`.
 7. Persist a unique cutover-snapshot id and start a detached guardian.
 8. Require the scheduling execution, snapshot id, deployment row, and release
    lock to be durably consistent. Then stop web and worker, create and
-   restore-verify the exact SQLite cutover snapshot, and atomically switch
-   `current` while retaining the old release as `previous`.
+   restore-verify the exact SQLite cutover snapshot, reconcile changed tracked
+   units into `~/.config/systemd/user`, run `systemctl --user daemon-reload`,
+   verify both loaded fragment paths, and atomically switch `current` while
+   retaining the old release as `previous`.
 9. Start web and worker. Unsafe HTTP requests, explicit user-activity touches,
    Gateway WebSockets, and worker execution claims remain paused while the
    deployment row is `verifying`.
@@ -132,11 +135,24 @@ remain available for restart and rollback. Interrupted `.retired-*` runtime
 cleanup is completed by the next prune, while missing runtimes for retained
 releases fail the operation before an old release is removed.
 
-The release parser temporarily permits the obsolete `backend/package.json` and
-`backend/bun.lock` artifacts so the single managed rollback slot created before
-the root-package consolidation remains verifiable. Neither file is produced or
-required by new releases. Remove `PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS` after
-both `current` and `previous` were built from the consolidated root package.
+Managed releases carry checksummed copies of
+`systemd/mira-dashboard.service` and
+`systemd/mira-dashboard-worker.service`. Activation, restore, and rollback
+install a changed complete pair with mode `0644`, reload the user manager, and
+verify that both units loaded from `~/.config/systemd/user`. If reconciliation
+fails, the pre-operation files are restored before the release transition
+returns an error. On a new VPS, `deploy:bootstrap` performs the first activation
+and unit installation, then enables and starts both services. Ordinary
+deployments thereafter update the installed unit definitions automatically.
+
+The first rollout of this unit-bundle contract is manual and supervised because
+its rollback release predates the bundle and is deliberately not special-cased
+in the permanent lifecycle code. Preserve the installed units and use the
+previous release lifecycle during recovery if that first cutover fails. After
+the first successful release, later activation targets carry the bundle, but
+the immediately previous pre-bundle slot remains manual-only until a second
+bundled release rotates it out. Automatic rollback is fully available again
+once both managed slots contain verified bundles.
 
 ## Restart And Smoke Test
 
@@ -224,9 +240,7 @@ test ! -L "$CURRENT_BUN"
 [[ "$(realpath --canonicalize-existing "$CURRENT_BUN")" == "$CURRENT_BUN" ]]
 [[ "$(stat --format='%h' -- "$CURRENT_BUN")" == "1" ]]
 CURRENT_BUN_REVISION="$("$CURRENT_BUN" --revision)"
-CURRENT_BUN_VERSION="$("$CURRENT_BUN" --version)"
-[[ "$CURRENT_BUN_REVISION" == "$CURRENT_BUN_ID" ||
-   "$CURRENT_BUN_VERSION" == "$CURRENT_BUN_ID" ]]
+[[ "$CURRENT_BUN_REVISION" == "$CURRENT_BUN_ID" ]]
 STATUS="$(
   env NODE_ENV=production \
     "$CURRENT_BUN" "$CURRENT_LIFECYCLE" status

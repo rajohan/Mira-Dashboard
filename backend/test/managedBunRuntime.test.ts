@@ -42,10 +42,6 @@ function writeFakeBun(
     writeFileSync(
         filePath,
         `#!/bin/sh
-if [ "\${1:-}" = "--version" ]; then
-    printf '%s\\n' '${version}'
-    exit 0
-fi
 if [ "\${1:-}" = "--revision" ]; then
     printf '%s\\n' '${revision}'
     exit 0
@@ -64,10 +60,11 @@ afterEach(() => {
 });
 
 describe("managed Bun runtimes", () => {
-    it("accepts bounded semver versions across Bun majors", () => {
-        expect(isBunRuntimeVersion("1.3.14")).toBe(true);
-        expect(isBunRuntimeVersion("2.0.0")).toBe(true);
+    it("accepts only bounded revision-qualified identities across Bun majors", () => {
+        expect(isBunRuntimeVersion("1.3.14+0d9b296af")).toBe(true);
         expect(isBunRuntimeVersion("2.0.0-canary.1+build.2")).toBe(true);
+        expect(isBunRuntimeVersion("1.3.14")).toBe(false);
+        expect(isBunRuntimeVersion("2.0.0")).toBe(false);
         expect(isBunRuntimeVersion("1.3")).toBe(false);
         expect(isBunRuntimeVersion("1.3.14foo")).toBe(false);
         expect(isBunRuntimeVersion("01.3.14")).toBe(false);
@@ -91,13 +88,16 @@ describe("managed Bun runtimes", () => {
         expect(installed).toBe(managedBunRuntimeExecutablePath(identity, runtimeRoot));
         expect(bunExecutableRuntimeIdentity(installed)).toBe(identity);
         expect(bunExecutableMatchesRuntime(installed, identity)).toBe(true);
+        expect(bunExecutableMatchesRuntime(installed, "1.3.14")).toBe(false);
         expect(hasManagedBunRuntime(identity, runtimeRoot)).toBe(true);
         expect(requireManagedBunRuntime(identity, runtimeRoot)).toBe(installed);
         expect(await installManagedBunRuntime(source, identity, { runtimeRoot })).toBe(
             installed
         );
         expect(
-            readFileSync(installed, "utf8").includes(String.raw`printf '%s\n' '1.3.14'`)
+            readFileSync(installed, "utf8").includes(
+                String.raw`printf '%s\n' '1.3.14+0d9b296af'`
+            )
         ).toBe(true);
         expect(readdirSync(path.join(runtimeRoot, identity))).toEqual(["bun"]);
         expect(statSync(installed).nlink).toBe(1);
@@ -113,7 +113,11 @@ describe("managed Bun runtimes", () => {
         const root = temporaryRoot("mira-managed-bun-invalid");
         const runtimeRoot = path.join(root, "runtimes");
         const source = path.join(root, "bun-source");
+        const versionOnlySource = path.join(root, "bun-version-only");
         writeFakeBun(source, "2.0.0", "2.0.0+feedface");
+        writeFakeBun(versionOnlySource, "2.0.0", "2.0.0");
+
+        expect(bunExecutableRuntimeIdentity(versionOnlySource)).toBeUndefined();
 
         const installError = await installManagedBunRuntime(source, "1.3.14", {
             runtimeRoot,
@@ -123,13 +127,13 @@ describe("managed Bun runtimes", () => {
         );
         expect(installError).toBeInstanceOf(Error);
         expect((installError as Error).message).toContain(
-            "does not report expected version 1.3.14"
+            "must be revision-qualified semver"
         );
         expect(() => requireManagedBunRuntime("2.0.0", runtimeRoot)).toThrow(
-            "Managed Bun runtime 2.0.0 is not available"
+            "must be revision-qualified semver"
         );
         expect(() => managedBunRuntimeExecutablePath("../2.0.0", runtimeRoot)).toThrow(
-            "must be valid semver"
+            "must be revision-qualified semver"
         );
     });
 
@@ -253,6 +257,64 @@ describe("managed Bun runtimes", () => {
         expect(launched.exitCode).toBe(0);
         expect(new TextDecoder().decode(launched.stdout).trim()).toBe(
             "dist/workerStart.js"
+        );
+
+        const versionOnlyRuntime = path.join(
+            projectRoot,
+            "production",
+            "runtimes",
+            "bun",
+            "2.0.0",
+            "bun"
+        );
+        mkdirSync(path.dirname(versionOnlyRuntime), { recursive: true });
+        writeFakeBun(versionOnlyRuntime, "2.0.0", "2.0.0+feedface");
+        writeFileSync(
+            path.join(releaseRoot, "release-manifest.json"),
+            `${JSON.stringify({ bunVersion: "2.0.0" })}\n`
+        );
+        const versionOnly = Bun.spawnSync({
+            cmd: [launcher, "dist/workerStart.js"],
+            cwd: releaseBackend,
+            env: {
+                MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+                PATH: "/usr/bin:/bin",
+            },
+            stderr: "pipe",
+            stdout: "pipe",
+        });
+        expect(versionOnly.exitCode).toBe(78);
+        expect(new TextDecoder().decode(versionOnly.stderr)).toContain(
+            "release manifest has no valid Bun runtime"
+        );
+
+        writeFileSync(
+            path.join(releaseRoot, "release-manifest.json"),
+            `${JSON.stringify({ bunVersion: "2.0.0+feedface" })}\n`
+        );
+        writeFileSync(
+            runtime,
+            `#!/bin/sh
+if [ "\${1:-}" = "--revision" ]; then
+    exit 1
+fi
+printf '%s\\n' "\${1:-}"
+`
+        );
+        chmodSync(runtime, 0o700);
+        const failedProbe = Bun.spawnSync({
+            cmd: [launcher, "dist/workerStart.js"],
+            cwd: releaseBackend,
+            env: {
+                MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+                PATH: "/usr/bin:/bin",
+            },
+            stderr: "pipe",
+            stdout: "pipe",
+        });
+        expect(failedProbe.exitCode).toBe(78);
+        expect(new TextDecoder().decode(failedProbe.stderr)).toContain(
+            "runtime revision probe failed"
         );
 
         const rejected = Bun.spawnSync({

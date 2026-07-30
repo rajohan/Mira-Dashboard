@@ -9,6 +9,7 @@ import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import { writeCliError, writeCliOutput } from "./lib/cliOutput.ts";
 import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { resolveManagedBunRuntimeRoot } from "./managedBunRuntime.ts";
+import { prepareManagedDashboardUnits } from "./managedDashboardSystemd.ts";
 import type {
     DashboardReleaseManagerOptions,
     DashboardReleaseState,
@@ -153,6 +154,10 @@ export async function runReleaseLifecycleCommand(
     let state: DashboardReleaseState;
     const transitionOptions: DashboardReleaseManagerOptions = {
         ...options,
+        ...(path.resolve(releasesRoot) ===
+            path.resolve(resolveDashboardProjectPaths().productionReleasesRoot) && {
+            prepareReleaseTransition: prepareManagedDashboardUnits,
+        }),
         transitionLockWaitMs:
             options.transitionLockWaitMs ?? RELEASE_TRANSITION_LOCK_WAIT_MS,
     };

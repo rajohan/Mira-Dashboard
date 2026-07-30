@@ -1349,6 +1349,54 @@ describe("backend route and service behavior", () => {
             await import("../src/routes/jobExecutionRoutes.ts");
         const missingExecutionId = "018f47a2-9b7c-7cc8-a123-456789abcdef";
 
+        const invalidClaimsPatch = await jobExecutionRoutes[
+            "/api/job-executions/claims"
+        ].PATCH(
+            new Request("https://test.local/api/job-executions/claims", {
+                body: JSON.stringify({ paused: "yes" }),
+                headers: { "Content-Type": "application/json" },
+                method: "PATCH",
+            })
+        );
+        expect(invalidClaimsPatch.status).toBe(400);
+
+        try {
+            const pausedClaims = await jobExecutionRoutes[
+                "/api/job-executions/claims"
+            ].PATCH(
+                new Request("https://test.local/api/job-executions/claims", {
+                    body: JSON.stringify({ paused: true }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "PATCH",
+                })
+            );
+            expect(pausedClaims.status).toBe(200);
+            expect(await pausedClaims.json()).toMatchObject({
+                isOk: true,
+                state: { paused: true },
+            });
+            const pausedQueue = jobExecutionRoutes["/api/job-executions"].GET(
+                new Request("https://test.local/api/job-executions?include=claims")
+            );
+            expect(await pausedQueue.json()).toMatchObject({
+                summary: { claimsPaused: true },
+            });
+        } finally {
+            const resumedClaims = await jobExecutionRoutes[
+                "/api/job-executions/claims"
+            ].PATCH(
+                new Request("https://test.local/api/job-executions/claims", {
+                    body: JSON.stringify({ paused: false }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "PATCH",
+                })
+            );
+            expect(resumedClaims.status).toBe(200);
+            expect(await resumedClaims.json()).toMatchObject({
+                state: { paused: false },
+            });
+        }
+
         const missingExecution = jobExecutionRoutes["/api/job-executions/:id"].GET(
             requestWithParameters(`/api/job-executions/${missingExecutionId}`, {
                 id: missingExecutionId,

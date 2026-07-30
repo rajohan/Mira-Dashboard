@@ -6,6 +6,7 @@ import { writeCliError, writeCliOutput } from "./lib/cliOutput.ts";
 import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
+import { parseSystemdProperties } from "./lib/systemdProperties.ts";
 import {
     bunExecutableRuntimeIdentity,
     installManagedBunRuntime,
@@ -13,6 +14,12 @@ import {
     resolveDashboardReleaseBuildBunExecutable,
     resolveManagedBunRuntimeRoot,
 } from "./managedBunRuntime.ts";
+import {
+    MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT,
+    MANAGED_DASHBOARD_UNIT_POLICY_ENVIRONMENT,
+    MANAGED_DASHBOARD_UNITS,
+    type ManagedDashboardUnitName,
+} from "./managedDashboardUnitPolicy.ts";
 import {
     type DashboardReleaseRetentionResult,
     loadManagedRelease,
@@ -24,18 +31,10 @@ import {
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const MAX_PROCESS_OUTPUT_BYTES = 20 * 1024 * 1024;
-export const MANAGED_DASHBOARD_UNITS = {
-    "mira-dashboard-worker.service": "dist/workerStart.js",
-    "mira-dashboard.service": "dist/serverStart.js",
-} as const;
-export const MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT = [
-    "NODE_ENV",
-    "MIRA_DASHBOARD_PROJECT_ROOT",
-] as const;
-const MANAGED_DASHBOARD_UNIT_POLICY_ENVIRONMENT = {
-    "mira-dashboard-worker.service": ["NODE_ENV=production"],
-    "mira-dashboard.service": ["NODE_ENV=production"],
-} as const satisfies Record<keyof typeof MANAGED_DASHBOARD_UNITS, readonly string[]>;
+export {
+    MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT,
+    MANAGED_DASHBOARD_UNITS,
+} from "./managedDashboardUnitPolicy.ts";
 
 export interface DashboardReleaseCommandResult {
     stderr: string;
@@ -79,8 +78,6 @@ export interface ManagedDashboardUnitContract {
     sourceRoot: string;
     worktreeRoot: string;
 }
-
-type ManagedDashboardUnitName = keyof typeof MANAGED_DASHBOARD_UNITS;
 
 const MANAGED_RELEASE_BUILD_ENVIRONMENT = [
     "HOME",
@@ -282,17 +279,7 @@ export function assertManagedDashboardUnitProperties(
         `MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`,
     ];
     const expectedWorkingDirectory = `${contract.releaseRoot}/backend`;
-    const actual = new Map(
-        properties
-            .split("\n")
-            .filter(Boolean)
-            .map((line) => {
-                const separator = line.indexOf("=");
-                return separator === -1
-                    ? [line, ""]
-                    : [line.slice(0, separator), line.slice(separator + 1)];
-            })
-    );
+    const actual = parseSystemdProperties(properties);
     if (actual.get("WorkingDirectory") !== expectedWorkingDirectory) {
         throw new Error(
             `${unit} must run from managed current/backend before Dashboard deployment`

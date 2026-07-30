@@ -33,6 +33,7 @@ import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { parseSystemdProperties } from "../lib/systemdProperties.ts";
 import { hasLineBreakOrNullByte } from "../lib/values.ts";
 import {
     isPullRequestPreviewAuthorAllowed,
@@ -1293,12 +1294,7 @@ async function startPreviewGatewayProxyUnit(
  * @returns Parsed the bounded systemctl property format used for preview status.
  */
 export function parsePreviewUnitState(output: string): SystemdUnitState {
-    const properties = new Map<string, string>();
-    for (const line of output.split("\n")) {
-        const separator = line.indexOf("=");
-        if (separator <= 0) continue;
-        properties.set(line.slice(0, separator), line.slice(separator + 1));
-    }
+    const properties = parseSystemdProperties(output);
     return {
         activeState: properties.get("ActiveState") || undefined,
         result: properties.get("Result") || undefined,

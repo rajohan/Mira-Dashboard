@@ -3417,9 +3417,13 @@ describe("shared component helpers", () => {
     });
 
     it("shows queue pressure and cancels an active job execution", async () => {
+        let claimsPaused = false;
+        let delayNextPause = true;
         let executionStatus: "cancelled" | "queued" = "queued";
+        let failNextClaimsUpdate = false;
+        const pauseMutationGate = Promise.withResolvers<void>();
         const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
-            return Promise.try(() => {
+            return Promise.try(async () => {
                 const url = requestUrl(input);
                 const method = init?.method ?? "GET";
                 const execution = {
@@ -3443,11 +3447,12 @@ describe("shared component helpers", () => {
                     triggerType: "manual",
                 };
 
-                if (url === "/api/job-executions" && method === "GET") {
+                if (url === "/api/job-executions?include=claims" && method === "GET") {
                     return Response.json({
                         executions: [execution],
                         summary: {
                             activeResourceClasses: [],
+                            claimsPaused,
                             oldestQueuedAt:
                                 executionStatus === "queued"
                                     ? execution.queuedAt
@@ -3457,6 +3462,28 @@ describe("shared component helpers", () => {
                             workerCapacity: 1,
                             workerCount: 1,
                             workerOnline: true,
+                        },
+                    });
+                }
+
+                if (url === "/api/job-executions/claims" && method === "PATCH") {
+                    const requestedPause = (
+                        JSON.parse(requestBodyText(init?.body)) as { paused: boolean }
+                    ).paused;
+                    if (failNextClaimsUpdate) {
+                        failNextClaimsUpdate = false;
+                        return Response.json({}, { status: 500 });
+                    }
+                    if (requestedPause && delayNextPause) {
+                        delayNextPause = false;
+                        await pauseMutationGate.promise;
+                    }
+                    claimsPaused = requestedPause;
+                    return Response.json({
+                        isOk: true,
+                        state: {
+                            paused: claimsPaused,
+                            updatedAt: "2026-07-30T08:00:00.000Z",
                         },
                     });
                 }
@@ -3492,6 +3519,37 @@ describe("shared component helpers", () => {
         expect(screen.getByText("host heavy")).toBeInTheDocument();
         expect(screen.getByText("Worker idle")).toBeInTheDocument();
         expect(screen.getByText("Active class").querySelector("svg")).not.toBeNull();
+
+        await userEvent.click(
+            screen.getByRole("button", { name: "Pause worker claims" })
+        );
+        expect(await screen.findByText("Saving...")).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: "Pause worker claims" })
+        ).toBeDisabled();
+        pauseMutationGate.resolve();
+        await waitFor(() => {
+            expect(claimsPaused).toBe(true);
+            expect(screen.getByText("Worker paused")).toBeInTheDocument();
+            expect(
+                screen.getByText(
+                    "New executions remain queued. Any running execution is allowed to finish."
+                )
+            ).toBeInTheDocument();
+        });
+        await userEvent.click(
+            screen.getByRole("button", { name: "Resume worker claims" })
+        );
+        await waitFor(() => {
+            expect(claimsPaused).toBe(false);
+            expect(screen.getByText("Worker idle")).toBeInTheDocument();
+        });
+        failNextClaimsUpdate = true;
+        await userEvent.click(
+            screen.getByRole("button", { name: "Pause worker claims" })
+        );
+        expect(await screen.findByText("HTTP 500")).toBeInTheDocument();
+        expect(claimsPaused).toBe(false);
 
         await userEvent.click(screen.getByRole("button", { name: "Cancel Host backup" }));
 

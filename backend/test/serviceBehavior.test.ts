@@ -1952,7 +1952,7 @@ describe("backend service behavior", () => {
         await createReleaseFixture(
             managedReleasePath(releasesRoot, currentCommit),
             currentCommit,
-            { commitTitle: "Schema 7 dashboard release" }
+            { commitTitle: "Schema 8 dashboard release" }
         );
         const previousReleasePath = managedReleasePath(releasesRoot, previousCommit);
         await createReleaseFixture(previousReleasePath, previousCommit, {
@@ -1979,7 +1979,7 @@ describe("backend service behavior", () => {
         expect(getDashboardReleaseStatus()).resolves.toMatchObject({
             current: {
                 commitSha: currentCommit,
-                schema: { maximumCompatible: 7, target: 7 },
+                schema: { maximumCompatible: 8, target: 8 },
             },
             previous: {
                 commitSha: previousCommit,
@@ -1987,11 +1987,11 @@ describe("backend service behavior", () => {
             },
             rollback: {
                 available: false,
-                reason: "Rollback release cannot open SQLite schema 7",
+                reason: "Rollback release cannot open SQLite schema 8",
             },
         });
         expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
-            "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 7"
+            "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 8"
         );
         const response = await pullRequestRoutes[
             "/api/pull-requests/releases/rollback"
@@ -1999,7 +1999,7 @@ describe("backend service behavior", () => {
         expect(response.status).toBe(409);
         expect(response.json()).resolves.toMatchObject(
             apiErrorExpectation(
-                "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 7"
+                "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 8"
             )
         );
         expect(countRollbackExecutions()).toBe(executionCountBefore);
@@ -2174,6 +2174,9 @@ printf 'scheduled\n'
             ).updatedAt;
             expect(guardian).toContain(
                 `${releasesRoot}/releases/${currentCommit}/backend/dist/releaseLifecycle.js`
+            );
+            expect(guardian).toContain(
+                '/usr/bin/timeout --signal=KILL 5s "$runtime_path" --revision'
             );
             expect(guardian).toContain(`rollback '${currentCommit}' '${previousCommit}'`);
             expect(guardian).toContain(`rollback '${previousCommit}' '${currentCommit}'`);
@@ -3153,7 +3156,7 @@ printf 'scheduled\n'
                     .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
                     .get(schemaBlockedRedeploy.id)
             ).toEqual({
-                note: "Automatic redeploy fallback is not eligible: Rollback release cannot open SQLite schema 7",
+                note: "Automatic redeploy fallback is not eligible: Rollback release cannot open SQLite schema 8",
                 status: "failed",
             });
             await executeSuccessfulGuardianPath(restartCommand);

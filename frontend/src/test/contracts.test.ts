@@ -15,6 +15,7 @@ import { parseExecRequest } from "../../../contracts/exec";
 import { parseFileContent, parseFilesResponse } from "../../../contracts/files";
 import {
     parseJobExecutionsResponse,
+    parseJobWorkerClaimsPatch,
     parseScheduledJobsResponse,
     parseScheduledJobUpdateRequest,
 } from "../../../contracts/jobs";
@@ -22,6 +23,11 @@ import {
     parseLogRotationRunResult,
     parseLogRotationStatus,
 } from "../../../contracts/logRotation";
+import {
+    moltbookPostFromPayload,
+    parseMoltbookFeed,
+    parseMoltbookProfile,
+} from "../../../contracts/moltbook";
 import { parseNotificationsResponse } from "../../../contracts/notifications";
 import {
     parseOpenClawConfig,
@@ -43,6 +49,57 @@ function captureContractError(operation: () => unknown): ContractValidationError
 }
 
 describe("shared runtime contracts", () => {
+    it("accepts provider-null Moltbook avatars and normalizes feed display data", () => {
+        const feed = parseMoltbookFeed({
+            hasMore: false,
+            posts: [
+                {
+                    author: {
+                        avatar_url: null,
+                        display_name: "Raymond",
+                        name: "raymond",
+                    },
+                    created_at: "2026-07-30T08:00:00.000Z",
+                    id: "post-1",
+                    submolt_name: "dashboard",
+                    title: "Null avatar",
+                },
+            ],
+        });
+        expect(moltbookPostFromPayload(feed.posts[0]!)).toMatchObject({
+            author: {
+                avatar_url: undefined,
+                display_name: "Raymond",
+                name: "raymond",
+            },
+            id: "post-1",
+        });
+        expect(
+            parseMoltbookProfile({
+                avatar_url: null,
+                comments_count: 0,
+                description: "",
+                display_name: "Mira",
+                follower_count: 0,
+                following_count: 0,
+                karma: 0,
+                name: "mira",
+                posts_count: 0,
+            }).avatar_url
+        ).toBeNull();
+    });
+
+    it("keeps the worker claims mutation body strict", () => {
+        expect(parseJobWorkerClaimsPatch({ paused: true })).toEqual({
+            paused: true,
+        });
+        expect(
+            captureContractError(() =>
+                parseJobWorkerClaimsPatch({ pause: true })
+            ).issues.map((issue) => issue.path)
+        ).toEqual(["body.paused", "body.pause"]);
+    });
+
     it("normalizes valid task input without losing intentional body whitespace", () => {
         expect(
             parseCreateTaskRequest({

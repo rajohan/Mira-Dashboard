@@ -18,6 +18,7 @@ Dashboard-local scheduled jobs are stored in SQLite:
 | `scheduled_job_execution_policies` | Resource class and timeout per job.                       |
 | `job_executions`                   | Persistent queue, lease, heartbeat, and cancellation.     |
 | `job_workers`                      | Worker capacity and liveness heartbeat.                   |
+| `job_worker_control`               | Singleton operator pause state for new execution claims.  |
 | `openclaw_cron_job_metadata`       | Dashboard-owned metadata for external OpenClaw cron jobs. |
 
 Supported schedule shapes:
@@ -42,11 +43,19 @@ this avoids repeating backup, update, or other non-idempotent side effects after
 a worker crash.
 
 `GET /api/job-executions` exposes queue depth, oldest wait, resource classes,
-and worker liveness. `GET /api/job-executions/:id` includes the bounded
-persisted output snapshot used for stdout/stderr and incremental progress.
+and worker liveness; `?include=claims` also includes the persistent pause state.
+`GET /api/job-executions/:id` includes the bounded persisted output snapshot
+used for stdout/stderr and incremental progress.
 HTTP waiters are observers only: disconnecting a request or restarting the web
 service never writes a cancellation request. Cancellation is explicit through
 `POST /api/job-executions/:id/cancel`.
+
+The Jobs page can pause or resume new worker claims through
+`PATCH /api/job-executions/claims`. Pausing is persistent across web/worker
+restarts and leaves queued work queued; an execution that is already running is
+allowed to finish. The claim transaction checks the singleton pause row under
+the same SQLite writer lock used to select work, so a completed pause request
+cannot race with a later claim.
 
 Use the Jobs page to inspect definitions and run history before editing the
 database manually.
@@ -122,6 +131,19 @@ External cache refreshes may require these env vars:
 
 If a page shows stale provider data, check the cache entry timestamp and the
 latest scheduled job run before debugging the frontend.
+
+The **Cache refresh** observability card is different from cached provider
+data. Its request/coalescing/failure/duration counters are runtime telemetry
+since the current worker process started, not historical totals and not SQLite
+rows. Production worker and web are separate processes, so the worker
+atomically mirrors its in-memory counters to an instance-unique, owner-only
+snapshot below the user's reboot-volatile `XDG_RUNTIME_DIR`; the web process
+samples the newest live worker instance. An old worker removes only its own
+snapshot, so overlapping restart cleanup cannot delete its replacement's
+metrics. The managed processes are systemd user services, so their user manager
+supplies `XDG_RUNTIME_DIR`; new-host bootstrap enables linger so
+`/run/user/<uid>` is also created for boot-time starts without an interactive
+login. Worker restart resets every counter.
 
 ### Status And Heartbeat Projections
 

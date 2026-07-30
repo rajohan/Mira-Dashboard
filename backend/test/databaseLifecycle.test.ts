@@ -114,10 +114,19 @@ describe("Dashboard SQLite lifecycle", () => {
             const first = applyDatabaseMigrations(database, databasePath);
             const second = applyDatabaseMigrations(database, databasePath);
 
-            expect(first.applied).toEqual([1, 2, 3, 4, 5, 6, 7]);
+            expect(first.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
             expect(first.backup).toBeUndefined();
             expect(second).toEqual({ applied: [] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(7);
+            expect(validateDatabaseMigrationHistory(database)).toBe(8);
+            expect(
+                database
+                    .query(
+                        `SELECT claims_paused, updated_at
+                         FROM job_worker_control
+                         WHERE id = 1`
+                    )
+                    .get()
+            ).toMatchObject({ claims_paused: 0 });
             expect(
                 database
                     .query("SELECT name FROM pragma_table_info('auth_sessions')")
@@ -250,7 +259,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 3 database with migrations 4 through 7", () => {
+    it("upgrades an existing version 3 database with migrations 4 through 8", () => {
         const root = temporaryRoot("mira-db-migrations-v3-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -259,9 +268,9 @@ describe("Dashboard SQLite lifecycle", () => {
 
             expect(validateDatabaseMigrationHistory(database)).toBe(3);
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [4, 5, 6, 7],
+                applied: [4, 5, 6, 7, 8],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(7);
+            expect(validateDatabaseMigrationHistory(database)).toBe(8);
             expect(
                 database
                     .query(
@@ -293,7 +302,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 4 database with migrations 5 through 7", () => {
+    it("upgrades an existing version 4 database with migrations 5 through 8", () => {
         const root = temporaryRoot("mira-db-migrations-v4-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -302,9 +311,9 @@ describe("Dashboard SQLite lifecycle", () => {
 
             expect(validateDatabaseMigrationHistory(database)).toBe(4);
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [5, 6, 7],
+                applied: [5, 6, 7, 8],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(7);
+            expect(validateDatabaseMigrationHistory(database)).toBe(8);
             expect(
                 database
                     .query(
@@ -374,9 +383,9 @@ describe("Dashboard SQLite lifecycle", () => {
                 database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
             ).toEqual({ count: 2 });
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [6, 7],
+                applied: [6, 7, 8],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(7);
+            expect(validateDatabaseMigrationHistory(database)).toBe(8);
             expect(
                 database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
             ).toEqual({ count: 0 });
@@ -402,9 +411,9 @@ describe("Dashboard SQLite lifecycle", () => {
             expect(legacyIndex.sql).toContain("'restart-scheduled'");
 
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [7],
+                applied: [7, 8],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(7);
+            expect(validateDatabaseMigrationHistory(database)).toBe(8);
 
             const currentIndex = database
                 .query(
@@ -507,7 +516,7 @@ describe("Dashboard SQLite lifecycle", () => {
         try {
             expect(
                 database.query("SELECT COUNT(*) AS count FROM schema_migrations").get()
-            ).toEqual({ count: 7 });
+            ).toEqual({ count: 8 });
         } finally {
             database.close();
         }
@@ -533,7 +542,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 );
 
             const result = applyDatabaseMigrations(database, databasePath);
-            expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7]);
+            expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
             expect(result.backup).toMatchObject({
                 kind: "pre-migration",
                 restoreVerified: true,
@@ -587,23 +596,23 @@ describe("Dashboard SQLite lifecycle", () => {
                 .prepare(
                     `INSERT INTO schema_migrations (
                         version, name, checksum, applied_at
-                     ) VALUES (8, 'unknown', 'unknown', ?)`
+                     ) VALUES (9, 'unknown', 'unknown', ?)`
                 )
                 .run("2026-07-23T00:00:00.000Z");
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
-                "incompatible SQLite migration version 8"
+                "incompatible SQLite migration version 9"
             );
             database
                 .prepare(
-                    "UPDATE schema_migrations SET name = ?, checksum = ? WHERE version = 8"
+                    "UPDATE schema_migrations SET name = ?, checksum = ? WHERE version = 9"
                 )
                 .run("future-additive", "a".repeat(64));
-            expect(validateDatabaseMigrationHistory(database, 8)).toBe(8);
-            expect(() => validateDatabaseMigrationHistory(database, 7)).toThrow(
-                "incompatible SQLite migration version 8"
+            expect(validateDatabaseMigrationHistory(database, 9)).toBe(9);
+            expect(() => validateDatabaseMigrationHistory(database, 8)).toThrow(
+                "incompatible SQLite migration version 9"
             );
 
-            database.prepare("DELETE FROM schema_migrations WHERE version = 8").run();
+            database.prepare("DELETE FROM schema_migrations WHERE version = 9").run();
             database.prepare("DELETE FROM schema_migrations WHERE version = 2").run();
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
                 "not contiguous"
@@ -810,8 +819,8 @@ describe("Dashboard SQLite lifecycle", () => {
         expect(preflightResult).toMatchObject({
             backup: { kind: "pre-deploy", restoreVerified: true },
             migrationTest: {
-                applied: [1, 2, 3, 4, 5, 6, 7],
-                currentVersion: 7,
+                applied: [1, 2, 3, 4, 5, 6, 7, 8],
+                currentVersion: 8,
             },
         });
         expect(getSqliteBackupInventory(databasePath).count).toBe(1);

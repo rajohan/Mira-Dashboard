@@ -1508,11 +1508,13 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
-    if (url === "/api/job-executions") {
+    if (url === "/api/job-executions?include=claims") {
         return Response.json({
             executions: [],
             summary: {
                 activeResourceClasses: [],
+                claimsPaused: false,
+                claimsPausedAt: undefined,
                 queued: 0,
                 running: 0,
                 workerCapacity: 1,

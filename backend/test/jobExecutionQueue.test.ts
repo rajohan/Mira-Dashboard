@@ -24,6 +24,7 @@ import {
     registerJobWorker,
     unregisterJobWorker,
 } from "../src/services/jobExecutionQueue.ts";
+import { setJobWorkerClaimsPaused } from "../src/services/jobWorkerControl.ts";
 import { waitForJobExecution } from "../src/services/queuedJobExecution.ts";
 import {
     enqueueScheduledJob,
@@ -45,6 +46,7 @@ const testDeploymentIds = new Set<string>();
 
 afterEach(async () => {
     await stopScheduledJobExecutor();
+    setJobWorkerClaimsPaused(false);
     for (const executionId of testExecutionIds) {
         database.prepare("DELETE FROM job_executions WHERE id = ?").run(executionId);
     }
@@ -600,6 +602,104 @@ printf 'LoadState=loaded\nActiveState=active\n'
         expect(cancelJobExecution(cancellableWhileQueued.id)).toMatchObject({
             status: "cancelled",
         });
+    });
+
+    it("persists an operator pause and atomically prevents new claims", () => {
+        const queued = enqueueJobExecution({
+            actionKey: `test.paused-${Bun.randomUUIDv7()}`,
+            displayName: "Paused mutation",
+            resourceClass: "exclusive",
+            timeoutMs: 60_000,
+        });
+        testExecutionIds.add(queued.id);
+        const pausedAt = "2026-07-30T08:00:00.000Z";
+
+        expect(setJobWorkerClaimsPaused(true, pausedAt)).toEqual({
+            paused: true,
+            updatedAt: pausedAt,
+        });
+        expect(claimNextJobExecution(`test-worker-${Bun.randomUUIDv7()}`, 1)).toBe(
+            undefined
+        );
+        expect(getJobExecution(queued.id)).toMatchObject({ status: "queued" });
+        expect(getJobExecutionSummary()).toMatchObject({
+            claimsPaused: true,
+            claimsPausedAt: pausedAt,
+            queued: 1,
+        });
+
+        setJobWorkerClaimsPaused(false);
+        const workerId = `test-worker-${Bun.randomUUIDv7()}`;
+        expect(claimNextJobExecution(workerId, 1)?.id).toBe(queued.id);
+        finishJobExecution(queued.id, workerId, "success", undefined, {});
+    });
+
+    it("recovers leases that expire while new claims are paused", async () => {
+        const timestamp = new Date().toISOString();
+        const running = insertJobExecution({
+            actionKey: `test.paused-expired-${Bun.randomUUIDv7()}`,
+            cancellable: false,
+            displayName: "Paused expired execution",
+            leaseOwner: "missing-worker",
+            queuedAt: timestamp,
+            resourceClass: "exclusive",
+            status: "running",
+            timeoutMs: 60_000,
+            triggerType: "system",
+        });
+        const queued = enqueueJobExecution({
+            actionKey: `test.paused-queued-${Bun.randomUUIDv7()}`,
+            displayName: "Paused queued execution",
+            resourceClass: "exclusive",
+            timeoutMs: 60_000,
+        });
+        testExecutionIds.add(running.id);
+        testExecutionIds.add(queued.id);
+        setJobWorkerClaimsPaused(true, timestamp);
+
+        startScheduledJobExecutor();
+        database
+            .prepare(
+                `UPDATE job_executions
+                 SET lease_expires_at = ?
+                 WHERE id = ?`
+            )
+            .run("1970-01-01T00:00:00.000Z", running.id);
+
+        expect(
+            await waitForJobExecution(running.id, {
+                pollIntervalMs: 25,
+                timeoutMs: 3000,
+            })
+        ).toMatchObject({
+            message: "Job failed after its worker lease expired",
+            status: "failed",
+        });
+        expect(getJobExecution(queued.id)).toMatchObject({ status: "queued" });
+    });
+
+    it("reconciles orphaned deployment cutovers while new claims are paused", () => {
+        const deploymentId = createVerifyingDeployment(
+            "2026-07-26T03:00:00.000Z",
+            "c0ffee12"
+        );
+        setJobWorkerClaimsPaused(true, "2026-07-30T08:00:00.000Z");
+
+        startScheduledJobExecutor();
+
+        expect(
+            database
+                .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                .get(deploymentId)
+        ).toEqual({
+            note: "Interrupted deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
+            status: "failed",
+        });
+        expect(
+            database
+                .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                .get(deploymentId)
+        ).toBeNull();
     });
 
     it("prioritizes interactive work and enforces global capacity", () => {
