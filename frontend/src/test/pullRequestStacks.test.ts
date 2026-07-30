@@ -63,6 +63,25 @@ describe("Delivery pull request stacks", () => {
         });
     });
 
+    it("excludes fork pull requests from inferred stack candidates", () => {
+        const candidates = derivePullRequestStackCandidates(
+            [
+                pullRequest(10, "shared-branch", "main", {
+                    isCrossRepository: true,
+                }),
+                pullRequest(11, "fork-dependent", "shared-branch"),
+                pullRequest(20, "models", "main"),
+                pullRequest(21, "api", "models"),
+            ],
+            "main"
+        );
+
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0]?.pullRequests.map((entry) => entry.number)).toEqual([
+            20, 21,
+        ]);
+    });
+
     it("groups native stacks bottom-to-top and merges only through the selected layer", () => {
         const stack360 = [
             pullRequest(353, "state-machine", "canonical", {

@@ -26,7 +26,8 @@ export function derivePullRequestStackCandidates(
     baseRefName: string
 ): PullRequestStackCandidate[] {
     const unstackedPullRequests = pullRequests.filter(
-        (pullRequest) => pullRequest.stack === undefined
+        (pullRequest) =>
+            pullRequest.stack === undefined && pullRequest.isCrossRepository !== true
     );
     const childrenByBase = new Map<string, PullRequestSummary[]>();
     for (const pullRequest of unstackedPullRequests) {
