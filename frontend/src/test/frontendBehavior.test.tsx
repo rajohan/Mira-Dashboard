@@ -6691,7 +6691,7 @@ describe("Mira Dashboard frontend behavior", () => {
                     fileName: "absolute-report.csv",
                     kind: "text",
                     mimeType: "text/csv",
-                    url: absoluteLocalProxyUrl,
+                    url: "/api/media?path=%2Ftmp%2Fabsolute-report.csv",
                 }
             );
         } finally {

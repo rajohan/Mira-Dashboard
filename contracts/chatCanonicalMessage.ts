@@ -95,6 +95,21 @@ function dashboardMediaKind(pathname: string): DashboardMediaKind | undefined {
     return pathname.startsWith("/api/chat/media/outgoing/") ? "managed" : undefined;
 }
 
+/**
+ * Removes an origin from a recognized Dashboard media route.
+ * @param value Candidate Dashboard media URL.
+ * @returns Portable root-relative media URL when recognized.
+ */
+export function canonicalChatPortableDashboardMediaUrl(
+    value: string
+): string | undefined {
+    const parsed = parseChatUrl(value.trim());
+    if (!parsed || !dashboardMediaKind(parsed.url.pathname)) {
+        return undefined;
+    }
+    return `${parsed.url.pathname}${parsed.url.search}${parsed.url.hash}`;
+}
+
 function dashboardMediaReference(value: string): DashboardMediaReference | undefined {
     const candidate = value.trim();
     const parsed = parseChatUrl(candidate);
@@ -267,14 +282,66 @@ export function extractCanonicalChatImages(content: unknown): CanonicalChatImage
     if (!Array.isArray(content)) {
         return [];
     }
-    return content.filter((item): item is CanonicalChatImage => {
+    const images: CanonicalChatImage[] = [];
+    for (const item of content) {
         if (!item || typeof item !== "object" || Array.isArray(item)) {
-            return false;
+            continue;
         }
-        return ["image", "image_url", "input_image"].includes(
-            String((item as { type?: unknown }).type)
-        );
-    });
+        const record = item as Record<string, unknown>;
+        const type =
+            record.type === "image" ||
+            record.type === "image_url" ||
+            record.type === "input_image"
+                ? record.type
+                : undefined;
+        if (!type) {
+            continue;
+        }
+
+        const rawImageUrl = record.image_url;
+        const imageUrlRecord =
+            rawImageUrl && typeof rawImageUrl === "object" && !Array.isArray(rawImageUrl)
+                ? (rawImageUrl as Record<string, unknown>)
+                : undefined;
+        let imageUrl: CanonicalChatImage["image_url"];
+        if (typeof rawImageUrl === "string") {
+            imageUrl = rawImageUrl;
+        } else if (typeof imageUrlRecord?.url === "string") {
+            imageUrl = { url: imageUrlRecord.url };
+        }
+        const rawSource =
+            record.source &&
+            typeof record.source === "object" &&
+            !Array.isArray(record.source)
+                ? (record.source as Record<string, unknown>)
+                : undefined;
+        const source = rawSource
+            ? {
+                  data: typeof rawSource.data === "string" ? rawSource.data : undefined,
+                  media_type:
+                      typeof rawSource.media_type === "string"
+                          ? rawSource.media_type
+                          : undefined,
+                  type: typeof rawSource.type === "string" ? rawSource.type : undefined,
+                  url: typeof rawSource.url === "string" ? rawSource.url : undefined,
+              }
+            : undefined;
+
+        images.push({
+            alt: typeof record.alt === "string" ? record.alt : undefined,
+            data: typeof record.data === "string" ? record.data : undefined,
+            image_url: imageUrl,
+            mimeType: typeof record.mimeType === "string" ? record.mimeType : undefined,
+            openUrl: typeof record.openUrl === "string" ? record.openUrl : undefined,
+            source:
+                source && Object.values(source).some((value) => value !== undefined)
+                    ? source
+                    : undefined,
+            type,
+            url: typeof record.url === "string" ? record.url : undefined,
+        });
+    }
+    return images;
 }
 
 /**

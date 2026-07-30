@@ -8,6 +8,7 @@ import {
     canonicalChatAttachmentKind,
     canonicalChatImageDisplayUrl,
     canonicalChatLocalMediaPathFromUrl,
+    canonicalChatPortableDashboardMediaUrl,
     extractCanonicalChatImages,
     extractCanonicalChatThinking,
     extractCanonicalChatToolCalls,
@@ -159,6 +160,10 @@ function displayUrlFromMediaRef(value: unknown): string | undefined {
     }
     try {
         const url = new URL(candidate);
+        const dashboardMediaUrl = canonicalChatPortableDashboardMediaUrl(candidate);
+        if (dashboardMediaUrl) {
+            return dashboardMediaUrl;
+        }
         if (REMOTE_MEDIA_PROTOCOLS.has(url.protocol)) {
             return candidate;
         }

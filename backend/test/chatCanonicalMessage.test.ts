@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
+import { normalizeOpenClawHistoryMessage } from "../../contracts/chat/openClawHistoryNormalizer";
 import {
     canonicalChatImageDisplayUrl,
     canonicalChatLocalMediaPathFromUrl,
+    extractCanonicalChatImages,
 } from "../../contracts/chatCanonicalMessage";
 
 describe("backend canonical chat media normalization", () => {
@@ -18,5 +20,71 @@ describe("backend canonical chat media normalization", () => {
         expect(canonicalChatLocalMediaPathFromUrl(localUrl)).toBe(
             "/tmp/generated image.png"
         );
+        expect(
+            normalizeOpenClawHistoryMessage({
+                content: [
+                    {
+                        attachment: {
+                            label: "generated image.png",
+                            mimeType: "image/png",
+                            url: localUrl,
+                        },
+                        type: "attachment",
+                    },
+                ],
+                role: "assistant",
+            }).attachments?.[0]?.url
+        ).toBe("/api/media?path=%2Ftmp%2Fgenerated%20image.png");
+    });
+
+    it("sanitizes malformed provider image fields before canonicalizing", () => {
+        expect(
+            extractCanonicalChatImages([
+                {
+                    alt: 42,
+                    image_url: { url: null },
+                    source: { data: 5, media_type: "image/png", url: false },
+                    type: "image_url",
+                    url: 7,
+                },
+                {
+                    alt: "preview",
+                    image_url: { extra: "ignored", url: "https://files.test/a.png" },
+                    source: {
+                        data: "abc",
+                        media_type: "image/png",
+                        type: "base64",
+                        url: null,
+                    },
+                    type: "image",
+                },
+            ])
+        ).toEqual([
+            {
+                alt: undefined,
+                data: undefined,
+                image_url: undefined,
+                mimeType: undefined,
+                openUrl: undefined,
+                source: { media_type: "image/png" },
+                type: "image_url",
+                url: undefined,
+            },
+            {
+                alt: "preview",
+                data: undefined,
+                image_url: { url: "https://files.test/a.png" },
+                mimeType: undefined,
+                openUrl: undefined,
+                source: {
+                    data: "abc",
+                    media_type: "image/png",
+                    type: "base64",
+                    url: undefined,
+                },
+                type: "image",
+                url: undefined,
+            },
+        ]);
     });
 });

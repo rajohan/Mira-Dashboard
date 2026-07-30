@@ -261,7 +261,8 @@ function hasRuntimeItemText(
 
 function shouldRetainRuntimeEvent(
     event: unknown,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    canonicalEvents: OpenClawRuntimeEnvelope["canonicalEvents"]
 ): boolean {
     if (event === "session.started" && !stringField(payload, "runId")) {
         return false;
@@ -294,7 +295,13 @@ function shouldRetainRuntimeEvent(
     return (
         !["start", "end"].includes(phase) ||
         !/\b(?:analysis|reasoning|thinking)\b/u.test(kind) ||
-        hasRuntimeItemText(data, item)
+        hasRuntimeItemText(data, item) ||
+        canonicalEvents.some(
+            (canonicalEvent) =>
+                canonicalEvent.kind === "thinking" &&
+                (canonicalEvent.message.text.trim() ||
+                    canonicalEvent.message.thinking?.some((block) => block.text.trim()))
+        )
     );
 }
 
@@ -2749,7 +2756,11 @@ export class OpenClawChatBridge {
         this.#flushSessionPersistence(storageSessionKey);
     }
 
-    #retain(envelope: OpenClawRuntimeEnvelope, shouldPersist = true): string[] {
+    #retain(
+        envelope: OpenClawRuntimeEnvelope,
+        shouldPersist = true,
+        retentionPayload?: Record<string, unknown>
+    ): string[] {
         if (typeof envelope.event !== "string" || !RETAINED_EVENTS.has(envelope.event)) {
             return [];
         }
@@ -2815,7 +2826,13 @@ export class OpenClawChatBridge {
         if (explicitRunId && associationBytes <= MAX_BYTES_PER_EVENT) {
             this.#rememberRunSession(explicitRunId, storageSessionKey);
         }
-        if (!shouldRetainRuntimeEvent(envelope.event, payloadView)) {
+        if (
+            !shouldRetainRuntimeEvent(
+                envelope.event,
+                retentionPayload || payloadView,
+                envelope.canonicalEvents
+            )
+        ) {
             if (didReplaceRuntimeSession) {
                 this.#queuePersistence(storageSessionKey);
             }
@@ -3600,7 +3617,7 @@ export class OpenClawChatBridge {
         }
         const runtimeRunAliases = [
             ...(requestRepair?.interruptedRunIds || []),
-            ...this.#retain(envelope),
+            ...this.#retain(envelope, true, runtimePayloadView(enrichedPayload)),
         ].filter((runId, index, aliases) => aliases.indexOf(runId) === index);
         return runtimeRunAliases.length > 0
             ? boundedCanonicalRuntimeEnvelope(

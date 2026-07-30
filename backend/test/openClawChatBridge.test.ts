@@ -1833,6 +1833,41 @@ describe("OpenClaw chat bridge", () => {
         ).toBe(true);
     });
 
+    it("retains compacted item thinking from the original provider payload", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        const progressText = "thinking ".repeat(75_000);
+        const thinking = bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    itemId: "thinking-large",
+                    kind: "reasoning",
+                    phase: "start",
+                    progressText,
+                },
+                runId: "large-thinking-run",
+                sessionKey: MAIN,
+                stream: "item",
+            },
+            []
+        );
+
+        expect(
+            (thinking.payload as { data?: { progressText?: string } }).data?.progressText
+        ).toBeUndefined();
+        expect(
+            thinking.canonicalEvents.find((event) => event.kind === "thinking")
+        ).toMatchObject({
+            message: {
+                thinking: [{ text: progressText }],
+            },
+        });
+        expect(bridge.snapshot(MAIN).events).toEqual([thinking]);
+        expect(bridge.flush()).toBe(true);
+        expect(new OpenClawChatBridge(store).snapshot(MAIN).events).toEqual([thinking]);
+    });
+
     it("retains suppressed item diagnostics for snapshot replay", () => {
         const bridge = new OpenClawChatBridge();
         const thinking = bridge.recordEvent(
