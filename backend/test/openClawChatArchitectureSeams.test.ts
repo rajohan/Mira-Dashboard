@@ -153,11 +153,15 @@ describe("OpenClaw chat architecture seams", () => {
 
     it("owns provider filtering and replay selection in the retention seam", () => {
         expect(
-            shouldRetainRuntimeEvent("agent", {
-                stream: "codex_app_server.internal",
-            })
+            shouldRetainRuntimeEvent(
+                "agent",
+                {
+                    stream: "codex_app_server.internal",
+                },
+                []
+            )
         ).toBe(false);
-        expect(shouldRetainRuntimeEvent("session.started", {})).toBe(false);
+        expect(shouldRetainRuntimeEvent("session.started", {}, [])).toBe(false);
 
         const conversation = retainedRun(
             "conversation",
