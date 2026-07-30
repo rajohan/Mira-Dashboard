@@ -515,6 +515,13 @@ export function withCurrentCanonicalOpenClawIdentity<
         canonicalEvents: envelope.canonicalEvents.map((event) => ({
             ...event,
             id: canonicalOpenClawEventId(context.sessionKey, event.sequence, event.kind),
+            ...(event.kind === "finish" &&
+                event.settlesCompactionRunId && {
+                    settlesCompactionRunId: openClawCompactionRunId(
+                        context.sessionKey,
+                        context.runId
+                    ),
+                }),
             ...("message" in event &&
                 event.message && {
                     message: {

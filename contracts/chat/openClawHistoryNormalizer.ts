@@ -183,6 +183,10 @@ function stringValues(plural: unknown, singular: unknown): string[] {
     return typeof singular === "string" ? [singular] : [];
 }
 
+function stringValue(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function normalizedTimestamp(value: unknown): string | undefined {
     let timestamp: number;
     if (typeof value === "number") {
@@ -257,20 +261,26 @@ function mediaReferenceAttachments(
 ): CanonicalChatAttachment[] {
     const paths = stringValues(message.MediaPaths, message.MediaPath);
     const types = stringValues(message.MediaTypes, message.MediaType);
-    return paths.map((path, index) => {
-        const mimeType = types[index] || mimeTypeFromPath(path);
+    return paths.flatMap((rawPath, index) => {
+        const path = rawPath.trim();
+        if (!path) {
+            return [];
+        }
+        const mimeType = stringValue(types[index]) || mimeTypeFromPath(path);
         const kind = canonicalChatAttachmentKind(mimeType);
-        return {
-            id: `${path}-${index}`,
-            fileName: fileNameFromPath(path),
-            mimeType,
-            dataUrl:
-                kind === "image"
-                    ? canonicalChatImageDisplayUrl(mediaUrlFromPath(path), mimeType)
-                    : undefined,
-            url: mediaUrlFromPath(path),
-            kind,
-        };
+        return [
+            {
+                id: `${path}-${index}`,
+                fileName: fileNameFromPath(path),
+                mimeType,
+                dataUrl:
+                    kind === "image"
+                        ? canonicalChatImageDisplayUrl(mediaUrlFromPath(path), mimeType)
+                        : undefined,
+                url: mediaUrlFromPath(path),
+                kind,
+            },
+        ];
     });
 }
 
@@ -355,18 +365,9 @@ function toolResult(
     if (!role.startsWith("tool")) {
         return undefined;
     }
-    let toolCallId: string | undefined;
-    if (typeof message.toolCallId === "string") {
-        toolCallId = message.toolCallId;
-    } else if (typeof message.tool_call_id === "string") {
-        toolCallId = message.tool_call_id;
-    }
-    let toolName: string | undefined;
-    if (typeof message.toolName === "string") {
-        toolName = message.toolName;
-    } else if (typeof message.tool_name === "string") {
-        toolName = message.tool_name;
-    }
+    const toolCallId =
+        stringValue(message.toolCallId) || stringValue(message.tool_call_id);
+    const toolName = stringValue(message.toolName) || stringValue(message.tool_name);
     return {
         id: toolCallId,
         name: toolName,

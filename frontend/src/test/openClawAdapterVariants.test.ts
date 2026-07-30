@@ -13,7 +13,10 @@ import {
     runtimeText,
     stringValue,
 } from "../../../contracts/chat/openClawAdapterValues";
-import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
+import {
+    withCanonicalOpenClawEvents,
+    withCurrentCanonicalOpenClawIdentity,
+} from "../../../contracts/chat/openClawRuntimeAdapter";
 import { messageDeleteKey } from "../components/features/chat/chatUtilities";
 import {
     createChatVisibility,
@@ -48,6 +51,57 @@ function envelope(
 }
 
 describe("OpenClaw adapter variants", () => {
+    it("sanitizes item thinking identity and rewrites compaction settlement identity", () => {
+        const adapter = new OpenClawChatAdapter();
+        const thinkingEvents = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        item: {
+                            itemId: "   ",
+                            text: "Inspecting the repository",
+                            type: "reasoning",
+                        },
+                    },
+                    stream: "item",
+                },
+                1
+            )
+        );
+        expect(thinkingEvents[0]).toMatchObject({
+            kind: "thinking",
+            message: {
+                thinking: [{ id: undefined, text: "Inspecting the repository" }],
+            },
+        });
+
+        const original = envelope(
+            "agent",
+            {
+                data: { phase: "end" },
+                runId: "provisional-run",
+                sessionKey: "agent:main:provisional",
+                stream: "lifecycle",
+            },
+            2
+        );
+        const rewritten = withCurrentCanonicalOpenClawIdentity({
+            ...original,
+            payload: {
+                ...original.payload,
+                runId: "provider-run",
+                sessionKey: SESSION,
+            },
+        });
+        expect(rewritten.canonicalEvents.at(-1)).toMatchObject({
+            kind: "finish",
+            runId: "provider-run",
+            sessionKey: SESSION,
+            settlesCompactionRunId: "compaction:provider-run",
+        });
+    });
+
     it("groups heartbeat-style thinking around preamble tool steps", () => {
         const adapter = new OpenClawChatAdapter();
         const history = adapter.history([

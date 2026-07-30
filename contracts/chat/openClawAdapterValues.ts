@@ -129,7 +129,7 @@ export function itemStrings(data: Record<string, unknown>, keys: string[]): stri
     const item = nestedItem(data);
     const sources = item === data ? [data] : [data, item];
     return uniqueCanonicalChatIds(
-        sources.flatMap((source) => keys.map((key) => rawString(source[key])))
+        sources.flatMap((source) => keys.map((key) => stringValue(source[key])))
     );
 }
 

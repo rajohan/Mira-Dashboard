@@ -100,4 +100,35 @@ describe("backend canonical chat media normalization", () => {
             { arguments: undefined, id: "call-1", name: "exec" },
         ]);
     });
+
+    it("drops blank provider attachment and tool-result identifiers", () => {
+        expect(
+            normalizeOpenClawHistoryMessage({
+                MediaPaths: ["   ", "/tmp/report.txt"],
+                MediaTypes: ["image/png", "text/plain"],
+                content: "",
+                role: "user",
+            }).attachments
+        ).toMatchObject([
+            {
+                fileName: "report.txt",
+                mimeType: "text/plain",
+                url: "/api/media?path=%2Ftmp%2Freport.txt",
+            },
+        ]);
+        expect(
+            normalizeOpenClawHistoryMessage({
+                content: "done",
+                role: "toolResult",
+                toolCallId: " ",
+                toolName: "",
+                tool_call_id: " call-1 ",
+                tool_name: " exec ",
+            }).toolResult
+        ).toMatchObject({
+            content: "done",
+            id: "call-1",
+            name: "exec",
+        });
+    });
 });
