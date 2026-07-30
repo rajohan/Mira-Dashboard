@@ -4971,24 +4971,17 @@ describe("Mira Dashboard pages", () => {
             type: "SUBAGENT",
             updatedAt: Date.parse("2026-07-19T17:00:00.000Z"),
         });
-        const rawGatewaySessions = [
+        const resyncedSessions = [
             {
-                id: activeSession.id,
-                key: activeSession.key,
-                model: activeSession.model,
+                ...activeSession,
                 updatedAt: Date.parse("2026-07-19T19:00:00.000Z"),
             },
-            {
-                id: selectedSession.id,
-                key: selectedSession.key,
-                model: selectedSession.model,
-                updatedAt: selectedSession.updatedAt,
-            },
+            selectedSession,
         ];
 
         await respondToSocketRequest(socket, "chat.history", { messages: [] });
         await respondToSocketRequest(socket, "sessions.list", {
-            sessions: rawGatewaySessions,
+            sessions: resyncedSessions,
         });
         await emitNormalizedSessions(socket, [activeSession, selectedSession]);
         await waitFor(() => {
@@ -5004,7 +4997,7 @@ describe("Mira Dashboard pages", () => {
             expect(findSocketRequest(socket, "sessions.list")).toBeDefined();
         });
         await respondToSocketRequest(socket, "sessions.list", {
-            sessions: rawGatewaySessions,
+            sessions: resyncedSessions,
         });
         await flushQueuedTimers();
 
@@ -5015,10 +5008,7 @@ describe("Mira Dashboard pages", () => {
             screen.getByRole("button", { name: "Session: main:heartbeat" })
         ).toBeInTheDocument();
 
-        await emitNormalizedSessions(socket, [
-            { ...activeSession, updatedAt: rawGatewaySessions[0]!.updatedAt },
-            selectedSession,
-        ]);
+        await emitNormalizedSessions(socket, resyncedSessions);
         await flushQueuedTimers();
         expect(view.router.state.location.search).toEqual({
             session: selectedSessionKey,
