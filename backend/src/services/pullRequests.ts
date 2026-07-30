@@ -1630,6 +1630,12 @@ async function requireStandalonePullRequest(
             { statusCode: 409 }
         );
     }
+    if (
+        pullRequest.isCrossRepository === true ||
+        pullRequest.headRefName === DEFAULT_BASE
+    ) {
+        return;
+    }
 
     const dependentPullRequestNumbers = await runGhJson(
         [
@@ -1943,6 +1949,7 @@ async function listDashboardPullRequestGraphqlRows(
                         url
                         headRefName
                         headRefOid
+                        isCrossRepository
                         baseRefName
                         author {
                             login
@@ -2233,6 +2240,7 @@ async function getPullRequest(
                     "url",
                     "headRefName",
                     "headRefOid",
+                    "isCrossRepository",
                     "baseRefName",
                     "author",
                     "createdAt",

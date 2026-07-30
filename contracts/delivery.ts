@@ -64,6 +64,7 @@ export const pullRequestSummarySchema = v.object({
     deletions: v.optional(finiteNumberSchema),
     headRefName: trimmedNonEmptyStringSchema,
     headRefOid: v.optional(trimmedNonEmptyStringSchema),
+    isCrossRepository: v.optional(v.boolean()),
     isDraft: v.boolean(),
     latestOpinionatedReviews: v.optional(pullRequestReviewConnectionSchema),
     mergeable: v.optional(v.string()),

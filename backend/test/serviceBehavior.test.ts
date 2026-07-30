@@ -315,7 +315,11 @@ fi
 function writeFakeGhForPullRequestMerge(
     binaryPath: string,
     logPath: string,
-    dependentPullRequestNumbers: number[] = []
+    dependentPullRequestNumbers: number[] = [],
+    options: {
+        headRefName?: string;
+        isCrossRepository?: boolean;
+    } = {}
 ): void {
     const headSha = "1".repeat(40);
     const dependentPullRequestsJson = JSON.stringify(
@@ -337,8 +341,9 @@ if [[ "$1 $2 $3" == "pr view 11" ]]; then
           changedFiles: 1,
           createdAt: "2026-06-24T10:00:00.000Z",
           deletions: 0,
-          headRefName: "merge-branch",
+          headRefName: options.headRefName ?? "merge-branch",
           headRefOid: headSha,
+          isCrossRepository: options.isCrossRepository ?? false,
           isDraft: false,
           mergeable: "MERGEABLE",
           mergeStateStatus: "CLEAN",
@@ -4905,6 +4910,45 @@ fi
         const ghCommands = await Bun.file(ghLog).text();
         expect(ghCommands).not.toContain("pr merge");
         expect(ghCommands).not.toContain("pr close");
+    });
+
+    it("does not treat main-targeted pull requests as dependents of a fork head", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-fork-guard-root-");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const fakeBin = createTemporaryRoot("mira-pr-fork-guard-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        const gitLog = path.join(fakeRoot, "git.log");
+        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog, [12], {
+            headRefName: "main",
+            isCrossRepository: true,
+        });
+        writeFakeGitForPullRequestStackMerge(
+            path.join(fakeBin, "git"),
+            fakeRoot,
+            worktreeRoot,
+            gitLog
+        );
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+
+        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        expect(
+            await approvePullRequest(11, false, {
+                expectedHeadSha: "1".repeat(40),
+                mergeStack: false,
+            })
+        ).toMatchObject({
+            isOk: true,
+            message: "PR #11 merged",
+        });
+
+        const ghCommands = await Bun.file(ghLog).text();
+        expect(ghCommands).not.toContain("pr list");
+        expect(ghCommands).toContain("pr merge 11");
     });
 
     it("merges from the middle of a native stack and retains worktrees above it", async () => {
