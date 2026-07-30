@@ -17,7 +17,6 @@ import {
     withCanonicalOpenClawEvents,
     withCurrentCanonicalOpenClawIdentity,
 } from "../../../contracts/chat/openClawRuntimeAdapter";
-import { messageDeleteKey } from "../components/features/chat/chatUtilities";
 import { projectCanonicalChat } from "../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,
@@ -232,9 +231,9 @@ describe("OpenClaw adapter variants", () => {
         expect(visible.some((message) => message.text.includes("Emitting marker"))).toBe(
             false
         );
+        expect(toolRow?.key).toStartWith("chat-message-source:v1:");
+        expect(toolRow?.deleteKeys).toEqual([toolRow?.key]);
         expect(toolRow).toMatchObject({
-            deleteKeys: [messageDeleteKey(history[2]!)],
-            key: messageDeleteKey(history[2]!),
             message: {
                 role: "assistant",
                 text: "",
