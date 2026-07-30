@@ -394,12 +394,17 @@ export interface ChatVisibilitySettings {
 }
 
 /** Provider-independent source identity retained while projecting one message. */
-export interface ChatMessageProvenance {
+export interface ChatMessageSourceReference {
     id: string;
     origin?: CanonicalChatEvent["origin"];
     provider?: CanonicalChatProviderMetadata;
     sequence?: number;
     source: "openclaw-history" | "openclaw-runtime";
+}
+
+/** Primary source plus any provider rows folded into the same visible message. */
+export interface ChatMessageProvenance extends ChatMessageSourceReference {
+    relatedSources?: ChatMessageSourceReference[];
 }
 
 /** Represents chat history message. */

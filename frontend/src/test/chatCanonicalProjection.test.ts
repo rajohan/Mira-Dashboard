@@ -235,6 +235,138 @@ describe("canonical chat turn projection", () => {
         expect(replay.map((turn) => turn.id)).toEqual(first.map((turn) => turn.id));
     });
 
+    it("preserves provider run identity on history-only turns", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "question",
+                    role: "user",
+                    runId: "history-provider-run",
+                    text: "question",
+                },
+                {
+                    content: "answer",
+                    role: "assistant",
+                    runId: "history-provider-run",
+                    text: "answer",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(1);
+        expect(turns[0]).toMatchObject({
+            lifecycle: "unknown",
+            runId: "history-provider-run",
+        });
+    });
+
+    it("starts a new turn after a final tool-bearing assistant answer", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "first question",
+                    role: "user",
+                    text: "first question",
+                },
+                {
+                    content: "first answer",
+                    isFinal: true,
+                    role: "assistant",
+                    text: "first answer",
+                    toolCalls: [
+                        {
+                            arguments: { query: "first" },
+                            id: "call-1",
+                            name: "search",
+                            toolResult: {
+                                content: "result",
+                                id: "call-1",
+                                name: "search",
+                            },
+                        },
+                    ],
+                },
+                {
+                    content: "second question",
+                    role: "user",
+                    text: "second question",
+                },
+                {
+                    content: "second answer",
+                    role: "assistant",
+                    text: "second answer",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(2);
+        expect(turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+            "user",
+            "assistant",
+        ]);
+        expect(turns[1]?.entries.map((entry) => entry.kind)).toEqual([
+            "user",
+            "assistant",
+        ]);
+    });
+
+    it("carries folded history tool-result provenance into turn ranges", () => {
+        const adapter = new OpenClawChatAdapter();
+        const page = canonicalizeOpenClawHistoryPage(
+            {
+                hasMore: false,
+                messages: [
+                    {
+                        __openclaw: { id: "history-call", seq: 2 },
+                        content: [
+                            {
+                                arguments: { command: "pwd" },
+                                id: "call-1",
+                                name: "functions.exec_command",
+                                type: "toolCall",
+                            },
+                        ],
+                        provider: "openai",
+                        role: "assistant",
+                        runId: "history-run",
+                    },
+                    {
+                        __openclaw: { id: "history-result", seq: 3 },
+                        content: [{ text: "/workspace", type: "text" }],
+                        provider: "openai",
+                        role: "toolResult",
+                        runId: "history-run",
+                        toolCallId: "call-1",
+                        toolName: "functions.exec_command",
+                    },
+                ],
+                offset: 0,
+                totalMessages: 2,
+            },
+            { offset: 0, sessionKey: SESSION }
+        );
+        const history = adapter.history(page.messages);
+        const turns = assembleCanonicalChatTurns(history, [], SESSION);
+
+        expect(history).toHaveLength(1);
+        expect(turns[0]).toMatchObject({
+            runId: "history-run",
+            sequenceEnd: 3,
+            sequenceStart: 2,
+        });
+        expect(turns[0]?.entries[0]?.relatedSources).toEqual([
+            expect.objectContaining({
+                id: expect.stringContaining("history-result"),
+                sequence: 3,
+                source: "openclaw-history",
+            }),
+        ]);
+    });
+
     it("treats an unselected idle chat as an empty matching projection", () => {
         const result = projectChatWithCanonicalShadow(
             [],

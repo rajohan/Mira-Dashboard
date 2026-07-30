@@ -173,6 +173,9 @@ function canonicalEntryKind(message: ChatHistoryMessage): CanonicalChatTurnEntry
     if (role === "user") {
         return "user";
     }
+    if (role === "assistant" && hasPrimaryAnswerContent(message)) {
+        return "assistant";
+    }
     if (
         TOOL_ROLE_VARIANTS.includes(role) ||
         message.toolCalls?.length ||
@@ -241,6 +244,7 @@ function canonicalEntry(
         message: canonicalMessage(message),
         origin: message.provenance?.origin,
         provider: message.provenance?.provider,
+        relatedSources: message.provenance?.relatedSources,
         sequence: message.provenance?.sequence ?? message.runtimeSequence,
         source,
     };
@@ -276,9 +280,12 @@ function uniqueProviders(
     entries: CanonicalChatTurnEntry[]
 ): CanonicalChatProviderMetadata[] | undefined {
     const providers = new Map<string, CanonicalChatProviderMetadata>();
-    for (const provider of entries.flatMap((entry) =>
-        entry.provider ? [entry.provider] : []
-    )) {
+    for (const provider of entries.flatMap((entry) => [
+        ...(entry.provider ? [entry.provider] : []),
+        ...(entry.relatedSources || []).flatMap((source) =>
+            source.provider ? [source.provider] : []
+        ),
+    ])) {
         providers.set(stableCanonicalChatStringify(provider), provider);
     }
     const values = providers.values().toArray();
@@ -290,7 +297,12 @@ function turnSequenceRange(entries: CanonicalChatTurnEntry[]): {
     sequenceStart?: number;
 } {
     const sequences = entries
-        .flatMap((entry) => (entry.sequence === undefined ? [] : [entry.sequence]))
+        .flatMap((entry) => [
+            ...(entry.sequence === undefined ? [] : [entry.sequence]),
+            ...(entry.relatedSources || []).flatMap((source) =>
+                source.sequence === undefined ? [] : [source.sequence]
+            ),
+        ])
         .toSorted((left, right) => left - right);
     return {
         sequenceEnd: sequences.at(-1),
@@ -298,14 +310,25 @@ function turnSequenceRange(entries: CanonicalChatTurnEntry[]): {
     };
 }
 
+function draftRunId(draft: CanonicalTurnDraft): string | undefined {
+    if (draft.run) {
+        return draft.run.runId;
+    }
+    const runIds = new Set(
+        draft.entries.flatMap((entry) =>
+            entry.message.runId ? [entry.message.runId] : []
+        )
+    );
+    return runIds.size === 1 ? runIds.values().next().value : undefined;
+}
+
 function uniqueTurnId(
     sessionKey: string,
     draft: CanonicalTurnDraft,
     occurrences: Map<string, number>
 ): string {
-    const sourceIdentity = draft.run
-        ? `run:${draft.run.runId}`
-        : `entry:${draft.entries[0]!.id}`;
+    const runId = draftRunId(draft);
+    const sourceIdentity = runId ? `run:${runId}` : `entry:${draft.entries[0]!.id}`;
     const base = `turn:${encodeURIComponent(sessionKey)}:${sourceIdentity}`;
     const occurrence = occurrences.get(base) ?? 0;
     occurrences.set(base, occurrence + 1);
@@ -317,13 +340,14 @@ function canonicalTurn(
     draft: CanonicalTurnDraft,
     occurrences: Map<string, number>
 ): CanonicalChatTurn {
+    const runId = draftRunId(draft);
     return {
         entries: draft.entries,
         id: uniqueTurnId(sessionKey, draft, occurrences),
         lifecycle: draft.run?.phase ?? "unknown",
         providers: uniqueProviders(draft.entries),
         runAliases: draft.run?.aliases,
-        runId: draft.run?.runId,
+        runId,
         schemaVersion: CANONICAL_CHAT_TURN_SCHEMA_VERSION,
         ...turnSequenceRange(draft.entries),
         sessionKey,

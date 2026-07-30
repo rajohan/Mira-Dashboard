@@ -9,6 +9,21 @@ import { nonNegativeIntegerSchema, parseContract } from "./runtime";
 export const CANONICAL_CHAT_TURN_SCHEMA_VERSION = 1;
 
 const nonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
+const canonicalChatTurnEntrySourceSchema = v.picklist([
+    "dashboard-optimistic",
+    "openclaw-history",
+    "openclaw-runtime",
+    "reconciled",
+]);
+const canonicalChatTurnSourceReferenceSchema = v.strictObject({
+    id: nonEmptyStringSchema,
+    origin: v.optional(
+        v.picklist(["openclaw-chat", "openclaw-runtime", "openclaw-session"])
+    ),
+    provider: v.optional(canonicalChatProviderMetadataSchema),
+    sequence: v.optional(nonNegativeIntegerSchema),
+    source: canonicalChatTurnEntrySourceSchema,
+});
 
 export const canonicalChatTurnEntrySchema = v.strictObject({
     id: nonEmptyStringSchema,
@@ -18,13 +33,9 @@ export const canonicalChatTurnEntrySchema = v.strictObject({
         v.picklist(["openclaw-chat", "openclaw-runtime", "openclaw-session"])
     ),
     provider: v.optional(canonicalChatProviderMetadataSchema),
+    relatedSources: v.optional(v.array(canonicalChatTurnSourceReferenceSchema)),
     sequence: v.optional(nonNegativeIntegerSchema),
-    source: v.picklist([
-        "dashboard-optimistic",
-        "openclaw-history",
-        "openclaw-runtime",
-        "reconciled",
-    ]),
+    source: canonicalChatTurnEntrySourceSchema,
 });
 
 export const canonicalChatTurnSchema = v.strictObject({
@@ -43,6 +54,9 @@ export const canonicalChatTurnSchema = v.strictObject({
 });
 
 export type CanonicalChatTurnEntry = v.InferOutput<typeof canonicalChatTurnEntrySchema>;
+export type CanonicalChatTurnSourceReference = v.InferOutput<
+    typeof canonicalChatTurnSourceReferenceSchema
+>;
 export type CanonicalChatTurn = v.InferOutput<typeof canonicalChatTurnSchema>;
 
 /**
