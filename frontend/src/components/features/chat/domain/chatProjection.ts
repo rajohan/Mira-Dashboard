@@ -1,3 +1,4 @@
+import { canonicalChatContentFingerprint } from "../../../../../../contracts/chatCanonicalMessage";
 import {
     type ChatHistoryMessage,
     type ChatRow,
@@ -1828,11 +1829,25 @@ export function renderChatProjectionRows(
     deletedMessageKeys: ReadonlySet<string>
 ): ChatRow[] {
     const deleteKeyOccurrences = new Map<string, number>();
+    const naturalDeleteKeys = new Set(
+        messages.flatMap((message) => projectedMessageDeleteKeys(message))
+    );
+    const generatedDeleteKeys = new Set<string>();
     return messages.flatMap((message) => {
         const deleteKeys = projectedMessageDeleteKeys(message).map((baseKey) => {
             const occurrence = deleteKeyOccurrences.get(baseKey) ?? 0;
             deleteKeyOccurrences.set(baseKey, occurrence + 1);
-            return chatProjectionRowOccurrenceKey(baseKey, occurrence);
+            if (occurrence === 0) {
+                return baseKey;
+            }
+            const key = unusedChatProjectionRowOccurrenceKey(
+                baseKey,
+                occurrence,
+                naturalDeleteKeys,
+                generatedDeleteKeys
+            );
+            generatedDeleteKeys.add(key);
+            return key;
         });
         return deleteKeys.some((key) => deletedMessageKeys.has(key))
             ? []
@@ -1898,20 +1913,51 @@ export function appendChatProjectionStatus(
     return typing ? [...rows, typing] : rows;
 }
 
-function chatProjectionRowOccurrenceKey(baseKey: string, occurrence: number): string {
-    return occurrence === 0 ? baseKey : `${baseKey}::row-occurrence:${occurrence}`;
+function chatProjectionRowOccurrenceKey(
+    baseKey: string,
+    occurrence: number,
+    collision: number
+): string {
+    return [
+        "chat-row-occurrence",
+        "v1",
+        occurrence,
+        collision,
+        canonicalChatContentFingerprint(baseKey),
+    ].join(":");
+}
+
+function unusedChatProjectionRowOccurrenceKey(
+    baseKey: string,
+    occurrence: number,
+    reservedKeys: ReadonlySet<string>,
+    usedKeys: ReadonlySet<string>
+): string {
+    let collision = 0;
+    let key = chatProjectionRowOccurrenceKey(baseKey, occurrence, collision);
+    while (reservedKeys.has(key) || usedKeys.has(key)) {
+        collision += 1;
+        key = chatProjectionRowOccurrenceKey(baseKey, occurrence, collision);
+    }
+    return key;
 }
 
 function uniqueChatProjectionRowKeys(rows: ChatRow[]): ChatRow[] {
+    const reservedKeys = new Set(rows.map((row) => row.key));
     const usedKeys = new Set<string>();
     const occurrences = new Map<string, number>();
     return rows.map((row) => {
         const baseKey = row.key;
         let occurrence = occurrences.get(baseKey) ?? 0;
         let key = baseKey;
-        while (usedKeys.has(key)) {
+        if (usedKeys.has(key)) {
             occurrence += 1;
-            key = chatProjectionRowOccurrenceKey(baseKey, occurrence);
+            key = unusedChatProjectionRowOccurrenceKey(
+                baseKey,
+                occurrence,
+                reservedKeys,
+                usedKeys
+            );
         }
         occurrences.set(baseKey, occurrence);
         usedKeys.add(key);

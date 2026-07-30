@@ -954,7 +954,9 @@ describe("canonical chat turn projection", () => {
             "second answer",
         ]);
         expect(new Set(keys).size).toBe(keys.length);
-        expect(keys[2]).toBe(`${keys[0]}::row-occurrence:1`);
+        expect(keys[0]).toBe("user::no-time::no-run::repeat");
+        expect(keys[2]).toStartWith("chat-row-occurrence:v1:");
+        expect(keys[2]).not.toBe(keys[0]);
         expect(first.projection.rows[0]?.deleteKeys).toEqual([keys[0]]);
         expect(first.projection.rows[2]?.deleteKeys).toEqual([keys[2]]);
         expect(replay.projection.rows.map((row) => row.key)).toEqual(keys);
@@ -982,6 +984,52 @@ describe("canonical chat turn projection", () => {
         expect(
             withoutSecondPrompt.projection.rows.map((row) => row.message.text)
         ).toEqual(["repeat", "first answer", "second answer"]);
+    });
+
+    it("keeps generated occurrence keys disjoint from natural message keys", () => {
+        const history = [
+            { content: "repeat", role: "user", text: "repeat" },
+            { content: "first answer", role: "assistant", text: "first answer" },
+            { content: "repeat", role: "user", text: "repeat" },
+            { content: "second answer", role: "assistant", text: "second answer" },
+            {
+                content: "repeat::row-occurrence:1",
+                role: "user",
+                text: "repeat::row-occurrence:1",
+            },
+            { content: "third answer", role: "assistant", text: "third answer" },
+        ];
+        const projection = projectCanonicalChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).projection;
+        const userRows = projection.rows.filter(
+            (row) => row.message.role.toLowerCase() === "user"
+        );
+        const deleteKeys = userRows.map((row) => row.deleteKeys?.[0]);
+
+        expect(userRows).toHaveLength(3);
+        expect(deleteKeys.every((key) => typeof key === "string")).toBe(true);
+        expect(new Set(deleteKeys).size).toBe(3);
+        for (const row of userRows) {
+            const withoutRow = projectCanonicalChat(
+                history,
+                createChatRuntimeState(),
+                SESSION,
+                createChatVisibility(true, true),
+                true,
+                new Set(row.deleteKeys)
+            ).projection;
+            expect(
+                withoutRow.rows.filter(
+                    (candidate) => candidate.message.role.toLowerCase() === "user"
+                )
+            ).toHaveLength(2);
+        }
     });
 
     it("fails closed when canonical validation detects an invalid session", () => {
