@@ -505,7 +505,17 @@ When changing chat event handling, test these cases:
 - versioned, synthetic/redacted incident fixtures replay both Codex/GPT's
   separated event stream (including a restart run alias) and Synthetic's mixed
   `session.message` format through the production adapter, reducer, and
-  projection, with the same semantic rows and unique projected row keys;
+  projection, with the same semantic rows and unique projected row keys; a
+  dedicated Codex/GPT restart fixture also repeats identical user history rows
+  and runtime echoes to verify one canonical user row;
+- the deterministic replay state machine runs 64 seeded transition traces with
+  duplicate envelopes, shuffled snapshot batches, stale replay after newer
+  sequences, two reconnects, partial snapshots followed by live ranges, partial
+  or duplicate history, a two-hop restart alias chain, compaction during the
+  parent run, and steers before and after both restarts; each trace must equal
+  straight-through canonical state and projection. Reordering is generated only
+  inside a replay batch or sequence-contiguous live range because
+  `runtimeSequence`, not arrival order, is the causal authority;
 - streaming text merges with final assistant messages;
 - a final message does not duplicate a local pending row, recovered-text echo,
   diagnostic-only row, or an earlier final from the same run;

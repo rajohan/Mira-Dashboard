@@ -8,6 +8,7 @@ import {
 const FIXTURE_URLS = [
     new URL("fixtures/chat/codex-gpt-restart.json", import.meta.url),
     new URL("fixtures/chat/synthetic-model-session-message.json", import.meta.url),
+    new URL("fixtures/chat/codex-gpt-duplicate-user-restart.json", import.meta.url),
 ];
 
 describe("chat incident fixtures", () => {
