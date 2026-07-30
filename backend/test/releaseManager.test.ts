@@ -52,6 +52,7 @@ import {
     RELEASE_MANIFEST_FILE_NAME,
     writeReleaseManifest,
 } from "../src/releaseManifest.ts";
+import { captureRejection } from "./support/rejections.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const temporaryRoots: string[] = [];
@@ -703,24 +704,29 @@ describe("Dashboard immutable release manager", () => {
         expect(restoredRegistryState.previous).toBeUndefined();
 
         const runtimeRoot = temporaryReleasesRoot();
-        await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
+        await createManagedRelease(
+            runtimeRoot,
+            FIRST_COMMIT,
+            FIRST_COMMIT,
+            "0.0.0+missing"
+        );
         const incompatibleRelease = await loadManagedRelease(runtimeRoot, FIRST_COMMIT);
         expect(() => assertDashboardReleaseRuntimeAvailable(incompatibleRelease)).toThrow(
-            "requires unavailable managed Bun runtime 0.0.0"
+            "requires unavailable managed Bun runtime 0.0.0+missing"
         );
         expect(
             activateDashboardRelease(FIRST_COMMIT, runtimeRoot, {
                 ...SCHEMA_6_OPTIONS,
                 hasRuntime: () => false,
             })
-        ).rejects.toThrow("requires unavailable managed Bun runtime 0.0.0");
+        ).rejects.toThrow("requires unavailable managed Bun runtime 0.0.0+missing");
 
         const cachedMajorRuntimeRoot = temporaryReleasesRoot();
         await createManagedRelease(
             cachedMajorRuntimeRoot,
             FIRST_COMMIT,
             FIRST_COMMIT,
-            "1.3.14"
+            "1.3.14+cached"
         );
         const cachedMajorRuntimeRelease = await loadManagedRelease(
             cachedMajorRuntimeRoot,
@@ -728,14 +734,14 @@ describe("Dashboard immutable release manager", () => {
         );
         expect(() =>
             assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
-                hasRuntime: (version) => version === "1.3.14",
+                hasRuntime: (version) => version === "1.3.14+cached",
             })
         ).not.toThrow();
         expect(() =>
             assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
                 hasRuntime: () => false,
             })
-        ).toThrow("requires unavailable managed Bun runtime 1.3.14");
+        ).toThrow("requires unavailable managed Bun runtime 1.3.14+cached");
     });
 
     it("checks the effective live schema after a code-only rollback", async () => {
@@ -977,10 +983,14 @@ describe("Dashboard immutable release manager", () => {
         let preparationCalls = 0;
 
         try {
-            expect(readDashboardReleaseState(root)).rejects.toThrow(
+            const statusError = await captureRejection(() =>
+                readDashboardReleaseState(root)
+            );
+            expect(statusError).toBeInstanceOf(Error);
+            expect((statusError as Error).message).toContain(
                 "Another managed release transition is in progress"
             );
-            expect(
+            const activationError = await captureRejection(() =>
                 activateDashboardRelease(SECOND_COMMIT, root, {
                     ...SCHEMA_6_OPTIONS,
                     prepareReleaseTransition: () => {
@@ -990,7 +1000,11 @@ describe("Dashboard immutable release manager", () => {
                         });
                     },
                 })
-            ).rejects.toThrow("Another managed release transition is in progress");
+            );
+            expect(activationError).toBeInstanceOf(Error);
+            expect((activationError as Error).message).toContain(
+                "Another managed release transition is in progress"
+            );
             expect(preparationCalls).toBe(0);
             expect(readlinkSync(path.join(root, "current"))).toBe(
                 `releases/${FIRST_COMMIT}`

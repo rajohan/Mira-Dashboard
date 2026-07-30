@@ -1513,6 +1513,8 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             executions: [],
             summary: {
                 activeResourceClasses: [],
+                claimsPaused: false,
+                claimsPausedAt: undefined,
                 queued: 0,
                 running: 0,
                 workerCapacity: 1,

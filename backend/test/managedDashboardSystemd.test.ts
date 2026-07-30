@@ -18,6 +18,7 @@ import {
 } from "../src/managedDashboardSystemd.ts";
 import { MANAGED_DASHBOARD_UNIT_NAMES } from "../src/managedDashboardUnitPolicy.ts";
 import { loadManagedRelease, managedReleasePath } from "../src/releaseManager.ts";
+import { captureRejection } from "./support/rejections.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const COMMIT_SHA = "a".repeat(40);
@@ -43,15 +44,6 @@ async function managedReleaseWithUnits(releasesRoot: string) {
     }
     await createReleaseFixture(releasePath, COMMIT_SHA);
     return loadManagedRelease(releasesRoot, COMMIT_SHA);
-}
-
-async function captureRejection(operation: () => Promise<unknown>): Promise<unknown> {
-    try {
-        await operation();
-    } catch (error) {
-        return error;
-    }
-    throw new Error("Expected operation to reject");
 }
 
 afterEach(() => {
@@ -96,7 +88,7 @@ describe("managed Dashboard systemd reconciliation", () => {
             );
             expect(statSync(path.join(unitRoot, unit)).mode & 0o777).toBe(0o644);
         }
-        expect(calls).toHaveLength(3);
+        expect(calls).toHaveLength(MANAGED_DASHBOARD_UNIT_NAMES.length + 1);
 
         calls.length = 0;
         expect(
@@ -104,7 +96,7 @@ describe("managed Dashboard systemd reconciliation", () => {
         ).toMatchObject({
             changed: [],
         });
-        expect(calls).toHaveLength(3);
+        expect(calls).toHaveLength(MANAGED_DASHBOARD_UNIT_NAMES.length + 1);
     });
 
     it("repairs unit modes even when the managed content already matches", async () => {

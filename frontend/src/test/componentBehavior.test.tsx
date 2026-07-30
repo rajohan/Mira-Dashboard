@@ -3418,9 +3418,12 @@ describe("shared component helpers", () => {
 
     it("shows queue pressure and cancels an active job execution", async () => {
         let claimsPaused = false;
+        let delayNextPause = true;
         let executionStatus: "cancelled" | "queued" = "queued";
+        let failNextClaimsUpdate = false;
+        const pauseMutationGate = Promise.withResolvers<void>();
         const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
-            return Promise.try(() => {
+            return Promise.try(async () => {
                 const url = requestUrl(input);
                 const method = init?.method ?? "GET";
                 const execution = {
@@ -3464,9 +3467,18 @@ describe("shared component helpers", () => {
                 }
 
                 if (url === "/api/job-executions/claims" && method === "PATCH") {
-                    claimsPaused = (
+                    const requestedPause = (
                         JSON.parse(requestBodyText(init?.body)) as { paused: boolean }
                     ).paused;
+                    if (failNextClaimsUpdate) {
+                        failNextClaimsUpdate = false;
+                        return Response.json({}, { status: 500 });
+                    }
+                    if (requestedPause && delayNextPause) {
+                        delayNextPause = false;
+                        await pauseMutationGate.promise;
+                    }
+                    claimsPaused = requestedPause;
                     return Response.json({
                         isOk: true,
                         state: {
@@ -3511,6 +3523,11 @@ describe("shared component helpers", () => {
         await userEvent.click(
             screen.getByRole("button", { name: "Pause worker claims" })
         );
+        expect(await screen.findByText("Saving...")).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: "Pause worker claims" })
+        ).toBeDisabled();
+        pauseMutationGate.resolve();
         await waitFor(() => {
             expect(claimsPaused).toBe(true);
             expect(screen.getByText("Worker paused")).toBeInTheDocument();
@@ -3527,6 +3544,12 @@ describe("shared component helpers", () => {
             expect(claimsPaused).toBe(false);
             expect(screen.getByText("Worker idle")).toBeInTheDocument();
         });
+        failNextClaimsUpdate = true;
+        await userEvent.click(
+            screen.getByRole("button", { name: "Pause worker claims" })
+        );
+        expect(await screen.findByText("HTTP 500")).toBeInTheDocument();
+        expect(claimsPaused).toBe(false);
 
         await userEvent.click(screen.getByRole("button", { name: "Cancel Host backup" }));
 

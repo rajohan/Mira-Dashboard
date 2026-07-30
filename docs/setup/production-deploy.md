@@ -141,9 +141,9 @@ Managed releases carry checksummed copies of
 install a changed complete pair with mode `0644`, reload the user manager, and
 verify that both units loaded from `~/.config/systemd/user`. If reconciliation
 fails, the pre-operation files are restored before the release transition
-returns an error. New VPS provisioning must still perform the initial install
-and `enable --now`; ordinary deployments thereafter update the installed unit
-definitions automatically.
+returns an error. On a new VPS, `deploy:bootstrap` performs the first activation
+and unit installation, then enables and starts both services. Ordinary
+deployments thereafter update the installed unit definitions automatically.
 
 The first rollout of this unit-bundle contract is manual and supervised because
 its rollback release predates the bundle and is deliberately not special-cased

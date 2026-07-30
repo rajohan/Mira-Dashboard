@@ -6,6 +6,7 @@ import { writeCliError, writeCliOutput } from "./lib/cliOutput.ts";
 import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
+import { parseSystemdProperties } from "./lib/systemdProperties.ts";
 import {
     bunExecutableRuntimeIdentity,
     installManagedBunRuntime,
@@ -278,17 +279,7 @@ export function assertManagedDashboardUnitProperties(
         `MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`,
     ];
     const expectedWorkingDirectory = `${contract.releaseRoot}/backend`;
-    const actual = new Map(
-        properties
-            .split("\n")
-            .filter(Boolean)
-            .map((line) => {
-                const separator = line.indexOf("=");
-                return separator === -1
-                    ? [line, ""]
-                    : [line.slice(0, separator), line.slice(separator + 1)];
-            })
-    );
+    const actual = parseSystemdProperties(properties);
     if (actual.get("WorkingDirectory") !== expectedWorkingDirectory) {
         throw new Error(
             `${unit} must run from managed current/backend before Dashboard deployment`

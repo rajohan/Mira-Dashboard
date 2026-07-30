@@ -60,10 +60,11 @@ afterEach(() => {
 });
 
 describe("managed Bun runtimes", () => {
-    it("accepts bounded semver versions across Bun majors", () => {
-        expect(isBunRuntimeVersion("1.3.14")).toBe(true);
-        expect(isBunRuntimeVersion("2.0.0")).toBe(true);
+    it("accepts only bounded revision-qualified identities across Bun majors", () => {
+        expect(isBunRuntimeVersion("1.3.14+0d9b296af")).toBe(true);
         expect(isBunRuntimeVersion("2.0.0-canary.1+build.2")).toBe(true);
+        expect(isBunRuntimeVersion("1.3.14")).toBe(false);
+        expect(isBunRuntimeVersion("2.0.0")).toBe(false);
         expect(isBunRuntimeVersion("1.3")).toBe(false);
         expect(isBunRuntimeVersion("1.3.14foo")).toBe(false);
         expect(isBunRuntimeVersion("01.3.14")).toBe(false);
@@ -112,7 +113,11 @@ describe("managed Bun runtimes", () => {
         const root = temporaryRoot("mira-managed-bun-invalid");
         const runtimeRoot = path.join(root, "runtimes");
         const source = path.join(root, "bun-source");
+        const versionOnlySource = path.join(root, "bun-version-only");
         writeFakeBun(source, "2.0.0", "2.0.0+feedface");
+        writeFakeBun(versionOnlySource, "2.0.0", "2.0.0");
+
+        expect(bunExecutableRuntimeIdentity(versionOnlySource)).toBeUndefined();
 
         const installError = await installManagedBunRuntime(source, "1.3.14", {
             runtimeRoot,
@@ -122,13 +127,13 @@ describe("managed Bun runtimes", () => {
         );
         expect(installError).toBeInstanceOf(Error);
         expect((installError as Error).message).toContain(
-            "does not report expected version 1.3.14"
+            "must be revision-qualified semver"
         );
         expect(() => requireManagedBunRuntime("2.0.0", runtimeRoot)).toThrow(
-            "Managed Bun runtime 2.0.0 is not available"
+            "must be revision-qualified semver"
         );
         expect(() => managedBunRuntimeExecutablePath("../2.0.0", runtimeRoot)).toThrow(
-            "must be valid semver"
+            "must be revision-qualified semver"
         );
     });
 
@@ -280,7 +285,7 @@ describe("managed Bun runtimes", () => {
         });
         expect(versionOnly.exitCode).toBe(78);
         expect(new TextDecoder().decode(versionOnly.stderr)).toContain(
-            "runtime version does not match"
+            "release manifest has no valid Bun runtime"
         );
 
         const rejected = Bun.spawnSync({

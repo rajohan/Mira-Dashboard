@@ -13,6 +13,7 @@ import { errorMessage } from "../lib/errors.ts";
 import { isJobResourceClass, withJobResourceClass } from "../lib/jobResources.ts";
 import { runWithLogContext } from "../lib/logContext.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { parseSystemdProperties } from "../lib/systemdProperties.ts";
 import { parseJobDisableIntent } from "./jobDisableIntent.ts";
 import {
     claimNextJobExecution,
@@ -1286,17 +1287,8 @@ function readSystemdUnitState(unit: string): SystemdUnitState {
             unit,
         });
     }
-    const properties = new Map(
-        new TextDecoder()
-            .decode(result.stdout)
-            .trim()
-            .split("\n")
-            .map((line) => {
-                const separator = line.indexOf("=");
-                return separator === -1
-                    ? [line, ""]
-                    : [line.slice(0, separator), line.slice(separator + 1)];
-            })
+    const properties = parseSystemdProperties(
+        new TextDecoder().decode(result.stdout).trim()
     );
     if (properties.get("LoadState") === "not-found") {
         return "missing";
@@ -1512,13 +1504,13 @@ function executorTick(): void {
     }
     scheduledJobRuntimeState.isExecutorTickRunning = true;
     try {
-        if (getJobWorkerClaimsState().paused) {
-            return;
-        }
         // The in-memory pause is lost when the deployment restarts this worker.
         // Keep replacement workers idle until the detached guardian records a
         // terminal deployment status in the shared database.
         if (hasPendingDeploymentCutover()) {
+            return;
+        }
+        if (getJobWorkerClaimsState().paused) {
             return;
         }
         const execution = claimNextJobExecution(

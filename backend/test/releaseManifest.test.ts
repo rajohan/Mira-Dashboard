@@ -28,6 +28,7 @@ import {
     verifyReleaseArtifacts,
     writeReleaseManifest,
 } from "../src/releaseManifest.ts";
+import { captureRejection } from "./support/rejections.ts";
 
 const temporaryRoots: string[] = [];
 const TEST_COMMIT = "a".repeat(40);
@@ -314,7 +315,11 @@ describe("Dashboard release manifest", () => {
             path.join(partialRoot, "systemd", "mira-dashboard.service"),
             "[Service]\nExecStart=/dashboard\n"
         );
-        expect(writeReleaseManifest(manifestOptions(partialRoot))).rejects.toThrow(
+        const partialBundleError = await captureRejection(() =>
+            writeReleaseManifest(manifestOptions(partialRoot))
+        );
+        expect(partialBundleError).toBeInstanceOf(Error);
+        expect((partialBundleError as Error).message).toContain(
             "Managed systemd release artifacts must be complete"
         );
     });
@@ -574,7 +579,7 @@ describe("Dashboard release manifest", () => {
             `${JSON.stringify(
                 {
                     ...manifest,
-                    bunVersion: "0.0.0",
+                    bunVersion: "0.0.0+other",
                 },
                 undefined,
                 2

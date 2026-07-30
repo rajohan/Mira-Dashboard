@@ -634,6 +634,30 @@ printf 'LoadState=loaded\nActiveState=active\n'
         finishJobExecution(queued.id, workerId, "success", undefined, {});
     });
 
+    it("reconciles orphaned deployment cutovers while new claims are paused", () => {
+        const deploymentId = createVerifyingDeployment(
+            "2026-07-26T03:00:00.000Z",
+            "c0ffee12"
+        );
+        setJobWorkerClaimsPaused(true, "2026-07-30T08:00:00.000Z");
+
+        startScheduledJobExecutor();
+
+        expect(
+            database
+                .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                .get(deploymentId)
+        ).toEqual({
+            note: "Interrupted deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
+            status: "failed",
+        });
+        expect(
+            database
+                .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                .get(deploymentId)
+        ).toBeNull();
+    });
+
     it("prioritizes interactive work and enforces global capacity", () => {
         const heavyJobId = createScheduledTestJob("host-heavy", "Heavy test job");
         const interactiveJobId = createScheduledTestJob(

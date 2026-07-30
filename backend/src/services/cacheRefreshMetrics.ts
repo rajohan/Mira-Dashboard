@@ -39,6 +39,7 @@ const emptyCacheRefreshMetrics = (): CacheRefreshMetrics => ({
 let cacheRefreshMetricsState = emptyCacheRefreshMetrics();
 let activeSession:
     | {
+          directoryValidated: boolean;
           instanceId: string;
           snapshotPath: string | undefined;
           startedAt: string;
@@ -109,7 +110,6 @@ function writeSnapshot(
     snapshot: CacheRefreshMetricsSnapshot
 ): void {
     const directoryPath = path.dirname(snapshotPath);
-    ensurePrivateRuntimeDirectory(directoryPath);
     const temporaryPath = path.join(
         directoryPath,
         `.${SNAPSHOT_FILE_NAME}.${process.pid}.${Bun.randomUUIDv7()}.tmp`
@@ -133,6 +133,10 @@ function writeSnapshot(
 
 function publishSnapshot(): void {
     if (!activeSession?.snapshotPath) return;
+    if (!activeSession.directoryValidated) {
+        ensurePrivateRuntimeDirectory(path.dirname(activeSession.snapshotPath));
+        activeSession.directoryValidated = true;
+    }
     writeSnapshot(activeSession.snapshotPath, {
         instanceId: activeSession.instanceId,
         metrics: metricsSnapshot(),
@@ -212,6 +216,7 @@ export function startCacheRefreshMetricsSession(
     if (activeSession) return;
     cacheRefreshMetricsState = emptyCacheRefreshMetrics();
     activeSession = {
+        directoryValidated: false,
         instanceId: Bun.randomUUIDv7(),
         snapshotPath:
             options.snapshotPath ??

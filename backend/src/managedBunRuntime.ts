@@ -8,7 +8,7 @@ import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 
 const BUN_RUNTIME_VERSION_PATTERN =
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*))(?:\.(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*)))*)?(?:\+[\dA-Za-z-]+(?:\.[\dA-Za-z-]+)*)?$/u;
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*))(?:\.(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][\dA-Za-z-]*)))*)?\+[\dA-Za-z-]+(?:\.[\dA-Za-z-]+)*$/u;
 const BUN_RUNTIME_VERSION_MAX_LENGTH = 64;
 const RETIRED_RUNTIME_DIRECTORY_PATTERN =
     /^\.retired-[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
@@ -26,7 +26,8 @@ export interface ManagedBunRuntimePruneResult {
 }
 
 /**
- * Accepts only bounded, complete semantic versions that are safe as path segments.
+ * Accepts only bounded, revision-qualified semantic versions that are safe as
+ * path segments.
  * @param value Candidate Bun version.
  * @returns Whether the candidate is a strict Bun runtime version.
  */
@@ -40,7 +41,9 @@ export function isBunRuntimeVersion(value: string): boolean {
 
 function assertBunRuntimeVersion(value: string): string {
     if (!isBunRuntimeVersion(value)) {
-        throw new TypeError("Managed Bun runtime version must be valid semver");
+        throw new TypeError(
+            "Managed Bun runtime version must be revision-qualified semver"
+        );
     }
     return value;
 }

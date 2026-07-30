@@ -138,7 +138,10 @@ since the current worker process started, not historical totals and not SQLite
 rows. Production worker and web are separate processes, so the worker
 atomically mirrors its in-memory counters to an owner-only snapshot below the
 user's reboot-volatile `XDG_RUNTIME_DIR`; the web process samples that snapshot.
-Worker restart resets every counter.
+The managed processes are systemd user services, so their user manager supplies
+`XDG_RUNTIME_DIR`; new-host bootstrap enables linger so `/run/user/<uid>` is
+also created for boot-time starts without an interactive login. Worker restart
+resets every counter.
 
 ### Status And Heartbeat Projections
 

@@ -2118,7 +2118,7 @@ function releaseCutoverShellFunctions(): string[] {
         "resolve_release_bun() {",
         '  release_root="$1"',
         '  bun_version="$(/usr/bin/jq --exit-status --raw-output \'.bunVersion | select(type == "string" and length > 0 and length <= 64)\' "$release_root/release-manifest.json")" || return 1',
-        String.raw`  [[ "$bun_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || return 1`,
+        String.raw`  [[ "$bun_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)$ ]] || return 1`,
         '  runtime_path="$project_root/production/runtimes/bun/$bun_version/bun"',
         '  [ -f "$runtime_path" ] && [ -x "$runtime_path" ] && [ ! -L "$runtime_path" ] || return 1',
         '  [ "$(/usr/bin/realpath --canonicalize-existing "$runtime_path")" = "$runtime_path" ] || return 1',

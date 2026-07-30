@@ -6,6 +6,7 @@ import path from "node:path";
 import { guardedPath, writeTextNoFollowAnchoredGuarded } from "./lib/guardedOps.ts";
 import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
+import { parseSystemdProperties } from "./lib/systemdProperties.ts";
 import {
     MANAGED_DASHBOARD_UNIT_ARTIFACTS,
     MANAGED_DASHBOARD_UNIT_NAMES,
@@ -136,17 +137,7 @@ async function reloadAndVerifyUnits(
             "--property=LoadState",
             "--no-pager",
         ]);
-        const properties = new Map(
-            result.stdout
-                .split("\n")
-                .filter(Boolean)
-                .map((line) => {
-                    const separator = line.indexOf("=");
-                    return separator === -1
-                        ? [line, ""]
-                        : [line.slice(0, separator), line.slice(separator + 1)];
-                })
-        );
+        const properties = parseSystemdProperties(result.stdout);
         if (
             (properties.get("DropInPaths") ?? "") !== "" ||
             properties.get("LoadState") !== "loaded" ||
