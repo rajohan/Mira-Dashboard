@@ -141,21 +141,22 @@ Create body:
 
 ## Jobs And Cron
 
-| Method  | Path                             | Purpose                                                                               |
-| ------- | -------------------------------- | ------------------------------------------------------------------------------------- |
-| `GET`   | `/api/jobs`                      | Lists Dashboard scheduled jobs.                                                       |
-| `GET`   | `/api/jobs/:id`                  | Reads a scheduled job.                                                                |
-| `PATCH` | `/api/jobs/:id`                  | Updates scheduled job settings and intentional-disable metadata.                      |
-| `POST`  | `/api/jobs/:id/run`              | Queues a scheduled job and returns `202`.                                             |
-| `GET`   | `/api/job-executions`            | Lists recent executions plus queue/worker summary.                                    |
-| `GET`   | `/api/job-executions/:id`        | Reads one execution, including its persisted progress/result output snapshot.         |
-| `POST`  | `/api/job-executions/:id/cancel` | Cancels queued work or requests cooperative cancellation of a running execution.      |
-| `GET`   | `/api/jobs/:id/runs`             | Lists job run history.                                                                |
-| `GET`   | `/api/cron/jobs`                 | Lists OpenClaw cron jobs and open linked tasks.                                       |
-| `POST`  | `/api/cron/jobs/:id/run`         | Runs an OpenClaw cron job.                                                            |
-| `POST`  | `/api/cron/jobs/:id/toggle`      | Enables/disables an OpenClaw cron job and updates its Dashboard-owned disable intent. |
-| `POST`  | `/api/cron/jobs/:id/update`      | Updates an OpenClaw cron job patch.                                                   |
-| `POST`  | `/api/cron/jobs/:id/delete`      | Deletes an OpenClaw cron job.                                                         |
+| Method  | Path                             | Purpose                                                                                |
+| ------- | -------------------------------- | -------------------------------------------------------------------------------------- |
+| `GET`   | `/api/jobs`                      | Lists Dashboard scheduled jobs.                                                        |
+| `GET`   | `/api/jobs/:id`                  | Reads a scheduled job.                                                                 |
+| `PATCH` | `/api/jobs/:id`                  | Updates scheduled job settings and intentional-disable metadata.                       |
+| `POST`  | `/api/jobs/:id/run`              | Queues a scheduled job and returns `202`.                                              |
+| `GET`   | `/api/job-executions`            | Lists recent executions plus queue/worker summary; `?include=claims` adds pause state. |
+| `PATCH` | `/api/job-executions/claims`     | Pauses/resumes new worker claims; running work is not cancelled.                       |
+| `GET`   | `/api/job-executions/:id`        | Reads one execution, including its persisted progress/result output snapshot.          |
+| `POST`  | `/api/job-executions/:id/cancel` | Cancels queued work or requests cooperative cancellation of a running execution.       |
+| `GET`   | `/api/jobs/:id/runs`             | Lists job run history.                                                                 |
+| `GET`   | `/api/cron/jobs`                 | Lists OpenClaw cron jobs and open linked tasks.                                        |
+| `POST`  | `/api/cron/jobs/:id/run`         | Runs an OpenClaw cron job.                                                             |
+| `POST`  | `/api/cron/jobs/:id/toggle`      | Enables/disables an OpenClaw cron job and updates its Dashboard-owned disable intent.  |
+| `POST`  | `/api/cron/jobs/:id/update`      | Updates an OpenClaw cron job patch.                                                    |
+| `POST`  | `/api/cron/jobs/:id/delete`      | Deletes an OpenClaw cron job.                                                          |
 
 When a Dashboard job or OpenClaw cron job is intentionally disabled, its update
 body may include `disableIntent: { mode, comment, until? }`. `mode` is `until`
@@ -172,6 +173,10 @@ shape wait by observing the persisted row, but an HTTP disconnect or web
 restart does not cancel the action. Poll the execution detail endpoint for its
 bounded progress/output snapshot, and use the explicit cancel endpoint when a
 queued or running action should stop.
+
+The claims mutation requires recent MFA. Its `{ paused: boolean }` state is
+durable across worker restarts. Paused executions remain queued, while an
+already-running execution finishes cooperatively.
 
 ## OpenClaw Config
 

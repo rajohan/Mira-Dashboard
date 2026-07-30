@@ -13,6 +13,7 @@ import {
     auditProvenanceForTarget,
     writeAuditEvent,
 } from "./auditEvents.ts";
+import { getJobWorkerClaimsState } from "./jobWorkerControl.ts";
 
 const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_EXECUTION_LIST_LIMIT = 200;
@@ -414,6 +415,7 @@ export function listJobExecutions(limit = 50): JobExecutionRecord[] {
 }
 
 export function getJobExecutionSummary(timestamp = Date.now()): JobExecutionSummary {
+    const claims = getJobWorkerClaimsState();
     const counts = database
         .prepare(
             `SELECT
@@ -457,6 +459,8 @@ export function getJobExecutionSummary(timestamp = Date.now()): JobExecutionSumm
         activeResourceClasses: activeRows
             .map((row) => row.resource_class)
             .filter((resourceClass) => isJobResourceClass(resourceClass)),
+        claimsPaused: claims.paused,
+        claimsPausedAt: claims.paused ? claims.updatedAt : undefined,
         oldestQueuedAgeMs: Number.isFinite(parsedOldestQueuedAt)
             ? Math.max(0, timestamp - parsedOldestQueuedAt)
             : undefined,
@@ -645,6 +649,10 @@ export function claimNextJobExecution(
     database.run("BEGIN IMMEDIATE");
     try {
         recoverExpiredJobExecutionsInTransaction(timestamp);
+        if (getJobWorkerClaimsState().paused) {
+            database.run("COMMIT");
+            return undefined;
+        }
         const active = database
             .prepare(
                 "SELECT COUNT(*) AS count FROM job_executions WHERE status = 'running'"

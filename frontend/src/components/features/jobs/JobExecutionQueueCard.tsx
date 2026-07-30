@@ -1,8 +1,12 @@
-import { Activity, Clock3, Cpu, Layers3, XCircle } from "lucide-react";
+import { Activity, Clock3, Cpu, Layers3, Pause, Play, XCircle } from "lucide-react";
 import type { ComponentProps } from "react";
 
 import type { JobExecution } from "../../../../../contracts/jobs";
-import { useCancelJobExecution, useJobExecutions } from "../../../hooks";
+import {
+    useCancelJobExecution,
+    useJobExecutions,
+    useSetJobWorkerClaimsPaused,
+} from "../../../hooks";
 import { messageFromError } from "../../../lib/errorMessage";
 import { cn } from "../../../utils/cn";
 import { formatDate, formatDuration } from "../../../utils/format";
@@ -36,7 +40,9 @@ export function JobExecutionQueueCard({
 }: JobExecutionQueueCardProperties = {}) {
     const queue = useJobExecutions();
     const cancelExecution = useCancelJobExecution();
+    const setClaimsPaused = useSetJobWorkerClaimsPaused();
     const summary = queue.data?.summary;
+    const claimsPaused = summary?.claimsPaused === true;
     const activeExecutions = (queue.data?.executions ?? []).filter(
         (execution) => execution.status === "queued" || execution.status === "running"
     );
@@ -59,12 +65,19 @@ export function JobExecutionQueueCard({
     if (queue.isLoading) {
         workerBadgeVariant = "default";
         workerBadgeLabel = "Loading worker";
+    } else if (claimsPaused) {
+        workerBadgeVariant = "warning";
+        workerBadgeLabel = "Worker paused";
     } else if (summary?.workerOnline && summary.running) {
         workerBadgeVariant = "info";
         workerBadgeLabel = "Worker active";
     } else if (summary?.workerOnline) {
         workerBadgeVariant = "success";
         workerBadgeLabel = "Worker idle";
+    }
+    let claimsButtonLabel = claimsPaused ? "Resume worker" : "Pause worker";
+    if (setClaimsPaused.isPending) {
+        claimsButtonLabel = "Saving...";
     }
 
     return (
@@ -76,7 +89,26 @@ export function JobExecutionQueueCard({
                         Persistent worker queue · global concurrency 1
                     </p>
                 </div>
-                <Badge variant={workerBadgeVariant}>{workerBadgeLabel}</Badge>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Badge variant={workerBadgeVariant}>{workerBadgeLabel}</Badge>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant={claimsPaused ? "primary" : "secondary"}
+                        disabled={queue.isLoading || setClaimsPaused.isPending}
+                        aria-label={
+                            claimsPaused ? "Resume worker claims" : "Pause worker claims"
+                        }
+                        onClick={() => setClaimsPaused.mutate(!claimsPaused)}
+                    >
+                        {claimsPaused ? (
+                            <Play className="size-4" />
+                        ) : (
+                            <Pause className="size-4" />
+                        )}
+                        {claimsButtonLabel}
+                    </Button>
+                </div>
             </div>
 
             {queue.error ? (
@@ -91,6 +123,20 @@ export function JobExecutionQueueCard({
                         cancelExecution.error,
                         "Failed to cancel execution"
                     )}
+                </Alert>
+            ) : undefined}
+            {setClaimsPaused.error ? (
+                <Alert variant="error">
+                    {messageFromError(
+                        setClaimsPaused.error,
+                        "Failed to update worker claim state"
+                    )}
+                </Alert>
+            ) : undefined}
+            {claimsPaused ? (
+                <Alert variant="warning">
+                    New executions remain queued. Any running execution is allowed to
+                    finish.
                 </Alert>
             ) : undefined}
 

@@ -1801,9 +1801,10 @@ describe("Mira Dashboard backend integration", () => {
 
         const queue = await api<{
             executions: Array<{ id: string; scheduledJobId?: string; status: string }>;
-            summary: { queued: number; running: number };
+            summary: { claimsPaused?: boolean; queued: number; running: number };
         }>("/api/job-executions");
         expect(queue.status).toBe(200);
+        expect(queue.body.summary).not.toHaveProperty("claimsPaused");
         expect(queue.body.summary).toMatchObject({ queued: 1, running: 0 });
         expect(queue.body.executions).toContainEqual(
             expect.objectContaining({
@@ -1812,6 +1813,31 @@ describe("Mira Dashboard backend integration", () => {
                 status: "queued",
             })
         );
+
+        const pausedClaims = await api<{
+            isOk: boolean;
+            state: { paused: boolean; updatedAt: string };
+        }>("/api/job-executions/claims", json("PATCH", { paused: true }));
+        expect(pausedClaims.status).toBe(200);
+        expect(pausedClaims.body).toMatchObject({
+            isOk: true,
+            state: { paused: true },
+        });
+        const pausedQueue = await api<{
+            summary: { claimsPaused?: boolean; queued: number };
+        }>("/api/job-executions?include=claims");
+        expect(pausedQueue.body.summary).toMatchObject({
+            claimsPaused: true,
+            queued: 1,
+        });
+        const resumedClaims = await api<{
+            isOk: boolean;
+            state: { paused: boolean };
+        }>("/api/job-executions/claims", json("PATCH", { paused: false }));
+        expect(resumedClaims.body).toMatchObject({
+            isOk: true,
+            state: { paused: false },
+        });
 
         const detail = await api<{
             execution: { id: string; output: Record<string, unknown>; status: string };

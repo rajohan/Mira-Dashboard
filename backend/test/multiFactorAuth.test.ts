@@ -612,6 +612,13 @@ describe("Dashboard multi-factor authentication", () => {
         ).toBe(true);
         expect(
             requiresRecentMfa(
+                new Request("https://dashboard.example/api/job-executions/claims", {
+                    method: "PATCH",
+                })
+            )
+        ).toBe(true);
+        expect(
+            requiresRecentMfa(
                 new Request("https://dashboard.example/api/terminal/complete", {
                     method: "POST",
                 })

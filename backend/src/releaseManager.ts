@@ -82,7 +82,14 @@ export interface DashboardReleaseRuntimeAvailabilityOptions {
     hasRuntime?: (version: string) => boolean;
 }
 
+export interface DashboardReleaseTransitionPreparation {
+    rollback: () => Promise<void>;
+}
+
 export interface DashboardReleaseManagerOptions extends DashboardReleaseRuntimeAvailabilityOptions {
+    prepareReleaseTransition?: (
+        target: ManagedDashboardRelease
+    ) => Promise<DashboardReleaseTransitionPreparation>;
     readLiveSchemaState?: (
         maximumCompatibleVersion: number
     ) => DashboardLiveSchemaState | Promise<DashboardLiveSchemaState>;
@@ -1130,6 +1137,32 @@ async function withReleaseTransitionLock<T>(
     return result as T;
 }
 
+async function withPreparedReleaseTransition<T>(
+    target: ManagedDashboardRelease,
+    options: DashboardReleaseManagerOptions,
+    transition: () => Promise<T>
+): Promise<T> {
+    const preparation = await options.prepareReleaseTransition?.(target);
+    try {
+        return await transition();
+    } catch (transitionError) {
+        if (!preparation) {
+            throw transitionError;
+        }
+        try {
+            await preparation.rollback();
+        } catch (rollbackError) {
+            const transitionFailure = new AggregateError(
+                [transitionError, rollbackError],
+                "Managed release transition and preparation rollback failed",
+                { cause: transitionError }
+            );
+            throw transitionFailure;
+        }
+        throw transitionError;
+    }
+}
+
 /**
  * Copies a verified build into the immutable release store while excluding
  * activation, rollback, pruning, and another publisher from its staging path.
@@ -1342,28 +1375,30 @@ export async function activateDashboardRelease(
                 liveSchemaState,
                 "Activation"
             );
-            if (state.current?.commitSha === candidate.commitSha) {
-                return state;
-            }
-
-            const before = releaseLinkStateFromDashboardState(state);
-            const journal: ReleaseTransitionJournal = {
-                after: {
-                    current: candidate.commitSha,
-                    previous: before.current,
-                },
-                before,
-                formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
-                operation: "activate",
-            };
-            return await executeReleaseTransition(layout, journal, async () => {
-                const expectedReleases = new Map<string, ManagedDashboardRelease>([
-                    [candidate.commitSha, candidate],
-                ]);
-                if (state.current) {
-                    expectedReleases.set(state.current.commitSha, state.current);
+            return withPreparedReleaseTransition(candidate, options, async () => {
+                if (state.current?.commitSha === candidate.commitSha) {
+                    return state;
                 }
-                await applyReleaseLinkState(layout, journal.after, expectedReleases);
+
+                const before = releaseLinkStateFromDashboardState(state);
+                const journal: ReleaseTransitionJournal = {
+                    after: {
+                        current: candidate.commitSha,
+                        previous: before.current,
+                    },
+                    before,
+                    formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
+                    operation: "activate",
+                };
+                return await executeReleaseTransition(layout, journal, async () => {
+                    const expectedReleases = new Map<string, ManagedDashboardRelease>([
+                        [candidate.commitSha, candidate],
+                    ]);
+                    if (state.current) {
+                        expectedReleases.set(state.current.commitSha, state.current);
+                    }
+                    await applyReleaseLinkState(layout, journal.after, expectedReleases);
+                });
             });
         },
         options.transitionLockWaitMs
@@ -1428,20 +1463,22 @@ export async function rollbackDashboardRelease(
                 formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
                 operation: "rollback",
             };
-            return await executeReleaseTransition(layout, journal, async () => {
-                await replaceReleaseLink(
-                    layout,
-                    "current",
-                    rollbackRelease.commitSha,
-                    rollbackRelease
-                );
-                await replaceReleaseLink(
-                    layout,
-                    "previous",
-                    activeRelease.commitSha,
-                    activeRelease
-                );
-            });
+            return withPreparedReleaseTransition(rollbackRelease, options, async () =>
+                executeReleaseTransition(layout, journal, async () => {
+                    await replaceReleaseLink(
+                        layout,
+                        "current",
+                        rollbackRelease.commitSha,
+                        rollbackRelease
+                    );
+                    await replaceReleaseLink(
+                        layout,
+                        "previous",
+                        activeRelease.commitSha,
+                        activeRelease
+                    );
+                })
+            );
         },
         options.transitionLockWaitMs
     );
@@ -1489,7 +1526,9 @@ export async function restoreDashboardReleaseAfterFailedActivation(
                     state.current,
                     options
                 );
-                return state;
+                return withPreparedReleaseTransition(state.current, options, () =>
+                    Promise.resolve(state)
+                );
             }
             if (
                 state.current?.commitSha !== candidateCommitSha ||
@@ -1522,19 +1561,21 @@ export async function restoreDashboardReleaseAfterFailedActivation(
                 formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
                 operation: "restore",
             };
-            return executeReleaseTransition(layout, journal, async () => {
-                const expectedReleases = new Map<string, ManagedDashboardRelease>([
-                    [candidateCommitSha, candidateRelease],
-                    [rollbackCommitSha, rollbackRelease],
-                ]);
-                if (restoredPreviousRelease) {
-                    expectedReleases.set(
-                        restoredPreviousRelease.commitSha,
-                        restoredPreviousRelease
-                    );
-                }
-                await applyReleaseLinkState(layout, journal.after, expectedReleases);
-            });
+            return withPreparedReleaseTransition(rollbackRelease, options, () =>
+                executeReleaseTransition(layout, journal, async () => {
+                    const expectedReleases = new Map<string, ManagedDashboardRelease>([
+                        [candidateCommitSha, candidateRelease],
+                        [rollbackCommitSha, rollbackRelease],
+                    ]);
+                    if (restoredPreviousRelease) {
+                        expectedReleases.set(
+                            restoredPreviousRelease.commitSha,
+                            restoredPreviousRelease
+                        );
+                    }
+                    await applyReleaseLinkState(layout, journal.after, expectedReleases);
+                })
+            );
         },
         options.transitionLockWaitMs
     );

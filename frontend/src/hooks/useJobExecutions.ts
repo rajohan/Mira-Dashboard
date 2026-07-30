@@ -8,9 +8,10 @@ import {
 import {
     parseJobExecutionCancelResponse,
     parseJobExecutionsResponse,
+    parseJobWorkerClaimsMutationResponse,
 } from "../../../contracts/jobs";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import { apiFetchParsed, apiPostParsed } from "./useApi";
+import { apiFetchParsed, apiPatchParsed, apiPostParsed } from "./useApi";
 
 export const jobExecutionKeys = {
     all: ["job-executions"] as const,
@@ -43,7 +44,8 @@ export async function refreshJobExecutionQueueWhilePending<T>(
 export function useJobExecutions() {
     return useQuery({
         queryKey: jobExecutionKeys.list(),
-        queryFn: () => apiFetchParsed("/job-executions", parseJobExecutionsResponse),
+        queryFn: () =>
+            apiFetchParsed("/job-executions?include=claims", parseJobExecutionsResponse),
         refetchInterval: refreshPolicy.active,
         refetchIntervalInBackground: false,
         staleTime: 500,
@@ -66,6 +68,21 @@ export function useCancelJobExecution() {
                     queryKey: ["scheduled-jobs", "runs", result.execution.scheduledJobId],
                 });
             }
+        },
+    });
+}
+
+export function useSetJobWorkerClaimsPaused() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (paused: boolean) =>
+            apiPatchParsed(
+                "/job-executions/claims",
+                parseJobWorkerClaimsMutationResponse,
+                { paused }
+            ),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all });
         },
     });
 }

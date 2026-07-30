@@ -42,10 +42,6 @@ function writeFakeBun(
     writeFileSync(
         filePath,
         `#!/bin/sh
-if [ "\${1:-}" = "--version" ]; then
-    printf '%s\\n' '${version}'
-    exit 0
-fi
 if [ "\${1:-}" = "--revision" ]; then
     printf '%s\\n' '${revision}'
     exit 0
@@ -91,13 +87,16 @@ describe("managed Bun runtimes", () => {
         expect(installed).toBe(managedBunRuntimeExecutablePath(identity, runtimeRoot));
         expect(bunExecutableRuntimeIdentity(installed)).toBe(identity);
         expect(bunExecutableMatchesRuntime(installed, identity)).toBe(true);
+        expect(bunExecutableMatchesRuntime(installed, "1.3.14")).toBe(false);
         expect(hasManagedBunRuntime(identity, runtimeRoot)).toBe(true);
         expect(requireManagedBunRuntime(identity, runtimeRoot)).toBe(installed);
         expect(await installManagedBunRuntime(source, identity, { runtimeRoot })).toBe(
             installed
         );
         expect(
-            readFileSync(installed, "utf8").includes(String.raw`printf '%s\n' '1.3.14'`)
+            readFileSync(installed, "utf8").includes(
+                String.raw`printf '%s\n' '1.3.14+0d9b296af'`
+            )
         ).toBe(true);
         expect(readdirSync(path.join(runtimeRoot, identity))).toEqual(["bun"]);
         expect(statSync(installed).nlink).toBe(1);
@@ -253,6 +252,35 @@ describe("managed Bun runtimes", () => {
         expect(launched.exitCode).toBe(0);
         expect(new TextDecoder().decode(launched.stdout).trim()).toBe(
             "dist/workerStart.js"
+        );
+
+        const versionOnlyRuntime = path.join(
+            projectRoot,
+            "production",
+            "runtimes",
+            "bun",
+            "2.0.0",
+            "bun"
+        );
+        mkdirSync(path.dirname(versionOnlyRuntime), { recursive: true });
+        writeFakeBun(versionOnlyRuntime, "2.0.0", "2.0.0+feedface");
+        writeFileSync(
+            path.join(releaseRoot, "release-manifest.json"),
+            `${JSON.stringify({ bunVersion: "2.0.0" })}\n`
+        );
+        const versionOnly = Bun.spawnSync({
+            cmd: [launcher, "dist/workerStart.js"],
+            cwd: releaseBackend,
+            env: {
+                MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+                PATH: "/usr/bin:/bin",
+            },
+            stderr: "pipe",
+            stdout: "pipe",
+        });
+        expect(versionOnly.exitCode).toBe(78);
+        expect(new TextDecoder().decode(versionOnly.stderr)).toContain(
+            "runtime version does not match"
         );
 
         const rejected = Bun.spawnSync({

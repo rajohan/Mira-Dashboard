@@ -76,8 +76,7 @@ if [[ "$(/usr/bin/stat --format='%h' -- "$runtime_path")" != "1" ]]; then
     exit 78
 fi
 runtime_revision="$("$runtime_path" --revision)"
-runtime_version="$("$runtime_path" --version)"
-if [[ "$runtime_revision" != "$bun_version" && "$runtime_version" != "$bun_version" ]]; then
+if [[ "$runtime_revision" != "$bun_version" ]]; then
     echo "Managed Dashboard Bun runtime version does not match the release" >&2
     exit 78
 fi

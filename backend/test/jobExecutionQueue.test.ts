@@ -24,6 +24,7 @@ import {
     registerJobWorker,
     unregisterJobWorker,
 } from "../src/services/jobExecutionQueue.ts";
+import { setJobWorkerClaimsPaused } from "../src/services/jobWorkerControl.ts";
 import { waitForJobExecution } from "../src/services/queuedJobExecution.ts";
 import {
     enqueueScheduledJob,
@@ -45,6 +46,7 @@ const testDeploymentIds = new Set<string>();
 
 afterEach(async () => {
     await stopScheduledJobExecutor();
+    setJobWorkerClaimsPaused(false);
     for (const executionId of testExecutionIds) {
         database.prepare("DELETE FROM job_executions WHERE id = ?").run(executionId);
     }
@@ -600,6 +602,36 @@ printf 'LoadState=loaded\nActiveState=active\n'
         expect(cancelJobExecution(cancellableWhileQueued.id)).toMatchObject({
             status: "cancelled",
         });
+    });
+
+    it("persists an operator pause and atomically prevents new claims", () => {
+        const queued = enqueueJobExecution({
+            actionKey: `test.paused-${Bun.randomUUIDv7()}`,
+            displayName: "Paused mutation",
+            resourceClass: "exclusive",
+            timeoutMs: 60_000,
+        });
+        testExecutionIds.add(queued.id);
+        const pausedAt = "2026-07-30T08:00:00.000Z";
+
+        expect(setJobWorkerClaimsPaused(true, pausedAt)).toEqual({
+            paused: true,
+            updatedAt: pausedAt,
+        });
+        expect(claimNextJobExecution(`test-worker-${Bun.randomUUIDv7()}`, 1)).toBe(
+            undefined
+        );
+        expect(getJobExecution(queued.id)).toMatchObject({ status: "queued" });
+        expect(getJobExecutionSummary()).toMatchObject({
+            claimsPaused: true,
+            claimsPausedAt: pausedAt,
+            queued: 1,
+        });
+
+        setJobWorkerClaimsPaused(false);
+        const workerId = `test-worker-${Bun.randomUUIDv7()}`;
+        expect(claimNextJobExecution(workerId, 1)?.id).toBe(queued.id);
+        finishJobExecution(queued.id, workerId, "success", undefined, {});
     });
 
     it("prioritizes interactive work and enforces global capacity", () => {

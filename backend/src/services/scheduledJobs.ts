@@ -29,6 +29,7 @@ import {
     unregisterJobWorker,
     updateJobExecutionOutput,
 } from "./jobExecutionQueue.ts";
+import { getJobWorkerClaimsState } from "./jobWorkerControl.ts";
 import { waitForJobExecution } from "./queuedJobExecution.ts";
 
 const logger = createStructuredLogger("scheduled-jobs");
@@ -1511,6 +1512,9 @@ function executorTick(): void {
     }
     scheduledJobRuntimeState.isExecutorTickRunning = true;
     try {
+        if (getJobWorkerClaimsState().paused) {
+            return;
+        }
         // The in-memory pause is lost when the deployment restarts this worker.
         // Keep replacement workers idle until the detached guardian records a
         // terminal deployment status in the shared database.

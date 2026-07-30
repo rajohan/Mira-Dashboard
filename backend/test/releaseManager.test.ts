@@ -24,6 +24,7 @@ import {
     type DatabaseMigrationIdentity,
 } from "../src/databaseMigrations/index.ts";
 import {
+    currentBunRuntimeIdentity,
     hasManagedBunRuntime,
     installManagedBunRuntime,
 } from "../src/managedBunRuntime.ts";
@@ -58,16 +59,17 @@ const FIRST_COMMIT = "a".repeat(40);
 const SECOND_COMMIT = "b".repeat(40);
 const THIRD_COMMIT = "c".repeat(40);
 const FOURTH_COMMIT = "d".repeat(40);
+const CURRENT_BUN_RUNTIME_IDENTITY = currentBunRuntimeIdentity();
 const TEST_FUTURE_MIGRATIONS: DatabaseMigrationIdentity[] = [
-    {
-        checksum: "8".repeat(64),
-        name: "test-migration-8",
-        version: 8,
-    },
     {
         checksum: "9".repeat(64),
         name: "test-migration-9",
         version: 9,
+    },
+    {
+        checksum: "a".repeat(64),
+        name: "test-migration-10",
+        version: 10,
     },
 ];
 
@@ -140,7 +142,7 @@ async function createManagedRelease(
     releasesRoot: string,
     directoryCommit: string,
     manifestCommit = directoryCommit,
-    bunVersion = Bun.version,
+    bunVersion = CURRENT_BUN_RUNTIME_IDENTITY,
     builtAt = new Date("2026-07-25T17:00:00.000Z")
 ): Promise<string> {
     await ensureDashboardReleaseLayout(releasesRoot);
@@ -660,15 +662,15 @@ describe("Dashboard immutable release manager", () => {
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "c".repeat(64),
-            schemaMaximum: 8,
+            schemaMaximum: 9,
             schemaMinimum: 6,
-            schemaTarget: 8,
+            schemaTarget: 9,
         });
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
 
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
-        ).rejects.toThrow("cannot roll back after SQLite schema 8");
+        ).rejects.toThrow("cannot roll back after SQLite schema 9");
         expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
         expect(existsSync(path.join(root, "previous"))).toBe(false);
     });
@@ -742,27 +744,27 @@ describe("Dashboard immutable release manager", () => {
         const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
         await createManagedRelease(root, THIRD_COMMIT);
         await rewriteManifest(rollbackPath, {
-            schemaMaximum: 8,
+            schemaMaximum: 9,
         });
         await rewriteManifest(migratedPath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 8,
-            schemaMinimum: 7,
-            schemaTarget: 8,
+            schemaMaximum: 9,
+            schemaMinimum: 8,
+            schemaTarget: 9,
         });
 
-        let liveSchemaVersion = 7;
+        let liveSchemaVersion = 8;
         const options = {
             hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
         await activateDashboardRelease(FIRST_COMMIT, root, options);
         await activateDashboardRelease(SECOND_COMMIT, root, options);
-        liveSchemaVersion = 8;
+        liveSchemaVersion = 9;
         await rollbackDashboardRelease(root, options);
 
         expect(activateDashboardRelease(THIRD_COMMIT, root, options)).rejects.toThrow(
-            "Activation release cannot open live SQLite schema 8"
+            "Activation release cannot open live SQLite schema 9"
         );
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(FIRST_COMMIT);
@@ -774,32 +776,32 @@ describe("Dashboard immutable release manager", () => {
         const currentPath = await createManagedRelease(root, FIRST_COMMIT);
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(currentPath, {
-            schemaMaximum: 8,
+            schemaMaximum: 9,
         });
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 8,
-            schemaMinimum: 7,
-            schemaTarget: 8,
+            schemaMaximum: 9,
+            schemaMinimum: 8,
+            schemaTarget: 9,
         });
         await activateDashboardRelease(FIRST_COMMIT, root, {
             hasRuntime: () => true,
-            readLiveSchemaState: () => testLiveSchemaState(7),
+            readLiveSchemaState: () => testLiveSchemaState(8),
         });
 
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 hasRuntime: () => true,
                 readLiveSchemaState: () =>
-                    testLiveSchemaState(8, {
-                        8: {
+                    testLiveSchemaState(9, {
+                        9: {
                             ...TEST_FUTURE_MIGRATIONS[0]!,
                             checksum: "f".repeat(64),
                         },
                     }),
             })
         ).rejects.toThrow(
-            "Activation release SQLite migration 8 identity does not match live history"
+            "Activation release SQLite migration 9 identity does not match live history"
         );
     });
 
@@ -809,12 +811,12 @@ describe("Dashboard immutable release manager", () => {
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 8,
-            schemaMinimum: 8,
-            schemaTarget: 8,
+            schemaMaximum: 9,
+            schemaMinimum: 9,
+            schemaTarget: 9,
         });
 
-        let liveSchemaVersion = 7;
+        let liveSchemaVersion = 8;
         const options = {
             hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
@@ -829,7 +831,7 @@ describe("Dashboard immutable release manager", () => {
             current: { commitSha: FIRST_COMMIT },
         });
         expect(activateDashboardRelease(SECOND_COMMIT, root, options)).rejects.toThrow(
-            "cannot roll back after SQLite schema 8"
+            "cannot roll back after SQLite schema 9"
         );
 
         await runReleaseLifecycleCommand(
@@ -837,15 +839,15 @@ describe("Dashboard immutable release manager", () => {
             root,
             options
         );
-        liveSchemaVersion = 8;
+        liveSchemaVersion = 9;
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 hasRuntime: () => true,
-                readLiveSchemaState: () => testLiveSchemaState(9),
+                readLiveSchemaState: () => testLiveSchemaState(10),
             })
-        ).rejects.toThrow("Activation release cannot open live SQLite schema 9");
+        ).rejects.toThrow("Activation release cannot open live SQLite schema 10");
         expect(rollbackDashboardRelease(root, options)).rejects.toThrow(
-            "Rollback release cannot open SQLite schema 8"
+            "Rollback release cannot open SQLite schema 9"
         );
         expect(readlinkSync(path.join(root, "current"))).toBe(
             `releases/${SECOND_COMMIT}`
@@ -857,16 +859,16 @@ describe("Dashboard immutable release manager", () => {
         const compatibleOldPath = await createManagedRelease(root, FIRST_COMMIT);
         const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(compatibleOldPath, {
-            schemaMaximum: 8,
+            schemaMaximum: 9,
         });
         await rewriteManifest(migratedPath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 8,
-            schemaMinimum: 8,
-            schemaTarget: 8,
+            schemaMaximum: 9,
+            schemaMinimum: 9,
+            schemaTarget: 9,
         });
 
-        let liveSchemaVersion = 7;
+        let liveSchemaVersion = 8;
         const options = {
             hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
@@ -876,7 +878,7 @@ describe("Dashboard immutable release manager", () => {
             ...options,
             schemaCutoverMode: "coordinated",
         });
-        liveSchemaVersion = 8;
+        liveSchemaVersion = 9;
 
         const oldCode = await rollbackDashboardRelease(root, options);
         expect(oldCode.current?.commitSha).toBe(FIRST_COMMIT);
@@ -972,14 +974,24 @@ describe("Dashboard immutable release manager", () => {
         await createManagedRelease(root, SECOND_COMMIT);
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
         const lockFileDescriptor = holdTransitionLock(root);
+        let preparationCalls = 0;
 
         try {
             expect(readDashboardReleaseState(root)).rejects.toThrow(
                 "Another managed release transition is in progress"
             );
             expect(
-                activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
+                activateDashboardRelease(SECOND_COMMIT, root, {
+                    ...SCHEMA_6_OPTIONS,
+                    prepareReleaseTransition: () => {
+                        preparationCalls += 1;
+                        return Promise.resolve({
+                            rollback: () => Promise.resolve(),
+                        });
+                    },
+                })
             ).rejects.toThrow("Another managed release transition is in progress");
+            expect(preparationCalls).toBe(0);
             expect(readlinkSync(path.join(root, "current"))).toBe(
                 `releases/${FIRST_COMMIT}`
             );
@@ -1119,6 +1131,7 @@ describe("Dashboard immutable release manager", () => {
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
         const originalRename = fsp.rename.bind(fsp);
         let hasChangedCandidate = false;
+        let preparationRollbacks = 0;
         const rename = spyOn(fsp, "rename").mockImplementation(
             async (oldPath, newPath) => {
                 if (!hasChangedCandidate && newPath === path.join(root, "current")) {
@@ -1134,12 +1147,24 @@ describe("Dashboard immutable release manager", () => {
 
         try {
             expect(
-                activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
+                activateDashboardRelease(SECOND_COMMIT, root, {
+                    ...SCHEMA_6_OPTIONS,
+                    prepareReleaseTransition: (target) => {
+                        expect(target.commitSha).toBe(SECOND_COMMIT);
+                        return Promise.resolve({
+                            rollback: () => {
+                                preparationRollbacks += 1;
+                                return Promise.resolve();
+                            },
+                        });
+                    },
+                })
             ).rejects.toThrow("Managed release snapshot changed while linking");
         } finally {
             rename.mockRestore();
         }
 
+        expect(preparationRollbacks).toBe(1);
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(FIRST_COMMIT);
         expect(state.previous).toBeUndefined();
@@ -1167,15 +1192,13 @@ describe("Dashboard immutable release manager", () => {
             `#!/bin/sh
 if [ "\${1:-}" = "--revision" ]; then
     printf '%s\\n' '${obsoleteRuntimeIdentity}'
-elif [ "\${1:-}" = "--version" ]; then
-    printf '%s\\n' '2.0.0'
 else
     exit 2
 fi
 `
         );
         chmodSync(obsoleteRuntimeSource, 0o700);
-        await installManagedBunRuntime(process.execPath, Bun.version, {
+        await installManagedBunRuntime(process.execPath, CURRENT_BUN_RUNTIME_IDENTITY, {
             runtimeRoot,
         });
         await installManagedBunRuntime(obsoleteRuntimeSource, obsoleteRuntimeIdentity, {
@@ -1185,28 +1208,28 @@ fi
             root,
             FIRST_COMMIT,
             FIRST_COMMIT,
-            Bun.version,
+            CURRENT_BUN_RUNTIME_IDENTITY,
             new Date("2026-07-25T17:00:00.000Z")
         );
         await createManagedRelease(
             root,
             SECOND_COMMIT,
             SECOND_COMMIT,
-            Bun.version,
+            CURRENT_BUN_RUNTIME_IDENTITY,
             new Date("2026-07-25T17:01:00.000Z")
         );
         await createManagedRelease(
             root,
             THIRD_COMMIT,
             THIRD_COMMIT,
-            Bun.version,
+            CURRENT_BUN_RUNTIME_IDENTITY,
             new Date("2026-07-25T17:02:00.000Z")
         );
         await createManagedRelease(
             root,
             FOURTH_COMMIT,
             FOURTH_COMMIT,
-            Bun.version,
+            CURRENT_BUN_RUNTIME_IDENTITY,
             new Date("2026-07-25T17:03:00.000Z")
         );
         await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
@@ -1245,10 +1268,12 @@ fi
             removed: [FIRST_COMMIT],
             removedRuntimes: [obsoleteRuntimeIdentity],
             retained: [FOURTH_COMMIT, THIRD_COMMIT, SECOND_COMMIT],
-            retainedRuntimes: [Bun.version],
+            retainedRuntimes: [CURRENT_BUN_RUNTIME_IDENTITY],
             warnings: [`Skipped unverifiable release ${unverifiableCommit}`],
         });
-        expect(hasManagedBunRuntime(Bun.version, runtimeRoot)).toBe(true);
+        expect(hasManagedBunRuntime(CURRENT_BUN_RUNTIME_IDENTITY, runtimeRoot)).toBe(
+            true
+        );
         expect(hasManagedBunRuntime(obsoleteRuntimeIdentity, runtimeRoot)).toBe(false);
         expect(existsSync(managedReleasePath(root, FIRST_COMMIT))).toBe(false);
         expect(existsSync(managedReleasePath(root, SECOND_COMMIT))).toBe(true);

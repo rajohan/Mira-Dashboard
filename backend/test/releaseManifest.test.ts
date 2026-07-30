@@ -272,20 +272,50 @@ describe("Dashboard release manifest", () => {
         );
     });
 
-    it("verifies declared pre-root workspace package files when present", async () => {
+    it("does not publish obsolete backend workspace package files", async () => {
         const root = temporaryReleaseRoot();
         writeFileSync(path.join(root, "backend", "package.json"), "{}\n");
         writeFileSync(path.join(root, "backend", "bun.lock"), "backend-lock\n");
         const manifest = await writeReleaseManifest(manifestOptions(root));
 
-        expect(manifest.artifacts.map((artifact) => artifact.path)).toContain(
+        expect(manifest.artifacts.map((artifact) => artifact.path)).not.toContain(
             "backend/package.json"
+        );
+        expect(manifest.artifacts.map((artifact) => artifact.path)).not.toContain(
+            "backend/bun.lock"
+        );
+        await verifyReleaseArtifacts(root, manifest);
+    });
+
+    it("publishes only complete managed systemd unit bundles", async () => {
+        const root = temporaryReleaseRoot();
+        mkdirSync(path.join(root, "systemd"));
+        writeFileSync(
+            path.join(root, "systemd", "mira-dashboard.service"),
+            "[Service]\nExecStart=/dashboard\n"
+        );
+        writeFileSync(
+            path.join(root, "systemd", "mira-dashboard-worker.service"),
+            "[Service]\nExecStart=/worker\n"
+        );
+        const manifest = await writeReleaseManifest(manifestOptions(root));
+
+        expect(manifest.artifacts.map((artifact) => artifact.path)).toContain(
+            "systemd/mira-dashboard.service"
+        );
+        expect(manifest.artifacts.map((artifact) => artifact.path)).toContain(
+            "systemd/mira-dashboard-worker.service"
         );
         await verifyReleaseArtifacts(root, manifest);
 
-        rmSync(path.join(root, "backend", "package.json"));
-        expect(verifyReleaseArtifacts(root, manifest)).rejects.toThrow(
-            "Release artifact inventory does not match its manifest"
+        const partialRoot = temporaryReleaseRoot();
+        mkdirSync(path.join(partialRoot, "systemd"));
+        writeFileSync(
+            path.join(partialRoot, "systemd", "mira-dashboard.service"),
+            "[Service]\nExecStart=/dashboard\n"
+        );
+        expect(writeReleaseManifest(manifestOptions(partialRoot))).rejects.toThrow(
+            "Managed systemd release artifacts must be complete"
         );
     });
 

@@ -19,6 +19,7 @@ import {
     isBunRuntimeVersion,
     isCurrentBunRuntime,
 } from "./managedBunRuntime.ts";
+import { MANAGED_DASHBOARD_UNIT_ARTIFACTS } from "./managedDashboardUnitPolicy.ts";
 
 export { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 
@@ -33,16 +34,10 @@ const RELEASE_STATIC_ARTIFACTS = [
     "bun.lock",
     "package.json",
 ] as const;
-// Keep the immediately previous pre-root-workspace release verifiable for
-// rollback. Remove this allowlist after both managed slots were built from the
-// consolidated root package.
-const PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS = [
-    "backend/bun.lock",
-    "backend/package.json",
-] as const;
+const OPTIONAL_RELEASE_STATIC_ARTIFACTS = [...MANAGED_DASHBOARD_UNIT_ARTIFACTS] as const;
 const SAFE_RELEASE_STATIC_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
-    ...PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS,
+    ...OPTIONAL_RELEASE_STATIC_ARTIFACTS,
 ] as const;
 const REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
@@ -288,25 +283,33 @@ export async function listReleaseArtifactPaths(releaseRoot: string): Promise<str
     }
 
     const paths: string[] = [...RELEASE_STATIC_ARTIFACTS];
-    for (const relativePath of PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS) {
-        try {
-            const stat = await fsp.lstat(artifactPath(realReleaseRoot, relativePath));
-            if (!stat.isFile() || stat.isSymbolicLink()) {
-                throw new TypeError(
-                    `Release artifact must be a regular file: ${relativePath}`
-                );
+    const optionalArtifactPresence = await Promise.all(
+        OPTIONAL_RELEASE_STATIC_ARTIFACTS.map(async (relativePath) => {
+            try {
+                const stat = await fsp.lstat(artifactPath(realReleaseRoot, relativePath));
+                if (!stat.isFile() || stat.isSymbolicLink()) {
+                    throw new TypeError(
+                        `Release artifact must be a regular file: ${relativePath}`
+                    );
+                }
+                return true;
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    return false;
+                }
+                throw error;
             }
-            paths.push(relativePath);
-        } catch (error) {
-            if (
-                error &&
-                typeof error === "object" &&
-                "code" in error &&
-                error.code === "ENOENT"
-            ) {
-                continue;
-            }
-            throw error;
+        })
+    );
+    if (
+        optionalArtifactPresence.some(Boolean) &&
+        !optionalArtifactPresence.every(Boolean)
+    ) {
+        throw new TypeError("Managed systemd release artifacts must be complete");
+    }
+    for (const [index, isPresent] of optionalArtifactPresence.entries()) {
+        if (isPresent) {
+            paths.push(OPTIONAL_RELEASE_STATIC_ARTIFACTS[index] as string);
         }
     }
     for (const directory of RELEASE_ARTIFACT_DIRECTORIES) {
@@ -628,6 +631,9 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
     const artifacts = value.artifacts.map((artifact) => parseArtifact(artifact));
     const artifactPaths = artifacts.map((artifact) => artifact.path);
     const sortedArtifactPaths = artifactPaths.toSorted(compareStrings);
+    const managedSystemdArtifactCount = MANAGED_DASHBOARD_UNIT_ARTIFACTS.filter(
+        (artifactPath_) => artifactPaths.includes(artifactPath_)
+    ).length;
     if (
         new Set(artifactPaths).size !== artifactPaths.length ||
         artifactPaths.some(
@@ -635,7 +641,9 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         ) ||
         REQUIRED_RELEASE_ARTIFACTS.some(
             (requiredPath) => !artifactPaths.includes(requiredPath)
-        )
+        ) ||
+        (managedSystemdArtifactCount !== 0 &&
+            managedSystemdArtifactCount !== MANAGED_DASHBOARD_UNIT_ARTIFACTS.length)
     ) {
         throw new TypeError("Release manifest artifact inventory is invalid");
     }

@@ -3417,6 +3417,7 @@ describe("shared component helpers", () => {
     });
 
     it("shows queue pressure and cancels an active job execution", async () => {
+        let claimsPaused = false;
         let executionStatus: "cancelled" | "queued" = "queued";
         const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
             return Promise.try(() => {
@@ -3443,11 +3444,12 @@ describe("shared component helpers", () => {
                     triggerType: "manual",
                 };
 
-                if (url === "/api/job-executions" && method === "GET") {
+                if (url === "/api/job-executions?include=claims" && method === "GET") {
                     return Response.json({
                         executions: [execution],
                         summary: {
                             activeResourceClasses: [],
+                            claimsPaused,
                             oldestQueuedAt:
                                 executionStatus === "queued"
                                     ? execution.queuedAt
@@ -3457,6 +3459,19 @@ describe("shared component helpers", () => {
                             workerCapacity: 1,
                             workerCount: 1,
                             workerOnline: true,
+                        },
+                    });
+                }
+
+                if (url === "/api/job-executions/claims" && method === "PATCH") {
+                    claimsPaused = (
+                        JSON.parse(requestBodyText(init?.body)) as { paused: boolean }
+                    ).paused;
+                    return Response.json({
+                        isOk: true,
+                        state: {
+                            paused: claimsPaused,
+                            updatedAt: "2026-07-30T08:00:00.000Z",
                         },
                     });
                 }
@@ -3492,6 +3507,26 @@ describe("shared component helpers", () => {
         expect(screen.getByText("host heavy")).toBeInTheDocument();
         expect(screen.getByText("Worker idle")).toBeInTheDocument();
         expect(screen.getByText("Active class").querySelector("svg")).not.toBeNull();
+
+        await userEvent.click(
+            screen.getByRole("button", { name: "Pause worker claims" })
+        );
+        await waitFor(() => {
+            expect(claimsPaused).toBe(true);
+            expect(screen.getByText("Worker paused")).toBeInTheDocument();
+            expect(
+                screen.getByText(
+                    "New executions remain queued. Any running execution is allowed to finish."
+                )
+            ).toBeInTheDocument();
+        });
+        await userEvent.click(
+            screen.getByRole("button", { name: "Resume worker claims" })
+        );
+        await waitFor(() => {
+            expect(claimsPaused).toBe(false);
+            expect(screen.getByText("Worker idle")).toBeInTheDocument();
+        });
 
         await userEvent.click(screen.getByRole("button", { name: "Cancel Host backup" }));
 

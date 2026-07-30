@@ -9,7 +9,7 @@ import gateway from "./gateway.ts";
 import { getDatabaseOperationMetrics } from "./lib/databaseMetrics.ts";
 import { getChildProcessMetrics } from "./lib/processes.ts";
 import { getRuntimeMetrics } from "./lib/runtimeMetrics.ts";
-import { getCacheRefreshMetrics } from "./services/cacheRefresh.ts";
+import { getCacheRefreshMetrics } from "./services/cacheRefreshMetrics.ts";
 import { getScheduledJobSchedulerMetrics } from "./services/scheduledJobs.ts";
 
 function fileBytes(path: string): number {

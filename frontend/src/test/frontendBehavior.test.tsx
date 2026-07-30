@@ -4075,7 +4075,7 @@ describe("Mira Dashboard frontend behavior", () => {
                                         author: {
                                             name: "raymond",
                                             display_name: "Raymond",
-                                            avatar_url: "/avatar.png",
+                                            avatar_url: null,
                                         },
                                         created_at: "2026-06-23T08:30:00.000Z",
                                         submolt_name: "dashboard",
@@ -4189,7 +4189,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 author: {
                     name: "raymond",
                     display_name: "Raymond",
-                    avatar_url: "/avatar.png",
+                    avatar_url: undefined,
                 },
                 upvotes: 0,
                 you_follow_author: true,

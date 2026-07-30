@@ -84,6 +84,7 @@ export {
     jobExecutionKeys,
     useCancelJobExecution,
     useJobExecutions,
+    useSetJobWorkerClaimsPaused,
 } from "./useJobExecutions";
 export { logKeys, useDashboardLogContent, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";

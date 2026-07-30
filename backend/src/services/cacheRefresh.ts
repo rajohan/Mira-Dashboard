@@ -11,7 +11,6 @@ import {
 import os from "node:os";
 
 import type { JobResourceClass, ScheduledJob } from "../../../contracts/jobs.ts";
-import type { CacheRefreshMetrics } from "../../../contracts/metrics.ts";
 import { database } from "../database.ts";
 import {
     getCacheEntry,
@@ -36,6 +35,12 @@ import {
     type CacheTtlUnit,
     writeCacheSuccess,
 } from "./cacheEntryWriter.ts";
+import {
+    recordCacheRefreshCoalesced,
+    recordCacheRefreshFinished,
+    recordCacheRefreshRequest,
+    recordCacheRefreshStarted,
+} from "./cacheRefreshMetrics.ts";
 import { getDatabaseOverview, getIsolatedDatabaseOverview } from "./databaseOverview.ts";
 import { evaluateOpenClawNotifications } from "./openclawNotifications.ts";
 import { evaluateQuotaNotifications } from "./quotaNotifications.ts";
@@ -1898,33 +1903,13 @@ function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQ
 }
 
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
-const cacheRefreshMetricsState: Omit<CacheRefreshMetrics, "averageDurationMs"> = {
-    active: 0,
-    coalesced: 0,
-    failures: 0,
-    lastDurationMs: 0,
-    maxDurationMs: 0,
-    refreshes: 0,
-    requests: 0,
-    totalDurationMs: 0,
-};
 
-/**
- * Returns aggregate producer timing without cache keys or cached payloads.
- * @returns aggregate producer timing without cache keys or cached payloads.
- */
-export function getCacheRefreshMetrics(): CacheRefreshMetrics {
-    return {
-        ...cacheRefreshMetricsState,
-        averageDurationMs:
-            cacheRefreshMetricsState.refreshes === 0
-                ? 0
-                : Math.round(
-                      (cacheRefreshMetricsState.totalDurationMs /
-                          cacheRefreshMetricsState.refreshes) *
-                          100
-                  ) / 100,
-    };
+function observeCacheRefreshMetric(event: string, operation: () => void): void {
+    try {
+        operation();
+    } catch (error) {
+        logger.warn("cache_refresh.metrics_write_failed", { error, metricEvent: event });
+    }
 }
 
 class SerialOperationQueue {
@@ -2164,7 +2149,7 @@ export async function refreshCacheProducer(
     signal?: AbortSignal,
     options: { force?: boolean } = {}
 ) {
-    cacheRefreshMetricsState.requests += 1;
+    observeCacheRefreshMetric("request", recordCacheRefreshRequest);
     if (signal?.aborted) {
         throw abortError();
     }
@@ -2179,7 +2164,7 @@ export async function refreshCacheProducer(
         )
         .toSorted(([left], [right]) => left.length - right.length)[0]?.[1];
     if (existing !== undefined && !options.force) {
-        cacheRefreshMetricsState.coalesced += 1;
+        observeCacheRefreshMetric("coalesced", recordCacheRefreshCoalesced);
         return await waitForExistingRefresh(key, scopeKey, existing, signal);
     }
     const childRefreshes = inFlightEntries
@@ -2196,27 +2181,20 @@ export async function refreshCacheProducer(
             ? refreshAfterChildRefreshes(childRefreshes, key, signal)
             : runBoundedCacheRefresh(() => refreshCacheProducerUnlocked(key), signal);
     const startedAt = performance.now();
-    cacheRefreshMetricsState.active += 1;
-    cacheRefreshMetricsState.refreshes += 1;
+    observeCacheRefreshMetric("started", recordCacheRefreshStarted);
     inFlightCacheRefreshes.set(scopeKey, refresh);
     void (async () => {
+        let failed = false;
         try {
             await refresh;
         } catch {
-            cacheRefreshMetricsState.failures += 1;
+            failed = true;
             // The caller observes refresh failures.
         } finally {
             const durationMs =
                 Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
-            cacheRefreshMetricsState.lastDurationMs = durationMs;
-            cacheRefreshMetricsState.maxDurationMs = Math.max(
-                cacheRefreshMetricsState.maxDurationMs,
-                durationMs
-            );
-            cacheRefreshMetricsState.totalDurationMs += durationMs;
-            cacheRefreshMetricsState.active = Math.max(
-                0,
-                cacheRefreshMetricsState.active - 1
+            observeCacheRefreshMetric("finished", () =>
+                recordCacheRefreshFinished(durationMs, failed)
             );
             if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
                 inFlightCacheRefreshes.delete(scopeKey);

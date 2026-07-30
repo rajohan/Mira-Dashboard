@@ -5,6 +5,10 @@ import {
     enqueueDatabaseSummaryRefresh,
     registerCacheRefreshScheduledJobs,
 } from "./cacheRefresh.ts";
+import {
+    startCacheRefreshMetricsSession,
+    stopCacheRefreshMetricsSession,
+} from "./cacheRefreshMetrics.ts";
 import { registerDockerExecutionActions } from "./dockerActions.ts";
 import { registerDockerUpdaterScheduledJobs } from "./dockerUpdater.ts";
 import { registerExecExecutionActions } from "./execJobs.ts";
@@ -87,6 +91,22 @@ function registerScheduledActions(profile = dashboardJobProfile()): void {
     registerPullRequestPreviewExecutionActions();
 }
 
+function startCacheRefreshMetrics(): void {
+    try {
+        startCacheRefreshMetricsSession();
+    } catch (error) {
+        logger.warn("job_worker.cache_refresh_metrics_start_failed", { error });
+    }
+}
+
+function stopCacheRefreshMetrics(): void {
+    try {
+        stopCacheRefreshMetricsSession();
+    } catch (error) {
+        logger.warn("job_worker.cache_refresh_metrics_stop_failed", { error });
+    }
+}
+
 /**
  * Starts the persistent queue scheduler and its single-concurrency executor.
  * @param releaseCommit Release commit value.
@@ -96,6 +116,7 @@ export function startDashboardJobWorker(releaseCommit = "development"): void {
     workerState.isStarted = true;
     const profile = dashboardJobProfile();
     try {
+        startCacheRefreshMetrics();
         registerScheduledActions(profile);
         startScheduledJobExecutor(releaseCommit);
         startScheduledJobScheduler();
@@ -106,6 +127,7 @@ export function startDashboardJobWorker(releaseCommit = "development"): void {
             try {
                 await stopScheduledJobExecutor();
                 workerState.isStarted = false;
+                stopCacheRefreshMetrics();
             } catch (cleanupError) {
                 logger.error("job_worker.executor_startup_rollback_failed", {
                     error: cleanupError,
@@ -128,6 +150,7 @@ export async function stopDashboardJobWorker(): Promise<void> {
         await trackWorkerStop(async () => {
             stopScheduledJobScheduler();
             await stopScheduledJobExecutor();
+            stopCacheRefreshMetrics();
             // Release the startup guard only after executor cleanup succeeds.
             workerState.isStarted = false;
             logger.info("job_worker.stopped");
