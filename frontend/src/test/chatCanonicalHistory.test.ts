@@ -256,6 +256,48 @@ describe("canonical chat history contract", () => {
         expect(summarized[2]?.contentBase64).toMatchObject({ length: 10_000 });
     });
 
+    it("keeps repeated metadata-less rows distinct with stable page positions", () => {
+        const raw = {
+            messages: [
+                { content: "OK", role: "assistant" },
+                { content: "OK", role: "assistant" },
+            ],
+            offset: 0,
+        };
+        const first = canonicalizeOpenClawHistoryPage(raw, {
+            offset: 0,
+            sessionKey: SESSION,
+        });
+        const replay = canonicalizeOpenClawHistoryPage(raw, {
+            offset: 0,
+            sessionKey: SESSION,
+        });
+
+        expect(new Set(first.messages.map((row) => row.id)).size).toBe(2);
+        expect(replay.messages.map((row) => row.id)).toEqual(
+            first.messages.map((row) => row.id)
+        );
+    });
+
+    it("accepts OpenClaw complete snapshots without pagination offsets", () => {
+        const page = canonicalizeOpenClawHistoryPage(
+            {
+                completeSnapshot: true,
+                hasMore: false,
+                messages: [{ content: "Imported", role: "assistant" }],
+                totalMessages: 1,
+            },
+            { offset: 0, sessionKey: SESSION }
+        );
+
+        expect(page).toMatchObject({
+            hasMore: false,
+            offset: 0,
+            totalMessages: 1,
+        });
+        expect(page.messages).toHaveLength(1);
+    });
+
     it("rejects missing and mismatched provider page offsets", () => {
         expect(() =>
             canonicalizeOpenClawHistoryPage(
