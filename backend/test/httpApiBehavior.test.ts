@@ -2284,20 +2284,35 @@ describe("Mira Dashboard backend integration", () => {
         expect(metrics.body.system.hostname.length).toBeGreaterThan(0);
         expect(metrics.body.tokens.total).toBe(0);
 
+        const projectionShadowObservation = {
+            canonicalActiveRunCount: 0,
+            canonicalCompactionPhase: "none",
+            canonicalRowCount: 0,
+            differenceKinds: [],
+            legacyActiveRunCount: 0,
+            legacyCompactionPhase: "none",
+            legacyRowCount: 0,
+            matches: true,
+            schemaVersion: 1,
+            turnCount: 0,
+        };
+        const unauthenticatedProjectionShadow =
+            await unauthenticatedApi<ApiErrorResponse>(
+                "/api/metrics/chat-projection-shadow",
+                json("POST", projectionShadowObservation)
+            );
+        expect(unauthenticatedProjectionShadow).toMatchObject({
+            body: {
+                error: {
+                    code: "unauthorized",
+                },
+            },
+            status: 401,
+        });
+
         const projectionShadow = await api<{ isOk: boolean }>(
             "/api/metrics/chat-projection-shadow",
-            json("POST", {
-                canonicalActiveRunCount: 0,
-                canonicalCompactionPhase: "none",
-                canonicalRowCount: 0,
-                differenceKinds: [],
-                legacyActiveRunCount: 0,
-                legacyCompactionPhase: "none",
-                legacyRowCount: 0,
-                matches: true,
-                schemaVersion: 1,
-                turnCount: 0,
-            })
+            json("POST", projectionShadowObservation)
         );
         expect(projectionShadow).toMatchObject({
             body: { isOk: true },
@@ -2307,17 +2322,8 @@ describe("Mira Dashboard backend integration", () => {
         const contentBearingProjectionShadow = await api<ApiErrorResponse>(
             "/api/metrics/chat-projection-shadow",
             json("POST", {
-                canonicalActiveRunCount: 0,
-                canonicalCompactionPhase: "none",
-                canonicalRowCount: 0,
-                differenceKinds: [],
-                legacyActiveRunCount: 0,
-                legacyCompactionPhase: "none",
+                ...projectionShadowObservation,
                 legacyFingerprint: "must-not-cross-the-boundary",
-                legacyRowCount: 0,
-                matches: true,
-                schemaVersion: 1,
-                turnCount: 0,
             })
         );
         expect(contentBearingProjectionShadow.status).toBe(400);

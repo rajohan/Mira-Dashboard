@@ -244,6 +244,7 @@ function projectionFor(
 }
 
 const EVENTS = replayScenario();
+const HISTORY_VARIANTS = historyVariants();
 const BASELINE_STATE = reduceChatRuntime(createChatRuntimeState(), EVENTS);
 const BASELINE_PROJECTION = projectionFor([], BASELINE_STATE);
 const BASELINE_ROWS = BASELINE_PROJECTION.rows.map(rowSemantics);
@@ -282,7 +283,7 @@ function soakSeedCount(): number {
 
 function verifyFaultedReplay(seed: number): void {
     const result = runChatReplayStateMachine(EVENTS, seed);
-    const history = historyVariants()[seed % historyVariants().length]!;
+    const history = HISTORY_VARIANTS[seed % HISTORY_VARIANTS.length]!;
     const projection = projectionFor(history, result.state);
     const normalizedState = { ...result.state, generation: 0 };
 
@@ -319,6 +320,7 @@ function verifyFaultedReplay(seed: number): void {
 }
 
 const SEED_COUNT = soakSeedCount();
+const SOAK_TIMEOUT_MS = Math.max(120_000, (SEED_COUNT - DEFAULT_SEED_COUNT) * 40);
 const SEEDS = Array.from(
     { length: Math.min(DEFAULT_SEED_COUNT, SEED_COUNT) },
     (_, index) => index + 1
@@ -331,15 +333,19 @@ describe("chat replay state machine", () => {
     );
 
     if (SEED_COUNT > DEFAULT_SEED_COUNT) {
-        it(`soaks canonical parity through seed ${SEED_COUNT}`, () => {
-            for (let seed = DEFAULT_SEED_COUNT + 1; seed <= SEED_COUNT; seed += 1) {
-                verifyFaultedReplay(seed);
-            }
-        }, 120_000);
+        it(
+            `soaks canonical parity through seed ${SEED_COUNT}`,
+            () => {
+                for (let seed = DEFAULT_SEED_COUNT + 1; seed <= SEED_COUNT; seed += 1) {
+                    verifyFaultedReplay(seed);
+                }
+            },
+            SOAK_TIMEOUT_MS
+        );
     }
 
     it("keeps partial and duplicate history semantically equivalent", () => {
-        for (const history of historyVariants()) {
+        for (const history of HISTORY_VARIANTS) {
             const projection = projectionFor(history, BASELINE_STATE);
 
             expect(projection.rows.map(rowSemantics)).toEqual(BASELINE_ROWS);

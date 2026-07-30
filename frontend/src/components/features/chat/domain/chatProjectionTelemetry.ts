@@ -37,6 +37,26 @@ export function chatProjectionShadowObservation(
 }
 
 /**
+ * Builds the browser-local dedupe key for structural parity changes.
+ * Projection counts are deliberately excluded so ordinary row churn does not
+ * report another observation while the selected session remains in the same
+ * parity state.
+ * @param comparison Browser shadow comparison.
+ * @param selectedSessionKey Currently selected session.
+ * @returns Stable structural parity signature.
+ */
+export function chatProjectionShadowStateSignature(
+    comparison: ChatProjectionShadowComparison,
+    selectedSessionKey: string
+): string {
+    return JSON.stringify({
+        differenceKinds: comparison.differenceKinds.toSorted(),
+        matches: comparison.matches,
+        selectedSessionKey,
+    });
+}
+
+/**
  * Reports one bounded, content-free canonical projection parity observation.
  * @param observation Content-free parity observation.
  * @returns Validated backend acknowledgement.

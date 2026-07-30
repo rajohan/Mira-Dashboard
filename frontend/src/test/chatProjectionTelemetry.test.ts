@@ -2,7 +2,10 @@ import { describe, expect, it } from "bun:test";
 
 import { parseChatProjectionShadowObservation } from "../../../contracts/chatProjectionTelemetry";
 import type { ChatProjectionShadowComparison } from "../components/features/chat/domain/chatCanonicalProjection";
-import { chatProjectionShadowObservation } from "../components/features/chat/domain/chatProjectionTelemetry";
+import {
+    chatProjectionShadowObservation,
+    chatProjectionShadowStateSignature,
+} from "../components/features/chat/domain/chatProjectionTelemetry";
 
 describe("canonical chat projection telemetry", () => {
     it("drops local fingerprints and sends only bounded structural parity", () => {
@@ -58,5 +61,51 @@ describe("canonical chat projection telemetry", () => {
             matches: false,
             schemaVersion: 1,
         });
+    });
+
+    it("dedupes count churn while retaining parity and session transitions", () => {
+        const comparison: ChatProjectionShadowComparison = {
+            canonicalActiveRunCount: 0,
+            canonicalCompactionPhase: "none",
+            canonicalFingerprint: "canonical-before",
+            canonicalRowCount: 1,
+            differenceKinds: [],
+            legacyActiveRunCount: 0,
+            legacyCompactionPhase: "none",
+            legacyFingerprint: "legacy-before",
+            legacyRowCount: 1,
+            matches: true,
+            schemaVersion: 1,
+            turnCount: 1,
+        };
+        const initial = chatProjectionShadowStateSignature(comparison, "session-a");
+        const countChurn = chatProjectionShadowStateSignature(
+            {
+                ...comparison,
+                canonicalActiveRunCount: 1,
+                canonicalFingerprint: "canonical-after",
+                canonicalRowCount: 3,
+                legacyActiveRunCount: 1,
+                legacyFingerprint: "legacy-after",
+                legacyRowCount: 3,
+                turnCount: 2,
+            },
+            "session-a"
+        );
+
+        expect(countChurn).toBe(initial);
+        expect(
+            chatProjectionShadowStateSignature(
+                {
+                    ...comparison,
+                    differenceKinds: ["rows"],
+                    matches: false,
+                },
+                "session-a"
+            )
+        ).not.toBe(initial);
+        expect(chatProjectionShadowStateSignature(comparison, "session-b")).not.toBe(
+            initial
+        );
     });
 });

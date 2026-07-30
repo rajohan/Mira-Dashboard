@@ -22,6 +22,7 @@ import type { ChatPreviewItem } from "../components/features/chat/chatTypes";
 import { createChatVisibility as createRuntimeVisibility } from "../components/features/chat/domain/chatPresentation";
 import {
     chatProjectionShadowObservation,
+    chatProjectionShadowStateSignature,
     reportChatProjectionShadowObservation,
 } from "../components/features/chat/domain/chatProjectionTelemetry";
 import { isSameChatSession } from "../components/features/chat/domain/chatState";
@@ -270,10 +271,10 @@ export function Chat() {
         }
         const { comparison } = projectionShadow;
         const observation = chatProjectionShadowObservation(comparison);
-        const observationSignature = JSON.stringify({
-            observation,
-            selectedSessionKey,
-        });
+        const observationSignature = chatProjectionShadowStateSignature(
+            comparison,
+            selectedSessionKey
+        );
         if (reportedProjectionObservationRef.current !== observationSignature) {
             reportedProjectionObservationRef.current = observationSignature;
             reportChatProjectionShadowObservation(observation).catch(() => void 0);
