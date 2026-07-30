@@ -4,9 +4,9 @@ import { renderHook } from "@testing-library/react";
 
 import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import { createChatRuntimeState } from "../components/features/chat/domain/chatState";
-import { useChatProjectionShadow } from "../components/features/chat/useChatProjectionShadow";
+import { useCanonicalChatProjection } from "../components/features/chat/useCanonicalChatProjection";
 
-describe("chat projection shadow hook", () => {
+describe("canonical chat projection hook", () => {
     it("reuses projection work across unrelated parent renders", () => {
         const history = [
             {
@@ -20,7 +20,7 @@ describe("chat projection shadow hook", () => {
         const { result, rerender } = renderHook(
             ({ unrelatedValue }: { unrelatedValue: string }) => {
                 void unrelatedValue;
-                return useChatProjectionShadow({
+                return useCanonicalChatProjection({
                     deletedMessageKeys,
                     history,
                     runtime,
@@ -52,7 +52,7 @@ describe("chat projection shadow hook", () => {
         const deletedMessageKeys = new Set<string>();
         const { result, rerender } = renderHook(
             ({ shouldShowThinking }: { shouldShowThinking: boolean }) =>
-                useChatProjectionShadow({
+                useCanonicalChatProjection({
                     deletedMessageKeys,
                     history,
                     runtime,

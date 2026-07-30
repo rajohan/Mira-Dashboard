@@ -4,7 +4,7 @@ import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openCla
 import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
 import {
     assembleCanonicalChatTurns,
-    projectChatWithCanonicalShadow,
+    projectCanonicalChat,
 } from "../components/features/chat/domain/chatCanonicalProjection";
 import { createChatVisibility } from "../components/features/chat/domain/chatPresentation";
 import {
@@ -69,7 +69,7 @@ describe("canonical chat turn projection", () => {
     });
 
     it("normalizes thinking from system finals before canonical validation", () => {
-        const result = projectChatWithCanonicalShadow(
+        const result = projectCanonicalChat(
             [
                 {
                     content: "Completed after analysis.",
@@ -86,12 +86,7 @@ describe("canonical chat turn projection", () => {
             new Set()
         );
 
-        expect(result.comparison).toMatchObject({
-            differenceKinds: [],
-            matches: true,
-            turnCount: 1,
-        });
-        expect(result.canonical?.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+        expect(result.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
             "thinking",
             "assistant",
         ]);
@@ -220,7 +215,7 @@ describe("canonical chat turn projection", () => {
         ];
         const runtime = reduceChatRuntime(createChatRuntimeState(), runtimeEvents);
 
-        const first = projectChatWithCanonicalShadow(
+        const first = projectCanonicalChat(
             history,
             runtime,
             SESSION,
@@ -228,7 +223,7 @@ describe("canonical chat turn projection", () => {
             true,
             new Set()
         );
-        const replay = projectChatWithCanonicalShadow(
+        const replay = projectCanonicalChat(
             history,
             runtime,
             SESSION,
@@ -236,7 +231,7 @@ describe("canonical chat turn projection", () => {
             true,
             new Set()
         );
-        const hiddenDiagnostics = projectChatWithCanonicalShadow(
+        const hiddenDiagnostics = projectCanonicalChat(
             history,
             runtime,
             SESSION,
@@ -244,14 +239,8 @@ describe("canonical chat turn projection", () => {
             false,
             new Set()
         );
-        const turn = first.canonical?.turns[0];
+        const turn = first.turns[0];
 
-        expect(first.comparison).toMatchObject({
-            differenceKinds: [],
-            matches: true,
-            schemaVersion: 1,
-            turnCount: 1,
-        });
         expect(turn).toMatchObject({
             lifecycle: "completed",
             providers: expect.arrayContaining([
@@ -297,19 +286,16 @@ describe("canonical chat turn projection", () => {
         );
         expect(turn?.sequenceStart).toBe(1);
         expect(turn?.sequenceEnd).toBeGreaterThan(turn?.sequenceStart ?? 0);
-        expect(replay.canonical?.turns.map((candidate) => candidate.id)).toEqual(
-            first.canonical?.turns.map((candidate) => candidate.id)
+        expect(replay.turns.map((candidate) => candidate.id)).toEqual(
+            first.turns.map((candidate) => candidate.id)
         );
-        expect(hiddenDiagnostics.canonical?.turns).toEqual(first.canonical?.turns);
-        expect(hiddenDiagnostics.comparison.matches).toBe(true);
+        expect(hiddenDiagnostics.turns).toEqual(first.turns);
         expect(
-            replay.canonical?.turns.flatMap((candidate) =>
+            replay.turns.flatMap((candidate) =>
                 candidate.entries.map((entry) => entry.id)
             )
         ).toEqual(
-            first.canonical?.turns.flatMap((candidate) =>
-                candidate.entries.map((entry) => entry.id)
-            )
+            first.turns.flatMap((candidate) => candidate.entries.map((entry) => entry.id))
         );
     });
 
@@ -837,7 +823,7 @@ describe("canonical chat turn projection", () => {
             eventName: "chat.history",
             format: "openclaw-history" as const,
         };
-        const result = projectChatWithCanonicalShadow(
+        const result = projectCanonicalChat(
             [
                 {
                     content: "question",
@@ -881,7 +867,7 @@ describe("canonical chat turn projection", () => {
             true,
             new Set()
         );
-        const thinkingEntry = result.canonical?.turns[0]?.entries.find(
+        const thinkingEntry = result.turns[0]?.entries.find(
             (entry) => entry.kind === "thinking"
         );
 
@@ -895,8 +881,8 @@ describe("canonical chat turn projection", () => {
         ]);
     });
 
-    it("treats an unselected idle chat as an empty matching projection", () => {
-        const result = projectChatWithCanonicalShadow(
+    it("treats an unselected idle chat as an empty canonical projection", () => {
+        const result = projectCanonicalChat(
             [],
             createChatRuntimeState(),
             "",
@@ -905,17 +891,13 @@ describe("canonical chat turn projection", () => {
             new Set()
         );
 
-        expect(result.canonical?.turns).toEqual([]);
-        expect(result.comparison).toMatchObject({
-            differenceKinds: [],
-            matches: true,
-            turnCount: 0,
-        });
+        expect(result.turns).toEqual([]);
+        expect(result.projection.rows).toEqual([]);
     });
 
-    it("keeps full media in turns while using bounded shadow identity", () => {
+    it("keeps full media in canonical turns", () => {
         const imageData = "a".repeat(200_000);
-        const result = projectChatWithCanonicalShadow(
+        const result = projectCanonicalChat(
             [
                 {
                     content: [{ data: imageData, mimeType: "image/png", type: "image" }],
@@ -937,32 +919,19 @@ describe("canonical chat turn projection", () => {
             new Set()
         );
 
-        expect(result.comparison.matches).toBe(true);
-        expect(result.canonical?.turns[0]?.entries[0]?.message.images?.[0]?.data).toBe(
-            imageData
-        );
+        expect(result.turns[0]?.entries[0]?.message.images?.[0]?.data).toBe(imageData);
     });
 
-    it("fails open to the legacy projection when canonical validation fails", () => {
-        const result = projectChatWithCanonicalShadow(
-            [{ content: "orphan", role: "user", text: "orphan" }],
-            createChatRuntimeState(),
-            "",
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
-
-        expect(result.legacy.rows).toHaveLength(1);
-        expect(result.canonical).toBeUndefined();
-        expect(result.comparison).toMatchObject({
-            canonicalError: {
-                message: "Canonical chat projection invariant failed: session",
-                name: "Error",
-            },
-            differenceKinds: ["canonical-error"],
-            matches: false,
-            schemaVersion: 1,
-        });
+    it("fails closed when canonical validation detects an invalid session", () => {
+        expect(() =>
+            projectCanonicalChat(
+                [{ content: "orphan", role: "user", text: "orphan" }],
+                createChatRuntimeState(),
+                "",
+                createChatVisibility(true, true),
+                true,
+                new Set()
+            )
+        ).toThrow("Canonical chat projection invariant failed: session");
     });
 });

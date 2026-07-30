@@ -36,7 +36,6 @@ interface ChatHistoryState {
     messages: ChatHistoryMessage[];
     resolvedConnectionGeneration?: number;
     sessionKey: string;
-    successfulConnectionGeneration?: number;
 }
 
 type ChatHistoryRequestResult =
@@ -120,7 +119,6 @@ export function useChatHistory({
                         ),
                         resolvedConnectionGeneration: transport.connectionGeneration,
                         sessionKey,
-                        successfulConnectionGeneration: transport.connectionGeneration,
                     }));
                     if (shouldStickToBottomRef.current) {
                         setIsAtBottom(true);
@@ -205,7 +203,6 @@ export function useChatHistory({
                             : [],
                     resolvedConnectionGeneration: requestConnectionGeneration,
                     sessionKey: selectedSessionKey,
-                    successfulConnectionGeneration: undefined,
                 }));
                 reportErrorFromEffect(result.error);
                 return;
@@ -218,7 +215,6 @@ export function useChatHistory({
                 ),
                 resolvedConnectionGeneration: requestConnectionGeneration,
                 sessionKey: selectedSessionKey,
-                successfulConnectionGeneration: requestConnectionGeneration,
             }));
             reportErrorFromEffect(undefined);
             if (isNewSession) {
@@ -271,7 +267,6 @@ export function useChatHistory({
                 ),
                 resolvedConnectionGeneration: transport.connectionGeneration,
                 sessionKey: requestSessionKey,
-                successfulConnectionGeneration: transport.connectionGeneration,
             }));
             setIsAtBottomFromEffect(shouldStickToBottomRef.current);
         })();
@@ -325,7 +320,6 @@ export function useChatHistory({
                     ),
                     resolvedConnectionGeneration: transport.connectionGeneration,
                     sessionKey: selectedSessionKey,
-                    successfulConnectionGeneration: transport.connectionGeneration,
                 }));
                 setIsAtBottomFromEffect(shouldStickToBottomRef.current);
             } finally {
@@ -359,9 +353,6 @@ export function useChatHistory({
 
     const visibleMessages =
         historyState.sessionKey === selectedSessionKey ? historyState.messages : [];
-    const hasSuccessfulHistoryLoad =
-        historyState.sessionKey === selectedSessionKey &&
-        historyState.successfulConnectionGeneration === transport.connectionGeneration;
     const isLoadingHistory =
         isConnected &&
         Boolean(selectedSessionKey) &&
@@ -381,15 +372,10 @@ export function useChatHistory({
                         ? previous.resolvedConnectionGeneration
                         : undefined,
                 sessionKey: selectedSessionKey,
-                successfulConnectionGeneration:
-                    previous.sessionKey === selectedSessionKey
-                        ? previous.successfulConnectionGeneration
-                        : undefined,
             };
         });
     };
     return {
-        hasSuccessfulHistoryLoad,
         isLoadingHistory,
         messages: visibleMessages,
         refreshSoon,

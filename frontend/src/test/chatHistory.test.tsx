@@ -47,7 +47,7 @@ function transportWithHistory(history: ChatTransport["history"]): ChatTransport 
 }
 
 describe("chat history controller", () => {
-    it("marks history successful only after a selected-session load succeeds", async () => {
+    it("recovers selected history after an initial load failure", async () => {
         const history = jest
             .fn<ChatTransport["history"]>()
             .mockRejectedValueOnce(new Error("history unavailable"))
@@ -71,7 +71,6 @@ describe("chat history controller", () => {
         );
 
         await waitFor(() => expect(result.current.isLoadingHistory).toBe(false));
-        expect(result.current.hasSuccessfulHistoryLoad).toBe(false);
 
         act(() => result.current.refreshSoon(SESSION, 0));
         await waitFor(() =>
@@ -79,7 +78,6 @@ describe("chat history controller", () => {
                 "recovered",
             ])
         );
-        expect(result.current.hasSuccessfulHistoryLoad).toBe(true);
     });
 
     it("preserves an optimistic send while the first history request is pending", async () => {

@@ -151,7 +151,7 @@ observed Codex history uses UUID message IDs and separated tool rows, while
 Synthetic uses short provider IDs and can combine thinking plus a tool call in
 one assistant message.
 
-### Canonical Turns And Projection Shadow
+### Canonical Turns And Projection
 
 Canonical turn schema v1 groups the reconciled transcript into stable logical
 turns before user visibility settings are applied. A turn retains its session
@@ -171,22 +171,19 @@ Projection is composed from explicit pure stages:
 5. apply visibility and final-thinking retention;
 6. map messages, active runs, and compaction lifecycle to UI rows.
 
-Canonical shadow mode runs the turn path beside the established projection. It
-returns the established rows to the UI, compares row, active-run, and compaction
-sections, and fails open if any canonical schema or stage invariant fails.
-Mismatch diagnostics contain only schema version, difference categories, and
-counts; transcript content, stable IDs, and internal fingerprints are not
-logged. Existing incident fixtures, projection regressions, and generated replay
-state-machine traces require exact shadow parity before the path can be cut over.
+The chat UI consumes this canonical turn path directly. Canonical schema or stage
+invariant failures are treated as errors instead of falling back to a second
+projection implementation.
 
-The browser submits one authenticated, versioned observation when a selected
-session's structural parity state changes. The strict telemetry contract accepts
-only row/run/turn counts, compaction phases, and bounded difference categories;
-message content, session/run/message IDs, and local comparison fingerprints
-cannot cross the boundary. Backend process-local counters expose matches,
-mismatches by section, canonical failures, and the last observation timestamp in
-application observability. Counters reset on backend restart and are evidence for
-a soak window, not durable chat data.
+Before cutover, the canonical path ran beside the previous projection and
+required exact row, active-run, and compaction parity. The deterministic soak
+covered 4,096 duplicate/reorder/reconnect/partial-history fault seeds under all
+eight thinking/tool/final-thinking visibility policies (110,628 assertions).
+Versioned incident fixtures separately cover Codex/GPT separated runtime rows,
+Synthetic mixed session messages, and duplicate-user restart recovery. The
+temporary legacy projection entry point, comparison path, browser telemetry
+contract, and parity counters were removed after that soak. Replay memory,
+eviction, persistence-write, and write-rate metrics remain operational signals.
 
 ### Session URL State
 

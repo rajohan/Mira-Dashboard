@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import type { ChatHistoryMessage, ChatRow } from "../components/features/chat/chatTypes";
-import { projectChatWithCanonicalShadow } from "../components/features/chat/domain/chatCanonicalProjection";
+import { projectCanonicalChat } from "../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,
     hasPrimaryAnswerContent,
@@ -227,20 +227,14 @@ function projectionFor(
     visibility = createChatVisibility(true, true),
     shouldKeepThinkingAfterFinal = true
 ) {
-    const shadow = projectChatWithCanonicalShadow(
+    return projectCanonicalChat(
         history,
         state,
         SESSION,
         visibility,
         shouldKeepThinkingAfterFinal,
         new Set()
-    );
-    expect(shadow.comparison).toMatchObject({
-        differenceKinds: [],
-        matches: true,
-        schemaVersion: 1,
-    });
-    return shadow.legacy;
+    ).projection;
 }
 
 const EVENTS = replayScenario();
@@ -334,7 +328,7 @@ describe("chat replay state machine", () => {
 
     if (SEED_COUNT > DEFAULT_SEED_COUNT) {
         it(
-            `soaks canonical parity through seed ${SEED_COUNT}`,
+            `soaks canonical replay through seed ${SEED_COUNT}`,
             () => {
                 for (let seed = DEFAULT_SEED_COUNT + 1; seed <= SEED_COUNT; seed += 1) {
                     verifyFaultedReplay(seed);

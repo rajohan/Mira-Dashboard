@@ -1926,32 +1926,3 @@ export function finalizeChatProjection(
         ),
     };
 }
-
-/**
- * Builds the exact rows consumed by the unchanged chat message UI.
- * @param history History value.
- * @param runtime Runtime value.
- * @param sessionKey Session key value.
- * @param visibility Visibility value.
- * @param shouldKeepThinkingAfterFinal Whether should keep thinking after final.
- * @param deletedMessageKeys Deleted message keys value.
- * @returns Built the exact rows consumed by the unchanged chat message UI.
- */
-export function projectChat(
-    history: ChatHistoryMessage[],
-    runtime: ChatRuntimeState,
-    sessionKey: string,
-    visibility: ChatVisibilitySettings,
-    shouldKeepThinkingAfterFinal: boolean,
-    deletedMessageKeys: ReadonlySet<string>
-): ChatProjection {
-    const context = selectChatProjectionContext(history, runtime, sessionKey);
-    const reconciliation = reconcileChatProjectionContext(context);
-    const structure = structureChatProjectionContext(reconciliation);
-    const presentation = presentChatProjectionContext(
-        structure,
-        visibility,
-        shouldKeepThinkingAfterFinal
-    );
-    return finalizeChatProjection(presentation, deletedMessageKeys);
-}

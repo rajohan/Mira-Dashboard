@@ -1,0 +1,193 @@
+{
+    "deliveryFormat": "synthetic-mixed-session-message",
+    "expected": {
+        "activeRunCount": 0,
+        "rows": [
+            {
+                "role": "user",
+                "text": "Investigate replay",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "user"
+            },
+            {
+                "role": "user",
+                "text": "[System] Your previous turn was interrupted by a gateway restart. Continue the previous task.",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "user"
+            },
+            {
+                "role": "user",
+                "text": "Steer after restart",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "user"
+            },
+            {
+                "role": "assistant",
+                "text": "",
+                "thinkingText": "Inspect replay state.Resume after restart.",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "thinking"
+            },
+            {
+                "role": "assistant",
+                "text": "Replay recovered.",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "assistant"
+            }
+        ],
+        "runCount": 1
+    },
+    "history": [
+        {
+            "content": "Investigate replay",
+            "role": "user",
+            "runId": "synthetic-duplicate-before-restart",
+            "timestamp": "2026-07-30T09:30:00.100Z"
+        },
+        {
+            "content": "Investigate replay",
+            "role": "user",
+            "runId": "synthetic-duplicate-before-restart",
+            "timestamp": "2026-07-30T09:30:00.100Z"
+        },
+        {
+            "content": "[System] Your previous turn was interrupted by a gateway restart. Continue the previous task.",
+            "role": "user",
+            "runId": "synthetic-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.300Z"
+        },
+        {
+            "content": "Steer after restart",
+            "role": "user",
+            "runId": "synthetic-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.400Z"
+        },
+        {
+            "content": "Steer after restart",
+            "role": "user",
+            "runId": "synthetic-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.400Z"
+        },
+        {
+            "content": "Replay recovered.",
+            "isFinal": true,
+            "role": "assistant",
+            "runId": "synthetic-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.600Z"
+        }
+    ],
+    "id": "synthetic-model-duplicate-user-restart",
+    "providerFormat": "synthetic-model",
+    "redaction": "synthetic",
+    "runtimeSnapshot": {
+        "completed": true,
+        "events": [
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": "Investigate replay",
+                        "role": "user"
+                    },
+                    "runId": "synthetic-duplicate-before-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800100
+                },
+                "runtimeRecordedAt": 1785403800100,
+                "runtimeSequence": 30,
+                "type": "event"
+            },
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": [
+                            {
+                                "thinking": "Inspect replay state.",
+                                "type": "thinking"
+                            }
+                        ],
+                        "role": "assistant"
+                    },
+                    "runId": "synthetic-duplicate-before-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800200
+                },
+                "runtimeRecordedAt": 1785403800200,
+                "runtimeSequence": 31,
+                "type": "event"
+            },
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": "[System] Your previous turn was interrupted by a gateway restart. Continue the previous task.",
+                        "role": "user"
+                    },
+                    "runId": "synthetic-duplicate-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800300
+                },
+                "runtimeRecordedAt": 1785403800300,
+                "runtimeRunAliases": ["synthetic-duplicate-before-restart"],
+                "runtimeSequence": 32,
+                "type": "event"
+            },
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": "Steer after restart",
+                        "role": "user"
+                    },
+                    "runId": "synthetic-duplicate-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800400
+                },
+                "runtimeRecordedAt": 1785403800400,
+                "runtimeRunAliases": ["synthetic-duplicate-before-restart"],
+                "runtimeSequence": 33,
+                "type": "event"
+            },
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": [
+                            {
+                                "thinking": "Resume after restart.",
+                                "type": "thinking"
+                            },
+                            {
+                                "text": "Replay recovered.",
+                                "type": "text"
+                            }
+                        ],
+                        "role": "assistant",
+                        "stopReason": "stop"
+                    },
+                    "runId": "synthetic-duplicate-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800600
+                },
+                "runtimeRecordedAt": 1785403800600,
+                "runtimeRunAliases": ["synthetic-duplicate-before-restart"],
+                "runtimeSequence": 35,
+                "type": "event"
+            }
+        ],
+        "schemaVersion": 1,
+        "throughSequence": 35
+    },
+    "schemaVersion": 1,
+    "sessionKey": "agent:main:main"
+}

@@ -21,7 +21,6 @@ import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 
 import type { CacheEnvelope } from "../../../contracts/cache";
-import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
 import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openClawHistoryPageAdapter";
 import type { Metrics } from "../../../contracts/metrics";
 import type { Session } from "../../../contracts/sessions";
@@ -86,10 +85,6 @@ const animationFrameState = {
 const terminalApiState = {
     expectedExecCwd: "/tmp",
     wasJobStopped: false,
-};
-const chatApiState = {
-    projectionShadowFailuresRemaining: 0,
-    projectionShadowRequests: 0,
 };
 const jobsApiState = {
     cronName: "heartbeat",
@@ -374,16 +369,6 @@ function dashboardMetricsResponse(): Metrics {
                 writeFailures: 0,
                 writes: 4,
                 writesPerMinute: 2,
-            },
-            projectionShadow: {
-                activeRunMismatches: 0,
-                canonicalErrors: 0,
-                compactionStatusMismatches: 0,
-                lastObservedAt: "2026-07-30T10:00:00.000Z",
-                matches: 8,
-                mismatches: 0,
-                observations: 8,
-                rowMismatches: 0,
             },
             replay: {
                 currentBytes: 2048,
@@ -710,23 +695,6 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (url === "/api/metrics") {
         return Response.json(dashboardMetricsResponse());
-    }
-
-    if (method === "POST" && url === "/api/metrics/chat-projection-shadow") {
-        chatApiState.projectionShadowRequests += 1;
-        if (chatApiState.projectionShadowFailuresRemaining > 0) {
-            chatApiState.projectionShadowFailuresRemaining -= 1;
-            return Response.json(
-                {
-                    error: {
-                        code: "projection_shadow_unavailable",
-                        message: "Projection shadow unavailable",
-                    },
-                },
-                { status: 503 }
-            );
-        }
-        return Response.json({ isOk: true });
     }
 
     if (url === "/api/cache/weather.spydeberg") {
@@ -2342,8 +2310,6 @@ async function flushQueuedTimers() {
 describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
-        chatApiState.projectionShadowFailuresRemaining = 0;
-        chatApiState.projectionShadowRequests = 0;
         terminalApiState.expectedExecCwd = "/tmp";
         terminalApiState.wasJobStopped = false;
         logsApiState.dashboardRequests = 0;
@@ -4805,173 +4771,6 @@ describe("Mira Dashboard pages", () => {
         view.unmount();
         view.queryClient.clear();
     }, 10_000);
-
-    it("waits for replay and retries a failed projection parity report", async () => {
-        const user = userEvent.setup();
-        chatApiState.projectionShadowFailuresRemaining = 1;
-        const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
-
-        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-        const socket = FakeWebSocket.instances[0]!;
-        await act(async () => {
-            socket.emit("open");
-            await Promise.resolve();
-        });
-        await waitFor(() => {
-            expect(findSocketRequest(socket, "sessions.list")).toBeDefined();
-        });
-        await respondToSocketRequest(socket, "sessions.list", {
-            sessions: [
-                dashboardSessionFixture({
-                    agentType: "main",
-                    displayLabel: "Main chat",
-                    id: "session-main",
-                    key: "agent:main:main",
-                    model: "codex",
-                    type: "MAIN",
-                    updatedAt: Date.parse("2026-07-30T10:00:00.000Z"),
-                }),
-            ],
-        });
-        await waitFor(() => {
-            expect(findSocketRequest(socket, "chat.history")).toBeDefined();
-        });
-        await flushQueuedTimers();
-
-        expect(chatApiState.projectionShadowRequests).toBe(0);
-
-        await respondToSocketRequest(socket, "chat.history", {
-            messages: [
-                {
-                    content: "Loaded transcript",
-                    role: "assistant",
-                    timestamp: "2026-07-30T10:00:00.000Z",
-                },
-            ],
-        });
-        await flushQueuedTimers();
-        expect(chatApiState.projectionShadowRequests).toBe(0);
-
-        await respondToSocketRequest(socket, "chat.runtimeSnapshot", {
-            completed: false,
-            events: [],
-            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
-            throughSequence: 0,
-        });
-        await waitFor(() => {
-            expect(chatApiState.projectionShadowRequests).toBe(1);
-        });
-        await flushQueuedTimers();
-
-        await user.click(screen.getByRole("button", { name: "Chat display settings" }));
-        await user.click(screen.getByRole("button", { name: "Show thinking" }));
-        await waitFor(() => {
-            expect(chatApiState.projectionShadowRequests).toBe(2);
-        });
-
-        await act(async () => {
-            socket.close();
-            await Promise.resolve();
-        });
-        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2), {
-            timeout: 3000,
-        });
-        const reconnectedSocket = FakeWebSocket.instances[1]!;
-        await act(async () => {
-            reconnectedSocket.emit("open");
-            await Promise.resolve();
-        });
-        await waitFor(() => {
-            expect(findSocketRequest(reconnectedSocket, "sessions.list")).toBeDefined();
-        });
-        await respondToSocketRequest(reconnectedSocket, "sessions.list", {
-            sessions: [
-                dashboardSessionFixture({
-                    agentType: "main",
-                    displayLabel: "Main chat",
-                    id: "session-main",
-                    key: "agent:main:main",
-                    model: "codex",
-                    type: "MAIN",
-                    updatedAt: Date.parse("2026-07-30T10:00:00.000Z"),
-                }),
-            ],
-        });
-        await waitFor(() => {
-            expect(findSocketRequest(reconnectedSocket, "chat.history")).toBeDefined();
-        });
-        await respondToSocketRequest(reconnectedSocket, "chat.history", {
-            messages: [
-                {
-                    content: "Loaded transcript",
-                    role: "assistant",
-                    timestamp: "2026-07-30T10:00:00.000Z",
-                },
-            ],
-        });
-        await flushQueuedTimers();
-        expect(chatApiState.projectionShadowRequests).toBe(2);
-
-        await respondToSocketRequest(reconnectedSocket, "chat.runtimeSnapshot", {
-            completed: false,
-            events: [],
-            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
-            throughSequence: 0,
-        });
-        await waitFor(
-            () => {
-                expect(chatApiState.projectionShadowRequests).toBe(3);
-            },
-            { timeout: 2000 }
-        );
-
-        view.unmount();
-        view.queryClient.clear();
-    });
-
-    it("does not report projection parity after selected chat history fails", async () => {
-        const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
-
-        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-        const socket = FakeWebSocket.instances[0]!;
-        await act(async () => {
-            socket.emit("open");
-            await Promise.resolve();
-        });
-        await waitFor(() => {
-            expect(findSocketRequest(socket, "sessions.list")).toBeDefined();
-        });
-        await respondToSocketRequest(socket, "sessions.list", {
-            sessions: [
-                dashboardSessionFixture({
-                    agentType: "main",
-                    displayLabel: "Main chat",
-                    id: "session-main",
-                    key: "agent:main:main",
-                    model: "codex",
-                    type: "MAIN",
-                    updatedAt: Date.parse("2026-07-30T10:00:00.000Z"),
-                }),
-            ],
-        });
-        await waitFor(() => {
-            expect(findSocketRequest(socket, "chat.history")).toBeDefined();
-        });
-        await respondToSocketRequest(
-            socket,
-            "chat.history",
-            { message: "history unavailable" },
-            false
-        );
-        await waitFor(() => {
-            expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
-        });
-
-        expect(chatApiState.projectionShadowRequests).toBe(0);
-
-        view.unmount();
-        view.queryClient.clear();
-    });
 
     it("clears chat history loading when the selected session disappears", async () => {
         const view = renderChatPage();

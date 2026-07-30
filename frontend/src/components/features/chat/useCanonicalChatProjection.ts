@@ -2,13 +2,13 @@ import { useState } from "react";
 
 import type { ChatHistoryMessage } from "./chatTypes";
 import {
-    projectChatWithCanonicalShadow,
-    type ChatProjectionShadowResult,
+    type CanonicalChatProjection,
+    projectCanonicalChat,
 } from "./domain/chatCanonicalProjection";
 import { createChatVisibility } from "./domain/chatPresentation";
 import type { ChatRuntimeState } from "./domain/chatState";
 
-interface ChatProjectionShadowInputs {
+interface CanonicalChatProjectionInputs {
     deletedMessageKeys: ReadonlySet<string>;
     history: ChatHistoryMessage[];
     runtime: ChatRuntimeState;
@@ -18,16 +18,16 @@ interface ChatProjectionShadowInputs {
     shouldShowTools: boolean;
 }
 
-interface ChatProjectionShadowCache extends ChatProjectionShadowInputs {
-    projection: ChatProjectionShadowResult;
+interface CanonicalChatProjectionCache extends CanonicalChatProjectionInputs {
+    projection: CanonicalChatProjection;
 }
 
 function createProjectionCache(
-    inputs: ChatProjectionShadowInputs
-): ChatProjectionShadowCache {
+    inputs: CanonicalChatProjectionInputs
+): CanonicalChatProjectionCache {
     return {
         ...inputs,
-        projection: projectChatWithCanonicalShadow(
+        projection: projectCanonicalChat(
             inputs.history,
             inputs.runtime,
             inputs.selectedSessionKey,
@@ -39,8 +39,8 @@ function createProjectionCache(
 }
 
 function hasSameProjectionInputs(
-    cache: ChatProjectionShadowCache,
-    inputs: ChatProjectionShadowInputs
+    cache: CanonicalChatProjectionCache,
+    inputs: CanonicalChatProjectionInputs
 ): boolean {
     return (
         cache.deletedMessageKeys === inputs.deletedMessageKeys &&
@@ -59,11 +59,11 @@ function hasSameProjectionInputs(
  * This render-local derived-state cache avoids transcript-wide work for
  * unrelated parent renders such as composer keystrokes.
  * @param inputs Semantic projection inputs.
- * @returns Legacy projection plus canonical shadow comparison.
+ * @returns Canonical turns and their UI projection.
  */
-export function useChatProjectionShadow(
-    inputs: ChatProjectionShadowInputs
-): ChatProjectionShadowResult {
+export function useCanonicalChatProjection(
+    inputs: CanonicalChatProjectionInputs
+): CanonicalChatProjection {
     const [cache, setCache] = useState(() => createProjectionCache(inputs));
     if (hasSameProjectionInputs(cache, inputs)) {
         return cache.projection;

@@ -1,7 +1,5 @@
-import type { ChatProjectionShadowObservation } from "../../../contracts/chatProjectionTelemetry.ts";
 import type {
     ChatPersistenceMetrics,
-    ChatProjectionShadowMetrics,
     ChatReplayMetrics,
     ChatRuntimeMetrics,
 } from "../../../contracts/metrics.ts";
@@ -16,18 +14,6 @@ interface OpenClawChatReplayGauge {
     runs: number;
     sessions: number;
 }
-
-const emptyProjectionShadowMetrics = (): ChatProjectionShadowMetrics => ({
-    activeRunMismatches: 0,
-    canonicalErrors: 0,
-    compactionStatusMismatches: 0,
-    matches: 0,
-    mismatches: 0,
-    observations: 0,
-    rowMismatches: 0,
-});
-
-let projectionShadowMetricsState = emptyProjectionShadowMetrics();
 
 function safeTimestamp(now: () => number): number {
     try {
@@ -131,50 +117,4 @@ export class OpenClawChatRuntimeMetricsRecorder {
         };
         return { persistence, replay: replayMetrics };
     }
-}
-
-/**
- * Records one validated content-free browser shadow observation.
- * @param observation Projection parity observation.
- * @param observedAt Observation timestamp.
- */
-export function recordChatProjectionShadowObservation(
-    observation: ChatProjectionShadowObservation,
-    observedAt = Date.now()
-): void {
-    projectionShadowMetricsState.observations += 1;
-    const observedDate = new Date(observedAt);
-    projectionShadowMetricsState.lastObservedAt = Number.isNaN(observedDate.valueOf())
-        ? new Date().toISOString()
-        : observedDate.toISOString();
-    if (observation.matches) {
-        projectionShadowMetricsState.matches += 1;
-        return;
-    }
-    projectionShadowMetricsState.mismatches += 1;
-    projectionShadowMetricsState.activeRunMismatches += Number(
-        observation.differenceKinds.includes("active-runs")
-    );
-    projectionShadowMetricsState.canonicalErrors += Number(
-        observation.differenceKinds.includes("canonical-error")
-    );
-    projectionShadowMetricsState.compactionStatusMismatches += Number(
-        observation.differenceKinds.includes("compaction-status")
-    );
-    projectionShadowMetricsState.rowMismatches += Number(
-        observation.differenceKinds.includes("rows")
-    );
-}
-
-/**
- * Returns process-local content-free projection parity counters.
- * @returns Projection parity metrics snapshot.
- */
-export function getChatProjectionShadowMetrics(): ChatProjectionShadowMetrics {
-    return { ...projectionShadowMetricsState };
-}
-
-/** Resets browser parity counters between isolated backend tests. */
-export function resetChatProjectionShadowMetricsForTests(): void {
-    projectionShadowMetricsState = emptyProjectionShadowMetrics();
 }

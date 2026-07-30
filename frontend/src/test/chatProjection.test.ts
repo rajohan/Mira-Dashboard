@@ -5,14 +5,13 @@ import {
     messageDeleteKey,
     stableChatStringify,
 } from "../components/features/chat/chatUtilities";
-import { projectChatWithCanonicalShadow } from "../components/features/chat/domain/chatCanonicalProjection";
+import { projectCanonicalChat } from "../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,
     presentChatMessages,
 } from "../components/features/chat/domain/chatPresentation";
 import {
     type ChatProjection,
-    projectChat as projectLegacyChat,
     reconcileChatMessages,
 } from "../components/features/chat/domain/chatProjection";
 import {
@@ -34,16 +33,9 @@ type EventDraft = ChatRuntimeEvent extends infer Event
     : never;
 
 function projectChat(
-    ...parameters: Parameters<typeof projectLegacyChat>
+    ...parameters: Parameters<typeof projectCanonicalChat>
 ): ChatProjection {
-    const shadow = projectChatWithCanonicalShadow(...parameters);
-    expect(shadow.comparison).toMatchObject({
-        differenceKinds: [],
-        matches: true,
-        schemaVersion: 1,
-    });
-    expect(shadow.canonical?.turns).toBeDefined();
-    return shadow.legacy;
+    return projectCanonicalChat(...parameters).projection;
 }
 
 function projectedRowKind(row: ChatProjection["rows"][number]): string {

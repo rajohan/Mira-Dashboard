@@ -20,15 +20,11 @@ import {
 } from "../components/features/chat/chatPageUtilities";
 import type { ChatPreviewItem } from "../components/features/chat/chatTypes";
 import { createChatVisibility as createRuntimeVisibility } from "../components/features/chat/domain/chatPresentation";
-import {
-    chatProjectionShadowObservation,
-    chatProjectionShadowStateSignature,
-    reportChatProjectionShadowObservation,
-} from "../components/features/chat/domain/chatProjectionTelemetry";
 import { isSameChatSession } from "../components/features/chat/domain/chatState";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
 import { useChatActions } from "../components/features/chat/useChatActions";
+import { useCanonicalChatProjection } from "../components/features/chat/useCanonicalChatProjection";
 import {
     projectChatActivityRows,
     useChatCompactionIndicator,
@@ -36,7 +32,6 @@ import {
 import { useChatHistory } from "../components/features/chat/useChatHistory";
 import { useChatInputMedia } from "../components/features/chat/useChatInputMedia";
 import { useChatModels } from "../components/features/chat/useChatModels";
-import { useChatProjectionShadow } from "../components/features/chat/useChatProjectionShadow";
 import { useChatRuntime } from "../components/features/chat/useChatRuntime";
 import { useChatScroll } from "../components/features/chat/useChatScroll";
 import { Card } from "../components/ui/Card";
@@ -115,8 +110,6 @@ export function Chat() {
     const resetConfirmResolverRef = useRef<((wasConfirmed: boolean) => void) | undefined>(
         undefined
     );
-    const reportedProjectionMismatchRef = useRef("");
-    const reportedProjectionObservationRef = useRef("");
 
     const [draft, setDraft] = useState("");
     const [isAtBottom, setIsAtBottom] = useState(true);
@@ -246,13 +239,7 @@ export function Chat() {
         shouldStickToBottomRef: shouldStickToBottomRef,
         transport,
     });
-    const {
-        hasSuccessfulHistoryLoad,
-        isLoadingHistory,
-        messages,
-        refreshSoon,
-        setMessages,
-    } = history;
+    const { isLoadingHistory, messages, refreshSoon, setMessages } = history;
     const runtime = useChatRuntime({
         onError: setSendError,
         onSettled: refreshSoon,
@@ -260,7 +247,7 @@ export function Chat() {
         transport,
     });
     const chatModelOptions = useChatModels(transport);
-    const projectionShadow = useChatProjectionShadow({
+    const { projection } = useCanonicalChatProjection({
         deletedMessageKeys,
         history: messages,
         runtime: runtime.state,
@@ -269,61 +256,6 @@ export function Chat() {
         shouldShowThinking: showThinkingOutput,
         shouldShowTools: showToolOutput,
     });
-    const projection = projectionShadow.legacy;
-    const canReportProjectionShadow =
-        Boolean(selectedSession) &&
-        hasSuccessfulHistoryLoad &&
-        isConnected &&
-        !isLoadingHistory &&
-        runtime.hasSettledSelectedSessionReplay;
-    useEffect(() => {
-        if (!canReportProjectionShadow) {
-            return;
-        }
-        const { comparison } = projectionShadow;
-        const observation = chatProjectionShadowObservation(comparison);
-        const observationSignature = chatProjectionShadowStateSignature(
-            comparison,
-            selectedSessionKey,
-            transport.connectionGeneration
-        );
-        if (reportedProjectionObservationRef.current !== observationSignature) {
-            reportedProjectionObservationRef.current = observationSignature;
-            reportChatProjectionShadowObservation(observation).catch(() => {
-                if (reportedProjectionObservationRef.current === observationSignature) {
-                    reportedProjectionObservationRef.current = "";
-                }
-            });
-        }
-        if (comparison.matches) {
-            return;
-        }
-        const signature = [
-            comparison.legacyFingerprint,
-            comparison.canonicalFingerprint || "canonical-error",
-            ...comparison.differenceKinds,
-        ].join(":");
-        if (reportedProjectionMismatchRef.current === signature) {
-            return;
-        }
-        reportedProjectionMismatchRef.current = signature;
-        console.warn("Canonical chat projection shadow mismatch", {
-            canonicalRowCount: comparison.canonicalRowCount,
-            canonicalActiveRunCount: comparison.canonicalActiveRunCount,
-            canonicalCompactionPhase: comparison.canonicalCompactionPhase,
-            differenceKinds: comparison.differenceKinds,
-            legacyActiveRunCount: comparison.legacyActiveRunCount,
-            legacyCompactionPhase: comparison.legacyCompactionPhase,
-            legacyRowCount: comparison.legacyRowCount,
-            schemaVersion: comparison.schemaVersion,
-            turnCount: comparison.turnCount,
-        });
-    }, [
-        canReportProjectionShadow,
-        projectionShadow,
-        selectedSessionKey,
-        transport.connectionGeneration,
-    ]);
     const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
     const chatRows = projectChatActivityRows({
         activeRuns: projection.activeRuns,

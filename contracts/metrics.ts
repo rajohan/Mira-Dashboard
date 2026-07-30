@@ -86,20 +86,8 @@ export const chatPersistenceMetricsSchema = v.strictObject({
     writesPerMinute: finiteNumberSchema,
 });
 
-export const chatProjectionShadowMetricsSchema = v.strictObject({
-    activeRunMismatches: finiteNumberSchema,
-    canonicalErrors: finiteNumberSchema,
-    compactionStatusMismatches: finiteNumberSchema,
-    lastObservedAt: v.optional(v.pipe(v.string(), v.trim(), v.nonEmpty())),
-    matches: finiteNumberSchema,
-    mismatches: finiteNumberSchema,
-    observations: finiteNumberSchema,
-    rowMismatches: finiteNumberSchema,
-});
-
 export const chatRuntimeMetricsSchema = v.strictObject({
     persistence: chatPersistenceMetricsSchema,
-    projectionShadow: chatProjectionShadowMetricsSchema,
     replay: chatReplayMetricsSchema,
 });
 
@@ -217,9 +205,6 @@ export type RuntimeMetrics = v.InferOutput<typeof runtimeMetricsSchema>;
 export type CacheRefreshMetrics = v.InferOutput<typeof cacheRefreshMetricsSchema>;
 export type ChatReplayMetrics = v.InferOutput<typeof chatReplayMetricsSchema>;
 export type ChatPersistenceMetrics = v.InferOutput<typeof chatPersistenceMetricsSchema>;
-export type ChatProjectionShadowMetrics = v.InferOutput<
-    typeof chatProjectionShadowMetricsSchema
->;
 export type ChatRuntimeMetrics = v.InferOutput<typeof chatRuntimeMetricsSchema>;
 export type DatabaseMetrics = v.InferOutput<typeof databaseMetricsSchema>;
 export type GatewayMetrics = v.InferOutput<typeof gatewayMetricsSchema>;
