@@ -714,12 +714,16 @@ describe("Dashboard immutable release manager", () => {
         expect(() => assertDashboardReleaseRuntimeAvailable(incompatibleRelease)).toThrow(
             "requires unavailable managed Bun runtime 0.0.0+missing"
         );
-        expect(
+        const activationError = await captureRejection(() =>
             activateDashboardRelease(FIRST_COMMIT, runtimeRoot, {
                 ...SCHEMA_6_OPTIONS,
                 hasRuntime: () => false,
             })
-        ).rejects.toThrow("requires unavailable managed Bun runtime 0.0.0+missing");
+        );
+        expect(activationError).toBeInstanceOf(Error);
+        expect((activationError as Error).message).toContain(
+            "requires unavailable managed Bun runtime 0.0.0+missing"
+        );
 
         const cachedMajorRuntimeRoot = temporaryReleasesRoot();
         await createManagedRelease(

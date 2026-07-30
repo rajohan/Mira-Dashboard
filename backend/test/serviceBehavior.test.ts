@@ -2175,6 +2175,9 @@ printf 'scheduled\n'
             expect(guardian).toContain(
                 `${releasesRoot}/releases/${currentCommit}/backend/dist/releaseLifecycle.js`
             );
+            expect(guardian).toContain(
+                '/usr/bin/timeout --signal=KILL 5s "$runtime_path" --revision'
+            );
             expect(guardian).toContain(`rollback '${currentCommit}' '${previousCommit}'`);
             expect(guardian).toContain(`rollback '${previousCommit}' '${currentCommit}'`);
             expect(guardian).toContain(

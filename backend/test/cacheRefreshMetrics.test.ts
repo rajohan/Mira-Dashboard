@@ -3,6 +3,7 @@ import {
     existsSync,
     mkdirSync,
     mkdtempSync,
+    readdirSync,
     readFileSync,
     rmSync,
     statSync,
@@ -30,6 +31,11 @@ function temporaryRoot(): string {
     const root = mkdtempSync(path.join(tmpdir(), "mira-cache-refresh-metrics-"));
     temporaryRoots.push(root);
     return root;
+}
+
+function instanceSnapshotPath(snapshotPath: string, instanceId: string): string {
+    const parsed = path.parse(snapshotPath);
+    return path.join(parsed.dir, `${parsed.name}.${instanceId}${parsed.ext}`);
 }
 
 async function readText(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -72,8 +78,16 @@ describe("cache refresh runtime metrics", () => {
             requests: 1,
             totalDurationMs: 12.35,
         });
+        const publishedSnapshotName = readdirSync(path.dirname(snapshotPath!)).find(
+            (name) => name.startsWith("cache-refresh-metrics.") && name.endsWith(".json")
+        );
+        expect(publishedSnapshotName).toBeDefined();
+        const publishedSnapshotPath = path.join(
+            path.dirname(snapshotPath!),
+            publishedSnapshotName!
+        );
         expect(statSync(path.dirname(snapshotPath!)).mode & 0o777).toBe(0o700);
-        expect(statSync(snapshotPath!).mode & 0o777).toBe(0o600);
+        expect(statSync(publishedSnapshotPath).mode & 0o777).toBe(0o600);
 
         const moduleUrl = pathToFileURL(
             path.resolve(import.meta.dirname, "../src/services/cacheRefreshMetrics.ts")
@@ -101,8 +115,36 @@ describe("cache refresh runtime metrics", () => {
         expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
         expect(JSON.parse(stdout)).toEqual(getCacheRefreshMetrics());
 
+        const replacementInstanceId = "ffffffff-ffff-7fff-bfff-ffffffffffff";
+        const replacementSnapshotPath = instanceSnapshotPath(
+            snapshotPath!,
+            replacementInstanceId
+        );
+        writeFileSync(
+            replacementSnapshotPath,
+            `${JSON.stringify({
+                instanceId: replacementInstanceId,
+                metrics: {
+                    active: 0,
+                    averageDurationMs: 9,
+                    coalesced: 0,
+                    failures: 0,
+                    lastDurationMs: 9,
+                    maxDurationMs: 9,
+                    refreshes: 9,
+                    requests: 9,
+                    totalDurationMs: 81,
+                },
+                pid: process.pid,
+                startedAt: "2026-07-30T08:00:00.000Z",
+                version: 1,
+            })}\n`,
+            { encoding: "utf8", flag: "wx", mode: 0o600 }
+        );
         stopCacheRefreshMetricsSession();
-        expect(existsSync(snapshotPath!)).toBe(false);
+        expect(existsSync(publishedSnapshotPath)).toBe(false);
+        expect(existsSync(replacementSnapshotPath)).toBe(true);
+        expect(getCacheRefreshMetrics({ environment }).requests).toBe(9);
     });
 
     it("fails soft on missing or malformed runtime snapshots", () => {
@@ -131,12 +173,17 @@ describe("cache refresh runtime metrics", () => {
         });
 
         mkdirSync(path.dirname(snapshotPath), { mode: 0o700, recursive: true });
-        writeFileSync(snapshotPath, '{"version":1,"metrics":"invalid"}\n', {
+        const malformedInstanceId = Bun.randomUUIDv7();
+        const malformedSnapshotPath = instanceSnapshotPath(
+            snapshotPath,
+            malformedInstanceId
+        );
+        writeFileSync(malformedSnapshotPath, '{"version":1,"metrics":"invalid"}\n', {
             encoding: "utf8",
             flag: "wx",
             mode: 0o600,
         });
-        expect(readFileSync(snapshotPath, "utf8")).toContain('"invalid"');
+        expect(readFileSync(malformedSnapshotPath, "utf8")).toContain('"invalid"');
         expect(getCacheRefreshMetrics({ environment })).toEqual({
             active: 0,
             averageDurationMs: 0,
@@ -149,11 +196,13 @@ describe("cache refresh runtime metrics", () => {
             totalDurationMs: 0,
         });
 
-        rmSync(snapshotPath);
+        rmSync(malformedSnapshotPath);
+        const staleInstanceId = Bun.randomUUIDv7();
+        const staleSnapshotPath = instanceSnapshotPath(snapshotPath, staleInstanceId);
         writeFileSync(
-            snapshotPath,
+            staleSnapshotPath,
             `${JSON.stringify({
-                instanceId: Bun.randomUUIDv7(),
+                instanceId: staleInstanceId,
                 metrics: {
                     active: 0,
                     averageDurationMs: 4,

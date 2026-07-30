@@ -288,6 +288,35 @@ describe("managed Bun runtimes", () => {
             "release manifest has no valid Bun runtime"
         );
 
+        writeFileSync(
+            path.join(releaseRoot, "release-manifest.json"),
+            `${JSON.stringify({ bunVersion: "2.0.0+feedface" })}\n`
+        );
+        writeFileSync(
+            runtime,
+            `#!/bin/sh
+if [ "\${1:-}" = "--revision" ]; then
+    exit 1
+fi
+printf '%s\\n' "\${1:-}"
+`
+        );
+        chmodSync(runtime, 0o700);
+        const failedProbe = Bun.spawnSync({
+            cmd: [launcher, "dist/workerStart.js"],
+            cwd: releaseBackend,
+            env: {
+                MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+                PATH: "/usr/bin:/bin",
+            },
+            stderr: "pipe",
+            stdout: "pipe",
+        });
+        expect(failedProbe.exitCode).toBe(78);
+        expect(new TextDecoder().decode(failedProbe.stderr)).toContain(
+            "runtime revision probe failed"
+        );
+
         const rejected = Bun.spawnSync({
             cmd: [launcher, "arbitrary.js"],
             env: {

@@ -15,6 +15,8 @@ import { readDashboardReleaseState } from "../backend/src/releaseManager.ts";
 const FULL_COMMIT_PATTERN = /^[\da-f]{40}$/u;
 const SYSTEMCTL_EXECUTABLE = "/usr/bin/systemctl";
 const COMMAND_OUTPUT_LIMIT = 1024 * 1024;
+const DEFAULT_SERVICE_STABILIZATION_MS = 30_000;
+const SERVICE_POLL_INTERVAL_MS = 250;
 
 interface ProductionBootstrapCommandResult {
     stderr: string;
@@ -22,6 +24,7 @@ interface ProductionBootstrapCommandResult {
 }
 
 export interface ProductionBootstrapCommandOptions {
+    allowNonZeroExit?: boolean;
     cwd?: string;
     timeoutMs: number;
 }
@@ -76,7 +79,7 @@ export async function runProductionBootstrapCommand(
         maxBuffer: COMMAND_OUTPUT_LIMIT,
         timeoutMs: options.timeoutMs,
     });
-    if (result.code !== 0) {
+    if (result.code !== 0 && options.allowNonZeroExit !== true) {
         const invocation = [command, ...arguments_].join(" ");
         throw new Error(
             `${invocation} failed with exit code ${
@@ -145,10 +148,15 @@ async function assertRealDirectory(directoryPath: string, label: string): Promis
 export async function initializeProductionBootstrapDatabase(): Promise<void> {
     const { database } = await import("../backend/src/database.ts");
     try {
-        const quickCheck = database.query("PRAGMA quick_check").get() as {
-            quick_check?: unknown;
-        } | null;
-        if (quickCheck?.quick_check !== "ok") {
+        const quickCheck = database.query("PRAGMA quick_check").all() as Array<
+            Record<string, unknown>
+        >;
+        if (
+            quickCheck.length !== 1 ||
+            Object.values(quickCheck[0] ?? {}).every(
+                (value) => typeof value !== "string" || value.toLowerCase() !== "ok"
+            )
+        ) {
             throw new Error("Fresh Dashboard database failed SQLite quick_check");
         }
     } finally {
@@ -170,7 +178,7 @@ function assertBootstrapEnvironment(environment: NodeJS.ProcessEnv): void {
 function assertServiceStabilizationMs(value: number): number {
     if (!Number.isFinite(value) || value < 0) {
         throw new RangeError(
-            "Dashboard bootstrap service stabilization delay must be non-negative"
+            "Dashboard bootstrap service stabilization window must be non-negative"
         );
     }
     return value;
@@ -215,7 +223,7 @@ async function verifyEnabledServices(
         const enabled = await commandRunner(
             SYSTEMCTL_EXECUTABLE,
             ["--user", "is-enabled", name],
-            { timeoutMs: 30_000 }
+            { allowNonZeroExit: true, timeoutMs: 30_000 }
         );
         if (enabled.stdout.trim() !== "enabled") {
             throw new Error(`${name} was not persistently enabled`);
@@ -256,6 +264,24 @@ async function verifyEnabledServices(
     return services;
 }
 
+async function waitForEnabledServices(
+    commandRunner: ProductionBootstrapCommandRunner,
+    stabilizationMs: number
+): Promise<ProductionBootstrapResult["services"]> {
+    const deadline = Date.now() + stabilizationMs;
+    while (true) {
+        try {
+            return await verifyEnabledServices(commandRunner);
+        } catch (error) {
+            const remainingMs = deadline - Date.now();
+            if (remainingMs <= 0) {
+                throw error;
+            }
+            await Bun.sleep(Math.min(SERVICE_POLL_INTERVAL_MS, remainingMs));
+        }
+    }
+}
+
 /**
  * Initializes and activates the first managed Dashboard release on a blank
  * production host. Re-running the same checkout is safe; using this command to
@@ -272,7 +298,7 @@ export async function bootstrapProductionDashboard(
     const commandRunner = options.commandRunner ?? runProductionBootstrapCommand;
     const onProgress = options.onProgress;
     const stabilizationMs = assertServiceStabilizationMs(
-        options.serviceStabilizationMs ?? 2000
+        options.serviceStabilizationMs ?? DEFAULT_SERVICE_STABILIZATION_MS
     );
 
     await assertRealDirectory(paths.projectRoot, "Dashboard project root");
@@ -346,16 +372,18 @@ export async function bootstrapProductionDashboard(
         });
     await activateRelease(commitSha);
 
-    onProgress?.("Enabling and starting Dashboard services");
+    onProgress?.("Enabling and restarting Dashboard services");
     await commandRunner(
         SYSTEMCTL_EXECUTABLE,
-        ["--user", "enable", "--now", ...MANAGED_DASHBOARD_UNIT_NAMES],
+        ["--user", "enable", ...MANAGED_DASHBOARD_UNIT_NAMES],
         { timeoutMs: 90_000 }
     );
-    if (stabilizationMs > 0) {
-        await Bun.sleep(stabilizationMs);
-    }
-    const services = await verifyEnabledServices(commandRunner);
+    await commandRunner(
+        SYSTEMCTL_EXECUTABLE,
+        ["--user", "restart", ...MANAGED_DASHBOARD_UNIT_NAMES],
+        { timeoutMs: 90_000 }
+    );
+    const services = await waitForEnabledServices(commandRunner, stabilizationMs);
     onProgress?.("Dashboard production bootstrap completed");
     return {
         commitSha,

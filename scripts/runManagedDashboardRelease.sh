@@ -75,7 +75,12 @@ if [[ "$(/usr/bin/stat --format='%h' -- "$runtime_path")" != "1" ]]; then
     echo "Managed Dashboard Bun runtime must not have external hard links" >&2
     exit 78
 fi
-runtime_revision="$("$runtime_path" --revision)"
+if ! runtime_revision="$(
+    /usr/bin/timeout --signal=KILL 5s "$runtime_path" --revision 2>/dev/null
+)"; then
+    echo "Managed Dashboard Bun runtime revision probe failed" >&2
+    exit 78
+fi
 if [[ "$runtime_revision" != "$bun_version" ]]; then
     echo "Managed Dashboard Bun runtime version does not match the release" >&2
     exit 78

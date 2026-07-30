@@ -2123,7 +2123,7 @@ function releaseCutoverShellFunctions(): string[] {
         '  [ -f "$runtime_path" ] && [ -x "$runtime_path" ] && [ ! -L "$runtime_path" ] || return 1',
         '  [ "$(/usr/bin/realpath --canonicalize-existing "$runtime_path")" = "$runtime_path" ] || return 1',
         '  [ "$(/usr/bin/stat --format=\'%h\' -- "$runtime_path")" = 1 ] || return 1',
-        '  runtime_revision="$("$runtime_path" --revision)" || return 1',
+        '  runtime_revision="$(/usr/bin/timeout --signal=KILL 5s "$runtime_path" --revision 2>/dev/null)" || return 1',
         '  [ "$runtime_revision" = "$bun_version" ] || return 1',
         '  printf "%s" "$runtime_path"',
         "}",

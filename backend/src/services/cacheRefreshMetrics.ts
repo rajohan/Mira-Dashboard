@@ -8,8 +8,11 @@ import { cacheRefreshMetricsSchema } from "../../../contracts/metrics.ts";
 
 const CACHE_REFRESH_METRICS_SNAPSHOT_VERSION = 1;
 const MAX_CACHE_REFRESH_METRICS_SNAPSHOT_BYTES = 16 * 1024;
+const MAX_CACHE_REFRESH_METRICS_SNAPSHOT_CANDIDATES = 64;
 const RUNTIME_DIRECTORY_NAME = "mira-dashboard";
 const SNAPSHOT_FILE_NAME = "cache-refresh-metrics.json";
+const SNAPSHOT_INSTANCE_ID_PATTERN =
+    /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 
 interface CacheRefreshMetricsSnapshot {
     instanceId: string;
@@ -88,6 +91,31 @@ function metricsSnapshot(): CacheRefreshMetrics {
                           100
                   ) / 100,
     };
+}
+
+function instanceSnapshotPath(snapshotPath: string, instanceId: string): string {
+    const parsed = path.parse(snapshotPath);
+    return path.join(parsed.dir, `${parsed.name}.${instanceId}${parsed.ext}`);
+}
+
+function instanceIdFromSnapshotName(
+    snapshotPath: string,
+    candidateName: string
+): string | undefined {
+    const parsed = path.parse(snapshotPath);
+    const prefix = `${parsed.name}.`;
+    if (
+        !candidateName.startsWith(prefix) ||
+        !candidateName.endsWith(parsed.ext) ||
+        candidateName === path.basename(snapshotPath)
+    ) {
+        return undefined;
+    }
+    const instanceId = candidateName.slice(
+        prefix.length,
+        parsed.ext === "" ? undefined : -parsed.ext.length
+    );
+    return SNAPSHOT_INSTANCE_ID_PATTERN.test(instanceId) ? instanceId : undefined;
 }
 
 function ensurePrivateRuntimeDirectory(directoryPath: string): void {
@@ -206,6 +234,35 @@ function readSnapshot(snapshotPath: string): CacheRefreshMetricsSnapshot | undef
     }
 }
 
+function readLatestSnapshot(
+    snapshotPath: string
+): CacheRefreshMetricsSnapshot | undefined {
+    const directoryPath = path.dirname(snapshotPath);
+    let candidates: Array<{ instanceId: string; path: string }>;
+    try {
+        candidates = fs
+            .readdirSync(directoryPath, { withFileTypes: true })
+            .filter((entry) => entry.isFile())
+            .flatMap((entry) => {
+                const instanceId = instanceIdFromSnapshotName(snapshotPath, entry.name);
+                return instanceId
+                    ? [{ instanceId, path: path.join(directoryPath, entry.name) }]
+                    : [];
+            })
+            .toSorted((left, right) => right.instanceId.localeCompare(left.instanceId))
+            .slice(0, MAX_CACHE_REFRESH_METRICS_SNAPSHOT_CANDIDATES);
+    } catch {
+        return undefined;
+    }
+    for (const candidate of candidates) {
+        const snapshot = readSnapshot(candidate.path);
+        if (snapshot?.instanceId === candidate.instanceId) {
+            return snapshot;
+        }
+    }
+    return undefined;
+}
+
 /**
  * Starts a fresh in-memory metrics session and publishes its zero snapshot for
  * production IPC. Repeated registration inside the same worker is idempotent.
@@ -215,27 +272,30 @@ export function startCacheRefreshMetricsSession(
 ): void {
     if (activeSession) return;
     cacheRefreshMetricsState = emptyCacheRefreshMetrics();
+    const instanceId = Bun.randomUUIDv7();
+    const snapshotPath =
+        options.snapshotPath ??
+        resolveCacheRefreshMetricsSnapshotPath(options.environment ?? process.env);
     activeSession = {
         directoryValidated: false,
-        instanceId: Bun.randomUUIDv7(),
+        instanceId,
         snapshotPath:
-            options.snapshotPath ??
-            resolveCacheRefreshMetricsSnapshotPath(options.environment ?? process.env),
+            snapshotPath === undefined
+                ? undefined
+                : instanceSnapshotPath(snapshotPath, instanceId),
         startedAt: new Date().toISOString(),
     };
     publishSnapshot();
 }
 
 /**
- * Removes only this worker instance's volatile snapshot. A replacement worker
- * that has already published a newer instance is left intact.
+ * Removes this worker instance's uniquely named volatile snapshot. Replacement
+ * workers publish to different paths, so cleanup cannot unlink their state.
  */
 export function stopCacheRefreshMetricsSession(): void {
     const session = activeSession;
     activeSession = undefined;
     if (!session?.snapshotPath) return;
-    const current = readSnapshot(session.snapshotPath);
-    if (current?.instanceId !== session.instanceId) return;
     try {
         fs.unlinkSync(session.snapshotPath);
     } catch (error) {
@@ -260,7 +320,7 @@ export function getCacheRefreshMetrics(
         options.snapshotPath ??
         resolveCacheRefreshMetricsSnapshotPath(options.environment ?? process.env);
     return (
-        (snapshotPath && readSnapshot(snapshotPath)?.metrics) ||
+        (snapshotPath && readLatestSnapshot(snapshotPath)?.metrics) ||
         emptyCacheRefreshMetrics()
     );
 }

@@ -634,6 +634,50 @@ printf 'LoadState=loaded\nActiveState=active\n'
         finishJobExecution(queued.id, workerId, "success", undefined, {});
     });
 
+    it("recovers leases that expire while new claims are paused", async () => {
+        const timestamp = new Date().toISOString();
+        const running = insertJobExecution({
+            actionKey: `test.paused-expired-${Bun.randomUUIDv7()}`,
+            cancellable: false,
+            displayName: "Paused expired execution",
+            leaseOwner: "missing-worker",
+            queuedAt: timestamp,
+            resourceClass: "exclusive",
+            status: "running",
+            timeoutMs: 60_000,
+            triggerType: "system",
+        });
+        const queued = enqueueJobExecution({
+            actionKey: `test.paused-queued-${Bun.randomUUIDv7()}`,
+            displayName: "Paused queued execution",
+            resourceClass: "exclusive",
+            timeoutMs: 60_000,
+        });
+        testExecutionIds.add(running.id);
+        testExecutionIds.add(queued.id);
+        setJobWorkerClaimsPaused(true, timestamp);
+
+        startScheduledJobExecutor();
+        database
+            .prepare(
+                `UPDATE job_executions
+                 SET lease_expires_at = ?
+                 WHERE id = ?`
+            )
+            .run("1970-01-01T00:00:00.000Z", running.id);
+
+        expect(
+            await waitForJobExecution(running.id, {
+                pollIntervalMs: 25,
+                timeoutMs: 3000,
+            })
+        ).toMatchObject({
+            message: "Job failed after its worker lease expired",
+            status: "failed",
+        });
+        expect(getJobExecution(queued.id)).toMatchObject({ status: "queued" });
+    });
+
     it("reconciles orphaned deployment cutovers while new claims are paused", () => {
         const deploymentId = createVerifyingDeployment(
             "2026-07-26T03:00:00.000Z",

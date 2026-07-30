@@ -92,8 +92,8 @@ The command performs the complete first managed activation:
    exact revision-qualified Bun executable;
 7. activates the release, atomically installs and verifies both tracked
    systemd unit files, and reloads the user manager;
-8. enables and starts both services, waits briefly, and verifies that both
-   remain enabled and running.
+8. enables and restarts both services, then polls within a bounded startup window
+   until both become enabled and running.
 
 Run the command as the managed user, not with `sudo`; only its one
 `loginctl enable-linger` child needs root. A normal sudo prompt may appear on a
@@ -141,7 +141,7 @@ tests.
 
 ## Managed Systemd User Services
 
-`deploy:bootstrap` installs, enables, starts, and verifies the tracked web and
+`deploy:bootstrap` installs, enables, restarts, and verifies the tracked web and
 worker units. No separate unit-file installation or `daemon-reload` is needed.
 
 The web role owns HTTP, WebSocket, and the Gateway bridge. The worker role owns

@@ -78,6 +78,12 @@ describe("production bootstrap", () => {
         expect((commandError as Error).message).toContain(
             "/usr/bin/false failed with exit code 1"
         );
+        expect(
+            await runProductionBootstrapCommand("/usr/bin/false", [], {
+                allowNonZeroExit: true,
+                timeoutMs: 5000,
+            })
+        ).toEqual({ stderr: "", stdout: "" });
 
         await initializeProductionBootstrapDatabase();
     });
@@ -140,13 +146,14 @@ describe("production bootstrap", () => {
             "Initializing and verifying production SQLite",
             "Staging the initial managed release",
             "Activating release and reconciling managed systemd units",
-            "Enabling and starting Dashboard services",
+            "Enabling and restarting Dashboard services",
             "Dashboard production bootstrap completed",
         ]);
         expect(calls).toContain(
-            `/usr/bin/systemctl --user enable --now ${MANAGED_DASHBOARD_UNIT_NAMES.join(
-                " "
-            )}`
+            `/usr/bin/systemctl --user enable ${MANAGED_DASHBOARD_UNIT_NAMES.join(" ")}`
+        );
+        expect(calls).toContain(
+            `/usr/bin/systemctl --user restart ${MANAGED_DASHBOARD_UNIT_NAMES.join(" ")}`
         );
         for (const unit of MANAGED_DASHBOARD_UNIT_NAMES) {
             expect(calls).toContain(`/usr/bin/systemctl --user is-enabled ${unit}`);
@@ -225,6 +232,68 @@ describe("production bootstrap", () => {
         );
         expect(initializeDatabase).not.toHaveBeenCalled();
         expect(stageRelease).not.toHaveBeenCalled();
+    });
+
+    it("restarts repaired units when rerunning the current release", async () => {
+        const root = temporaryProjectRoot();
+        const paths = dashboardProjectPaths(root);
+        const calls: string[] = [];
+
+        await bootstrapProductionDashboard({
+            activateRelease: () => Promise.resolve(),
+            commandRunner: commandRunner(paths.productionCheckoutRoot, calls),
+            environment: { NODE_ENV: "production" },
+            initializeDatabase: () => Promise.resolve(),
+            paths,
+            readReleaseSlots: () => Promise.resolve({ current: COMMIT_SHA }),
+            serviceStabilizationMs: 0,
+            stageRelease: (commitSha) => Promise.resolve({ commitSha, path: "release" }),
+        });
+
+        const enableIndex = calls.indexOf(
+            `/usr/bin/systemctl --user enable ${MANAGED_DASHBOARD_UNIT_NAMES.join(" ")}`
+        );
+        const restartIndex = calls.indexOf(
+            `/usr/bin/systemctl --user restart ${MANAGED_DASHBOARD_UNIT_NAMES.join(" ")}`
+        );
+        expect(enableIndex).toBeGreaterThan(-1);
+        expect(restartIndex).toBeGreaterThan(enableIndex);
+    });
+
+    it("polls transient service startup state until both units are healthy", async () => {
+        const root = temporaryProjectRoot();
+        const paths = dashboardProjectPaths(root);
+        const baseRunner = commandRunner(paths.productionCheckoutRoot, []);
+        let stateChecks = 0;
+        const settlingRunner: ProductionBootstrapCommandRunner = (
+            command,
+            arguments_,
+            options
+        ) => {
+            if (command === "/usr/bin/systemctl" && arguments_[1] === "show") {
+                stateChecks += 1;
+                if (stateChecks === 1) {
+                    return Promise.resolve({
+                        stderr: "",
+                        stdout: "ActiveState=activating\nResult=success\nSubState=start\n",
+                    });
+                }
+            }
+            return baseRunner(command, arguments_, options);
+        };
+
+        await bootstrapProductionDashboard({
+            activateRelease: () => Promise.resolve(),
+            commandRunner: settlingRunner,
+            environment: { NODE_ENV: "production" },
+            initializeDatabase: () => Promise.resolve(),
+            paths,
+            readReleaseSlots: () => Promise.resolve({}),
+            serviceStabilizationMs: 10,
+            stageRelease: (commitSha) => Promise.resolve({ commitSha, path: "release" }),
+        });
+
+        expect(stateChecks).toBe(MANAGED_DASHBOARD_UNIT_NAMES.length + 1);
     });
 
     it("fails closed for invalid slots, staged identity, and service state", async () => {

@@ -30,7 +30,6 @@ import {
     unregisterJobWorker,
     updateJobExecutionOutput,
 } from "./jobExecutionQueue.ts";
-import { getJobWorkerClaimsState } from "./jobWorkerControl.ts";
 import { waitForJobExecution } from "./queuedJobExecution.ts";
 
 const logger = createStructuredLogger("scheduled-jobs");
@@ -1508,9 +1507,6 @@ function executorTick(): void {
         // Keep replacement workers idle until the detached guardian records a
         // terminal deployment status in the shared database.
         if (hasPendingDeploymentCutover()) {
-            return;
-        }
-        if (getJobWorkerClaimsState().paused) {
             return;
         }
         const execution = claimNextJobExecution(

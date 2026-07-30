@@ -6,6 +6,19 @@ repository_root="$(
     pwd -P
 )"
 dashboard_project_root="${MIRA_DASHBOARD_PROJECT_ROOT:-/home/ubuntu/projects/mira-dashboard}"
+dashboard_project_root="$(
+    printf '%s' "$dashboard_project_root" |
+        /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+)"
+if [[ -z "$dashboard_project_root" ]]; then
+    dashboard_project_root="/home/ubuntu/projects/mira-dashboard"
+fi
+if ! dashboard_project_root="$(
+    /usr/bin/realpath --canonicalize-existing -- "$dashboard_project_root"
+)"; then
+    echo "Dashboard project root must be an existing real path" >&2
+    exit 1
+fi
 expected_checkout="$dashboard_project_root/production/checkout"
 
 if [[ "$(id -u)" == "0" ]]; then
@@ -23,7 +36,7 @@ if [[ "$linger_state" != "yes" ]]; then
     echo "Enabling persistent systemd user services for $managed_user"
     /usr/bin/sudo /usr/bin/loginctl enable-linger "$managed_user"
 fi
-linger_state="$(/usr/bin/loginctl show-user "$managed_user" --property=Linger --value)"
+linger_state="$(/usr/bin/loginctl show-user "$managed_user" --property=Linger --value 2>/dev/null || true)"
 if [[ "$linger_state" != "yes" ]]; then
     echo "systemd linger was not enabled for $managed_user" >&2
     exit 1
