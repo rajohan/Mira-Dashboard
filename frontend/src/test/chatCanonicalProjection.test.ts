@@ -269,6 +269,126 @@ describe("canonical chat turn projection", () => {
         });
     });
 
+    it("keeps the primary history sequence after runtime reconciliation", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "reconciled question",
+                    provenance: {
+                        id: "history-question",
+                        sequence: 2,
+                        source: "openclaw-history",
+                    },
+                    role: "user",
+                    runId: "provider-run",
+                    runtimeSequence: 9,
+                    text: "reconciled question",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns[0]).toMatchObject({
+            sequenceEnd: 2,
+            sequenceStart: 2,
+        });
+        expect(turns[0]?.entries[0]).toMatchObject({
+            sequence: 2,
+            source: "openclaw-history",
+        });
+    });
+
+    it("splits a new provider run after a diagnostic-only history turn", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "",
+                    role: "assistant",
+                    runId: "failed-provider-run",
+                    text: "",
+                    thinking: [{ text: "partial diagnostic" }],
+                },
+                {
+                    content: "retry",
+                    role: "user",
+                    runId: "retry-provider-run",
+                    text: "retry",
+                },
+                {
+                    content: "recovered",
+                    role: "assistant",
+                    runId: "retry-provider-run",
+                    text: "recovered",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(2);
+        expect(turns.map((turn) => turn.runId)).toEqual([
+            "failed-provider-run",
+            "retry-provider-run",
+        ]);
+        expect(turns.map((turn) => turn.entries.map((entry) => entry.kind))).toEqual([
+            ["thinking"],
+            ["user", "assistant"],
+        ]);
+    });
+
+    it("starts run-backed output after an answered runless history turn", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "question",
+                    role: "user",
+                    text: "question",
+                },
+                {
+                    content: "answer",
+                    role: "assistant",
+                    text: "answer",
+                },
+                {
+                    content: "",
+                    role: "assistant",
+                    runId: "runtime-run",
+                    text: "",
+                    thinking: [{ text: "new runtime work" }],
+                },
+            ],
+            [
+                {
+                    aliases: [],
+                    diagnostics: [],
+                    lastSequence: 3,
+                    phase: "active",
+                    runId: "runtime-run",
+                    sessionKey: SESSION,
+                    startedAt: "2026-07-30T06:32:00.000Z",
+                    updatedAt: "2026-07-30T06:32:00.000Z",
+                    userMessages: [],
+                },
+            ],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(2);
+        expect(turns[0]).toMatchObject({
+            lifecycle: "unknown",
+            runId: undefined,
+        });
+        expect(turns[1]).toMatchObject({
+            lifecycle: "active",
+            runId: "runtime-run",
+        });
+        expect(turns.map((turn) => turn.entries.map((entry) => entry.kind))).toEqual([
+            ["user", "assistant"],
+            ["thinking"],
+        ]);
+    });
+
     it("starts a new turn after a final tool-bearing assistant answer", () => {
         const turns = assembleCanonicalChatTurns(
             [

@@ -245,7 +245,10 @@ function canonicalEntry(
         origin: message.provenance?.origin,
         provider: message.provenance?.provider,
         relatedSources: message.provenance?.relatedSources,
-        sequence: message.runtimeSequence ?? message.provenance?.sequence,
+        sequence:
+            source === "openclaw-history"
+                ? message.provenance?.sequence
+                : (message.runtimeSequence ?? message.provenance?.sequence),
         source,
     };
 }
@@ -256,6 +259,18 @@ function draftHasAnswer(draft: CanonicalTurnDraft): boolean {
     );
 }
 
+function draftRunId(draft: CanonicalTurnDraft): string | undefined {
+    if (draft.run) {
+        return draft.run.runId;
+    }
+    const runIds = new Set(
+        draft.entries.flatMap((entry) =>
+            entry.message.runId ? [entry.message.runId] : []
+        )
+    );
+    return runIds.size === 1 ? runIds.values().next().value : undefined;
+}
+
 function shouldStartTurn(
     draft: CanonicalTurnDraft | undefined,
     entry: CanonicalChatTurnEntry,
@@ -264,7 +279,12 @@ function shouldStartTurn(
     if (!draft) {
         return true;
     }
-    if (draft.run && run && draft.run.runId !== run.runId) {
+    const currentRunId = draftRunId(draft);
+    const incomingRunId = run?.runId ?? entry.message.runId;
+    if (currentRunId && incomingRunId && currentRunId !== incomingRunId) {
+        return true;
+    }
+    if (!currentRunId && run && draftHasAnswer(draft)) {
         return true;
     }
     if (entry.kind !== "user") {
@@ -308,18 +328,6 @@ function turnSequenceRange(entries: CanonicalChatTurnEntry[]): {
         sequenceEnd: sequences.at(-1),
         sequenceStart: sequences[0],
     };
-}
-
-function draftRunId(draft: CanonicalTurnDraft): string | undefined {
-    if (draft.run) {
-        return draft.run.runId;
-    }
-    const runIds = new Set(
-        draft.entries.flatMap((entry) =>
-            entry.message.runId ? [entry.message.runId] : []
-        )
-    );
-    return runIds.size === 1 ? runIds.values().next().value : undefined;
 }
 
 function uniqueTurnId(
