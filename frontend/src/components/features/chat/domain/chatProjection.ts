@@ -151,11 +151,62 @@ function projectedMessageRowKey(message: ChatHistoryMessage): string {
     );
 }
 
+function projectedMessageSourceFacet(message: ChatHistoryMessage): string {
+    const role = message.role.toLowerCase();
+    if (role === "user") {
+        return "user";
+    }
+    if (
+        message.thinking?.length &&
+        !message.toolCalls?.length &&
+        !message.toolResult &&
+        !hasPrimaryAnswerContent(message)
+    ) {
+        return "thinking";
+    }
+    if (message.toolCalls?.length || message.toolResult || message.isToolUse) {
+        return "tool";
+    }
+    return "assistant";
+}
+
+function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[] {
+    const provenance = message.provenance;
+    if (!provenance) {
+        return [];
+    }
+    const { relatedSources = [], ...primarySource } = provenance;
+    const sourceIdentities = new Set(
+        [primarySource, ...relatedSources].map((source) =>
+            stableChatStringify({
+                id: source.id,
+                sequence: source.sequence,
+                source: source.source,
+            })
+        )
+    );
+    const facet = projectedMessageSourceFacet(message);
+    return sourceIdentities
+        .values()
+        .toArray()
+        .toSorted()
+        .map(
+            (sourceIdentity) =>
+                `chat-message-source:v1:${canonicalChatContentFingerprint(
+                    stableChatStringify({ facet, sourceIdentity })
+                )}`
+        );
+}
+
 /**
  * Keeps persisted delete keys valid when runtime reconciliation adds a run id.
  * @returns Projected message delete keys result.
  */
 function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
+    const sourceKeys = projectedMessageSourceDeleteKeys(message);
+    if (sourceKeys.length > 0) {
+        return sourceKeys;
+    }
     const currentKey = projectedMessageRowKey(message);
     if (!message.runId || message.local === true) {
         return [currentKey];

@@ -179,7 +179,7 @@ Before cutover, the canonical path ran beside the previous projection and
 required exact row, active-run, and compaction parity. The deterministic soak
 covered 4,096 duplicate/reorder/reconnect/partial-history fault seeds under all
 eight thinking/tool/final-thinking visibility policies (110,628 assertions).
-Versioned incident fixtures separately cover Codex/GPT separated runtime rows,
+Versioned incident fixtures separately cover Codex/GPT-separated runtime rows,
 Synthetic mixed session messages, and duplicate-user restart recovery. The
 temporary legacy projection entry point, comparison path, browser telemetry
 contract, and parity counters were removed after that soak. Replay memory,

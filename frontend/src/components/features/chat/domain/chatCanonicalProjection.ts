@@ -513,9 +513,22 @@ function structureFromTurns(
     structure: StructuredChatProjection,
     turns: CanonicalChatTurn[]
 ): StructuredChatProjection {
+    let messageIndex = 0;
+    const messages = turns.flatMap((turn) =>
+        turn.entries.map((entry) => {
+            const sourceMessage = structure.messages[messageIndex];
+            messageIndex += 1;
+            return sourceMessage?.provenance
+                ? { ...entry.message, provenance: sourceMessage.provenance }
+                : entry.message;
+        })
+    );
+    if (messageIndex !== structure.messages.length) {
+        throw new Error("Canonical chat projection invariant failed: turn coverage");
+    }
     return {
         ...structure,
-        messages: turns.flatMap((turn) => turn.entries.map((entry) => entry.message)),
+        messages,
     };
 }
 

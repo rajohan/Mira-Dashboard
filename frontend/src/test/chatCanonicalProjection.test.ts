@@ -34,6 +34,19 @@ function runtimeEnvelope(message: Record<string, unknown>, runtimeSequence: numb
     });
 }
 
+function provenanceBackfillMessage(id: string, sequence: number) {
+    return {
+        content: "repeat",
+        provenance: {
+            id,
+            sequence,
+            source: "openclaw-history" as const,
+        },
+        role: "user",
+        text: "repeat",
+    };
+}
+
 describe("canonical chat turn projection", () => {
     it("classifies system finals with answer and tool metadata as assistant output", () => {
         const turns = assembleCanonicalChatTurns(
@@ -986,50 +999,53 @@ describe("canonical chat turn projection", () => {
         ).toEqual(["repeat", "first answer", "second answer"]);
     });
 
-    it("keeps generated occurrence keys disjoint from natural message keys", () => {
-        const history = [
-            { content: "repeat", role: "user", text: "repeat" },
-            { content: "first answer", role: "assistant", text: "first answer" },
-            { content: "repeat", role: "user", text: "repeat" },
-            { content: "second answer", role: "assistant", text: "second answer" },
-            {
-                content: "repeat::row-occurrence:1",
-                role: "user",
-                text: "repeat::row-occurrence:1",
-            },
-            { content: "third answer", role: "assistant", text: "third answer" },
+    it("keeps provenance-backed delete keys stable across duplicate backfills", () => {
+        const originalHistory = [
+            provenanceBackfillMessage("history-2", 2),
+            provenanceBackfillMessage("history-3", 3),
         ];
-        const projection = projectCanonicalChat(
-            history,
+        const original = projectCanonicalChat(
+            originalHistory,
             createChatRuntimeState(),
             SESSION,
             createChatVisibility(true, true),
             true,
             new Set()
         ).projection;
-        const userRows = projection.rows.filter(
-            (row) => row.message.role.toLowerCase() === "user"
+        const originalTarget = original.rows.find(
+            (row) => row.message.provenance?.id === "history-2"
         );
-        const deleteKeys = userRows.map((row) => row.deleteKeys?.[0]);
+        const backfilledHistory = [
+            provenanceBackfillMessage("history-1", 1),
+            ...originalHistory,
+        ];
+        const backfilled = projectCanonicalChat(
+            backfilledHistory,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).projection;
+        const backfilledTarget = backfilled.rows.find(
+            (row) => row.message.provenance?.id === "history-2"
+        );
 
-        expect(userRows).toHaveLength(3);
-        expect(deleteKeys.every((key) => typeof key === "string")).toBe(true);
-        expect(new Set(deleteKeys).size).toBe(3);
-        for (const row of userRows) {
-            const withoutRow = projectCanonicalChat(
-                history,
-                createChatRuntimeState(),
-                SESSION,
-                createChatVisibility(true, true),
-                true,
-                new Set(row.deleteKeys)
-            ).projection;
-            expect(
-                withoutRow.rows.filter(
-                    (candidate) => candidate.message.role.toLowerCase() === "user"
-                )
-            ).toHaveLength(2);
-        }
+        expect(originalTarget?.key).toStartWith("chat-message-source:v1:");
+        expect(backfilledTarget?.deleteKeys).toEqual(originalTarget?.deleteKeys);
+
+        const withoutTarget = projectCanonicalChat(
+            backfilledHistory,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(originalTarget?.deleteKeys)
+        ).projection;
+        expect(withoutTarget.rows.map((row) => row.message.provenance?.id)).toEqual([
+            "history-1",
+            "history-3",
+        ]);
     });
 
     it("fails closed when canonical validation detects an invalid session", () => {
