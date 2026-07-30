@@ -138,8 +138,9 @@ function applyFinalThinkingPreference(
         }
 
         const isDiagnosticTool = hasToolOutput && !hasPrimaryContent;
+        const role = message.role.toLowerCase();
         const isPrimaryAnswer =
-            message.role.toLowerCase() === "assistant" &&
+            (role === "assistant" || role === "system") &&
             details.isPrimaryAnswerContent &&
             isRenderableChatHistoryMessage(withoutThinking, visibility);
         response.push({
@@ -147,7 +148,7 @@ function applyFinalThinkingPreference(
             primaryAnswer: isPrimaryAnswer,
             retainableThinking: Boolean(
                 visibility.shouldShowThinking &&
-                message.role.toLowerCase() === "assistant" &&
+                role === "assistant" &&
                 message.thinking?.length &&
                 (isDiagnosticTool || !hasPrimaryContent)
             ),
@@ -422,7 +423,16 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         if (anchoredGroups) {
             collapsed.push(...anchoredGroups.map((group) => group.message));
         }
-        collapsed.push(stripThinkingFromMessage(message));
+        const withoutThinking = stripThinkingFromMessage(message);
+        if (
+            !message.thinking?.length ||
+            isRenderableChatHistoryMessage(withoutThinking, {
+                shouldShowThinking: true,
+                shouldShowTools: true,
+            })
+        ) {
+            collapsed.push(withoutThinking);
+        }
     }
     const trailingGroups = groupsByAnchorIndex
         .get(messages.length)

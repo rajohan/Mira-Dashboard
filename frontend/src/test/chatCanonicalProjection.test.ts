@@ -92,6 +92,51 @@ describe("canonical chat turn projection", () => {
             "thinking",
             "assistant",
         ]);
+
+        const withoutSettledThinking = projectChatWithCanonicalShadow(
+            [
+                {
+                    content: "Completed after analysis.",
+                    isFinal: true,
+                    role: "system",
+                    text: "Completed after analysis.",
+                    thinking: [{ text: "private analysis" }],
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            false,
+            new Set()
+        );
+        expect(
+            withoutSettledThinking.canonical?.projection.rows.map(
+                (row) => row.message.text
+            )
+        ).toEqual(["Completed after analysis."]);
+    });
+
+    it("omits stripped thinking placeholders from canonical turns", () => {
+        const result = projectChatWithCanonicalShadow(
+            [
+                {
+                    content: [{ text: "Inspecting state", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "Inspecting state" }],
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(result.canonical?.turns).toHaveLength(1);
+        expect(result.canonical?.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+            "thinking",
+        ]);
     });
 
     it("retains stable source, sequence, lifecycle, and provider metadata", () => {
@@ -227,11 +272,9 @@ describe("canonical chat turn projection", () => {
             "openclaw-runtime",
             "openclaw-runtime",
             "openclaw-runtime",
-            "openclaw-runtime",
         ]);
         expect(turn?.entries.map((entry) => entry.origin)).toEqual([
             undefined,
-            "openclaw-session",
             "openclaw-session",
             "openclaw-session",
             "openclaw-session",
@@ -240,7 +283,6 @@ describe("canonical chat turn projection", () => {
             "user",
             "tool",
             "thinking",
-            "assistant",
             "assistant",
         ]);
         const toolEventSequences = runtimeEvents.flatMap((event) =>
