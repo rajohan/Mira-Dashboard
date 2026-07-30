@@ -1,15 +1,24 @@
 import { describe, expect, it } from "bun:test";
 
-import type { OpenClawRuntimeEnvelope } from "../../contracts/chat.ts";
+import {
+    OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    type OpenClawRuntimeEnvelope,
+    type OpenClawRuntimeSnapshot,
+} from "../../contracts/chat.ts";
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import {
     isSameSessionKey,
+    OpenClawChatIdentityRegistry,
     sessionMessageRunId,
 } from "../src/chat/openClawChatIdentity.ts";
 import {
     isTerminalEvent,
     runtimeSessionBoundary,
 } from "../src/chat/openClawChatLifecycle.ts";
+import {
+    OpenClawChatPersistenceCoordinator,
+    type OpenClawChatSnapshotStore,
+} from "../src/chat/openClawChatPersistence.ts";
 import {
     runtimePayloadView,
     sessionMessageRole,
@@ -152,6 +161,80 @@ describe("OpenClaw chat architecture seams", () => {
                 role: "user",
             })
         ).toBe("dashboard-chat-codex");
+
+        const registry = new OpenClawChatIdentityRegistry();
+        registry.rememberRunSession("provider-run", "agent:main:main");
+        expect(
+            registry.sessionCandidates("main", "provider-run", [
+                { id: "main", key: "agent:main:main" },
+                { id: "main", key: "agent:ops:main" },
+            ])
+        ).toEqual(new Map([["agent:main:main", "agent:main:main"]]));
+        registry.setRuntimeSession("main", {
+            id: "provider-session",
+            startedAt: 42,
+        });
+        registry.promoteRuntimeSession("main", "agent:main:main", false);
+        expect(registry.runtimeSession("agent:main:main")).toEqual({
+            id: "provider-session",
+            startedAt: 42,
+        });
+        registry.forgetSession("agent:main:main");
+        expect(registry.sessionKeyForRun("provider-run", [])).toBeUndefined();
+    });
+
+    it("owns hydration, write queues and durable deletes in the persistence seam", () => {
+        const snapshots = new Map<string, OpenClawRuntimeSnapshot>();
+        let saveCount = 0;
+        const store: OpenClawChatSnapshotStore = {
+            clear: () => snapshots.clear(),
+            delete: (sessionKey) => snapshots.delete(sessionKey),
+            keys: () => snapshots.keys().toArray(),
+            load: (sessionKey) => snapshots.get(sessionKey),
+            maximumSequence: () =>
+                Math.max(
+                    0,
+                    ...snapshots.values().map((snapshot) => snapshot.throughSequence)
+                ),
+            promote: (
+                sourceSessionKey,
+                canonicalSessionKey,
+                sourceSnapshot,
+                canonicalSnapshot
+            ) => {
+                snapshots.set(sourceSessionKey, sourceSnapshot);
+                snapshots.set(canonicalSessionKey, canonicalSnapshot);
+            },
+            save: (sessionKey, snapshot) => {
+                saveCount += 1;
+                snapshots.set(sessionKey, snapshot);
+            },
+        };
+        const memorySnapshot: OpenClawRuntimeSnapshot = {
+            completed: false,
+            events: [
+                envelope("agent", {
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                }),
+            ],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+            throughSequence: 1,
+        };
+        const persistence = new OpenClawChatPersistenceCoordinator(store, {
+            ensureSessionLoaded: () => true,
+            snapshotFromMemory: () => memorySnapshot,
+        });
+
+        persistence.markHydratedLookup("agent:main:main");
+        persistence.queueSession("agent:main:main");
+        expect(persistence.pendingSessionKeys()).toEqual(["agent:main:main"]);
+        expect(persistence.flush()).toBe(true);
+        expect(saveCount).toBe(1);
+        expect(persistence.isLoaded("agent:main:main")).toBe(true);
+        expect(persistence.deleteSession("agent:main:main")).toBe(true);
+        expect(snapshots.size).toBe(0);
     });
 
     it("owns provider filtering and replay selection in the retention seam", () => {
