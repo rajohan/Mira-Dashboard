@@ -5,6 +5,7 @@ import {
     canonicalChatImageDisplayUrl,
     canonicalChatLocalMediaPathFromUrl,
     extractCanonicalChatImages,
+    extractCanonicalChatToolCalls,
 } from "../../contracts/chatCanonicalMessage";
 
 describe("backend canonical chat media normalization", () => {
@@ -85,6 +86,18 @@ describe("backend canonical chat media normalization", () => {
                 type: "image",
                 url: undefined,
             },
+        ]);
+    });
+
+    it("normalizes empty provider tool-call identifiers before canonicalizing", () => {
+        expect(
+            extractCanonicalChatToolCalls([
+                { id: " ", name: "", type: "toolCall" },
+                { id: " call-1 ", name: " exec ", type: "toolCall" },
+            ])
+        ).toEqual([
+            { arguments: undefined, id: undefined, name: "tool" },
+            { arguments: undefined, id: "call-1", name: "exec" },
         ]);
     });
 });

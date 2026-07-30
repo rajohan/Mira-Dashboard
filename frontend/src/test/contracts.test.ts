@@ -15,6 +15,7 @@ import {
     parseOpenClawRuntimeEnvelope,
     parseOpenClawRuntimeSnapshot,
 } from "../../../contracts/chat";
+import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
 import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
 import { canonicalChatImageDisplayUrl } from "../../../contracts/chatCanonicalMessage";
 import {
@@ -178,12 +179,29 @@ describe("shared runtime contracts", () => {
         const previousLocation = location.href;
         try {
             location.assign("https://dashboard.test/");
+            const externalMediaUrl =
+                "https://files.example.test/api/media?path=report.png";
             expect(
                 canonicalChatImageDisplayUrl(
                     "https://files.example.test/api/chat/media/outgoing/session/file/full",
                     "image/png"
                 )
             ).toBeUndefined();
+            expect(
+                normalizeOpenClawHistoryMessage({
+                    content: [
+                        {
+                            attachment: {
+                                label: "report.png",
+                                mimeType: "image/png",
+                                url: externalMediaUrl,
+                            },
+                            type: "attachment",
+                        },
+                    ],
+                    role: "assistant",
+                }).attachments?.[0]?.url
+            ).toBe(externalMediaUrl);
         } finally {
             location.assign(previousLocation);
         }

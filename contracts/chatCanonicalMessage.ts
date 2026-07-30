@@ -104,7 +104,11 @@ export function canonicalChatPortableDashboardMediaUrl(
     value: string
 ): string | undefined {
     const parsed = parseChatUrl(value.trim());
-    if (!parsed || !dashboardMediaKind(parsed.url.pathname)) {
+    if (
+        !parsed ||
+        !dashboardMediaKind(parsed.url.pathname) ||
+        (currentDashboardOrigin() && !parsed.isSameDashboardOrigin)
+    ) {
         return undefined;
     }
     return `${parsed.url.pathname}${parsed.url.search}${parsed.url.hash}`;
@@ -395,10 +399,12 @@ export function extractCanonicalChatToolCalls(content: unknown): CanonicalChatTo
             continue;
         }
         const record = item as Record<string, unknown>;
+        const id = typeof record.id === "string" ? record.id.trim() : "";
+        const name = typeof record.name === "string" ? record.name.trim() : "";
         calls.push({
             arguments: record.arguments,
-            id: typeof record.id === "string" ? record.id : undefined,
-            name: typeof record.name === "string" ? record.name : "tool",
+            id: id || undefined,
+            name: name || "tool",
         });
     }
     return calls;
