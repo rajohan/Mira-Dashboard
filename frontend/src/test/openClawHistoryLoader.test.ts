@@ -179,7 +179,7 @@ describe("OpenClaw history loader", () => {
         expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
     });
 
-    it("reloads same-sequence sibling rows instead of collapsing them in cache", async () => {
+    it("caches same-sequence sibling rows without collapsing rewritten rows", async () => {
         let output = "stale output";
         const requests: number[] = [];
         const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), (request) => {
@@ -222,11 +222,65 @@ describe("OpenClaw history loader", () => {
         });
 
         const initial = await loader.history(SESSION, 2);
+        const cached = await loader.history(SESSION, 2);
         output = "current output";
         const refreshed = await loader.history(SESSION, 2);
 
-        expect(requests).toEqual([0, 0]);
+        expect(requests).toEqual([0, 0, 0]);
+        expect(cached).toBe(initial);
         expect(initial[0]?.toolCalls?.[0]?.toolResult?.content).toBe("stale output");
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
+    it("rebuilds cached history when a new row shares a cached sequence", async () => {
+        let includeResult = false;
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return Promise.resolve({
+                hasMore: false,
+                messages: [
+                    rawMessage(
+                        1,
+                        "assistant",
+                        [
+                            {
+                                id: "call-1",
+                                name: "bash",
+                                type: "toolCall",
+                            },
+                        ],
+                        {
+                            __openclaw: {
+                                id: "tool-call-message",
+                                seq: 1,
+                            },
+                        }
+                    ),
+                    ...(includeResult
+                        ? [
+                              rawMessage(1, "tool", "current output", {
+                                  __openclaw: {
+                                      id: "tool-result-message",
+                                      seq: 1,
+                                  },
+                                  toolCallId: "call-1",
+                                  toolName: "bash",
+                              }),
+                          ]
+                        : []),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: includeResult ? 2 : 1,
+            });
+        });
+
+        const initial = await loader.history(SESSION, 2);
+        includeResult = true;
+        const refreshed = await loader.history(SESSION, 2);
+
+        expect(initial[0]?.toolCalls?.[0]?.toolResult).toBeUndefined();
+        expect(refreshed).toHaveLength(1);
         expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
     });
 

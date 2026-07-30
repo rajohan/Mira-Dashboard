@@ -38,13 +38,7 @@ function historySequence(row: CanonicalChatHistoryRow): number | undefined {
 function hasIncrementalHistorySequenceMetadata(
     rows: readonly CanonicalChatHistoryRow[]
 ): boolean {
-    const sequences = rows.flatMap((row) => {
-        const sequence = historySequence(row);
-        return sequence === undefined ? [] : [sequence];
-    });
-    return (
-        sequences.length === rows.length && new Set(sequences).size === sequences.length
-    );
+    return rows.every((row) => historySequence(row) !== undefined);
 }
 
 function parseHistoryPage(raw: unknown, requestedOffset: number): OpenClawHistoryPage {
@@ -107,12 +101,12 @@ function mergeCachedHistoryRows(
     freshRows: CanonicalChatHistoryRow[],
     throughSequence: number
 ): MergedCachedHistory {
-    const cachedBySequence = new Map(
+    const cachedById = new Map(
         cached.rows.flatMap((row) => {
             const sequence = historySequence(row);
             return sequence === undefined || sequence > throughSequence
                 ? []
-                : ([[sequence, row]] as const);
+                : ([[historyMessageId(row), row]] as const);
         })
     );
     const appendedRows: CanonicalChatHistoryRow[] = [];
@@ -122,22 +116,29 @@ function mergeCachedHistoryRows(
         if (sequence === undefined || sequence > throughSequence) {
             continue;
         }
-        const previous = cachedBySequence.get(sequence);
-        if (sequence > cached.throughSequence) {
-            appendedRows.push(row);
-        } else if (previous && JSON.stringify(previous) !== JSON.stringify(row)) {
+        const id = historyMessageId(row);
+        const previous = cachedById.get(id);
+        if (!previous) {
+            if (sequence > cached.throughSequence) {
+                appendedRows.push(row);
+            } else {
+                didRewriteCachedRows = true;
+            }
+        } else if (JSON.stringify(previous) !== JSON.stringify(row)) {
             didRewriteCachedRows = true;
         }
-        cachedBySequence.set(sequence, row);
+        cachedById.set(id, row);
     }
     return {
         appendedRows,
         didRewriteCachedRows,
-        rows: cachedBySequence
-            .entries()
+        rows: cachedById
+            .values()
             .toArray()
-            .toSorted(([left], [right]) => left - right)
-            .map(([, row]) => row),
+            .toSorted(
+                (left, right) =>
+                    (historySequence(left) ?? 0) - (historySequence(right) ?? 0)
+            ),
     };
 }
 
