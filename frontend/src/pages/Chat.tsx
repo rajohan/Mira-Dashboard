@@ -263,7 +263,11 @@ export function Chat() {
         shouldShowTools: showToolOutput,
     });
     const projection = projectionShadow.legacy;
+    const canReportProjectionShadow = Boolean(selectedSession) && !isLoadingHistory;
     useEffect(() => {
+        if (!canReportProjectionShadow) {
+            return;
+        }
         const { comparison } = projectionShadow;
         const observation = chatProjectionShadowObservation(comparison);
         const observationSignature = JSON.stringify({
@@ -297,7 +301,7 @@ export function Chat() {
             schemaVersion: comparison.schemaVersion,
             turnCount: comparison.turnCount,
         });
-    }, [projectionShadow, selectedSessionKey]);
+    }, [canReportProjectionShadow, projectionShadow, selectedSessionKey]);
     const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
     const chatRows = projectChatActivityRows({
         activeRuns: projection.activeRuns,

@@ -1,15 +1,21 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
+import type { Server } from "bun";
+
 import { parseChatProjectionShadowObservation } from "../../contracts/chatProjectionTelemetry.ts";
+import { createSession, createUser } from "../src/auth.ts";
 import {
     getChatProjectionShadowMetrics,
     OpenClawChatRuntimeMetricsRecorder,
     recordChatProjectionShadowObservation,
     resetChatProjectionShadowMetricsForTests,
 } from "../src/chat/openClawChatMetrics.ts";
+import { database } from "../src/database.ts";
+import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
 import { metricsRoutes } from "../src/routes/metricsRoutes.ts";
 
 afterEach(() => {
+    resetRequestPolicyForTests();
     resetChatProjectionShadowMetricsForTests();
 });
 
@@ -164,5 +170,70 @@ describe("OpenClaw chat runtime observability", () => {
         );
         expect(invalidResponse.status).toBe(400);
         expect(getChatProjectionShadowMetrics().observations).toBe(1);
+    });
+
+    it("records authenticated browser telemetry without durable request audits", async () => {
+        const user = await createUser(
+            `chat-metrics-${Bun.randomUUIDv7()}`,
+            "chat-metrics-test-password"
+        );
+        const sessionToken = createSession(user.id);
+        let auditWriteAttempts = 0;
+        const securedRoutes = withRequestPolicy(
+            {
+                "/api/metrics/chat-projection-shadow":
+                    metricsRoutes["/api/metrics/chat-projection-shadow"],
+            },
+            {
+                persistAuditEvent: () => {
+                    auditWriteAttempts += 1;
+                    throw new Error("audit storage unavailable");
+                },
+            }
+        );
+        const securedPost = securedRoutes["/api/metrics/chat-projection-shadow"]
+            .POST as unknown as (
+            request: Request,
+            server: Server<unknown>
+        ) => Promise<Response>;
+
+        try {
+            const response = await securedPost(
+                new Request("http://localhost/api/metrics/chat-projection-shadow", {
+                    body: JSON.stringify({
+                        canonicalActiveRunCount: 0,
+                        canonicalCompactionPhase: "none",
+                        canonicalRowCount: 0,
+                        differenceKinds: [],
+                        legacyActiveRunCount: 0,
+                        legacyCompactionPhase: "none",
+                        legacyRowCount: 0,
+                        matches: true,
+                        schemaVersion: 1,
+                        turnCount: 0,
+                    }),
+                    headers: {
+                        "Content-Type": "application/json",
+                        cookie: `mira_dashboard_session=${encodeURIComponent(sessionToken)}`,
+                    },
+                    method: "POST",
+                }),
+                {
+                    requestIP: () => ({
+                        address: "127.0.0.1",
+                        family: "IPv4",
+                        port: 31_000,
+                    }),
+                } as unknown as Server<unknown>
+            );
+
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ isOk: true });
+            expect(auditWriteAttempts).toBe(0);
+            expect(getChatProjectionShadowMetrics().observations).toBe(1);
+        } finally {
+            database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(user.id);
+            database.prepare("DELETE FROM users WHERE id = ?").run(user.id);
+        }
     });
 });

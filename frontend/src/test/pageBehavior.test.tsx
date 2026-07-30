@@ -86,6 +86,9 @@ const terminalApiState = {
     expectedExecCwd: "/tmp",
     wasJobStopped: false,
 };
+const chatApiState = {
+    projectionShadowRequests: 0,
+};
 const jobsApiState = {
     cronName: "heartbeat",
     heartbeatDisableIntent: undefined as
@@ -708,6 +711,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/metrics/chat-projection-shadow") {
+        chatApiState.projectionShadowRequests += 1;
         return Response.json({ isOk: true });
     }
 
@@ -2324,6 +2328,7 @@ async function flushQueuedTimers() {
 describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
+        chatApiState.projectionShadowRequests = 0;
         terminalApiState.expectedExecCwd = "/tmp";
         terminalApiState.wasJobStopped = false;
         logsApiState.dashboardRequests = 0;
@@ -4785,6 +4790,55 @@ describe("Mira Dashboard pages", () => {
         view.unmount();
         view.queryClient.clear();
     }, 10_000);
+
+    it("reports projection parity only after selected chat history resolves", async () => {
+        const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(findSocketRequest(socket, "sessions.list")).toBeDefined();
+        });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                dashboardSessionFixture({
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    id: "session-main",
+                    key: "agent:main:main",
+                    model: "codex",
+                    type: "MAIN",
+                    updatedAt: Date.parse("2026-07-30T10:00:00.000Z"),
+                }),
+            ],
+        });
+        await waitFor(() => {
+            expect(findSocketRequest(socket, "chat.history")).toBeDefined();
+        });
+        await flushQueuedTimers();
+
+        expect(chatApiState.projectionShadowRequests).toBe(0);
+
+        await respondToSocketRequest(socket, "chat.history", {
+            messages: [
+                {
+                    content: "Loaded transcript",
+                    role: "assistant",
+                    timestamp: "2026-07-30T10:00:00.000Z",
+                },
+            ],
+        });
+        await waitFor(() => {
+            expect(chatApiState.projectionShadowRequests).toBe(1);
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
 
     it("clears chat history loading when the selected session disappears", async () => {
         const view = renderChatPage();
