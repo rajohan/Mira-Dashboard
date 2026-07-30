@@ -16,6 +16,11 @@ interface ParsedChatUrl {
     url: URL;
 }
 
+interface DashboardMediaReference {
+    kind: DashboardMediaKind;
+    url: string;
+}
+
 /**
  * Returns a lowercase MIME type without optional parameters.
  * @param mimeType MIME type to normalize.
@@ -90,11 +95,33 @@ function dashboardMediaKind(pathname: string): DashboardMediaKind | undefined {
     return pathname.startsWith("/api/chat/media/outgoing/") ? "managed" : undefined;
 }
 
+function dashboardMediaReference(value: string): DashboardMediaReference | undefined {
+    const candidate = value.trim();
+    const parsed = parseChatUrl(candidate);
+    if (!parsed) {
+        return undefined;
+    }
+    const kind = dashboardMediaKind(parsed.url.pathname);
+    if (!kind) {
+        return undefined;
+    }
+    if (parsed.isSameDashboardOrigin) {
+        return { kind, url: candidate };
+    }
+    if (currentDashboardOrigin() || !CHAT_IMAGE_URL_PROTOCOLS.has(parsed.url.protocol)) {
+        return undefined;
+    }
+    // Backend normalization has no browser origin. Known Dashboard media routes
+    // are portable, so remove the untrusted origin instead of either dropping
+    // the preview or allowing an external host to become an inline image.
+    return {
+        kind,
+        url: `${parsed.url.pathname}${parsed.url.search}${parsed.url.hash}`,
+    };
+}
+
 function dashboardMediaKindFromUrl(url: string): DashboardMediaKind | undefined {
-    const parsed = parseChatUrl(url);
-    return parsed?.isSameDashboardOrigin
-        ? dashboardMediaKind(parsed.url.pathname)
-        : undefined;
+    return dashboardMediaReference(url)?.kind;
 }
 
 function safeChatImageUrl(value: unknown): string | undefined {
@@ -107,6 +134,10 @@ function safeChatImageUrl(value: unknown): string | undefined {
     }
     if (candidate.startsWith("data:image/")) {
         return candidate;
+    }
+    const mediaReference = dashboardMediaReference(candidate);
+    if (mediaReference) {
+        return mediaReference.url;
     }
     const parsed = parseChatUrl(candidate);
     if (!parsed) {
@@ -132,22 +163,24 @@ function safeChatImageUrl(value: unknown): string | undefined {
  * @returns Local path when the URL targets local Dashboard media.
  */
 export function canonicalChatLocalMediaPathFromUrl(url: string): string | undefined {
-    const parsed = parseChatUrl(url);
-    if (
-        !parsed?.isSameDashboardOrigin ||
-        dashboardMediaKind(parsed.url.pathname) !== "local"
-    ) {
+    const mediaReference = dashboardMediaReference(url);
+    if (mediaReference?.kind !== "local") {
         return undefined;
     }
-    return parsed.url.searchParams.get("path")?.trim() || undefined;
+    const parsed = parseChatUrl(mediaReference.url);
+    return parsed?.url.searchParams.get("path")?.trim() || undefined;
 }
 
 function attachmentPreviewUrl(url: string, mode: "image" | "text"): string | undefined {
-    if (dashboardMediaKindFromUrl(url)) {
-        const fragmentIndex = url.indexOf("#");
+    const mediaReference = dashboardMediaReference(url);
+    if (mediaReference) {
+        const fragmentIndex = mediaReference.url.indexOf("#");
         const urlWithoutFragment =
-            fragmentIndex === -1 ? url : url.slice(0, fragmentIndex);
-        const fragment = fragmentIndex === -1 ? "" : url.slice(fragmentIndex);
+            fragmentIndex === -1
+                ? mediaReference.url
+                : mediaReference.url.slice(0, fragmentIndex);
+        const fragment =
+            fragmentIndex === -1 ? "" : mediaReference.url.slice(fragmentIndex);
         if (/[?&]preview=(?:image|text)(?=&|$)/u.test(urlWithoutFragment)) {
             return `${urlWithoutFragment.replace(
                 /[?&]preview=(?:image|text)(?=&|$)/u,

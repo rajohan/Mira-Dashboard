@@ -16,6 +16,7 @@ import {
     parseOpenClawRuntimeSnapshot,
 } from "../../../contracts/chat";
 import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
+import { canonicalChatImageDisplayUrl } from "../../../contracts/chatCanonicalMessage";
 import {
     parsePullRequestApproveRequest,
     parsePullRequestPreviewStartRequest,
@@ -88,6 +89,7 @@ describe("shared runtime contracts", () => {
                 },
                 model: "gpt-5.6-sol",
                 modelProvider: "openai",
+                provider: "openai",
                 runId: "synthetic-run",
                 sessionKey: "agent:main:main",
             },
@@ -153,6 +155,21 @@ describe("shared runtime contracts", () => {
                 throughSequence: 4,
             })
         ).toThrow(ContractValidationError);
+    });
+
+    it("does not rebase external Dashboard-shaped media URLs in a browser", () => {
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            expect(
+                canonicalChatImageDisplayUrl(
+                    "https://files.example.test/api/chat/media/outgoing/session/file/full",
+                    "image/png"
+                )
+            ).toBeUndefined();
+        } finally {
+            location.assign(previousLocation);
+        }
     });
 
     it("accepts provider-null Moltbook avatars and normalizes feed display data", () => {

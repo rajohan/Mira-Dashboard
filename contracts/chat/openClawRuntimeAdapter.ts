@@ -396,8 +396,9 @@ function canonicalOpenClawProvider(
             (canUseSessionMetadata ? stringValue(payload.model) : undefined),
         provider:
             stringValue(message?.provider) ||
-            stringValue(payload.provider) ||
-            (canUseSessionMetadata ? stringValue(payload.modelProvider) : undefined),
+            (canUseSessionMetadata
+                ? stringValue(payload.provider) || stringValue(payload.modelProvider)
+                : undefined),
         state: stringValue(payload.state),
         stream: stringValue(payload.stream),
     };
