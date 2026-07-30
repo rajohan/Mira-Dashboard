@@ -173,7 +173,7 @@ function canonicalEntryKind(message: ChatHistoryMessage): CanonicalChatTurnEntry
     if (role === "user") {
         return "user";
     }
-    if (role === "assistant" && hasPrimaryAnswerContent(message)) {
+    if ((role === "assistant" || role === "system") && hasPrimaryAnswerContent(message)) {
         return "assistant";
     }
     if (
@@ -284,7 +284,7 @@ function shouldStartTurn(
     if (currentRunId && incomingRunId && currentRunId !== incomingRunId) {
         return true;
     }
-    if (!currentRunId && run && draftHasAnswer(draft)) {
+    if (!currentRunId && incomingRunId && draftHasAnswer(draft)) {
         return true;
     }
     if (entry.kind !== "user") {

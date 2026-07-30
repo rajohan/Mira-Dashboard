@@ -5,11 +5,13 @@ import type {
 import { currentIsoString } from "../../../../utils/date";
 import {
     type ChatHistoryMessage,
+    type ChatMessageProvenance,
     type ChatThinkingDisplay,
     type ChatToolCallDisplay,
     type ChatToolResultDisplay,
     mergeChatAttachments,
     mergeChatImages,
+    mergeChatMessageProvenance,
 } from "../chatTypes";
 import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
 
@@ -77,18 +79,18 @@ function withRuntimeMessageProvenance(
     message: ChatHistoryMessage,
     event: RuntimeEventBase
 ): ChatHistoryMessage {
-    return event.id
-        ? {
-              ...message,
-              provenance: {
-                  id: event.id,
-                  origin: event.origin,
-                  provider: event.provider,
-                  sequence: event.sequence,
-                  source: "openclaw-runtime",
-              },
-          }
-        : message;
+    if (!event.id) return message;
+    const runtimeProvenance: ChatMessageProvenance = {
+        id: event.id,
+        origin: event.origin,
+        provider: event.provider,
+        sequence: event.sequence,
+        source: "openclaw-runtime",
+    };
+    return {
+        ...message,
+        provenance: mergeChatMessageProvenance(runtimeProvenance, message.provenance),
+    };
 }
 
 export type ChatRuntimeEvent =
@@ -486,6 +488,7 @@ function mergeMessageDetails(
         ...incoming,
         attachments: mergeChatAttachments(previous?.attachments, incoming.attachments),
         images: mergeChatImages(previous?.images, incoming.images),
+        provenance: mergeChatMessageProvenance(incoming.provenance, previous?.provenance),
         text,
         thinking: mergeThinking(previous?.thinking, incoming.thinking),
         toolCalls: incoming.toolCalls?.length ? incoming.toolCalls : previous?.toolCalls,
@@ -677,6 +680,7 @@ function mergeToolDiagnostic(
         ...incoming,
         attachments: mergeChatAttachments(previous.attachments, incoming.attachments),
         images: mergeChatImages(previous.images, incoming.images),
+        provenance: mergeChatMessageProvenance(incoming.provenance, previous.provenance),
         toolCalls: calls.length > 0 ? calls : incoming.toolCalls,
         toolResult,
     };

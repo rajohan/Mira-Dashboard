@@ -32,6 +32,39 @@ function runtimeEnvelope(message: Record<string, unknown>, runtimeSequence: numb
 }
 
 describe("canonical chat turn projection", () => {
+    it("classifies system finals with answer and tool metadata as assistant output", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: [{ text: "Completed with tool context.", type: "text" }],
+                    isFinal: true,
+                    role: "system",
+                    text: "Completed with tool context.",
+                    toolCalls: [
+                        {
+                            id: "call-1",
+                            name: "functions.exec_command",
+                            toolResult: {
+                                content: "/workspace",
+                                id: "call-1",
+                                name: "functions.exec_command",
+                            },
+                        },
+                    ],
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(1);
+        expect(turns[0]?.entries).toHaveLength(1);
+        expect(turns[0]?.entries[0]).toMatchObject({
+            kind: "assistant",
+            message: { text: "Completed with tool context." },
+        });
+    });
+
     it("retains stable source, sequence, lifecycle, and provider metadata", () => {
         const adapter = new OpenClawChatAdapter();
         const historyPage = canonicalizeOpenClawHistoryPage(
@@ -387,6 +420,40 @@ describe("canonical chat turn projection", () => {
             ["user", "assistant"],
             ["thinking"],
         ]);
+    });
+
+    it("starts provider output after an answered runless turn without runtime state", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "question",
+                    role: "user",
+                    text: "question",
+                },
+                {
+                    content: "first answer",
+                    role: "assistant",
+                    text: "first answer",
+                },
+                {
+                    content: "new provider output",
+                    role: "assistant",
+                    runId: "provider-run-without-runtime",
+                    text: "new provider output",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(2);
+        expect(turns.map((turn) => turn.runId)).toEqual([
+            undefined,
+            "provider-run-without-runtime",
+        ]);
+        expect(
+            turns.map((turn) => turn.entries.map((entry) => entry.message.text))
+        ).toEqual([["question", "first answer"], ["new provider output"]]);
     });
 
     it("starts a new turn after a final tool-bearing assistant answer", () => {

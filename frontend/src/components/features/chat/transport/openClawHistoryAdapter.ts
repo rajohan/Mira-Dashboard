@@ -1,49 +1,9 @@
 import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chatCanonicalHistory";
 import {
     type ChatHistoryMessage,
-    type ChatMessageProvenance,
-    type ChatMessageSourceReference,
     mergeChatAttachments,
+    mergeChatMessageProvenance,
 } from "../chatTypes";
-
-function sourceReference(provenance: ChatMessageProvenance): ChatMessageSourceReference {
-    const { relatedSources: _relatedSources, ...reference } = provenance;
-    return reference;
-}
-
-function mergeHistoryProvenance(
-    primary: ChatMessageProvenance | undefined,
-    folded: ChatMessageProvenance | undefined
-): ChatMessageProvenance | undefined {
-    if (!primary) {
-        return folded;
-    }
-    if (!folded) {
-        return primary;
-    }
-    const primaryKey = `${primary.source}\u0000${primary.id}\u0000${
-        primary.sequence ?? ""
-    }`;
-    const relatedSources = new Map<string, ChatMessageSourceReference>();
-    for (const reference of [
-        ...(primary.relatedSources || []),
-        sourceReference(folded),
-        ...(folded.relatedSources || []),
-    ]) {
-        const key = `${reference.source}\u0000${reference.id}\u0000${
-            reference.sequence ?? ""
-        }`;
-        if (key !== primaryKey) {
-            relatedSources.set(key, reference);
-        }
-    }
-    return {
-        ...primary,
-        ...(relatedSources.size > 0 && {
-            relatedSources: relatedSources.values().toArray(),
-        }),
-    };
-}
 
 function matchingToolCallIndex(
     message: ChatHistoryMessage,
@@ -122,7 +82,10 @@ export function appendOpenClawHistory(
         result[assistantIndex] = {
             ...assistant,
             attachments: mergeChatAttachments(assistant.attachments, message.attachments),
-            provenance: mergeHistoryProvenance(assistant.provenance, message.provenance),
+            provenance: mergeChatMessageProvenance(
+                assistant.provenance,
+                message.provenance
+            ),
             timestamp: message.timestamp || assistant.timestamp,
             toolCalls,
             toolResult: (toolCalls.length === 1 ? message : assistant).toolResult,
