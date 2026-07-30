@@ -170,7 +170,10 @@ function mergeCachedHistoryRows(
         if (sequence === undefined || sequence > throughSequence) {
             continue;
         }
-        if (replacedFingerprintSequences.has(sequence)) {
+        if (
+            replacedFingerprintSequences.has(sequence) &&
+            hasSequenceFingerprintIdentity(row)
+        ) {
             continue;
         }
         const id = historyMessageId(row);

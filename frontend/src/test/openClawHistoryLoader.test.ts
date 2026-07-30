@@ -260,6 +260,41 @@ describe("OpenClaw history loader", () => {
         expect(refreshed.map((message) => message.text)).toEqual(["current answer"]);
     });
 
+    it("updates provider rows beside a rewritten seq-only sibling", async () => {
+        let fingerprintContent = "stale fingerprint";
+        let providerContent = "stale provider";
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(1, "assistant", fingerprintContent, {
+                        __openclaw: { seq: 1 },
+                    }),
+                    rawMessage(1, "assistant", providerContent, {
+                        __openclaw: { id: "provider-message", seq: 1 },
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 2,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        fingerprintContent = "current fingerprint";
+        providerContent = "current provider";
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial.map((message) => message.text)).toEqual([
+            "stale fingerprint",
+            "stale provider",
+        ]);
+        expect(refreshed.map((message) => message.text).toSorted()).toEqual([
+            "current fingerprint",
+            "current provider",
+        ]);
+    });
+
     it("preserves seq-only siblings while replacing a rewritten member", async () => {
         let output = "stale output";
         const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
