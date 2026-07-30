@@ -104,7 +104,7 @@ describe("canonical chat turn projection", () => {
             "assistant",
         ]);
 
-        const withoutSettledThinking = projectChatWithCanonicalShadow(
+        const withoutSettledThinking = projectCanonicalChat(
             [
                 {
                     content: "Completed after analysis.",
@@ -121,14 +121,12 @@ describe("canonical chat turn projection", () => {
             new Set()
         );
         expect(
-            withoutSettledThinking.canonical?.projection.rows.map(
-                (row) => row.message.text
-            )
+            withoutSettledThinking.projection.rows.map((row) => row.message.text)
         ).toEqual(["Completed after analysis."]);
     });
 
     it("omits stripped thinking placeholders from canonical turns", () => {
-        const result = projectChatWithCanonicalShadow(
+        const result = projectCanonicalChat(
             [
                 {
                     content: [{ text: "Inspecting state", type: "thinking" }],
@@ -144,10 +142,8 @@ describe("canonical chat turn projection", () => {
             new Set()
         );
 
-        expect(result.canonical?.turns).toHaveLength(1);
-        expect(result.canonical?.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
-            "thinking",
-        ]);
+        expect(result.turns).toHaveLength(1);
+        expect(result.turns[0]?.entries.map((entry) => entry.kind)).toEqual(["thinking"]);
     });
 
     it("retains stable source, sequence, lifecycle, and provider metadata", () => {
