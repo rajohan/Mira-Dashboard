@@ -6,6 +6,7 @@ import {
     withCanonicalOpenClawEvents,
     withCurrentCanonicalOpenClawIdentity,
 } from "../../../contracts/chat/openClawRuntimeAdapter.ts";
+import type { ChatRuntimeMetrics } from "../../../contracts/metrics.ts";
 import {
     isActiveConversationAtBoundary,
     isAgentSessionKey,
@@ -33,6 +34,10 @@ import {
     isTerminalEvent,
     runtimeSessionBoundary,
 } from "./openClawChatLifecycle.ts";
+import {
+    getChatProjectionShadowMetrics,
+    OpenClawChatRuntimeMetricsRecorder,
+} from "./openClawChatMetrics.ts";
 import {
     MAX_CHAT_RUNTIME_SESSIONS,
     OpenClawChatPersistenceCoordinator,
@@ -87,6 +92,7 @@ interface OpenClawChatBridgeOptions {
  */
 export class OpenClawChatBridge {
     readonly #identity = new OpenClawChatIdentityRegistry();
+    readonly #metrics = new OpenClawChatRuntimeMetricsRecorder();
     readonly #persistence: OpenClawChatPersistenceCoordinator;
     readonly #runsBySession = new Map<string, Map<string, RetainedRun>>();
     readonly #requestBoundaries = new OpenClawChatRequestBoundaries(
@@ -112,6 +118,7 @@ export class OpenClawChatBridge {
         this.#maxReplayBytes = maxReplayBytes;
         this.#persistence = new OpenClawChatPersistenceCoordinator(store, {
             ensureSessionLoaded: (sessionKey) => this.#ensureSessionLoaded(sessionKey),
+            metrics: this.#metrics,
             snapshotFromMemory: (sessionKey) =>
                 this.#snapshotFromMemory(sessionKey, true),
         });
@@ -369,7 +376,7 @@ export class OpenClawChatBridge {
         );
     }
 
-    #evictSessionFromMemory(sessionKey: string): void {
+    #evictSessionFromMemory(sessionKey: string, reason?: "memory" | "session"): void {
         const storageSessionKey = normalizedSessionKey(sessionKey);
         const evictedBytes = replayBytes(
             this.#runsBySession.get(storageSessionKey)?.values() || []
@@ -380,6 +387,9 @@ export class OpenClawChatBridge {
         this.#totalReplayBytes = Math.max(0, this.#totalReplayBytes - evictedBytes);
         this.#identity.forgetSession(storageSessionKey);
         this.#persistence.forgetMemorySession(storageSessionKey);
+        if (reason) {
+            this.#metrics.recordEviction(reason);
+        }
     }
 
     #clearCompletedRuns(sessionKey: string, preservedRunId?: string): void {
@@ -648,6 +658,7 @@ export class OpenClawChatBridge {
             totalBytes += replayBytes(runs.values());
         }
         this.#totalReplayBytes = totalBytes;
+        this.#metrics.observeReplayBytes(totalBytes);
     }
 
     #enforceReplayMemoryLimit(protectedSessionKey?: string): void {
@@ -674,7 +685,7 @@ export class OpenClawChatBridge {
                 // Keep the freshest persisted copy before releasing process memory.
                 // The hard memory ceiling still wins if SQLite is temporarily failing.
                 this.#persistence.flushSession(oldestSessionKey);
-                this.#evictSessionFromMemory(oldestSessionKey);
+                this.#evictSessionFromMemory(oldestSessionKey, "memory");
             }
         } finally {
             this.#enforcingReplayMemoryLimit = false;
@@ -697,7 +708,7 @@ export class OpenClawChatBridge {
             if (!oldestSessionKey) {
                 break;
             }
-            this.#evictSessionFromMemory(oldestSessionKey);
+            this.#evictSessionFromMemory(oldestSessionKey, "session");
             this.#persistence.deleteSession(oldestSessionKey);
         }
     }
@@ -1683,6 +1694,31 @@ export class OpenClawChatBridge {
             );
         }
         return isContinuation;
+    }
+
+    /**
+     * Returns content-free replay, persistence, and projection shadow metrics.
+     * @returns Current chat runtime metrics.
+     */
+    getMetrics(): ChatRuntimeMetrics {
+        let events = 0;
+        let runs = 0;
+        for (const sessionRuns of this.#runsBySession.values()) {
+            runs += sessionRuns.size;
+            for (const run of sessionRuns.values()) {
+                events += run.events.length;
+            }
+        }
+        return {
+            ...this.#metrics.snapshot({
+                currentBytes: this.#totalReplayBytes,
+                events,
+                maxBytes: this.#maxReplayBytes,
+                runs,
+                sessions: this.#runsBySession.size,
+            }),
+            projectionShadow: getChatProjectionShadowMetrics(),
+        };
     }
 
     /**

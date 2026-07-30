@@ -68,6 +68,41 @@ export const cacheRefreshMetricsSchema = v.strictObject({
     totalDurationMs: finiteNumberSchema,
 });
 
+export const chatReplayMetricsSchema = v.strictObject({
+    currentBytes: finiteNumberSchema,
+    events: finiteNumberSchema,
+    maxBytes: finiteNumberSchema,
+    memoryEvictions: finiteNumberSchema,
+    peakBytes: finiteNumberSchema,
+    runs: finiteNumberSchema,
+    sessionEvictions: finiteNumberSchema,
+    sessions: finiteNumberSchema,
+});
+
+export const chatPersistenceMetricsSchema = v.strictObject({
+    writeAttempts: finiteNumberSchema,
+    writeFailures: finiteNumberSchema,
+    writes: finiteNumberSchema,
+    writesPerMinute: finiteNumberSchema,
+});
+
+export const chatProjectionShadowMetricsSchema = v.strictObject({
+    activeRunMismatches: finiteNumberSchema,
+    canonicalErrors: finiteNumberSchema,
+    compactionStatusMismatches: finiteNumberSchema,
+    lastObservedAt: v.optional(v.pipe(v.string(), v.trim(), v.nonEmpty())),
+    matches: finiteNumberSchema,
+    mismatches: finiteNumberSchema,
+    observations: finiteNumberSchema,
+    rowMismatches: finiteNumberSchema,
+});
+
+export const chatRuntimeMetricsSchema = v.strictObject({
+    persistence: chatPersistenceMetricsSchema,
+    projectionShadow: chatProjectionShadowMetricsSchema,
+    replay: chatReplayMetricsSchema,
+});
+
 export const databaseMetricsSchema = v.strictObject({
     available: v.boolean(),
     averageDurationMs: finiteNumberSchema,
@@ -112,6 +147,7 @@ export const schedulerMetricsSchema = v.strictObject({
 
 export const appObservabilityMetricsSchema = v.strictObject({
     cacheRefresh: cacheRefreshMetricsSchema,
+    chat: chatRuntimeMetricsSchema,
     database: databaseMetricsSchema,
     gateway: gatewayMetricsSchema,
     processes: childProcessMetricsSchema,
@@ -179,6 +215,12 @@ export type HttpRouteMetrics = v.InferOutput<typeof httpRouteMetricsSchema>;
 export type HttpRequestMetrics = v.InferOutput<typeof httpRequestMetricsSchema>;
 export type RuntimeMetrics = v.InferOutput<typeof runtimeMetricsSchema>;
 export type CacheRefreshMetrics = v.InferOutput<typeof cacheRefreshMetricsSchema>;
+export type ChatReplayMetrics = v.InferOutput<typeof chatReplayMetricsSchema>;
+export type ChatPersistenceMetrics = v.InferOutput<typeof chatPersistenceMetricsSchema>;
+export type ChatProjectionShadowMetrics = v.InferOutput<
+    typeof chatProjectionShadowMetricsSchema
+>;
+export type ChatRuntimeMetrics = v.InferOutput<typeof chatRuntimeMetricsSchema>;
 export type DatabaseMetrics = v.InferOutput<typeof databaseMetricsSchema>;
 export type GatewayMetrics = v.InferOutput<typeof gatewayMetricsSchema>;
 export type SchedulerMetrics = v.InferOutput<typeof schedulerMetricsSchema>;

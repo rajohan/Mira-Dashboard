@@ -363,6 +363,34 @@ function dashboardMetricsResponse(): Metrics {
             requests: 1,
             totalDurationMs: 4,
         },
+        chat: {
+            persistence: {
+                writeAttempts: 4,
+                writeFailures: 0,
+                writes: 4,
+                writesPerMinute: 2,
+            },
+            projectionShadow: {
+                activeRunMismatches: 0,
+                canonicalErrors: 0,
+                compactionStatusMismatches: 0,
+                lastObservedAt: "2026-07-30T10:00:00.000Z",
+                matches: 8,
+                mismatches: 0,
+                observations: 8,
+                rowMismatches: 0,
+            },
+            replay: {
+                currentBytes: 2048,
+                events: 12,
+                maxBytes: 16_777_216,
+                memoryEvictions: 0,
+                peakBytes: 4096,
+                runs: 2,
+                sessionEvictions: 0,
+                sessions: 1,
+            },
+        },
         cpu: {
             count: 4,
             loadAvg: [0.1, 0.2, 0.3],
@@ -677,6 +705,10 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (url === "/api/metrics") {
         return Response.json(dashboardMetricsResponse());
+    }
+
+    if (method === "POST" && url === "/api/metrics/chat-projection-shadow") {
+        return Response.json({ isOk: true });
     }
 
     if (url === "/api/cache/weather.spydeberg") {

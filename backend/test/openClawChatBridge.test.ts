@@ -424,6 +424,13 @@ describe("OpenClaw chat bridge", () => {
 
         expect(bridge.snapshot(oldSession).events).toEqual([]);
         expect(bridge.snapshot(currentSession).events).toHaveLength(1);
+        expect(bridge.getMetrics().replay).toMatchObject({
+            currentBytes: expect.any(Number),
+            memoryEvictions: 1,
+            peakBytes: expect.any(Number),
+        });
+        expect(bridge.getMetrics().replay.currentBytes).toBeLessThanOrEqual(900_000);
+        expect(bridge.getMetrics().replay.peakBytes).toBeGreaterThan(900_000);
     });
 
     it("rehydrates an oversized protected session without retaining it in memory", () => {
@@ -1525,6 +1532,7 @@ describe("OpenClaw chat bridge", () => {
         expect(store.snapshots.size).toBe(50);
         expect(store.snapshots.has("agent:test:0")).toBe(false);
         expect(store.snapshots.has("agent:test:50")).toBe(true);
+        expect(bridge.getMetrics().replay.sessionEvictions).toBe(1);
     });
 
     it("protects the requested persisted replay while hydrating at the session limit", () => {

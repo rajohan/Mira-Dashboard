@@ -479,6 +479,20 @@ describe("Mira Dashboard backend integration", () => {
                 failures: expect.any(Number),
                 refreshes: expect.any(Number),
             },
+            chat: {
+                persistence: {
+                    writeAttempts: expect.any(Number),
+                    writesPerMinute: expect.any(Number),
+                },
+                projectionShadow: {
+                    mismatches: expect.any(Number),
+                    observations: expect.any(Number),
+                },
+                replay: {
+                    currentBytes: expect.any(Number),
+                    peakBytes: expect.any(Number),
+                },
+            },
             database: {
                 available: true,
                 latencyMs: expect.any(Number),
@@ -2269,6 +2283,45 @@ describe("Mira Dashboard backend integration", () => {
         expect(metrics.body.memory.used).toBeGreaterThanOrEqual(0);
         expect(metrics.body.system.hostname.length).toBeGreaterThan(0);
         expect(metrics.body.tokens.total).toBe(0);
+
+        const projectionShadow = await api<{ isOk: boolean }>(
+            "/api/metrics/chat-projection-shadow",
+            json("POST", {
+                canonicalActiveRunCount: 0,
+                canonicalCompactionPhase: "none",
+                canonicalRowCount: 0,
+                differenceKinds: [],
+                legacyActiveRunCount: 0,
+                legacyCompactionPhase: "none",
+                legacyRowCount: 0,
+                matches: true,
+                schemaVersion: 1,
+                turnCount: 0,
+            })
+        );
+        expect(projectionShadow).toMatchObject({
+            body: { isOk: true },
+            status: 200,
+        });
+
+        const contentBearingProjectionShadow = await api<ApiErrorResponse>(
+            "/api/metrics/chat-projection-shadow",
+            json("POST", {
+                canonicalActiveRunCount: 0,
+                canonicalCompactionPhase: "none",
+                canonicalRowCount: 0,
+                differenceKinds: [],
+                legacyActiveRunCount: 0,
+                legacyCompactionPhase: "none",
+                legacyFingerprint: "must-not-cross-the-boundary",
+                legacyRowCount: 0,
+                matches: true,
+                schemaVersion: 1,
+                turnCount: 0,
+            })
+        );
+        expect(contentBearingProjectionShadow.status).toBe(400);
+        expect(contentBearingProjectionShadow.body.error.code).toBe("invalid_request");
 
         const { database } = await import("../src/database.ts");
         database.prepare("DELETE FROM cache_entries WHERE key = ?").run("moltbook.home");

@@ -14,6 +14,11 @@ import {
 } from "../../../../../../contracts/chatCanonicalTurn";
 import { stableCanonicalChatStringify } from "../../../../../../contracts/chatCanonicalUtilities";
 import {
+    CHAT_PROJECTION_SHADOW_SCHEMA_VERSION,
+    type ChatProjectionCompactionPhase,
+    type ChatProjectionShadowDifference,
+} from "../../../../../../contracts/chatProjectionTelemetry";
+import {
     type ChatHistoryMessage,
     type ChatVisibilitySettings,
     isRenderableChatHistoryMessage,
@@ -34,22 +39,21 @@ import {
 } from "./chatProjection";
 import { isSameChatSession, type ChatRunState, type ChatRuntimeState } from "./chatState";
 
-export const CHAT_PROJECTION_SHADOW_SCHEMA_VERSION = 1;
-
-export type ChatProjectionShadowDifference =
-    | "active-runs"
-    | "canonical-error"
-    | "compaction-status"
-    | "rows";
+export { CHAT_PROJECTION_SHADOW_SCHEMA_VERSION } from "../../../../../../contracts/chatProjectionTelemetry";
+export type { ChatProjectionShadowDifference } from "../../../../../../contracts/chatProjectionTelemetry";
 
 export interface ChatProjectionShadowComparison {
     canonicalError?: {
         message: string;
         name: string;
     };
+    canonicalActiveRunCount?: number;
+    canonicalCompactionPhase?: ChatProjectionCompactionPhase;
     canonicalFingerprint?: string;
     canonicalRowCount?: number;
     differenceKinds: ChatProjectionShadowDifference[];
+    legacyActiveRunCount: number;
+    legacyCompactionPhase: ChatProjectionCompactionPhase;
     legacyFingerprint: string;
     legacyRowCount: number;
     matches: boolean;
@@ -597,6 +601,12 @@ function projectionFingerprint(sections: Record<string, unknown>): string {
     return canonicalChatContentFingerprint(stableCanonicalChatStringify(sections));
 }
 
+function projectionCompactionPhase(
+    projection: ChatProjection
+): ChatProjectionCompactionPhase {
+    return projection.compactionStatus?.phase ?? "none";
+}
+
 /**
  * Compares legacy and canonical-turn projection without exposing transcript content.
  * @param legacy Existing projection.
@@ -619,9 +629,13 @@ export function compareChatProjectionShadow(
             stableCanonicalChatStringify(canonicalSections[section])
     );
     return {
+        canonicalActiveRunCount: canonical.activeRuns.length,
+        canonicalCompactionPhase: projectionCompactionPhase(canonical),
         canonicalFingerprint: projectionFingerprint(canonicalSections),
         canonicalRowCount: canonical.rows.length,
         differenceKinds,
+        legacyActiveRunCount: legacy.activeRuns.length,
+        legacyCompactionPhase: projectionCompactionPhase(legacy),
         legacyFingerprint: projectionFingerprint(legacySections),
         legacyRowCount: legacy.rows.length,
         matches: differenceKinds.length === 0,
@@ -701,6 +715,8 @@ export function projectChatWithCanonicalShadow(
             comparison: {
                 canonicalError: canonicalProjectionErrorMetadata(error),
                 differenceKinds: ["canonical-error"],
+                legacyActiveRunCount: legacy.activeRuns.length,
+                legacyCompactionPhase: projectionCompactionPhase(legacy),
                 legacyFingerprint: projectionFingerprint(projectionSections(legacy)),
                 legacyRowCount: legacy.rows.length,
                 matches: false,

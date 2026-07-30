@@ -72,6 +72,7 @@ export async function getAppObservabilityMetrics(): Promise<AppObservabilityMetr
     const runtime = getRuntimeMetrics();
     return {
         cacheRefresh: getCacheRefreshMetrics(),
+        chat: gateway.getChatMetrics(),
         database: getDatabaseMetrics(),
         gateway: gateway.getMetrics(),
         processes: getChildProcessMetrics(),

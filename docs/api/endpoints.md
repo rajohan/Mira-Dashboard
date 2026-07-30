@@ -280,6 +280,7 @@ development](../development/local-dev.md#managed-pr-dev).
 | `GET`  | `/api/cache/:key`                          | Reads one cache entry.                                                                           |
 | `POST` | `/api/cache/:key/refresh`                  | Queues and observes one cache refresh.                                                           |
 | `GET`  | `/api/metrics`                             | Reads host metrics.                                                                              |
+| `POST` | `/api/metrics/chat-projection-shadow`      | Records one strict, content-free canonical projection parity observation.                        |
 | `GET`  | `/api/database/overview`                   | Reads Postgres/PgBouncer plus Dashboard SQLite lifecycle overview.                               |
 | `GET`  | `/api/ops/log-rotation/status`             | Reads log rotation status.                                                                       |
 | `POST` | `/api/ops/log-rotation/dry-run`            | Queues and observes log rotation dry-run.                                                        |

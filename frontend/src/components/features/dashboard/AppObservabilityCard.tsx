@@ -3,6 +3,7 @@ import {
     ChartNoAxesCombined,
     Database,
     Gauge,
+    MessagesSquare,
     Network,
     Radio,
     RefreshCw,
@@ -79,6 +80,7 @@ export function AppObservabilityCard({ metrics }: AppObservabilityCardProperties
 
     const {
         cacheRefresh,
+        chat,
         database,
         gateway,
         http,
@@ -94,8 +96,8 @@ export function AppObservabilityCard({ metrics }: AppObservabilityCardProperties
                 <div>
                     <CardTitle>Application observability</CardTitle>
                     <p className="mt-1 text-xs text-primary-400">
-                        Dashboard web, worker, queue, database, Gateway, HTTP, and cache
-                        telemetry
+                        Dashboard web, worker, queue, database, Gateway, chat, HTTP, and
+                        cache telemetry
                     </p>
                 </div>
                 <Badge
@@ -244,6 +246,52 @@ export function AppObservabilityCard({ metrics }: AppObservabilityCardProperties
                     <MetricRow
                         label="Last disconnected"
                         value={formatTimestamp(gateway.lastDisconnectedAt)}
+                    />
+                </MetricGroup>
+
+                <MetricGroup
+                    title="Chat runtime"
+                    icon={<MessagesSquare className="size-4" />}
+                >
+                    <MetricRow
+                        label="Replay / peak / limit"
+                        value={`${formatSize(chat.replay.currentBytes)} / ${formatSize(chat.replay.peakBytes)} / ${formatSize(chat.replay.maxBytes)}`}
+                    />
+                    <MetricRow
+                        label="Sessions / runs / events"
+                        value={`${chat.replay.sessions} / ${chat.replay.runs} / ${chat.replay.events}`}
+                    />
+                    <MetricRow
+                        label="Memory / session evictions"
+                        value={`${chat.replay.memoryEvictions} / ${chat.replay.sessionEvictions}`}
+                    />
+                    <MetricRow
+                        label="Store writes / attempts"
+                        value={`${chat.persistence.writes} / ${chat.persistence.writeAttempts}`}
+                    />
+                    <MetricRow
+                        label="Store write failures"
+                        value={chat.persistence.writeFailures}
+                    />
+                    <MetricRow
+                        label="Store writes / minute"
+                        value={chat.persistence.writesPerMinute}
+                    />
+                    <MetricRow
+                        label="Shadow matches / observations"
+                        value={`${chat.projectionShadow.matches} / ${chat.projectionShadow.observations}`}
+                    />
+                    <MetricRow
+                        label="Shadow mismatches / errors"
+                        value={`${chat.projectionShadow.mismatches} / ${chat.projectionShadow.canonicalErrors}`}
+                    />
+                    <MetricRow
+                        label="Run / compaction / row diffs"
+                        value={`${chat.projectionShadow.activeRunMismatches} / ${chat.projectionShadow.compactionStatusMismatches} / ${chat.projectionShadow.rowMismatches}`}
+                    />
+                    <MetricRow
+                        label="Last shadow observation"
+                        value={formatTimestamp(chat.projectionShadow.lastObservedAt)}
                     />
                 </MetricGroup>
 

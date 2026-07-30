@@ -5,6 +5,7 @@ import {
     isSameSessionKey,
     normalizedSessionKey,
 } from "./openClawChatIdentity.ts";
+import type { OpenClawChatRuntimeMetricsRecorder } from "./openClawChatMetrics.ts";
 
 const logger = createStructuredLogger("openclaw-chat");
 
@@ -32,6 +33,7 @@ export interface OpenClawChatSnapshotStore {
 
 interface OpenClawChatPersistenceCoordinatorOptions {
     ensureSessionLoaded: (sessionKey: string) => boolean;
+    metrics: OpenClawChatRuntimeMetricsRecorder;
     snapshotFromMemory: (sessionKey: string) => OpenClawRuntimeSnapshot;
 }
 
@@ -56,6 +58,7 @@ export class OpenClawChatPersistenceCoordinator {
     readonly #pendingSessionClears = new Set<string>();
     readonly #store: OpenClawChatSnapshotStore | undefined;
     readonly #ensureSessionLoaded: (sessionKey: string) => boolean;
+    readonly #metrics: OpenClawChatRuntimeMetricsRecorder;
     readonly #snapshotFromMemory: (sessionKey: string) => OpenClawRuntimeSnapshot;
     #persistenceTimer: ReturnType<typeof setTimeout> | undefined;
     #storeClearPending = false;
@@ -67,6 +70,7 @@ export class OpenClawChatPersistenceCoordinator {
     ) {
         this.#store = store;
         this.#ensureSessionLoaded = options.ensureSessionLoaded;
+        this.#metrics = options.metrics;
         this.#snapshotFromMemory = options.snapshotFromMemory;
     }
 
@@ -98,12 +102,26 @@ export class OpenClawChatPersistenceCoordinator {
         this.#persistenceTimer = undefined;
     }
 
+    #writeStore(operation: (store: OpenClawChatSnapshotStore) => void): void {
+        const store = this.#store;
+        if (!store) {
+            throw new Error("OpenClaw chat snapshot store is unavailable");
+        }
+        try {
+            operation(store);
+            this.#metrics.recordPersistenceWrite(true);
+        } catch (error) {
+            this.#metrics.recordPersistenceWrite(false);
+            throw error;
+        }
+    }
+
     #retryStoreClear(): boolean {
         if (!this.#store || !this.#storeClearPending) {
             return true;
         }
         try {
-            this.#store.clear();
+            this.#writeStore((store) => store.clear());
             this.#storeClearPending = false;
             this.#pendingDeleteKeys.clear();
             this.#pendingSessionClears.clear();
@@ -132,7 +150,7 @@ export class OpenClawChatPersistenceCoordinator {
                 continue;
             }
             try {
-                this.#store.delete(pendingKey);
+                this.#writeStore((store) => store.delete(pendingKey));
                 this.#pendingDeleteKeys.delete(pendingKey);
                 this.#loadedStoreKeys.delete(pendingKey);
                 this.#recordStoreSuccess();
@@ -169,7 +187,7 @@ export class OpenClawChatPersistenceCoordinator {
         let hasFailed = false;
         for (const matchingKey of matchingKeys) {
             try {
-                this.#store.delete(matchingKey);
+                this.#writeStore((store) => store.delete(matchingKey));
                 this.#pendingDeleteKeys.delete(matchingKey);
                 this.#loadedStoreKeys.delete(matchingKey);
                 this.#recordStoreSuccess();
@@ -325,7 +343,7 @@ export class OpenClawChatPersistenceCoordinator {
         const storageSessionKey = normalizedSessionKey(sessionKey);
         this.#pendingDeleteKeys.add(storageSessionKey);
         try {
-            this.#store.delete(storageSessionKey);
+            this.#writeStore((store) => store.delete(storageSessionKey));
             this.#pendingDeleteKeys.delete(storageSessionKey);
             this.#loadedStoreKeys.delete(storageSessionKey);
             this.#recordStoreSuccess();
@@ -353,7 +371,7 @@ export class OpenClawChatPersistenceCoordinator {
             if (snapshot.events.length === 0) {
                 return this.deleteSession(storageSessionKey);
             }
-            this.#store.save(storageSessionKey, snapshot);
+            this.#writeStore((store) => store.save(storageSessionKey, snapshot));
             for (const pendingKey of this.#pendingDeleteKeys) {
                 if (isExactSessionKey(pendingKey, storageSessionKey)) {
                     this.#pendingDeleteKeys.delete(pendingKey);
@@ -463,11 +481,13 @@ export class OpenClawChatPersistenceCoordinator {
             return false;
         }
         try {
-            this.#store.promote(
-                sourceStorageKey,
-                canonicalStorageKey,
-                sourceSnapshot,
-                canonicalSnapshot
+            this.#writeStore((store) =>
+                store.promote(
+                    sourceStorageKey,
+                    canonicalStorageKey,
+                    sourceSnapshot,
+                    canonicalSnapshot
+                )
             );
             for (const pendingKey of this.#pendingDeleteKeys) {
                 if (

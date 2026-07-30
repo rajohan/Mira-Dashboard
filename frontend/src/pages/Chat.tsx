@@ -20,6 +20,10 @@ import {
 } from "../components/features/chat/chatPageUtilities";
 import type { ChatPreviewItem } from "../components/features/chat/chatTypes";
 import { createChatVisibility as createRuntimeVisibility } from "../components/features/chat/domain/chatPresentation";
+import {
+    chatProjectionShadowObservation,
+    reportChatProjectionShadowObservation,
+} from "../components/features/chat/domain/chatProjectionTelemetry";
 import { isSameChatSession } from "../components/features/chat/domain/chatState";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
@@ -111,6 +115,7 @@ export function Chat() {
         undefined
     );
     const reportedProjectionMismatchRef = useRef("");
+    const reportedProjectionObservationRef = useRef("");
 
     const [draft, setDraft] = useState("");
     const [isAtBottom, setIsAtBottom] = useState(true);
@@ -260,6 +265,15 @@ export function Chat() {
     const projection = projectionShadow.legacy;
     useEffect(() => {
         const { comparison } = projectionShadow;
+        const observation = chatProjectionShadowObservation(comparison);
+        const observationSignature = JSON.stringify({
+            observation,
+            selectedSessionKey,
+        });
+        if (reportedProjectionObservationRef.current !== observationSignature) {
+            reportedProjectionObservationRef.current = observationSignature;
+            reportChatProjectionShadowObservation(observation).catch(() => void 0);
+        }
         if (comparison.matches) {
             return;
         }
@@ -274,12 +288,16 @@ export function Chat() {
         reportedProjectionMismatchRef.current = signature;
         console.warn("Canonical chat projection shadow mismatch", {
             canonicalRowCount: comparison.canonicalRowCount,
+            canonicalActiveRunCount: comparison.canonicalActiveRunCount,
+            canonicalCompactionPhase: comparison.canonicalCompactionPhase,
             differenceKinds: comparison.differenceKinds,
+            legacyActiveRunCount: comparison.legacyActiveRunCount,
+            legacyCompactionPhase: comparison.legacyCompactionPhase,
             legacyRowCount: comparison.legacyRowCount,
             schemaVersion: comparison.schemaVersion,
             turnCount: comparison.turnCount,
         });
-    }, [projectionShadow]);
+    }, [projectionShadow, selectedSessionKey]);
     const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
     const chatRows = projectChatActivityRows({
         activeRuns: projection.activeRuns,
