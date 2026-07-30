@@ -111,6 +111,9 @@ function mergeCachedHistoryRows(
     freshRows: CanonicalChatHistoryRow[],
     throughSequence: number
 ): MergedCachedHistory {
+    const freshRowOrder = new Map(
+        freshRows.map((row, index) => [historyMessageId(row), index])
+    );
     const cachedById = new Map(
         cached.rows.flatMap((row) => {
             const sequence = historySequence(row);
@@ -195,10 +198,23 @@ function mergeCachedHistoryRows(
         rows: cachedById
             .values()
             .toArray()
-            .toSorted(
-                (left, right) =>
-                    (historySequence(left) ?? 0) - (historySequence(right) ?? 0)
-            ),
+            .toSorted((left, right) => {
+                const leftSequence = historySequence(left) ?? 0;
+                const rightSequence = historySequence(right) ?? 0;
+                const sequenceOrder = leftSequence - rightSequence;
+                if (
+                    sequenceOrder !== 0 ||
+                    !replacedFingerprintSequences.has(leftSequence)
+                ) {
+                    return sequenceOrder;
+                }
+                return (
+                    (freshRowOrder.get(historyMessageId(left)) ??
+                        Number.MAX_SAFE_INTEGER) -
+                    (freshRowOrder.get(historyMessageId(right)) ??
+                        Number.MAX_SAFE_INTEGER)
+                );
+            }),
     };
 }
 

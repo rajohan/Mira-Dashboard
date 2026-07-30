@@ -295,6 +295,52 @@ describe("OpenClaw history loader", () => {
         ]);
     });
 
+    it("preserves fresh same-sequence order when a fingerprint row is rewritten", async () => {
+        let command = "echo stale";
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(
+                        1,
+                        "assistant",
+                        [
+                            {
+                                arguments: { command },
+                                id: "call-1",
+                                name: "bash",
+                                type: "toolCall",
+                            },
+                        ],
+                        { __openclaw: { seq: 1 } }
+                    ),
+                    rawMessage(1, "tool", "completed", {
+                        __openclaw: {
+                            id: "provider-result",
+                            seq: 1,
+                        },
+                        toolCallId: "call-1",
+                        toolName: "bash",
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 2,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        command = "echo current";
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial).toHaveLength(1);
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0]?.toolCalls?.[0]?.arguments).toEqual({
+            command: "echo current",
+        });
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("completed");
+    });
+
     it("preserves seq-only siblings while replacing a rewritten member", async () => {
         let output = "stale output";
         const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
