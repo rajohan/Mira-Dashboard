@@ -4219,6 +4219,29 @@ fi
         });
     });
 
+    it("excludes fork pull requests from inferred preview stack ancestry", async () => {
+        const { pullRequestPreviewScope } =
+            await import("../src/services/pullRequests.ts");
+        const forkBottom = stackPullRequestSummary(11, {
+            headRefName: "shared-base",
+            isCrossRepository: true,
+            stack: undefined,
+        });
+        const child = stackPullRequestSummary(12, {
+            baseRefName: "shared-base",
+            headRefName: "same-repository-child",
+            stack: undefined,
+        });
+
+        expect(pullRequestPreviewScope(child, [forkBottom, child])).toBeUndefined();
+        expect(
+            pullRequestPreviewScope(child, [
+                { ...forkBottom, isCrossRepository: false },
+                child,
+            ])?.map((pullRequest) => pullRequest.number)
+        ).toEqual([11, 12]);
+    });
+
     it("allows review approval on an upper linear stack candidate", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");

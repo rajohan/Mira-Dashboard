@@ -1063,6 +1063,9 @@ function buildPullRequestPreviewScopeIndex(
             nativeStackMembers.set(pullRequest.stack.number, members);
             continue;
         }
+        if (pullRequest.isCrossRepository === true) {
+            continue;
+        }
         unstackedPullRequests.push(pullRequest);
         if (pullRequest.baseRefName === DEFAULT_BASE) {
             candidateScopes.set(pullRequest.number, [pullRequest]);
