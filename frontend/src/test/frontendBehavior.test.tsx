@@ -140,6 +140,7 @@ import {
     deliveryKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useCreatePullRequestStack,
     useDashboardDeployments,
     useDashboardReleaseStatus,
     useDeployDashboard,
@@ -5091,8 +5092,17 @@ describe("Mira Dashboard frontend behavior", () => {
                 if (url === "/api/pull-requests/189/approve" && method === "POST") {
                     expect(JSON.parse(requestBodyText(init?.body))).toEqual({
                         deploy: true,
+                        expectedHeadSha: "a".repeat(40),
+                        mergeStack: true,
                     });
                     return Response.json({ isOk: true, message: "approved" });
+                }
+
+                if (url === "/api/pull-requests/stacks" && method === "POST") {
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        pullRequests: [188, 189],
+                    });
+                    return Response.json({ isOk: true, message: "stack created" });
                 }
 
                 if (
@@ -5169,7 +5179,9 @@ describe("Mira Dashboard frontend behavior", () => {
                 }
 
                 if (url === "/api/pull-requests/189/preview/start" && method === "POST") {
-                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({});
+                    expect(JSON.parse(requestBodyText(init?.body))).toEqual({
+                        expectedHeadSha: "a".repeat(40),
+                    });
                     return Response.json({
                         isOk: true,
                         preview: {
@@ -5201,9 +5213,18 @@ describe("Mira Dashboard frontend behavior", () => {
             useApprovePullRequest()
         );
         await approvePullRequest.result.current.mutateAsync({
+            expectedHeadSha: "a".repeat(40),
+            mergeStack: true,
             number: 189,
             willDeploy: true,
         });
+
+        const createStack = renderHookWithQueryClient(() => useCreatePullRequestStack());
+        expect(
+            createStack.result.current.mutateAsync({
+                pullRequests: [188, 189],
+            })
+        ).resolves.toMatchObject({ message: "stack created" });
 
         const approveReview = renderHookWithQueryClient(() =>
             useApprovePullRequestReview()
@@ -5241,7 +5262,10 @@ describe("Mira Dashboard frontend behavior", () => {
             useStartPullRequestPreview()
         );
         expect(
-            startPreview.result.current.mutateAsync({ number: 189 })
+            startPreview.result.current.mutateAsync({
+                expectedHeadSha: "a".repeat(40),
+                number: 189,
+            })
         ).resolves.toMatchObject({
             number: 189,
             status: "running",

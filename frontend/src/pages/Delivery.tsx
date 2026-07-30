@@ -24,6 +24,13 @@ import type {
 } from "../../../contracts/delivery";
 import { ProductionReleasesCard } from "../components/features/delivery/ProductionReleasesCard";
 import { PullRequestDevelopmentCard } from "../components/features/delivery/PullRequestDevelopmentCard";
+import {
+    derivePullRequestStackCandidates,
+    groupNativePullRequestStacks,
+    indexPullRequestStackCandidates,
+    type PullRequestStackCandidate,
+    pullRequestStackMergeGroup,
+} from "../components/features/delivery/pullRequestStacks";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -35,6 +42,7 @@ import { RefreshButton } from "../components/ui/RefreshButton";
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useCreatePullRequestStack,
     useDashboardDeployments,
     useDashboardReleaseStatus,
     useDeployDashboard,
@@ -56,11 +64,16 @@ type PendingAction =
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
-    | { type: "preview-rebuild"; pr: PullRequestSummary }
-    | { type: "preview-start"; pr: PullRequestSummary }
+    | {
+          type: "preview-rebuild";
+          pr: PullRequestSummary;
+          scope: PullRequestSummary[];
+      }
+    | { type: "preview-start"; pr: PullRequestSummary; scope: PullRequestSummary[] }
     | { number: number; title?: string; type: "preview-stop" }
     | { type: "reject"; pr: PullRequestSummary }
     | { release: DashboardReleaseSummary; type: "rollback" }
+    | { candidate: PullRequestStackCandidate; type: "stack-create" }
     | { type: "deploy" };
 type PendingActionType = Exclude<PendingAction, undefined>["type"];
 type UnhandledPendingActionType = Exclude<
@@ -74,6 +87,7 @@ type UnhandledPendingActionType = Exclude<
     | "reject"
     | "review-approve"
     | "rollback"
+    | "stack-create"
 >;
 
 const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
@@ -84,6 +98,7 @@ void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
+const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const DEFAULT_BASE = "main";
 const ACTIVE_PREVIEW_STATUSES = new Set<PullRequestPreviewStatus["status"]>([
     "running",
@@ -505,10 +520,10 @@ function canConfiguredReviewerApproveReview(pr: PullRequestSummary): boolean {
 function actionLabel(action: Exclude<PendingAction, undefined>) {
     switch (action.type) {
         case "merge": {
-            return "Merge PR";
+            return action.pr.stack ? "Merge stack" : "Merge PR";
         }
         case "merge-deploy": {
-            return "Merge + Deploy";
+            return action.pr.stack ? "Merge stack + Deploy" : "Merge + Deploy";
         }
         case "review-approve": {
             return "Approve PR";
@@ -524,6 +539,9 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
         }
         case "reject": {
             return "Reject PR";
+        }
+        case "stack-create": {
+            return "Create GitHub stack";
         }
         case "deploy": {
             return `Deploy latest ${DEFAULT_BASE}`;
@@ -541,19 +559,31 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
 function actionMessage(action: Exclude<PendingAction, undefined>) {
     switch (action.type) {
         case "merge": {
-            return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
+            if (action.pr.stack) {
+                return `Merge GitHub stack #${action.pr.stack.number} through PR #${action.pr.number}: ${action.pr.title}?\n\nThe selected layer is exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}. GitHub will submit every open PR from the bottom of the stack through #${action.pr.number} as one all-or-nothing merge group. Direct merges use squash; a required merge queue uses its repository policy. Delivery removes each merged PR's clean local worktree and managed dev data only after every included PR confirms as merged. If GitHub queues the stack, Delivery retains every worktree. It will not deploy.`;
+            }
+            return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"} and delete the remote branch. It will not deploy.`;
         }
         case "merge-deploy": {
-            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
+            if (action.pr.stack) {
+                return `Merge and deploy GitHub stack #${action.pr.stack.number} through PR #${action.pr.number}: ${action.pr.title}?\n\nThe selected layer is exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}. GitHub will submit every open PR from the bottom of the stack through #${action.pr.number} as one all-or-nothing merge group. Direct merges use squash; a required merge queue uses its repository policy. After every included PR confirms as merged, Delivery removes its clean local worktree and managed dev data, syncs ${DEFAULT_BASE}, publishes an immutable release, atomically activates it, restarts web and worker, and verifies commit-bound readiness. If GitHub queues the stack, Delivery keeps all worktrees and does not auto-deploy; use Deploy latest ${DEFAULT_BASE} after the queue finishes.`;
+            }
+            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}, sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
         }
         case "review-approve": {
             return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
         }
         case "preview-start": {
-            return `Run PR #${action.pr.number} in dev: ${action.pr.title}?\n\nThis runs the fixed PR commit over Tailscale HTTPS without source watchers, using an isolated Dashboard database, a writable workspace snapshot, and an isolated scheduler/worker without host or backup jobs. It connects to the live production Gateway so chat and session changes can affect production data. The dev environment stops automatically after four hours.`;
+            const includedPullRequests = action.scope
+                .map((pullRequest) => `#${pullRequest.number}`)
+                .join(" → ");
+            return `Run PR #${action.pr.number} in dev: ${action.pr.title}?\n\nThis runs the exact PR head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}. Included layers: ${includedPullRequests}. It runs over Tailscale HTTPS without source watchers, using an isolated Dashboard database, a writable workspace snapshot, and an isolated scheduler/worker without host or backup jobs. It connects to the live production Gateway so chat and session changes can affect production data. The dev environment stops automatically after four hours.`;
         }
         case "preview-rebuild": {
-            return `Rebuild PR dev for #${action.pr.number}: ${action.pr.title}?\n\nThis replaces the running dev environment with the latest PR head while keeping the same isolation and live production Gateway connection. The rebuilt environment stops automatically after four hours.`;
+            const includedPullRequests = action.scope
+                .map((pullRequest) => `#${pullRequest.number}`)
+                .join(" → ");
+            return `Rebuild PR dev for #${action.pr.number}: ${action.pr.title}?\n\nThis replaces the running dev environment with exact PR head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}. Included layers: ${includedPullRequests}. It keeps the same isolation and live production Gateway connection. The rebuilt environment stops automatically after four hours.`;
         }
         case "preview-stop": {
             const title = action.title ? `: ${action.title}` : "";
@@ -561,6 +591,12 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
         }
         case "reject": {
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
+        }
+        case "stack-create": {
+            const pullRequestNumbers = action.candidate.pullRequests
+                .map((pullRequest) => `#${pullRequest.number}`)
+                .join(" → ");
+            return `Create a GitHub stack from ${pullRequestNumbers}?\n\nThe existing pull requests will be linked from bottom to top. Their branches, commits, and review state are unchanged.`;
         }
         case "deploy": {
             return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
@@ -579,12 +615,15 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
  */
 function actionResultMessage(
     message: string,
-    ...cleanupResults: Array<{ message: string } | undefined>
+    ...cleanupResults: Array<{ message: string } | { message: string }[] | undefined>
 ) {
     return [
         message,
         ...cleanupResults
-            .filter((cleanup) => cleanup !== undefined)
+            .flatMap((cleanup) => {
+                if (cleanup === undefined) return [];
+                return Array.isArray(cleanup) ? cleanup : [cleanup];
+            })
             .map((cleanup) => cleanup.message),
     ].join("\n");
 }
@@ -674,6 +713,14 @@ function PullRequestCard({
                     <Badge variant={isMiraPullRequest(pr) ? "info" : "default"}>
                         {authorLabel(pr)}
                     </Badge>
+                    {pr.stack ? (
+                        <>
+                            <Badge variant="info">Stack #{pr.stack.number}</Badge>
+                            <Badge variant="default">
+                                {pr.stack.position}/{pr.stack.size}
+                            </Badge>
+                        </>
+                    ) : undefined}
                     <Badge variant={statusVariant(pr.mergeable)}>
                         {pr.mergeable || "mergeable unknown"}
                     </Badge>
@@ -779,6 +826,7 @@ export function Delivery() {
     } = usePullRequestPreview();
     const approvePullRequest = useApprovePullRequest();
     const approvePullRequestReview = useApprovePullRequestReview();
+    const createPullRequestStack = useCreatePullRequestStack();
     const rejectPullRequest = useRejectPullRequest();
     const updatePullRequestBranch = useUpdatePullRequestBranch();
     const deployDashboard = useDeployDashboard();
@@ -791,6 +839,7 @@ export function Delivery() {
     const isActionPending =
         approvePullRequest.isPending ||
         approvePullRequestReview.isPending ||
+        createPullRequestStack.isPending ||
         rejectPullRequest.isPending ||
         updatePullRequestBranch.isPending ||
         deployDashboard.isPending ||
@@ -811,8 +860,23 @@ export function Delivery() {
                   number: previewStatus.number,
                   title: previewStatus.title,
               };
-    const miraPullRequests = pullRequests.filter((pr) => isMiraPullRequest(pr));
-    const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
+    const stackGroups = groupNativePullRequestStacks(pullRequests);
+    const unstackedPullRequests = pullRequests.filter(
+        (pullRequest) => pullRequest.stack === undefined
+    );
+    const stackCandidates = derivePullRequestStackCandidates(
+        unstackedPullRequests,
+        DEFAULT_BASE
+    );
+    const stackCandidateEntries = indexPullRequestStackCandidates(stackCandidates);
+    const standalonePullRequests = unstackedPullRequests.filter(
+        (pullRequest) => !stackCandidateEntries.has(pullRequest.number)
+    );
+    const hasMiraPullRequests = pullRequests.some((pr) => isMiraPullRequest(pr));
+    const miraPullRequests = standalonePullRequests.filter((pr) => isMiraPullRequest(pr));
+    const externalPullRequests = standalonePullRequests.filter(
+        (pr) => !isMiraPullRequest(pr)
+    );
 
     /** Performs confirm action. */
     async function confirmAction(action: Exclude<PendingAction, undefined>) {
@@ -820,7 +884,18 @@ export function Delivery() {
         try {
             switch (action.type) {
                 case "merge": {
+                    const expectedHeadSha = action.pr.headRefOid;
+                    if (
+                        typeof expectedHeadSha !== "string" ||
+                        !FULL_COMMIT_SHA_PATTERN.test(expectedHeadSha)
+                    ) {
+                        throw new Error(
+                            "Refresh Delivery before merging because the exact PR head is unavailable"
+                        );
+                    }
                     const result = await approvePullRequest.mutateAsync({
+                        expectedHeadSha,
+                        mergeStack: action.pr.stack !== undefined,
                         number: action.pr.number,
                         willDeploy: false,
                     });
@@ -828,14 +903,27 @@ export function Delivery() {
                         actionResultMessage(
                             result.message,
                             result.cleanup,
-                            result.previewCleanup
+                            result.cleanups,
+                            result.previewCleanup,
+                            result.previewCleanups
                         )
                     );
                     break;
                 }
 
                 case "merge-deploy": {
+                    const expectedHeadSha = action.pr.headRefOid;
+                    if (
+                        typeof expectedHeadSha !== "string" ||
+                        !FULL_COMMIT_SHA_PATTERN.test(expectedHeadSha)
+                    ) {
+                        throw new Error(
+                            "Refresh Delivery before merging because the exact PR head is unavailable"
+                        );
+                    }
                     const result = await approvePullRequest.mutateAsync({
+                        expectedHeadSha,
+                        mergeStack: action.pr.stack !== undefined,
                         number: action.pr.number,
                         willDeploy: true,
                     });
@@ -846,7 +934,9 @@ export function Delivery() {
                         actionResultMessage(
                             message,
                             result.cleanup,
-                            result.previewCleanup
+                            result.cleanups,
+                            result.previewCleanup,
+                            result.previewCleanups
                         )
                     );
                     break;
@@ -864,7 +954,17 @@ export function Delivery() {
                 case "preview-rebuild":
                 case "preview-start": {
                     const isRebuild = action.type === "preview-rebuild";
+                    const expectedHeadSha = action.pr.headRefOid;
+                    if (
+                        typeof expectedHeadSha !== "string" ||
+                        !FULL_COMMIT_SHA_PATTERN.test(expectedHeadSha)
+                    ) {
+                        throw new Error(
+                            "Refresh Delivery before starting dev because the exact PR head is unavailable"
+                        );
+                    }
                     const preview = await startPullRequestPreview.mutateAsync({
+                        expectedHeadSha,
                         number: action.pr.number,
                     });
                     let resultMessage: string;
@@ -904,6 +1004,16 @@ export function Delivery() {
                     break;
                 }
 
+                case "stack-create": {
+                    const result = await createPullRequestStack.mutateAsync({
+                        pullRequests: action.candidate.pullRequests.map(
+                            (pullRequest) => pullRequest.number
+                        ),
+                    });
+                    setLastResult(result.message);
+                    break;
+                }
+
                 case "deploy": {
                     const result = await deployDashboard.mutateAsync();
                     setLastResult(result?.deployment?.note ?? "Deploy scheduled");
@@ -932,7 +1042,10 @@ export function Delivery() {
      * Builds trusted PR dev status and controls for an eligible pull request.
      * @returns Built trusted PR dev status and controls for an eligible pull request.
      */
-    function pullRequestPreviewActions(pr: PullRequestSummary) {
+    function pullRequestPreviewActions(
+        pr: PullRequestSummary,
+        scope: PullRequestSummary[]
+    ) {
         if (pr.previewEligible !== true) {
             return { blockedMessage: undefined, controls: undefined };
         }
@@ -999,6 +1112,7 @@ export function Delivery() {
                         onClick={() =>
                             setPendingAction({
                                 pr,
+                                scope,
                                 type: isRebuildDevelopment
                                     ? "preview-rebuild"
                                     : "preview-start",
@@ -1049,38 +1163,97 @@ export function Delivery() {
      * @returns Rendered merge controls for a pull request.
      */
     function renderPullRequestActions(pr: PullRequestSummary) {
-        const previewActions = pullRequestPreviewActions(pr);
-        const isChecksPassed = hasPullRequestChecksPassed(pr.statusCheckRollup);
-        const isReviewApproved = isPullRequestReviewApproved(pr);
-        const isMergeBlocked = isGithubMergeBlocked(pr);
+        const stackCandidateEntry = stackCandidateEntries.get(pr.number);
+        const previewScope = stackCandidateEntry
+            ? stackCandidateEntry.candidate.pullRequests.slice(
+                  0,
+                  stackCandidateEntry.position
+              )
+            : pullRequestStackMergeGroup(pr, pullRequests);
+        const previewActions = pullRequestPreviewActions(pr, previewScope);
+        if (stackCandidateEntry) {
+            return (
+                <>
+                    {previewActions.blockedMessage ? (
+                        <p className="col-span-full w-full text-xs text-primary-400">
+                            {previewActions.blockedMessage}
+                        </p>
+                    ) : undefined}
+                    {previewActions.controls}
+                    <p className="col-span-full w-full text-xs text-primary-400">
+                        This is layer {stackCandidateEntry.position}/
+                        {stackCandidateEntry.candidate.pullRequests.length} in an unlinked
+                        GitHub stack candidate. Create the stack above before reviewing,
+                        merging, or rejecting it from Delivery.
+                    </p>
+                </>
+            );
+        }
+        if (
+            !pr.stack &&
+            unstackedPullRequests.some(
+                (pullRequest) => pullRequest.baseRefName === pr.headRefName
+            )
+        ) {
+            return (
+                <p className="col-span-full w-full text-xs text-primary-400">
+                    This PR has an ambiguous or incomplete dependent chain. Restructure
+                    the branches into one linear candidate before managing it from
+                    Delivery.
+                </p>
+            );
+        }
+        if (pr.baseRefName !== DEFAULT_BASE && !pr.stack) {
+            return (
+                <p className="col-span-full w-full text-xs text-primary-400">
+                    This dependent PR targets{" "}
+                    <span className="font-mono text-primary-300">{pr.baseRefName}</span>.
+                    Link its complete linear chain as a GitHub stack before managing it
+                    from Delivery.
+                </p>
+            );
+        }
+        const mergeGroup = pullRequestStackMergeGroup(pr, pullRequests);
+        const draftPullRequest = mergeGroup.find((pullRequest) => pullRequest.isDraft);
+        const checksBlockedPullRequest = mergeGroup.find(
+            (pullRequest) => !hasPullRequestChecksPassed(pullRequest.statusCheckRollup)
+        );
+        const reviewBlockedPullRequest = mergeGroup.find(
+            (pullRequest) => !isPullRequestReviewApproved(pullRequest)
+        );
+        const githubBlockedPullRequest = mergeGroup.find((pullRequest) =>
+            isGithubMergeBlocked(pullRequest)
+        );
+        const isExpectedHeadAvailable =
+            typeof pr.headRefOid === "string" &&
+            FULL_COMMIT_SHA_PATTERN.test(pr.headRefOid);
         const canUpdateBranch =
+            !pr.stack &&
             pr.baseRefName === DEFAULT_BASE &&
             isPullRequestBranchBehind(pr) &&
             !hasPullRequestConflicts(pr);
         const isMergeDisabled =
             isActionPending ||
             isProductionActionBlocked ||
-            pr.isDraft ||
-            !isChecksPassed ||
-            !isReviewApproved ||
-            isMergeBlocked;
+            draftPullRequest !== undefined ||
+            checksBlockedPullRequest !== undefined ||
+            reviewBlockedPullRequest !== undefined ||
+            githubBlockedPullRequest !== undefined ||
+            !isExpectedHeadAvailable;
         let mergeDisabledReason: string | undefined;
-        if (pr.isDraft) {
+        if (draftPullRequest) {
+            mergeDisabledReason = `PR #${draftPullRequest.number} is a draft`;
+        } else if (checksBlockedPullRequest) {
+            mergeDisabledReason = `CI checks must pass on PR #${checksBlockedPullRequest.number} before merging`;
+        } else if (reviewBlockedPullRequest) {
+            mergeDisabledReason = `Approve PR #${reviewBlockedPullRequest.number} before merging`;
+        } else if (githubBlockedPullRequest) {
+            mergeDisabledReason = `GitHub reports PR #${githubBlockedPullRequest.number} is blocked from merging`;
+        } else if (!isExpectedHeadAvailable) {
             mergeDisabledReason =
-                "Draft pull requests cannot be merged from the dashboard";
-        } else if (isChecksPassed) {
-            if (isReviewApproved) {
-                if (isMergeBlocked) {
-                    mergeDisabledReason =
-                        "GitHub reports this pull request is blocked from merging";
-                } else if (isProductionActionBlocked) {
-                    mergeDisabledReason = productionActionBlockedMessage;
-                }
-            } else {
-                mergeDisabledReason = "Approve the PR before merging from the dashboard";
-            }
-        } else {
-            mergeDisabledReason = "CI checks must pass before merging from the dashboard";
+                "Refresh Delivery before merging because the exact PR head is unavailable";
+        } else if (isProductionActionBlocked) {
+            mergeDisabledReason = productionActionBlockedMessage;
         }
         const mergeDisabledReasonId = mergeDisabledReason
             ? `pr-${pr.number}-merge-disabled-reason`
@@ -1148,7 +1321,7 @@ export function Delivery() {
                     aria-describedby={mergeDisabledReasonId}
                 >
                     <Rocket className="size-4" />
-                    Merge + Deploy
+                    {pr.stack ? `Merge through #${pr.number} + Deploy` : "Merge + Deploy"}
                 </Button>
                 <Button
                     variant="secondary"
@@ -1157,16 +1330,23 @@ export function Delivery() {
                     aria-describedby={mergeDisabledReasonId}
                 >
                     <GitMerge className="size-4" />
-                    Merge only
+                    {pr.stack ? `Merge stack through #${pr.number}` : "Merge only"}
                 </Button>
-                <Button
-                    variant="danger"
-                    onClick={() => setPendingAction({ type: "reject", pr })}
-                    disabled={isActionPending}
-                >
-                    <XCircle className="size-4" />
-                    Reject
-                </Button>
+                {pr.stack ? (
+                    <p className="col-span-full w-full text-xs text-primary-400">
+                        Reject is unavailable because closing one member leaves a blocker
+                        in the GitHub stack. Restructure or unstack it on GitHub first.
+                    </p>
+                ) : (
+                    <Button
+                        variant="danger"
+                        onClick={() => setPendingAction({ type: "reject", pr })}
+                        disabled={isActionPending}
+                    >
+                        <XCircle className="size-4" />
+                        Reject
+                    </Button>
+                )}
             </>
         );
     }
@@ -1349,7 +1529,154 @@ export function Delivery() {
                                 </Card>
                             ) : undefined}
 
-                            {pullRequests.length > 0 && miraPullRequests.length === 0 ? (
+                            {stackCandidates.length > 0 ? (
+                                <section
+                                    className="space-y-3"
+                                    aria-label="GitHub stack candidates"
+                                >
+                                    <div>
+                                        <SectionHeader
+                                            title="GitHub stack candidates"
+                                            count={stackCandidates.reduce(
+                                                (count, candidate) =>
+                                                    count + candidate.pullRequests.length,
+                                                0
+                                            )}
+                                            badgeVariant="warning"
+                                        />
+                                        <p className="mt-1 text-sm text-primary-400">
+                                            These existing PR chains are linear but not
+                                            yet linked as GitHub stacks.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {stackCandidates.map((candidate) => {
+                                            const numbers = candidate.pullRequests
+                                                .map(
+                                                    (pullRequest) =>
+                                                        `#${pullRequest.number}`
+                                                )
+                                                .join(" → ");
+                                            return (
+                                                <div
+                                                    key={numbers}
+                                                    className="space-y-3 rounded-lg border border-primary-700 bg-primary-900/20 p-3"
+                                                    aria-label={`GitHub stack candidate ${numbers}`}
+                                                >
+                                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                        <div>
+                                                            <div className="text-sm font-medium text-primary-200">
+                                                                {numbers}
+                                                            </div>
+                                                            <p className="mt-1 text-xs text-primary-400">
+                                                                Bottom targets{" "}
+                                                                <span className="font-mono">
+                                                                    {
+                                                                        candidate.baseRefName
+                                                                    }
+                                                                </span>
+                                                                ; each next PR targets the
+                                                                branch below it.
+                                                            </p>
+                                                        </div>
+                                                        <Button
+                                                            variant="secondary"
+                                                            onClick={() =>
+                                                                setPendingAction({
+                                                                    candidate,
+                                                                    type: "stack-create",
+                                                                })
+                                                            }
+                                                            disabled={isActionPending}
+                                                        >
+                                                            <GitBranch className="size-4" />
+                                                            Create stack
+                                                        </Button>
+                                                    </div>
+                                                    {candidate.pullRequests.map((pr) => (
+                                                        <PullRequestCard
+                                                            key={pr.number}
+                                                            pr={pr}
+                                                            actions={renderPullRequestActions(
+                                                                pr
+                                                            )}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            ) : undefined}
+
+                            {stackGroups.length > 0 ? (
+                                <section className="space-y-3" aria-label="GitHub stacks">
+                                    <div>
+                                        <SectionHeader
+                                            title="GitHub stacks"
+                                            count={stackGroups.reduce(
+                                                (count, group) =>
+                                                    count + group.pullRequests.length,
+                                                0
+                                            )}
+                                            badgeVariant="info"
+                                        />
+                                        <p className="mt-1 text-sm text-primary-400">
+                                            Choose any layer to submit it and every open
+                                            PR below it as one merge group. Choosing the
+                                            top submits the full remaining stack.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-4">
+                                        {stackGroups.map((group) => {
+                                            const firstPullRequest =
+                                                group.pullRequests[0];
+                                            const stack = firstPullRequest?.stack;
+                                            if (!stack) return null;
+                                            return (
+                                                <div
+                                                    key={group.number}
+                                                    className="space-y-3 rounded-lg border border-primary-700 bg-primary-900/20 p-3"
+                                                    aria-label={`GitHub stack #${group.number}`}
+                                                >
+                                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                                        <div>
+                                                            <h3 className="font-medium text-primary-200">
+                                                                Stack #{group.number}
+                                                            </h3>
+                                                            <p className="text-xs text-primary-400">
+                                                                {
+                                                                    group.pullRequests
+                                                                        .length
+                                                                }{" "}
+                                                                open of {stack.size} total
+                                                                · base{" "}
+                                                                <span className="font-mono text-primary-300">
+                                                                    {stack.baseRefName}
+                                                                </span>
+                                                            </p>
+                                                        </div>
+                                                        <Badge variant="info">
+                                                            Bottom → top
+                                                        </Badge>
+                                                    </div>
+                                                    {group.pullRequests.map((pr) => (
+                                                        <PullRequestCard
+                                                            key={pr.number}
+                                                            pr={pr}
+                                                            actions={renderPullRequestActions(
+                                                                pr
+                                                            )}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            ) : undefined}
+
+                            {pullRequests.length > 0 && !hasMiraPullRequests ? (
                                 <Card variant="bordered">
                                     <CardTitle>No Mira-authored PRs waiting</CardTitle>
                                     <p className="mt-2 text-sm text-primary-400">
@@ -1371,8 +1698,9 @@ export function Delivery() {
                                             badgeVariant="info"
                                         />
                                         <p className="mt-1 text-sm text-primary-400">
-                                            These can be merged, rejected, or merged and
-                                            deployed from the dashboard.
+                                            Standalone main PRs use the existing single-PR
+                                            flow. Unresolved dependent PRs stay read-only
+                                            until linked as a stack.
                                         </p>
                                     </div>
                                     <div className="space-y-3">
@@ -1399,8 +1727,10 @@ export function Delivery() {
                                             badgeVariant="default"
                                         />
                                         <p className="mt-1 text-sm text-primary-400">
-                                            These can be merged after the same review, CI,
+                                            Standalone changes use the same review, CI,
                                             and checkout gates as Mira-authored PRs.
+                                            Unresolved dependent PRs stay read-only until
+                                            linked as a stack.
                                         </p>
                                     </div>
                                     <div className="space-y-3">

@@ -75,10 +75,10 @@ const SAFE_INSTALL_ENVIRONMENT_KEYS = [
 ] as const;
 
 export interface PullRequestPreviewCandidate {
-    authorLogin?: string;
-    baseRefName: string;
+    authorLogins: Array<string | undefined>;
     commitSha: string;
     number: number;
+    rootBaseRefName: string;
     title: string;
 }
 
@@ -1581,17 +1581,24 @@ function validatePreviewPullRequest(
     ) {
         throw new TypeError("Preview pull request number is invalid");
     }
-    if (pullRequest.baseRefName !== "main") {
+    if (pullRequest.rootBaseRefName !== "main") {
         throw Object.assign(
-            new Error("Only main-targeted pull requests can be previewed"),
+            new Error("Only main-rooted pull requests can be previewed"),
             { statusCode: 409 }
         );
     }
     if (
-        !isPullRequestPreviewAuthorAllowed(pullRequest.authorLogin, config.allowedAuthors)
+        pullRequest.authorLogins.length === 0 ||
+        pullRequest.authorLogins.length > 100 ||
+        pullRequest.authorLogins.some(
+            (authorLogin) =>
+                !isPullRequestPreviewAuthorAllowed(authorLogin, config.allowedAuthors)
+        )
     ) {
         throw Object.assign(
-            new Error("Pull request author is not allowed to run host previews"),
+            new Error(
+                "Every pull request included in a host preview must have an allowed author"
+            ),
             { statusCode: 403 }
         );
     }

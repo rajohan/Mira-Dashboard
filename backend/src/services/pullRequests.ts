@@ -4,13 +4,20 @@ import type {
     DashboardReleaseStatus,
     DashboardReleaseSummary,
     DeploymentJob,
+    GitHubAsyncPullRequestMergeResult,
+    GitHubPullRequestState,
+    GitHubPullRequestStackResource,
     ProductionCheckoutStatus,
     PullRequestPreviewCleanupResult,
+    PullRequestStack,
     PullRequestSummary,
     WorktreeCleanupResult,
 } from "../../../contracts/delivery.ts";
 import {
+    parseGitHubAsyncPullRequestMergeResult,
     parseGitHubPullRequestState,
+    parseGitHubPullRequestStackResource,
+    parseGitHubPullRequestStacks,
     parsePublicGitHubPullRequests,
     parsePullRequestSummary,
 } from "../../../contracts/delivery.ts";
@@ -98,6 +105,50 @@ function pullRequestMergeMessage(
     return willDeploy ? `PR #${number} merged. Deploy started` : `PR #${number} merged`;
 }
 
+/**
+ * Describes the outcome of atomically merging a native pull request stack.
+ * @param stackNumber GitHub stack number.
+ * @param number Highest pull request included in the merge.
+ * @param pullRequestCount Number of open pull requests merged.
+ * @param willDeploy Whether deployment was requested.
+ * @param syncError Production checkout synchronization error, when present.
+ * @param deployError Deployment startup error, when present.
+ * @returns User-facing stack merge result message.
+ */
+function pullRequestStackMergeMessage(
+    stackNumber: number,
+    number: number,
+    pullRequestCount: number,
+    willDeploy: boolean,
+    syncError: string | undefined,
+    deployError: string | undefined
+): string {
+    const merged = `Stack #${stackNumber} merged through PR #${number} (${pullRequestCount} PR${pullRequestCount === 1 ? "" : "s"})`;
+    if (syncError) return `${merged}. Production sync failed`;
+    if (deployError) return `${merged}. Deploy failed to start`;
+    return willDeploy ? `${merged}. Deploy started` : merged;
+}
+
+/**
+ * Describes a native stack accepted by GitHub's merge queue.
+ * @param stackNumber GitHub stack number.
+ * @param number Highest pull request included in the queue group.
+ * @param pullRequestCount Number of open pull requests added to the queue.
+ * @param willDeploy Whether deployment was requested.
+ * @returns User-facing queued stack result message.
+ */
+function pullRequestStackQueuedMessage(
+    stackNumber: number,
+    number: number,
+    pullRequestCount: number,
+    willDeploy: boolean
+): string {
+    const queued = `Stack #${stackNumber} queued through PR #${number} (${pullRequestCount} PR${pullRequestCount === 1 ? "" : "s"})`;
+    return willDeploy
+        ? `${queued}. Delivery retained every worktree and will not auto-deploy; deploy latest main after GitHub finishes the queue`
+        : `${queued}. Delivery retained every worktree because GitHub has not confirmed the PRs merged`;
+}
+
 import {
     type OrphanedDeploymentCutover,
     registerDeploymentCutoverRecoveryHandler,
@@ -134,6 +185,8 @@ const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+const STACK_MERGE_POLL_INTERVAL_MS = 1000;
+const STACK_MERGE_TIMEOUT_MS = 5 * 60 * 1000;
 const PUBLIC_PR_CACHE_MS = 2 * 60 * 1000;
 const PUBLIC_PR_FAILURE_CACHE_MS = 30_000;
 const PUBLIC_GITHUB_API_TIMEOUT_MS = 15_000;
@@ -970,10 +1023,12 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     delete rest.latestOpinionatedReviews;
     delete rest.reviews;
     const previewAllowedAuthors = resolvePullRequestPreviewAllowedAuthors();
+    const targetsDashboardBase =
+        pr.baseRefName === DEFAULT_BASE || pr.stack?.baseRefName === DEFAULT_BASE;
 
     return {
         ...rest,
-        canReviewerApprove: canReviewerApprove(pr),
+        canReviewerApprove: targetsDashboardBase && canReviewerApprove(pr),
         previewEligible:
             pr.baseRefName === DEFAULT_BASE &&
             isPullRequestPreviewAuthorAllowed(pr.author?.login, previewAllowedAuthors) &&
@@ -984,27 +1039,182 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
 }
 
 /**
+ * Finds the main-rooted pull requests whose code is included in one PR head.
+ * The result is ordered bottom-to-top and excludes already-merged stack layers.
+ * @param pullRequest Selected pull request.
+ * @param pullRequests Current open pull requests.
+ * @returns Included pull requests, or undefined when no trusted linear ancestry exists.
+ */
+export function pullRequestPreviewScope(
+    pullRequest: PullRequestSummary,
+    pullRequests: readonly PullRequestSummary[]
+): PullRequestSummary[] | undefined {
+    const selectedStack = pullRequest.stack;
+    if (selectedStack) {
+        if (selectedStack.baseRefName !== DEFAULT_BASE) return undefined;
+        const members = pullRequests
+            .filter((candidate) => {
+                const candidateStack = candidate.stack;
+                return (
+                    candidateStack?.number === selectedStack.number &&
+                    candidateStack.position <= selectedStack.position
+                );
+            })
+            .toSorted(
+                (left, right) =>
+                    (left.stack?.position ?? 0) - (right.stack?.position ?? 0)
+            );
+        return members.at(-1)?.number === pullRequest.number ? members : undefined;
+    }
+
+    if (pullRequest.baseRefName === DEFAULT_BASE) return [pullRequest];
+
+    const unstackedPullRequests = pullRequests.filter(
+        (candidate) => candidate.stack === undefined
+    );
+    const childrenByBase = new Map<string, PullRequestSummary[]>();
+    for (const candidate of unstackedPullRequests) {
+        const children = childrenByBase.get(candidate.baseRefName) ?? [];
+        children.push(candidate);
+        childrenByBase.set(candidate.baseRefName, children);
+    }
+
+    for (const bottomPullRequest of unstackedPullRequests) {
+        if (bottomPullRequest.baseRefName !== DEFAULT_BASE) continue;
+        const members = [bottomPullRequest];
+        const seenNumbers = new Set([bottomPullRequest.number]);
+        let currentPullRequest = bottomPullRequest;
+        let isLinear = true;
+        while (true) {
+            const children = childrenByBase.get(currentPullRequest.headRefName) ?? [];
+            if (children.length === 0) break;
+            if (children.length !== 1) {
+                isLinear = false;
+                break;
+            }
+            const child = children[0];
+            if (!child || seenNumbers.has(child.number)) {
+                isLinear = false;
+                break;
+            }
+            members.push(child);
+            seenNumbers.add(child.number);
+            currentPullRequest = child;
+        }
+        if (!isLinear) continue;
+        const selectedIndex = members.findIndex(
+            (candidate) => candidate.number === pullRequest.number
+        );
+        if (selectedIndex !== -1) return members.slice(0, selectedIndex + 1);
+    }
+    return undefined;
+}
+
+/**
+ * Verifies that every unmerged native stack layer included in a preview remains
+ * open and matches the exact metadata used for author authorization.
+ * @param pullRequest Selected pull request.
+ * @param scope Open pull request layers included in its head.
+ * @param signal Signal used to cancel the operation.
+ */
+export async function validatePullRequestPreviewScope(
+    pullRequest: PullRequestSummary,
+    scope: readonly PullRequestSummary[],
+    signal?: AbortSignal
+): Promise<void> {
+    if (!pullRequest.stack) return;
+    const stack = await requirePullRequestStack(pullRequest.number, signal);
+    validateDashboardStackPr(pullRequest, stack);
+    const selectedIndex = stack.pull_requests.findIndex(
+        (candidate) => candidate.number === pullRequest.number
+    );
+    if (selectedIndex === -1) {
+        throw Object.assign(
+            new Error(`PR #${pullRequest.number} is no longer in its GitHub stack`),
+            { statusCode: 409 }
+        );
+    }
+    const scopeByNumber = new Map(
+        scope.map((candidate) => [candidate.number, candidate])
+    );
+    for (const stackPullRequest of stack.pull_requests.slice(0, selectedIndex + 1)) {
+        if (stackPullRequest.merged_at !== null) continue;
+        if (stackPullRequest.state !== "open") {
+            throw Object.assign(
+                new Error(
+                    `PR #${stackPullRequest.number} is closed and blocks this stack preview`
+                ),
+                { statusCode: 409 }
+            );
+        }
+        const scopedPullRequest = scopeByNumber.get(stackPullRequest.number);
+        if (
+            !scopedPullRequest ||
+            scopedPullRequest.headRefOid !== stackPullRequest.head.sha
+        ) {
+            throw Object.assign(
+                new Error(
+                    `PR #${stackPullRequest.number} changed while Delivery loaded the stack preview`
+                ),
+                { statusCode: 409 }
+            );
+        }
+    }
+}
+
+function applyPullRequestPreviewEligibility(
+    pullRequests: PullRequestSummary[]
+): PullRequestSummary[] {
+    const allowedAuthors = resolvePullRequestPreviewAllowedAuthors();
+    return pullRequests.map((pullRequest) => {
+        const scope = pullRequestPreviewScope(pullRequest, pullRequests);
+        const previewEligible =
+            scope !== undefined &&
+            scope.every(
+                (candidate) =>
+                    isPullRequestPreviewAuthorAllowed(
+                        candidate.author?.login,
+                        allowedAuthors
+                    ) &&
+                    typeof candidate.headRefOid === "string" &&
+                    FULL_COMMIT_SHA_PATTERN.test(candidate.headRefOid)
+            );
+        return { ...pullRequest, previewEligible };
+    });
+}
+
+/**
  * Parses the bounded public REST shape used only by credential-free dev previews.
  * @param value Value to process.
  * @returns Parsed the bounded public REST shape used only by credential-free dev previews.
  */
 export function parsePublicGithubPullRequests(value: unknown): PullRequestSummary[] {
-    return parsePublicGitHubPullRequests(value).map((pullRequest) => {
-        return normalizePullRequest({
-            author: { login: pullRequest.user.login },
-            baseRefName: pullRequest.base.ref,
-            body: pullRequest.body ?? undefined,
-            createdAt: pullRequest.created_at,
-            headRefName: pullRequest.head.ref,
-            headRefOid: pullRequest.head.sha,
-            isDraft: pullRequest.draft,
-            number: Number(pullRequest.number),
-            statusCheckRollup: [],
-            title: pullRequest.title,
-            updatedAt: pullRequest.updated_at,
-            url: pullRequest.html_url,
-        });
-    });
+    return applyPullRequestPreviewEligibility(
+        parsePublicGitHubPullRequests(value).map((pullRequest) => {
+            return normalizePullRequest({
+                author: { login: pullRequest.user.login },
+                baseRefName: pullRequest.base.ref,
+                body: pullRequest.body ?? undefined,
+                createdAt: pullRequest.created_at,
+                headRefName: pullRequest.head.ref,
+                headRefOid: pullRequest.head.sha,
+                isDraft: pullRequest.draft,
+                number: Number(pullRequest.number),
+                stack: pullRequest.stack
+                    ? {
+                          baseRefName: pullRequest.stack.base.ref,
+                          number: pullRequest.stack.number,
+                          position: pullRequest.stack.position,
+                          size: pullRequest.stack.size,
+                      }
+                    : undefined,
+                statusCheckRollup: [],
+                title: pullRequest.title,
+                updatedAt: pullRequest.updated_at,
+                url: pullRequest.html_url,
+            });
+        })
+    );
 }
 
 async function readBoundedJsonResponse(
@@ -1050,7 +1260,7 @@ async function listPublicDashboardPullRequests(): Promise<PullRequestSummary[]> 
     }
     try {
         const response = await fetch(
-            `https://api.github.com/repos/${DASHBOARD_REPO}/pulls?state=open&base=${DEFAULT_BASE}&per_page=100`,
+            `https://api.github.com/repos/${DASHBOARD_REPO}/pulls?state=open&per_page=100`,
             {
                 headers: {
                     Accept: "application/vnd.github+json",
@@ -1161,6 +1371,188 @@ async function runGhJson<T>(
         throw new Error("GitHub CLI returned an empty JSON response");
     }
     return parser(JSON.parse(output));
+}
+
+/**
+ * Runs a GitHub API command whose documented terminal error states use JSON bodies.
+ * @param arguments_ GitHub CLI arguments.
+ * @param parser Runtime value parser.
+ * @param signal Signal used to cancel the operation.
+ * @returns Parsed GitHub response, including a documented non-2xx result body.
+ */
+async function runGhJsonWithResultBody<T>(
+    arguments_: string[],
+    parser: ContractParser<T>,
+    signal?: AbortSignal
+): Promise<T> {
+    const { code, stderr, stdout } = await runProcess("gh", arguments_, {
+        cwd: getDashboardRoot(),
+        env: buildCommandEnvironment(),
+        maxBuffer: MAX_BUFFER,
+        signal,
+        timeoutMs: 60_000,
+    });
+    const output = stdout.trim();
+    if (output) {
+        try {
+            return parser(JSON.parse(output));
+        } catch (error) {
+            if (code === 0) throw error;
+        }
+    }
+    throw new Error(
+        `gh ${arguments_.join(" ")} failed with exit code ${code}: ${
+            stderr.trim() || output || "GitHub CLI returned no result"
+        }`
+    );
+}
+
+/**
+ * Returns the native GitHub stack containing one pull request.
+ * @param number Pull request number.
+ * @param signal Signal used to cancel the operation.
+ * @returns The native stack, when the pull request is stacked.
+ */
+async function findPullRequestStack(
+    number: number,
+    signal?: AbortSignal
+): Promise<GitHubPullRequestStackResource | undefined> {
+    const repo = parseRepoParts(DASHBOARD_REPO);
+    const stacks = await runGhJson(
+        [
+            "api",
+            `repos/${repo.owner}/${repo.name}/stacks?pull_request=${number}&per_page=2`,
+        ],
+        parseGitHubPullRequestStacks,
+        signal
+    );
+    if (stacks.length > 1) {
+        throw new Error(`GitHub returned multiple stacks for PR #${number}`);
+    }
+    return stacks[0];
+}
+
+/**
+ * Requires one pull request to belong to a native GitHub stack.
+ * @param number Pull request number.
+ * @param signal Signal used to cancel the operation.
+ * @returns The pull request's native stack.
+ */
+async function requirePullRequestStack(
+    number: number,
+    signal?: AbortSignal
+): Promise<GitHubPullRequestStackResource> {
+    const stack = await findPullRequestStack(number, signal);
+    if (!stack) {
+        throw Object.assign(
+            new Error(
+                `PR #${number} is not registered as a GitHub stack. Create the stack before merging it`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    return stack;
+}
+
+function isGitHubStackApiUnavailable(error: unknown): boolean {
+    const message = errorMessage(error, "").toLowerCase();
+    return message.includes("/stacks") && message.includes("http 404");
+}
+
+/**
+ * Finds stack membership for ordinary PR mutation guards without breaking
+ * repositories where the private-preview stack API is unavailable.
+ * @param number Pull request number.
+ * @param signal Signal used to cancel the operation.
+ * @returns Native stack membership, when visible and present.
+ */
+async function findPullRequestStackForGuard(
+    number: number,
+    signal?: AbortSignal
+): Promise<GitHubPullRequestStackResource | undefined> {
+    try {
+        return await findPullRequestStack(number, signal);
+    } catch (error) {
+        if (isGitHubStackApiUnavailable(error)) return undefined;
+        throw error;
+    }
+}
+
+/**
+ * Prevents ordinary single-PR mutations from breaking a native or candidate stack.
+ * @param pullRequest Pull request being mutated.
+ * @param action User-facing action description.
+ * @param signal Signal used to cancel the operation.
+ */
+async function requireStandalonePullRequest(
+    pullRequest: PullRequestSummary,
+    action: string,
+    signal?: AbortSignal
+): Promise<void> {
+    const stack = await findPullRequestStackForGuard(pullRequest.number, signal);
+    if (stack) {
+        throw Object.assign(
+            new Error(
+                `PR #${pullRequest.number} belongs to GitHub stack #${stack.number}. Use the stack-aware ${action} flow`
+            ),
+            { statusCode: 409 }
+        );
+    }
+
+    const { stdout } = await runCommand(
+        "gh",
+        [
+            "pr",
+            "list",
+            "--repo",
+            DASHBOARD_REPO,
+            "--state",
+            "open",
+            "--base",
+            pullRequest.headRefName,
+            "--limit",
+            "1",
+            "--json",
+            "number",
+            "--jq",
+            "length",
+        ],
+        { signal, timeoutMs: 60_000 }
+    );
+    const dependentPullRequestCount = stdout.trim();
+    if (!/^[01]$/u.test(dependentPullRequestCount)) {
+        throw new Error("GitHub returned an invalid dependent pull request count");
+    }
+    if (dependentPullRequestCount === "1") {
+        throw Object.assign(
+            new Error(
+                `PR #${pullRequest.number} has an open dependent pull request. Create or restructure the stack before ${action}`
+            ),
+            { statusCode: 409 }
+        );
+    }
+}
+
+/**
+ * Maps one native stack resource to the summary metadata for a member.
+ * @param stack Native GitHub stack.
+ * @param number Pull request number.
+ * @returns Dashboard stack metadata for the pull request.
+ */
+function pullRequestStackMetadata(
+    stack: GitHubPullRequestStackResource,
+    number: number
+): PullRequestStack | undefined {
+    const index = stack.pull_requests.findIndex(
+        (pullRequest) => pullRequest.number === number
+    );
+    if (index === -1) return undefined;
+    return {
+        baseRefName: stack.base.ref,
+        number: stack.number,
+        position: index + 1,
+        size: stack.pull_requests.length,
+    };
 }
 
 /**
@@ -1362,19 +1754,36 @@ async function runGhJsonLines<T>(
 }
 
 /**
- * Lists open pull requests targeting the dashboard production branch.
- * @returns Promise resolving to the list dashboard pull requests result.
+ * Lists open pull requests through GitHub GraphQL.
+ * @param includeStackMetadata Whether private-preview stack fields should be selected.
+ * @returns Raw pull request summaries.
  */
-export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
-    if (
-        process.env.NODE_ENV !== "production" &&
-        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
-        !configuredGithubReadToken()
-    ) {
-        return listPublicDashboardPullRequests();
-    }
+async function listDashboardPullRequestGraphqlRows(
+    includeStackMetadata: boolean
+): Promise<PullRequestSummary[]> {
     const repo = parseRepoParts(DASHBOARD_REPO);
-    const pullRequests = await runGhJsonLines(
+    const stackSelection = includeStackMetadata
+        ? `
+                        stack {
+                            baseRefName
+                            number
+                            size
+                        }
+                        stackEntry {
+                            position
+                        }`
+        : "";
+    const jqParts = [
+        ".data.repository.pullRequests.nodes[]",
+        "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
+    ];
+    if (includeStackMetadata) {
+        jqParts.push(
+            "| .stack = (if (.stack and .stackEntry) then {baseRefName: .stack.baseRefName, number: .stack.number, position: .stackEntry.position, size: .stack.size} else null end)",
+            "| del(.stackEntry)"
+        );
+    }
+    return runGhJsonLines(
         [
             "api",
             "graphql",
@@ -1390,7 +1799,6 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
                     first: 100
                     after: $endCursor
                     states: OPEN
-                    baseRefName: "${DEFAULT_BASE}"
                     orderBy: { field: UPDATED_AT, direction: DESC }
                 ) {
                     pageInfo {
@@ -1414,6 +1822,7 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
                         mergeable
                         mergeStateStatus
                         reviewDecision
+                        ${stackSelection}
                         latestOpinionatedReviews(first: 20) {
                             nodes {
                                 state
@@ -1432,16 +1841,49 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
                     }
                 }
             }
-        }`,
+            }`,
             "--jq",
-            [
-                ".data.repository.pullRequests.nodes[]",
-                "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
-            ].join(" "),
+            jqParts.join(" "),
         ],
         parsePullRequestSummary,
         { timeoutMs: PR_LIST_TIMEOUT_MS }
     );
+}
+
+/**
+ * Returns whether GitHub rejected only the private-preview stack GraphQL fields.
+ * @param error Error to inspect.
+ * @returns Whether listing should retry without stack fields.
+ */
+function isStackGraphqlMetadataUnavailable(error: unknown): boolean {
+    const message = errorMessage(error, "").toLowerCase();
+    return (
+        (message.includes("stackentry") || message.includes("field 'stack'")) &&
+        (message.includes("field") ||
+            message.includes("undefinedfield") ||
+            message.includes("doesn't exist"))
+    );
+}
+
+/**
+ * Lists open pull requests for the dashboard repository.
+ * @returns Promise resolving to the list dashboard pull requests result.
+ */
+export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
+    if (
+        process.env.NODE_ENV !== "production" &&
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
+        !configuredGithubReadToken()
+    ) {
+        return listPublicDashboardPullRequests();
+    }
+    let pullRequests: PullRequestSummary[];
+    try {
+        pullRequests = await listDashboardPullRequestGraphqlRows(true);
+    } catch (error) {
+        if (!isStackGraphqlMetadataUnavailable(error)) throw error;
+        pullRequests = await listDashboardPullRequestGraphqlRows(false);
+    }
 
     const refreshedPullRequests = await Promise.all(
         pullRequests.map(async (pr) => {
@@ -1450,16 +1892,121 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
             }
 
             try {
-                return normalizePullRequest(await getPullRequest(pr.number));
+                return normalizePullRequest({
+                    ...(await getPullRequest(pr.number)),
+                    stack: pr.stack,
+                });
             } catch {
                 return normalizePullRequest(pr);
             }
         })
     );
 
-    return refreshedPullRequests.toSorted((a, b) =>
+    return applyPullRequestPreviewEligibility(refreshedPullRequests).toSorted((a, b) =>
         b.updatedAt.localeCompare(a.updatedAt)
     );
+}
+
+/**
+ * Validates an ordered list of existing pull requests as one linear stack.
+ * @param numbers Pull request numbers ordered from bottom to top.
+ * @param pullRequests Current open pull requests.
+ * @returns The validated pull requests ordered from bottom to top.
+ */
+function validatePullRequestStackCandidate(
+    numbers: number[],
+    pullRequests: PullRequestSummary[]
+): PullRequestSummary[] {
+    if (new Set(numbers).size !== numbers.length) {
+        throw Object.assign(new Error("A stack cannot contain duplicate pull requests"), {
+            statusCode: 400,
+        });
+    }
+
+    const pullRequestsByNumber = new Map(
+        pullRequests.map((pullRequest) => [pullRequest.number, pullRequest])
+    );
+    const orderedPullRequests = numbers.map((number) => {
+        const pullRequest = pullRequestsByNumber.get(number);
+        if (!pullRequest) {
+            throw Object.assign(
+                new Error(`PR #${number} is not an open pull request in this repository`),
+                { statusCode: 409 }
+            );
+        }
+        if (pullRequest.stack) {
+            throw Object.assign(
+                new Error(
+                    `PR #${number} already belongs to GitHub stack #${pullRequest.stack.number}`
+                ),
+                { statusCode: 409 }
+            );
+        }
+        return pullRequest;
+    });
+
+    const bottomPullRequest = orderedPullRequests[0];
+    if (!bottomPullRequest || bottomPullRequest.baseRefName !== DEFAULT_BASE) {
+        throw Object.assign(
+            new Error(`The bottom pull request must target ${DEFAULT_BASE}`),
+            { statusCode: 409 }
+        );
+    }
+
+    for (let index = 1; index < orderedPullRequests.length; index += 1) {
+        const previousPullRequest = orderedPullRequests[index - 1];
+        const pullRequest = orderedPullRequests[index];
+        if (
+            !previousPullRequest ||
+            !pullRequest ||
+            pullRequest.baseRefName !== previousPullRequest.headRefName
+        ) {
+            throw Object.assign(
+                new Error(
+                    `PR #${pullRequest?.number ?? numbers[index]} must target ${
+                        previousPullRequest?.headRefName ?? "the branch below it"
+                    }`
+                ),
+                { statusCode: 409 }
+            );
+        }
+    }
+
+    return orderedPullRequests;
+}
+
+/**
+ * Creates a native GitHub stack from existing linear pull requests.
+ * @param numbers Pull request numbers ordered from bottom to top.
+ * @param signal Signal used to cancel the operation.
+ * @returns Pull request action response.
+ */
+export async function createPullRequestStack(numbers: number[], signal?: AbortSignal) {
+    const pullRequests = validatePullRequestStackCandidate(
+        numbers,
+        await listDashboardPullRequests()
+    );
+    const repo = parseRepoParts(DASHBOARD_REPO);
+    const arguments_ = ["api", "-X", "POST", `repos/${repo.owner}/${repo.name}/stacks`];
+    for (const pullRequest of pullRequests) {
+        arguments_.push("-F", `pull_requests[]=${pullRequest.number}`);
+    }
+    let stack: GitHubPullRequestStackResource;
+    try {
+        stack = await runGhJson(arguments_, parseGitHubPullRequestStackResource, signal);
+    } catch (error) {
+        if (isGitHubStackApiUnavailable(error)) {
+            throw Object.assign(
+                new Error("GitHub stacks are not enabled for this repository or token"),
+                { statusCode: 409 }
+            );
+        }
+        throw error;
+    }
+    return {
+        isOk: true,
+        message: `GitHub stack #${stack.number} created with ${stack.pull_requests.length} PRs`,
+    };
 }
 
 /**
@@ -1524,6 +2071,17 @@ async function getPullRequest(
     );
 }
 
+async function getPullRequestState(
+    number: number,
+    signal?: AbortSignal
+): Promise<GitHubPullRequestState> {
+    return runGhJson(
+        ["pr", "view", String(number), "--repo", DASHBOARD_REPO, "--json", "state"],
+        parseGitHubPullRequestState,
+        signal
+    );
+}
+
 /**
  * Checks the PR lifecycle without filtering by its current base branch.
  * @param number Number value.
@@ -1534,11 +2092,7 @@ export async function isDashboardPullRequestOpen(
     number: number,
     signal?: AbortSignal
 ): Promise<boolean> {
-    const result = await runGhJson(
-        ["pr", "view", String(number), "--repo", DASHBOARD_REPO, "--json", "state"],
-        parseGitHubPullRequestState,
-        signal
-    );
+    const result = await getPullRequestState(number, signal);
     return result.state === "OPEN";
 }
 
@@ -1700,6 +2254,26 @@ function validateDashboardPr(pr: PullRequestSummary): void {
     }
 }
 
+/** Validates a native stacked pull request can be managed from the dashboard. */
+function validateDashboardStackPr(
+    pr: PullRequestSummary,
+    stack: GitHubPullRequestStackResource
+): void {
+    if (stack.base.ref !== DEFAULT_BASE) {
+        throw new Error(
+            `Only ${DEFAULT_BASE}-targeted pull request stacks can be managed here`
+        );
+    }
+    if (!stack.pull_requests.some((pullRequest) => pullRequest.number === pr.number)) {
+        throw new Error(
+            `PR #${pr.number} is not a member of GitHub stack #${stack.number}`
+        );
+    }
+    if (pr.isDraft) {
+        throw new Error("Draft pull requests cannot be approved from the dashboard");
+    }
+}
+
 /** Validates a pull request can be updated with the latest base branch. */
 function validateDashboardPrForBranchUpdate(pr: PullRequestSummary): void {
     if (pr.baseRefName !== DEFAULT_BASE) {
@@ -1728,9 +2302,30 @@ function validateDashboardPrForApproval(pr: PullRequestSummary): void {
     }
 }
 
+/** Validates a native stacked pull request can be approved and merged. */
+function validateDashboardStackPrForApproval(
+    pr: PullRequestSummary,
+    stack: GitHubPullRequestStackResource
+): void {
+    validateDashboardStackPr(pr, stack);
+    if (!hasPullRequestChecksPassed(pr.statusCheckRollup)) {
+        throw new Error("Pull request CI checks must pass before approval");
+    }
+    if (!isPullRequestReviewApproved(pr)) {
+        throw new Error("Pull request review approval is required before merging");
+    }
+}
+
 /** Validates a pull request can receive Rajohan's review approval. */
-function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
-    validateDashboardPr(pr);
+function validateDashboardPrForReviewApproval(
+    pr: PullRequestSummary,
+    stack?: GitHubPullRequestStackResource
+): void {
+    if (stack) {
+        validateDashboardStackPr(pr, stack);
+    } else {
+        validateDashboardPr(pr);
+    }
     if (pr.author?.login === DEFAULT_REVIEWER_AUTHOR) {
         throw new Error("Rajohan cannot approve his own pull request");
     }
@@ -3104,8 +3699,88 @@ export async function prepareAndStartRollback(
     }
 }
 
+/**
+ * Waits for GitHub's asynchronous stack merge to reach a terminal state.
+ * @param number Pull request selected as the top of the merge group.
+ * @param expectedHeadSha Expected selected pull request head.
+ * @param signal Signal used to cancel the operation.
+ * @returns Terminal asynchronous merge result.
+ */
+async function mergePullRequestStack(
+    number: number,
+    expectedHeadSha: string,
+    signal?: AbortSignal
+): Promise<GitHubAsyncPullRequestMergeResult> {
+    if (!FULL_COMMIT_SHA_PATTERN.test(expectedHeadSha)) {
+        throw Object.assign(
+            new TypeError("Stack merge requires a full lowercase pull request head SHA"),
+            { statusCode: 400 }
+        );
+    }
+    const repo = parseRepoParts(DASHBOARD_REPO);
+    // Keep both the local refetch and GitHub's request-side SHA precondition:
+    // neither a stale Delivery page nor a push in the final request window may
+    // merge a different selected head than the one the user confirmed.
+    let result = await runGhJsonWithResultBody(
+        [
+            "api",
+            "-X",
+            "PUT",
+            `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async`,
+            "-F",
+            "merge_method=squash",
+            "-F",
+            "merge_action=default",
+            "-f",
+            `sha=${expectedHeadSha}`,
+        ],
+        parseGitHubAsyncPullRequestMergeResult,
+        signal
+    );
+    if (
+        result.details.expected_head_sha &&
+        result.details.expected_head_sha !== expectedHeadSha
+    ) {
+        throw Object.assign(
+            new Error(
+                `PR #${number} changed while GitHub accepted the stack merge. Verify the stack state before retrying`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    const deadline = Date.now() + STACK_MERGE_TIMEOUT_MS;
+
+    while (result.status === "pending") {
+        const uuid = result.details.uuid;
+        if (!uuid) {
+            throw new Error("GitHub stack merge returned pending without a result id");
+        }
+        if (Date.now() >= deadline) {
+            throw new Error(`GitHub stack merge for PR #${number} timed out`);
+        }
+        signal?.throwIfAborted();
+        await Bun.sleep(STACK_MERGE_POLL_INTERVAL_MS);
+        signal?.throwIfAborted();
+        result = await runGhJson(
+            [
+                "api",
+                `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async/${uuid}`,
+            ],
+            parseGitHubAsyncPullRequestMergeResult,
+            signal
+        );
+    }
+
+    if (result.status === "failed") {
+        throw Object.assign(new Error(result.details.message), { statusCode: 409 });
+    }
+    return result;
+}
+
 interface PullRequestApprovalExecutionOptions {
+    expectedHeadSha: string;
     lockHeldBy?: string;
+    mergeStack?: boolean;
     signal?: AbortSignal;
 }
 
@@ -3119,7 +3794,7 @@ interface PullRequestApprovalExecutionOptions {
 export async function approvePullRequest(
     number: number,
     willDeploy: boolean,
-    options: PullRequestApprovalExecutionOptions = {}
+    options: PullRequestApprovalExecutionOptions
 ) {
     const lockId = options.lockHeldBy ?? `approve-${Bun.randomUUIDv7()}`;
     let isReleaseLock = options.lockHeldBy !== undefined;
@@ -3127,8 +3802,13 @@ export async function approvePullRequest(
     let syncError: string | undefined;
     let deployError: string | undefined;
     let deployment: DeploymentJob | undefined;
-    let cleanup: WorktreeCleanupResult;
-    let previewCleanup: PullRequestPreviewCleanupResult;
+    let cleanup: WorktreeCleanupResult | undefined;
+    let cleanups: WorktreeCleanupResult[] | undefined;
+    let previewCleanup: PullRequestPreviewCleanupResult | undefined;
+    let previewCleanups: PullRequestPreviewCleanupResult[] | undefined;
+    let stack: GitHubPullRequestStackResource | undefined;
+    let stackPullRequests: GitHubPullRequestStackResource["pull_requests"] = [];
+    let mergeStatus: "enqueued" | "merged" | undefined;
 
     try {
         if (options.lockHeldBy) {
@@ -3136,14 +3816,173 @@ export async function approvePullRequest(
         }
         await ensureProductionCheckout(options.signal);
         const pr = await getPullRequest(number, options.signal);
-        validateDashboardPrForApproval(pr);
+        if (
+            !FULL_COMMIT_SHA_PATTERN.test(options.expectedHeadSha) ||
+            pr.headRefOid !== options.expectedHeadSha
+        ) {
+            throw Object.assign(
+                new Error(
+                    `PR #${number} changed after the Delivery page loaded. Refresh before merging`
+                ),
+                { statusCode: 409 }
+            );
+        }
+        if (options.mergeStack) {
+            stack = await requirePullRequestStack(number, options.signal);
+            validateDashboardStackPr(pr, stack);
+            const selectedIndex = stack.pull_requests.findIndex(
+                (pullRequest) => pullRequest.number === number
+            );
+            if (selectedIndex === -1) {
+                throw Object.assign(
+                    new Error(`PR #${number} is not in GitHub stack #${stack.number}`),
+                    { statusCode: 409 }
+                );
+            }
+            const selectedPullRequest = stack.pull_requests[selectedIndex];
+            if (!selectedPullRequest) {
+                throw new Error(
+                    `GitHub stack #${stack.number} has no entry at position ${selectedIndex + 1}`
+                );
+            }
+            if (
+                selectedPullRequest.state !== "open" ||
+                selectedPullRequest.merged_at !== null
+            ) {
+                throw Object.assign(
+                    new Error(`PR #${number} is not open for stack merge`),
+                    { statusCode: 409 }
+                );
+            }
+            if (selectedPullRequest.head.sha !== options.expectedHeadSha) {
+                throw Object.assign(
+                    new Error(
+                        `PR #${number} changed after the Delivery page loaded. Refresh before merging the stack`
+                    ),
+                    { statusCode: 409 }
+                );
+            }
+            stackPullRequests = [];
+            for (const pullRequest of stack.pull_requests.slice(0, selectedIndex + 1)) {
+                if (pullRequest.merged_at !== null) continue;
+                if (pullRequest.state !== "open") {
+                    throw Object.assign(
+                        new Error(
+                            `PR #${pullRequest.number} is closed and blocks merging through PR #${number}`
+                        ),
+                        { statusCode: 409 }
+                    );
+                }
+                if (pullRequest.draft) {
+                    throw Object.assign(
+                        new Error(
+                            `PR #${pullRequest.number} is a draft and blocks merging through PR #${number}`
+                        ),
+                        { statusCode: 409 }
+                    );
+                }
+                stackPullRequests.push(pullRequest);
+            }
+            const currentPullRequests = await Promise.all(
+                stackPullRequests.map((pullRequest) =>
+                    pullRequest.number === pr.number
+                        ? Promise.resolve(pr)
+                        : getPullRequest(pullRequest.number, options.signal)
+                )
+            );
+            for (const [index, currentPullRequest] of currentPullRequests.entries()) {
+                const stackPullRequest = stackPullRequests[index];
+                if (!stackPullRequest) continue;
+                if (currentPullRequest.headRefOid !== stackPullRequest.head.sha) {
+                    throw Object.assign(
+                        new Error(
+                            `PR #${currentPullRequest.number} changed while Delivery loaded the stack. Refresh before merging`
+                        ),
+                        { statusCode: 409 }
+                    );
+                }
+                try {
+                    validateDashboardStackPrForApproval(currentPullRequest, stack);
+                } catch (error) {
+                    throw Object.assign(
+                        new Error(
+                            `PR #${currentPullRequest.number}: ${errorMessage(
+                                error,
+                                "Stack member is not ready to merge"
+                            )}`
+                        ),
+                        { statusCode: 409 }
+                    );
+                }
+            }
+        } else {
+            validateDashboardPrForApproval(pr);
+            await requireStandalonePullRequest(pr, "merge", options.signal);
+        }
         if (!options.lockHeldBy) {
             acquireDeploymentLock(lockId);
             isReleaseLock = true;
         }
-        await runCommand(
-            "gh",
-            [
+        if (stack) {
+            const stackMergeResult = await mergePullRequestStack(
+                number,
+                options.expectedHeadSha,
+                options.signal
+            );
+            if (stackMergeResult.status === "enqueued") {
+                mergeStatus = "enqueued";
+                return {
+                    isOk: true,
+                    mergeStatus,
+                    message: pullRequestStackQueuedMessage(
+                        stack.number,
+                        number,
+                        stackPullRequests.length,
+                        willDeploy
+                    ),
+                };
+            }
+            if (stackMergeResult.status !== "merged") {
+                throw new Error(
+                    `GitHub stack merge returned unexpected status ${stackMergeResult.status}`
+                );
+            }
+            const unconfirmedPullRequests: number[] = [];
+            for (const pullRequest of stackPullRequests) {
+                const state = await getPullRequestState(
+                    pullRequest.number,
+                    options.signal
+                );
+                if (state.state !== "MERGED") {
+                    unconfirmedPullRequests.push(pullRequest.number);
+                }
+            }
+            if (unconfirmedPullRequests.length > 0) {
+                throw Object.assign(
+                    new Error(
+                        `GitHub reported the stack merged, but ${unconfirmedPullRequests
+                            .map((pullRequestNumber) => `PR #${pullRequestNumber}`)
+                            .join(
+                                ", "
+                            )} did not confirm as merged. Worktrees were retained`
+                    ),
+                    { statusCode: 409 }
+                );
+            }
+            mergeStatus = "merged";
+            cleanups = [];
+            previewCleanups = [];
+            for (const pullRequest of stackPullRequests) {
+                cleanups.push(
+                    await cleanupPullRequestWorktree(pullRequest.head.ref, options.signal)
+                );
+                // Stack merges and preview lifecycle actions share the exclusive worker.
+                previewCleanups.push(
+                    await cleanupClosedPullRequestPreview(pullRequest.number)
+                );
+            }
+        } else {
+            const mergeArguments = [
                 "pr",
                 "merge",
                 String(number),
@@ -3151,13 +3990,18 @@ export async function approvePullRequest(
                 "--delete-branch",
                 "--repo",
                 DASHBOARD_REPO,
-            ],
-            { signal: options.signal, timeoutMs: 120_000 }
-        );
-        cleanup = await cleanupPullRequestWorktree(pr.headRefName, options.signal);
-        // The production entry point runs this inside the exclusive github.merge job,
-        // which shares the single-capacity worker with every preview lifecycle action.
-        previewCleanup = await cleanupClosedPullRequestPreview(number);
+                "--match-head-commit",
+                options.expectedHeadSha,
+            ];
+            await runCommand("gh", mergeArguments, {
+                signal: options.signal,
+                timeoutMs: 120_000,
+            });
+            cleanup = await cleanupPullRequestWorktree(pr.headRefName, options.signal);
+            // The production entry point runs this inside the exclusive github.merge job,
+            // which shares the single-capacity worker with every preview lifecycle action.
+            previewCleanup = await cleanupClosedPullRequestPreview(number);
+        }
 
         try {
             await syncMain(options.signal);
@@ -3181,11 +4025,23 @@ export async function approvePullRequest(
 
     return {
         isOk: true,
-        message: pullRequestMergeMessage(number, willDeploy, syncError, deployError),
+        message: stack
+            ? pullRequestStackMergeMessage(
+                  stack.number,
+                  number,
+                  stackPullRequests.length,
+                  willDeploy,
+                  syncError,
+                  deployError
+              )
+            : pullRequestMergeMessage(number, willDeploy, syncError, deployError),
         deployment,
         deployError,
         cleanup,
+        cleanups,
+        mergeStatus,
         previewCleanup,
+        previewCleanups,
         syncError,
     };
 }
@@ -3197,12 +4053,35 @@ function queuedPullRequestResult<T>(execution: JobExecutionRecord): T {
 }
 
 /**
+ * Creates a native GitHub stack through the persistent execution plane.
+ * @param pullRequests Pull request numbers ordered from bottom to top.
+ * @returns Promise resolving to the stack creation result.
+ */
+export async function runPullRequestStackCreation(pullRequests: number[]) {
+    const execution = enqueueJobExecution({
+        actionKey: "github.stack-create",
+        displayName: `Create GitHub stack from ${pullRequests.length} PRs`,
+        payload: { pullRequests },
+        resourceClass: "exclusive",
+        timeoutMs: 5 * 60 * 1000,
+    });
+    return queuedPullRequestResult<Awaited<ReturnType<typeof createPullRequestStack>>>(
+        await waitForJobExecution(execution.id, { timeoutMs: 15 * 60 * 1000 })
+    );
+}
+
+/**
  * Runs PR merge/deploy through the shared persistent execution plane.
  * @param number Number value.
  * @param willDeploy Whether will deploy.
+ * @param options Exact-head and native stack merge options.
  * @returns Promise resolving to the run pull request approval result.
  */
-export async function runPullRequestApproval(number: number, willDeploy: boolean) {
+export async function runPullRequestApproval(
+    number: number,
+    willDeploy: boolean,
+    options: { expectedHeadSha: string; mergeStack?: boolean }
+) {
     registerPullRequestJobLifecycleHandlers();
     const deploymentLockId = `approve-${Bun.randomUUIDv7()}`;
     acquireDeploymentLock(deploymentLockId);
@@ -3211,9 +4090,15 @@ export async function runPullRequestApproval(number: number, willDeploy: boolean
         execution = enqueueJobExecution({
             actionKey: willDeploy ? "github.merge-deploy" : "github.merge",
             displayName: willDeploy
-                ? `Merge and deploy PR #${number}`
-                : `Merge PR #${number}`,
-            payload: { deploymentLockId, number, willDeploy },
+                ? `Merge and deploy ${options.mergeStack ? "stack through " : ""}PR #${number}`
+                : `Merge ${options.mergeStack ? "stack through " : ""}PR #${number}`,
+            payload: {
+                deploymentLockId,
+                expectedHeadSha: options.expectedHeadSha,
+                mergeStack: options.mergeStack === true,
+                number,
+                willDeploy,
+            },
             resourceClass: "exclusive",
             timeoutMs: (willDeploy ? 45 : 10) * 60 * 1000,
         });
@@ -3234,7 +4119,11 @@ export async function runPullRequestApproval(number: number, willDeploy: boolean
  */
 export async function approvePullRequestReview(number: number, signal?: AbortSignal) {
     const pr = await getPullRequest(number, signal);
-    validateDashboardPrForReviewApproval(pr);
+    const stack =
+        pr.baseRefName === DEFAULT_BASE
+            ? undefined
+            : await requirePullRequestStack(number, signal);
+    validateDashboardPrForReviewApproval(pr, stack);
 
     await runCommand(
         "gh",
@@ -3246,7 +4135,11 @@ export async function approvePullRequestReview(number: number, signal?: AbortSig
         }
     );
 
-    const pullRequest = await getPullRequest(number, signal);
+    const refreshedPullRequest = await getPullRequest(number, signal);
+    const stackMetadata = stack ? pullRequestStackMetadata(stack, number) : undefined;
+    const pullRequest = stackMetadata
+        ? normalizePullRequest({ ...refreshedPullRequest, stack: stackMetadata })
+        : refreshedPullRequest;
 
     return {
         isOk: true,
@@ -3264,6 +4157,7 @@ export async function approvePullRequestReview(number: number, signal?: AbortSig
 export async function updatePullRequestBranch(number: number, signal?: AbortSignal) {
     const pr = await getPullRequest(number, signal);
     validateDashboardPrForBranchUpdate(pr);
+    await requireStandalonePullRequest(pr, "branch update", signal);
     const repo = parseRepoParts(DASHBOARD_REPO);
     const arguments_ = [
         "api",
@@ -3298,6 +4192,7 @@ export async function rejectPullRequest(
 ) {
     const pr = await getPullRequest(number, signal);
     validateDashboardPr(pr);
+    await requireStandalonePullRequest(pr, "reject", signal);
 
     await runCommand(
         "gh",
@@ -3380,6 +4275,29 @@ function executionPullRequestNumber(payload: Record<string, unknown>): number {
     return validatePrNumber(number);
 }
 
+function executionPullRequestStackNumbers(payload: Record<string, unknown>): number[] {
+    const pullRequests = payload.pullRequests;
+    if (
+        !Array.isArray(pullRequests) ||
+        pullRequests.length < 2 ||
+        pullRequests.length > 100
+    ) {
+        throw Object.assign(new Error("Pull request stack payload is invalid"), {
+            statusCode: 400,
+        });
+    }
+    const numbers: number[] = [];
+    for (const value of pullRequests) {
+        if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+            throw Object.assign(new Error("Pull request stack payload is invalid"), {
+                statusCode: 400,
+            });
+        }
+        numbers.push(value);
+    }
+    return numbers;
+}
+
 async function executePullRequestMerge(
     job: ScheduledJob,
     signal: AbortSignal | undefined,
@@ -3388,6 +4306,16 @@ async function executePullRequestMerge(
     context.protectFromCancellation();
     const number = executionPullRequestNumber(job.actionPayload);
     const willDeploy = job.actionPayload.willDeploy === true;
+    const mergeStack = job.actionPayload.mergeStack === true;
+    const expectedHeadSha = job.actionPayload.expectedHeadSha;
+    if (
+        typeof expectedHeadSha !== "string" ||
+        !FULL_COMMIT_SHA_PATTERN.test(expectedHeadSha)
+    ) {
+        throw Object.assign(new Error("Expected pull request head SHA is invalid"), {
+            statusCode: 400,
+        });
+    }
     const deploymentLockId = job.actionPayload.deploymentLockId;
     if (
         deploymentLockId !== undefined &&
@@ -3398,7 +4326,9 @@ async function executePullRequestMerge(
         });
     }
     const result = await approvePullRequest(number, willDeploy, {
+        expectedHeadSha,
         lockHeldBy: deploymentLockId,
+        mergeStack,
         signal,
     });
     const message = result.syncError || result.deployError;
@@ -3471,6 +4401,13 @@ export function registerPullRequestExecutionActions(): void {
     });
     registerScheduledJobAction("github.merge", executePullRequestMerge);
     registerScheduledJobAction("github.merge-deploy", executePullRequestMerge);
+    registerScheduledJobAction("github.stack-create", async (job, signal, context) => {
+        const pullRequests = executionPullRequestStackNumbers(job.actionPayload);
+        context.protectFromCancellation();
+        return {
+            result: await createPullRequestStack(pullRequests, signal),
+        };
+    });
     registerScheduledJobAction("github.review-approval", async (job, signal, context) => {
         const number = executionPullRequestNumber(job.actionPayload);
         context.protectFromCancellation();

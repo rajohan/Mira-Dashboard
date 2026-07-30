@@ -3268,6 +3268,17 @@ describe("backend route and service behavior", () => {
             );
             expect(response.status).toBe(400);
         }
+
+        const invalidPullRequestStack = await pullRequestRoutes[
+            "/api/pull-requests/stacks"
+        ].POST(
+            new Request("https://test.local/api/pull-requests/stacks", {
+                body: JSON.stringify({ pullRequests: [1] }),
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            })
+        );
+        expect(invalidPullRequestStack.status).toBe(400);
     });
 
     it("aggregates metrics tokens by model, display label, and session type", async () => {

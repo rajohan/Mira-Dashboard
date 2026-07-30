@@ -11,7 +11,9 @@ import type {
 import {
     parseDashboardRollbackRequest,
     parsePullRequestApproveRequest,
+    parsePullRequestPreviewStartRequest,
     parsePullRequestRejectRequest,
+    parsePullRequestStackCreateRequest,
 } from "../../../contracts/delivery.ts";
 import { json, jsonWithEtag } from "../http.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
@@ -38,6 +40,7 @@ import {
     runPullRequestBranchUpdate,
     runPullRequestRejection,
     runPullRequestReviewApproval,
+    runPullRequestStackCreation,
     validatePrNumber,
 } from "../services/pullRequests.ts";
 
@@ -122,21 +125,50 @@ export const pullRequestRoutes = {
             }
         },
     },
+    "/api/pull-requests/stacks": {
+        POST: async (request: Request) => {
+            try {
+                const body = await readApiJsonOrError(
+                    request,
+                    parsePullRequestStackCreateRequest,
+                    {
+                        code: "invalid_pull_request_stack",
+                        context: "pull-request.stack",
+                        message: "Invalid pull request stack",
+                    }
+                );
+                if (body instanceof Response) return body;
+                const response = await runPullRequestMutation(() =>
+                    runPullRequestStackCreation(body.pullRequests)
+                );
+                return json(response satisfies PullRequestActionResponse, {
+                    status: 201,
+                });
+            } catch (error) {
+                return routeError(error, "Pull request stack creation failed");
+            }
+        },
+    },
     "/api/pull-requests/:number/approve": {
         POST: async (request: ParametersRequest<"number">) => {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                const body = request.body
-                    ? await readApiJsonOrError(request, parsePullRequestApproveRequest, {
-                          code: "invalid_pull_request_approval",
-                          context: "pull-request.approve",
-                          message: "Invalid pull request approval",
-                      })
-                    : {};
+                const body = await readApiJsonOrError(
+                    request,
+                    parsePullRequestApproveRequest,
+                    {
+                        code: "invalid_pull_request_approval",
+                        context: "pull-request.approve",
+                        message: "Invalid pull request approval",
+                    }
+                );
                 if (body instanceof Response) return body;
                 const response = await runPullRequestMutation(() =>
-                    runPullRequestApproval(number, body?.deploy === true)
+                    runPullRequestApproval(number, body?.deploy === true, {
+                        expectedHeadSha: body.expectedHeadSha,
+                        mergeStack: body?.mergeStack,
+                    })
                 );
                 return json(response satisfies PullRequestActionResponse);
             } catch (error) {
@@ -203,11 +235,24 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
+                const body = await readApiJsonOrError(
+                    request,
+                    parsePullRequestPreviewStartRequest,
+                    {
+                        code: "invalid_pull_request_preview",
+                        context: "pull-request.preview",
+                        message: "Invalid pull request preview request",
+                    }
+                );
+                if (body instanceof Response) return body;
                 try {
                     return json(
                         {
                             isOk: true,
-                            preview: await prepareAndStartPullRequestPreview(number),
+                            preview: await prepareAndStartPullRequestPreview(
+                                number,
+                                body.expectedHeadSha
+                            ),
                         } satisfies PullRequestPreviewMutationResponse,
                         { status: 202 }
                     );

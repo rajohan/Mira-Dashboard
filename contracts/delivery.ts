@@ -33,6 +33,20 @@ export const pullRequestReviewConnectionSchema = v.object({
     nodes: v.optional(v.array(pullRequestReviewSchema)),
 });
 
+export const pullRequestStackSchema = v.strictObject({
+    baseRefName: trimmedNonEmptyStringSchema,
+    number: positiveIntegerSchema,
+    position: positiveIntegerSchema,
+    size: positiveIntegerSchema,
+});
+
+const optionalPullRequestStackSchema = v.optional(
+    v.pipe(
+        v.nullable(pullRequestStackSchema),
+        v.transform((value) => value ?? undefined)
+    )
+);
+
 /** GitHub owns this evolving payload, so only Dashboard-consumed fields are retained. */
 export const pullRequestSummarySchema = v.object({
     additions: v.optional(finiteNumberSchema),
@@ -59,10 +73,18 @@ export const pullRequestSummarySchema = v.object({
     ),
     reviewerApproved: v.optional(v.boolean()),
     reviews: v.optional(v.array(pullRequestReviewSchema)),
+    stack: optionalPullRequestStackSchema,
     statusCheckRollup: v.optional(v.array(v.unknown())),
     title: trimmedNonEmptyStringSchema,
     updatedAt: trimmedNonEmptyStringSchema,
     url: trimmedNonEmptyStringSchema,
+});
+
+const publicGitHubPullRequestStackSchema = v.object({
+    base: v.object({ ref: trimmedNonEmptyStringSchema }),
+    number: positiveIntegerSchema,
+    position: positiveIntegerSchema,
+    size: positiveIntegerSchema,
 });
 
 /** Bounded public GitHub REST shape used by credential-free development previews. */
@@ -77,6 +99,7 @@ export const publicGitHubPullRequestSchema = v.object({
     }),
     html_url: trimmedNonEmptyStringSchema,
     number: positiveIntegerSchema,
+    stack: v.optional(v.nullable(publicGitHubPullRequestStackSchema)),
     title: trimmedNonEmptyStringSchema,
     updated_at: trimmedNonEmptyStringSchema,
     user: v.object({ login: trimmedNonEmptyStringSchema }),
@@ -89,6 +112,48 @@ export const publicGitHubPullRequestsSchema = v.pipe(
 
 export const gitHubPullRequestStateSchema = v.object({
     state: v.picklist(["CLOSED", "MERGED", "OPEN"]),
+});
+
+export const gitHubPullRequestStackResourceSchema = v.object({
+    base: v.object({ ref: trimmedNonEmptyStringSchema }),
+    created_at: trimmedNonEmptyStringSchema,
+    id: positiveIntegerSchema,
+    node_id: trimmedNonEmptyStringSchema,
+    number: positiveIntegerSchema,
+    open: v.boolean(),
+    pull_requests: v.pipe(
+        v.array(
+            v.object({
+                draft: v.boolean(),
+                head: v.object({
+                    ref: trimmedNonEmptyStringSchema,
+                    sha: fullCommitShaSchema,
+                }),
+                merged_at: v.nullable(trimmedNonEmptyStringSchema),
+                number: positiveIntegerSchema,
+                state: v.picklist(["closed", "open"]),
+            })
+        ),
+        v.maxLength(100)
+    ),
+    url: trimmedNonEmptyStringSchema,
+});
+
+export const gitHubPullRequestStacksSchema = v.pipe(
+    v.array(gitHubPullRequestStackResourceSchema),
+    v.maxLength(100)
+);
+
+export const gitHubAsyncPullRequestMergeResultSchema = v.object({
+    details: v.object({
+        expected_head_sha: v.optional(fullCommitShaSchema),
+        merge_action: v.optional(v.picklist(["default", "direct_merge", "merge_queue"])),
+        merge_method: v.optional(v.picklist(["merge", "rebase", "squash"])),
+        message: v.string(),
+        sha: v.optional(fullCommitShaSchema),
+        uuid: v.optional(trimmedNonEmptyStringSchema),
+    }),
+    status: v.picklist(["enqueued", "failed", "merged", "pending"]),
 });
 
 export const deploymentJobSchema = v.strictObject({
@@ -198,12 +263,16 @@ export const pullRequestPreviewMutationResponseSchema = v.strictObject({
 });
 export const pullRequestActionResponseSchema = v.strictObject({
     cleanup: v.optional(worktreeCleanupResultSchema),
+    cleanups: v.optional(v.array(worktreeCleanupResultSchema)),
     deployError: v.optional(v.string()),
     deployment: v.optional(deploymentJobSchema),
     isOk: v.boolean(),
+    mergeStatus: v.optional(v.picklist(["enqueued", "merged"])),
     message: v.string(),
     previewCleanup: v.optional(pullRequestPreviewCleanupResultSchema),
+    previewCleanups: v.optional(v.array(pullRequestPreviewCleanupResultSchema)),
     pullRequest: v.optional(pullRequestSummarySchema),
+    syncError: v.optional(v.string()),
 });
 export const deploymentActionResponseSchema = v.strictObject({
     deployment: deploymentJobSchema,
@@ -212,6 +281,20 @@ export const deploymentActionResponseSchema = v.strictObject({
 
 export const pullRequestApproveRequestSchema = strictJsonObjectSchema({
     deploy: v.optional(v.boolean()),
+    expectedHeadSha: fullCommitShaSchema,
+    mergeStack: v.optional(v.boolean()),
+});
+
+export const pullRequestStackCreateRequestSchema = strictJsonObjectSchema({
+    pullRequests: v.pipe(
+        v.array(positiveIntegerSchema),
+        v.minLength(2),
+        v.maxLength(100)
+    ),
+});
+
+export const pullRequestPreviewStartRequestSchema = strictJsonObjectSchema({
+    expectedHeadSha: fullCommitShaSchema,
 });
 
 export const pullRequestRejectRequestSchema = strictJsonObjectSchema({
@@ -227,9 +310,16 @@ export type PullRequestReview = v.InferOutput<typeof pullRequestReviewSchema>;
 export type PullRequestReviewConnection = v.InferOutput<
     typeof pullRequestReviewConnectionSchema
 >;
+export type PullRequestStack = v.InferOutput<typeof pullRequestStackSchema>;
 export type PullRequestSummary = v.InferOutput<typeof pullRequestSummarySchema>;
 export type PublicGitHubPullRequest = v.InferOutput<typeof publicGitHubPullRequestSchema>;
 export type GitHubPullRequestState = v.InferOutput<typeof gitHubPullRequestStateSchema>;
+export type GitHubPullRequestStackResource = v.InferOutput<
+    typeof gitHubPullRequestStackResourceSchema
+>;
+export type GitHubAsyncPullRequestMergeResult = v.InferOutput<
+    typeof gitHubAsyncPullRequestMergeResultSchema
+>;
 export type DeploymentJob = v.InferOutput<typeof deploymentJobSchema>;
 export type DashboardReleaseSummary = v.InferOutput<typeof dashboardReleaseSummarySchema>;
 export type DashboardReleaseStatus = v.InferOutput<typeof dashboardReleaseStatusSchema>;
@@ -269,6 +359,12 @@ export type DeploymentActionResponse = v.InferOutput<
 export type PullRequestApproveRequest = v.InferOutput<
     typeof pullRequestApproveRequestSchema
 >;
+export type PullRequestStackCreateRequest = v.InferOutput<
+    typeof pullRequestStackCreateRequestSchema
+>;
+export type PullRequestPreviewStartRequest = v.InferOutput<
+    typeof pullRequestPreviewStartRequestSchema
+>;
 export type PullRequestRejectRequest = v.InferOutput<
     typeof pullRequestRejectRequestSchema
 >;
@@ -285,6 +381,28 @@ export function parsePullRequestApproveRequest(
     value: unknown
 ): PullRequestApproveRequest {
     return parseContract(pullRequestApproveRequestSchema, value);
+}
+
+/**
+ * Parses a native GitHub stack creation request at the backend HTTP trust boundary.
+ * @param value Value to process.
+ * @returns Parsed native GitHub stack creation request.
+ */
+export function parsePullRequestStackCreateRequest(
+    value: unknown
+): PullRequestStackCreateRequest {
+    return parseContract(pullRequestStackCreateRequestSchema, value);
+}
+
+/**
+ * Parses an exact-head pull request preview request.
+ * @param value Value to process.
+ * @returns Parsed pull request preview request.
+ */
+export function parsePullRequestPreviewStartRequest(
+    value: unknown
+): PullRequestPreviewStartRequest {
+    return parseContract(pullRequestPreviewStartRequestSchema, value);
 }
 
 /**
@@ -342,6 +460,45 @@ export function parseGitHubPullRequestState(
     path = "pullRequestState"
 ): GitHubPullRequestState {
     return parseContract(gitHubPullRequestStateSchema, value, path);
+}
+
+/**
+ * Parses a native GitHub pull request stack resource.
+ * @param value Value to process.
+ * @param path File or resource path.
+ * @returns Parsed GitHub pull request stack.
+ */
+export function parseGitHubPullRequestStackResource(
+    value: unknown,
+    path = "pullRequestStack"
+): GitHubPullRequestStackResource {
+    return parseContract(gitHubPullRequestStackResourceSchema, value, path);
+}
+
+/**
+ * Parses a bounded collection of native GitHub pull request stacks.
+ * @param value Value to process.
+ * @param path File or resource path.
+ * @returns Parsed GitHub pull request stacks.
+ */
+export function parseGitHubPullRequestStacks(
+    value: unknown,
+    path = "pullRequestStacks"
+): GitHubPullRequestStackResource[] {
+    return parseContract(gitHubPullRequestStacksSchema, value, path);
+}
+
+/**
+ * Parses one asynchronous native GitHub pull request merge result.
+ * @param value Value to process.
+ * @param path File or resource path.
+ * @returns Parsed asynchronous merge result.
+ */
+export function parseGitHubAsyncPullRequestMergeResult(
+    value: unknown,
+    path = "pullRequestStackMerge"
+): GitHubAsyncPullRequestMergeResult {
+    return parseContract(gitHubAsyncPullRequestMergeResultSchema, value, path);
 }
 
 /**

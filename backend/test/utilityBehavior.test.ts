@@ -5,6 +5,7 @@ import path from "node:path";
 
 import type { Server } from "bun";
 
+import type { PullRequestSummary } from "../../contracts/delivery.ts";
 import { database } from "../src/database.ts";
 import * as databaseMigrationRunnerModule from "../src/databaseMigrationRunner.ts";
 import {
@@ -62,6 +63,7 @@ import {
 import {
     getResolvedRoots,
     parsePublicGithubPullRequests,
+    pullRequestPreviewScope,
     validatePrNumber,
 } from "../src/services/pullRequests.ts";
 import { httpOrigin, httpUrl } from "./support/httpUrls.ts";
@@ -110,6 +112,27 @@ function callTestRoute(
     });
 }
 
+function previewPullRequest(
+    number: number,
+    headRefName: string,
+    baseRefName: string,
+    overrides: Partial<PullRequestSummary> = {}
+): PullRequestSummary {
+    return {
+        author: { login: "mira-2026" },
+        baseRefName,
+        createdAt: "2026-07-30T10:00:00.000Z",
+        headRefName,
+        headRefOid: String(number).repeat(40).slice(0, 40),
+        isDraft: false,
+        number,
+        title: `PR ${number}`,
+        updatedAt: "2026-07-30T11:00:00.000Z",
+        url: `https://github.test/pull/${number}`,
+        ...overrides,
+    };
+}
+
 describe("backend service utilities", () => {
     it("maps credential-free public GitHub pull request metadata for dev previews", () => {
         const commitSha = "a".repeat(40);
@@ -127,6 +150,21 @@ describe("backend service utilities", () => {
                     updated_at: "2026-07-26T11:00:00.000Z",
                     user: { login: "mira-2026" },
                 },
+                {
+                    base: { ref: "mira/preview" },
+                    body: "Stacked preview body",
+                    created_at: "2026-07-26T11:00:00.000Z",
+                    draft: false,
+                    head: {
+                        ref: "mira/stacked-preview",
+                        sha: "b".repeat(40),
+                    },
+                    html_url: "https://github.com/rajohan/Mira-Dashboard/pull/336",
+                    number: 336,
+                    title: "Stacked preview PR",
+                    updated_at: "2026-07-26T12:00:00.000Z",
+                    user: { login: "mira-2026" },
+                },
             ])
         ).toEqual([
             expect.objectContaining({
@@ -140,10 +178,54 @@ describe("backend service utilities", () => {
                 reviewerApproved: false,
                 statusCheckRollup: [],
             }),
+            expect.objectContaining({
+                baseRefName: "mira/preview",
+                canReviewerApprove: false,
+                headRefName: "mira/stacked-preview",
+                number: 336,
+                previewEligible: true,
+                reviewerApproved: false,
+                statusCheckRollup: [],
+            }),
         ]);
         expect(() => parsePublicGithubPullRequests([{ number: 335 }])).toThrow(
             "publicPullRequests.0.base"
         );
+    });
+
+    it("resolves exact main-rooted preview scopes for stacks and linear candidates", () => {
+        const stack = [
+            previewPullRequest(1, "stack-bottom", "main", {
+                stack: { baseRefName: "main", number: 9, position: 1, size: 2 },
+            }),
+            previewPullRequest(2, "stack-top", "stack-bottom", {
+                stack: { baseRefName: "main", number: 9, position: 2, size: 2 },
+            }),
+        ];
+        const candidate = [
+            previewPullRequest(3, "candidate-bottom", "main"),
+            previewPullRequest(4, "candidate-top", "candidate-bottom"),
+        ];
+
+        const stackScope = pullRequestPreviewScope(stack[1] as PullRequestSummary, stack);
+        expect(stackScope?.map((member) => member.number)).toEqual([1, 2]);
+        expect(
+            pullRequestPreviewCandidate(stack[1] as PullRequestSummary, stackScope)
+        ).toMatchObject({
+            authorLogins: ["mira-2026", "mira-2026"],
+            rootBaseRefName: "main",
+        });
+        expect(
+            pullRequestPreviewScope(candidate[1] as PullRequestSummary, candidate)?.map(
+                (member) => member.number
+            )
+        ).toEqual([3, 4]);
+        expect(
+            pullRequestPreviewScope(candidate[1] as PullRequestSummary, [
+                ...candidate,
+                previewPullRequest(5, "candidate-parallel", "candidate-bottom"),
+            ])
+        ).toBeUndefined();
     });
 
     it("compacts every heartbeat cache payload without dropping health failures", () => {
@@ -829,10 +911,10 @@ describe("backend service utilities", () => {
                 title: "Managed preview",
             } as never)
         ).toEqual({
-            authorLogin: "mira-2026",
-            baseRefName: "main",
+            authorLogins: ["mira-2026"],
             commitSha: "a".repeat(40),
             number: 335,
+            rootBaseRefName: "main",
             title: "Managed preview",
         });
 
