@@ -3288,9 +3288,10 @@ describe("Mira Dashboard pages", () => {
                                     mergeable: "MERGEABLE",
                                     mergeStateStatus: "CLEAN",
                                     number: 372,
+                                    canReviewerApprove: true,
                                     previewEligible: false,
-                                    reviewDecision: "APPROVED",
-                                    reviewerApproved: true,
+                                    reviewDecision: "REVIEW_REQUIRED",
+                                    reviewerApproved: false,
                                     statusCheckRollup: [{ status: "SUCCESS" }],
                                     title: "Fork default branch",
                                     updatedAt: "2026-07-30T08:00:00.000Z",
@@ -3328,6 +3329,7 @@ describe("Mira Dashboard pages", () => {
 
         expect(await screen.findByText("Fork default branch")).toBeInTheDocument();
         expect(screen.queryByText(/ambiguous or incomplete dependent chain/u)).toBeNull();
+        expect(screen.getByRole("button", { name: "Approve PR" })).toBeEnabled();
         expect(screen.getAllByRole("button", { name: "Merge only" })).toHaveLength(2);
         expect(screen.getAllByRole("button", { name: "Reject" })).toHaveLength(2);
 

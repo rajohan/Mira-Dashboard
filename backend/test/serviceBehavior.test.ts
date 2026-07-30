@@ -214,6 +214,7 @@ elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == 
   printf '%s\n' '{"number":2,"title":"Blocked cached PR","body":"","url":"https://github.test/pr/2","headRefName":"blocked","headRefOid":"head2","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"APPROVED","latestOpinionatedReviews":{"nodes":[]},"additions":2,"deletions":1,"changedFiles":2,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T10:45:00.000Z"}]}'
   printf '%s\n' '{"number":3,"title":"Ghost-authored PR","body":"","url":"https://github.test/pr/3","headRefName":"ghost","headRefOid":"head3","baseRefName":"main","author":null,"createdAt":"2026-06-24T11:00:00.000Z","updatedAt":"2026-06-24T12:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-06-24T11:30:00.000Z","author":null}]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
   printf '%s\n' '{"number":4,"title":"Stacked PR","body":"","url":"https://github.test/pr/4","headRefName":"stacked","headRefOid":"head4","baseRefName":"ready","author":{"login":"mira-2026"},"createdAt":"2026-06-24T12:00:00.000Z","updatedAt":"2026-06-24T13:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":4,"deletions":1,"changedFiles":2,"stack":{"baseRefName":"main","number":42,"position":2,"size":2},"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T12:45:00.000Z"}]}'
+  printf '%s\n' '{"number":5,"title":"Fork PR","body":"","url":"https://github.test/pr/5","headRefName":"main","headRefOid":"head5","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T06:00:00.000Z","updatedAt":"2026-06-24T07:00:00.000Z","isCrossRepository":true,"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T06:45:00.000Z"}]}'
 elif [[ "$1 $2 $3" == "pr view 2" && "$*" == *"--json state"* ]]; then
   printf '%s\n' '{"state":"OPEN"}'
 elif [[ "$1 $2 $3" == "pr view 99" && "$*" == *"--json state"* ]]; then
@@ -4065,7 +4066,7 @@ fi
 
         const pullRequests = await listDashboardPullRequests();
         expect(pullRequests.map((pullRequest) => pullRequest.number)).toEqual([
-            4, 3, 2, 1,
+            4, 3, 2, 1, 5,
         ]);
         expect(pullRequests[0]).toMatchObject({
             baseRefName: "ready",
@@ -4098,6 +4099,13 @@ fi
                 position: 1,
                 size: 2,
             },
+        });
+        expect(pullRequests[4]).toMatchObject({
+            canReviewerApprove: true,
+            isCrossRepository: true,
+            number: 5,
+            previewEligible: false,
+            reviewerApproved: false,
         });
         expect(isDashboardPullRequestOpen(2)).resolves.toBe(true);
         expect(isDashboardPullRequestOpen(99)).resolves.toBe(false);

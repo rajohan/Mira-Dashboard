@@ -1208,6 +1208,9 @@ function applyPullRequestPreviewEligibility(
     const scopeIndex = buildPullRequestPreviewScopeIndex(pullRequests);
     return pullRequests.map((pullRequest) => {
         const scope = resolvePullRequestPreviewScope(pullRequest, scopeIndex);
+        const isReviewApprovalSupported =
+            scope !== undefined ||
+            (pullRequest.stack === undefined && pullRequest.baseRefName === DEFAULT_BASE);
         const previewEligible =
             scope !== undefined &&
             scope.every(
@@ -1221,7 +1224,8 @@ function applyPullRequestPreviewEligibility(
             );
         return {
             ...pullRequest,
-            canReviewerApprove: scope !== undefined && canReviewerApprove(pullRequest),
+            canReviewerApprove:
+                isReviewApprovalSupported && canReviewerApprove(pullRequest),
             previewEligible,
         };
     });

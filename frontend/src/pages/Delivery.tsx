@@ -553,6 +553,11 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
     }
 }
 
+/**
+ * Formats the exact pull request heads included in a stack merge confirmation.
+ * @param pullRequests Pull requests ordered from bottom to top.
+ * @returns Bottom-to-top pull request numbers and abbreviated head SHAs.
+ */
 function exactPullRequestHeadSummary(pullRequests: PullRequestSummary[]): string {
     return pullRequests
         .map(
@@ -562,6 +567,12 @@ function exactPullRequestHeadSummary(pullRequests: PullRequestSummary[]): string
         .join(" → ");
 }
 
+/**
+ * Builds the exact per-layer head preconditions for a native stack merge.
+ * @param pullRequest Selected pull request.
+ * @param scope Pull requests included through the selected stack layer.
+ * @returns Expected stack heads, or undefined for a standalone pull request.
+ */
 function expectedStackHeadsForMerge(
     pullRequest: PullRequestSummary,
     scope: PullRequestSummary[]
