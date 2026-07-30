@@ -10,6 +10,8 @@ import {
     useState,
 } from "react";
 
+import { readSessionsResponsePayload } from "../../../contracts/socket";
+import { replaceSessionsFromWebSocket } from "../collections/sessions";
 import {
     AUTH_SESSION_ROTATED_EVENT_NAME,
     type AuthSessionIdentity,
@@ -118,10 +120,16 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         }
 
         const load = async () => {
-            // The RPC payload contains raw Gateway rows. The backend follows it
-            // with a normalized `sessions` broadcast, which is the only list
-            // allowed to replace the Dashboard collection.
-            await client.request("sessions.list");
+            const payload = await client.request("sessions.list");
+            if (runtime.currentClient() !== client || !client.isOpen()) {
+                return;
+            }
+            const sessions = readSessionsResponsePayload(payload);
+            if (!sessions) {
+                throw new TypeError("Invalid sessions.list response");
+            }
+            replaceSessionsFromWebSocket(sessions);
+            setHasConfirmedSessionList(true);
         };
         const refresh = { promise: load() };
         runtime.beginSessionListRefresh(refresh);

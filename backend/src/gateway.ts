@@ -744,6 +744,112 @@ function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): 
 }
 
 /**
+ * Normalizes one raw Gateway sessions.list response for Dashboard consumers.
+ * @param response Raw Gateway response.
+ * @returns Valid Dashboard session rows.
+ */
+function normalizeGatewaySessionList(response: unknown): Session[] {
+    const payload = asRecord(response);
+    const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+    const defaults = asRecord(payload?.defaults) as GatewaySession | undefined;
+    return sessions
+        .map((entry) => asRecord(entry))
+        .filter(
+            (entry): entry is Record<string, unknown> =>
+                entry !== undefined &&
+                (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
+                (entry.key === undefined || typeof entry.key === "string") &&
+                (entry.updatedAt === undefined ||
+                    (typeof entry.updatedAt === "number" &&
+                        Number.isFinite(entry.updatedAt)) ||
+                    (typeof entry.updatedAt === "string" &&
+                        !Number.isNaN(Date.parse(entry.updatedAt)))) &&
+                (stringFallback(entry.sessionId).trim() ||
+                    stringFallback(entry.key).trim()) !== ""
+        )
+        .map((entry) => {
+            const session = entry as GatewaySession & {
+                activeRunId?: string | null | undefined;
+                currentRunId?: string | null | undefined;
+                endedAt?: string | number | null | undefined;
+                runId?: string | null | undefined;
+                startedAt?: string | number | null | undefined;
+            };
+            const updatedAt =
+                typeof entry.updatedAt === "string"
+                    ? Date.parse(entry.updatedAt)
+                    : entry.updatedAt;
+            const shouldApplyDefaults =
+                (!session.model || session.model === defaults?.model) &&
+                (!session.modelProvider ||
+                    !defaults?.modelProvider ||
+                    session.modelProvider === defaults.modelProvider);
+            const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
+            const hasSessionThinkingChoices = Boolean(
+                session.thinkingLevels?.length || session.thinkingOptions?.length
+            );
+            let thinkingLevels = hasSessionThinkingChoices
+                ? undefined
+                : matchingDefaults?.thinkingLevels;
+            if (session.thinkingLevels?.length) {
+                thinkingLevels = session.thinkingLevels;
+            }
+            let thinkingOptions = hasSessionThinkingChoices
+                ? undefined
+                : matchingDefaults?.thinkingOptions;
+            if (session.thinkingOptions?.length) {
+                thinkingOptions = session.thinkingOptions;
+            }
+            return transformSession({
+                ...matchingDefaults,
+                ...session,
+                model: session.model?.trim() ? session.model : matchingDefaults?.model,
+                modelProvider: session.modelProvider?.trim()
+                    ? session.modelProvider
+                    : matchingDefaults?.modelProvider,
+                contextTokens: session.contextTokens ?? matchingDefaults?.contextTokens,
+                thinkingDefault:
+                    session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
+                thinkingLevels,
+                thinkingOptions,
+                fastMode: session.fastMode,
+                effectiveFastMode:
+                    session.effectiveFastMode ??
+                    matchingDefaults?.effectiveFastMode ??
+                    matchingDefaults?.fastMode,
+                activeRunId:
+                    session.activeRunId === null ? undefined : session.activeRunId,
+                currentRunId:
+                    session.currentRunId === null ? undefined : session.currentRunId,
+                endedAt: session.endedAt === null ? undefined : session.endedAt,
+                runId: session.runId === null ? undefined : session.runId,
+                startedAt: session.startedAt === null ? undefined : session.startedAt,
+                updatedAt:
+                    typeof updatedAt === "number" && Number.isFinite(updatedAt)
+                        ? updatedAt
+                        : undefined,
+            });
+        });
+}
+
+/**
+ * Installs and broadcasts a normalized session list for the active Gateway.
+ * @param expectedClient Gateway client that produced the list.
+ * @param sessions Normalized Dashboard sessions.
+ */
+function publishGatewaySessions(
+    expectedClient: OpenClawGatewayClientInstance,
+    sessions: Session[]
+): void {
+    if (!gatewayState.isConnected || !isCurrentGatewayClient(expectedClient)) {
+        return;
+    }
+    gatewayState.sessions = sessions;
+    chatReplayState.bridge.reconcileSessions(gatewayState.sessions);
+    broadcast({ type: "sessions", sessions: gatewayState.sessions });
+}
+
+/**
  * Performs refresh sessions.
  * @param expectedClient Expected client value.
  */
@@ -759,95 +865,7 @@ async function refreshSessions(
     }
 
     const response = await expectedClient.request("sessions.list", {});
-    if (gatewayState.isConnected && isCurrentGatewayClient(expectedClient)) {
-        const payload = asRecord(response);
-        const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
-        const defaults = asRecord(payload?.defaults) as GatewaySession | undefined;
-        gatewayState.sessions = sessions
-            .map((entry) => asRecord(entry))
-            .filter(
-                (entry): entry is Record<string, unknown> =>
-                    entry !== undefined &&
-                    (entry.sessionId === undefined ||
-                        typeof entry.sessionId === "string") &&
-                    (entry.key === undefined || typeof entry.key === "string") &&
-                    (entry.updatedAt === undefined ||
-                        (typeof entry.updatedAt === "number" &&
-                            Number.isFinite(entry.updatedAt)) ||
-                        (typeof entry.updatedAt === "string" &&
-                            !Number.isNaN(Date.parse(entry.updatedAt)))) &&
-                    (stringFallback(entry.sessionId).trim() ||
-                        stringFallback(entry.key).trim()) !== ""
-            )
-            .map((entry) => {
-                const session = entry as GatewaySession & {
-                    activeRunId?: string | null | undefined;
-                    currentRunId?: string | null | undefined;
-                    endedAt?: string | number | null | undefined;
-                    runId?: string | null | undefined;
-                    startedAt?: string | number | null | undefined;
-                };
-                const updatedAt =
-                    typeof entry.updatedAt === "string"
-                        ? Date.parse(entry.updatedAt)
-                        : entry.updatedAt;
-                const shouldApplyDefaults =
-                    (!session.model || session.model === defaults?.model) &&
-                    (!session.modelProvider ||
-                        !defaults?.modelProvider ||
-                        session.modelProvider === defaults.modelProvider);
-                const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
-                const hasSessionThinkingChoices = Boolean(
-                    session.thinkingLevels?.length || session.thinkingOptions?.length
-                );
-                let thinkingLevels = hasSessionThinkingChoices
-                    ? undefined
-                    : matchingDefaults?.thinkingLevels;
-                if (session.thinkingLevels?.length) {
-                    thinkingLevels = session.thinkingLevels;
-                }
-                let thinkingOptions = hasSessionThinkingChoices
-                    ? undefined
-                    : matchingDefaults?.thinkingOptions;
-                if (session.thinkingOptions?.length) {
-                    thinkingOptions = session.thinkingOptions;
-                }
-                return transformSession({
-                    ...matchingDefaults,
-                    ...session,
-                    model: session.model?.trim()
-                        ? session.model
-                        : matchingDefaults?.model,
-                    modelProvider: session.modelProvider?.trim()
-                        ? session.modelProvider
-                        : matchingDefaults?.modelProvider,
-                    contextTokens:
-                        session.contextTokens ?? matchingDefaults?.contextTokens,
-                    thinkingDefault:
-                        session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
-                    thinkingLevels,
-                    thinkingOptions,
-                    fastMode: session.fastMode,
-                    effectiveFastMode:
-                        session.effectiveFastMode ??
-                        matchingDefaults?.effectiveFastMode ??
-                        matchingDefaults?.fastMode,
-                    activeRunId:
-                        session.activeRunId === null ? undefined : session.activeRunId,
-                    currentRunId:
-                        session.currentRunId === null ? undefined : session.currentRunId,
-                    endedAt: session.endedAt === null ? undefined : session.endedAt,
-                    runId: session.runId === null ? undefined : session.runId,
-                    startedAt: session.startedAt === null ? undefined : session.startedAt,
-                    updatedAt:
-                        typeof updatedAt === "number" && Number.isFinite(updatedAt)
-                            ? updatedAt
-                            : undefined,
-                });
-            });
-        chatReplayState.bridge.reconcileSessions(gatewayState.sessions);
-        broadcast({ type: "sessions", sessions: gatewayState.sessions });
-    }
+    publishGatewaySessions(expectedClient, normalizeGatewaySessionList(response));
 }
 
 /** Refreshes Gateway sessions and logs failures from event callbacks. */
@@ -1203,6 +1221,7 @@ async function forwardRequest(
                 parameters,
                 requestOptions
             );
+            let normalizedSessions: Session[] | undefined;
             if (method === "chat.history") {
                 payload = await hydrateOmittedChatHistoryImages(
                     payload,
@@ -1226,6 +1245,9 @@ async function forwardRequest(
                             ? parameters.sessionKey
                             : "",
                 });
+            } else if (method === "sessions.list") {
+                normalizedSessions = normalizeGatewaySessionList(payload);
+                payload = { sessions: normalizedSessions };
             }
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
@@ -1243,7 +1265,9 @@ async function forwardRequest(
             } catch {
                 // Ignore reply write failures; the Gateway call already succeeded.
             }
-            if (method.startsWith("sessions.")) {
+            if (normalizedSessions) {
+                publishGatewaySessions(activeGateway, normalizedSessions);
+            } else if (method.startsWith("sessions.")) {
                 await refreshSessionsAfterRequest(activeGateway);
             }
         } catch (error) {
@@ -1260,13 +1284,15 @@ async function forwardRequest(
     }
 
     try {
-        await requestWithReplayBoundary(
+        const payload = await requestWithReplayBoundary(
             activeGateway,
             method,
             parameters,
             requestOptions
         );
-        if (method.startsWith("sessions.")) {
+        if (method === "sessions.list") {
+            publishGatewaySessions(activeGateway, normalizeGatewaySessionList(payload));
+        } else if (method.startsWith("sessions.")) {
             await refreshSessionsAfterRequest(activeGateway);
         }
         return true;

@@ -3035,7 +3035,7 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 });
                 await waitFor(() =>
-                    expect(result.current.hasConfirmedSessionList).toBe(false)
+                    expect(result.current.hasConfirmedSessionList).toBe(true)
                 );
             }
             act(() => {

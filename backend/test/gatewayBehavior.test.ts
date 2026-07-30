@@ -1032,6 +1032,45 @@ describe("gateway behavior", () => {
         expect(providerMismatchSession).not.toHaveProperty("thinkingLevels");
         expect(providerMismatchSession).not.toHaveProperty("thinkingOptions");
 
+        await waitFor(
+            () =>
+                (client?.requests.filter(({ method }) => method === "sessions.list")
+                    .length ?? 0) >= 2
+        );
+        const sessionListRequestCount = client?.requests.filter(
+            ({ method }) => method === "sessions.list"
+        ).length;
+        socket.emitMessage({
+            id: "browser-session-list",
+            method: "sessions.list",
+            params: {},
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"browser-session-list"'))
+        );
+        const browserSessionList = socket.sent
+            .map(
+                (raw) =>
+                    JSON.parse(raw) as {
+                        id?: string;
+                        payload?: { sessions?: unknown[] };
+                    }
+            )
+            .find((message) => message.id === "browser-session-list");
+        expect(browserSessionList?.payload?.sessions).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "sess1",
+                    key: "agent:main:main",
+                    type: "MAIN",
+                }),
+            ])
+        );
+        expect(
+            client?.requests.filter(({ method }) => method === "sessions.list").length
+        ).toBe((sessionListRequestCount ?? 0) + 1);
+
         client?.options.onEvent?.({
             event: "session.tool",
             payload: { name: "tool", runId: "run-1" },
