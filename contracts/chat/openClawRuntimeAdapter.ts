@@ -385,7 +385,9 @@ function canonicalOpenClawProvider(
     payload: Record<string, unknown>
 ): CanonicalChatEvent["provider"] {
     const message = asRecord(payload.message);
-    const messageRole = stringValue(message?.role)?.toLowerCase();
+    const messageRole = (
+        stringValue(message?.role) || stringValue(payload.role)
+    )?.toLowerCase();
     const canUseSessionMetadata =
         eventName !== "session.message" || messageRole !== "user";
     return {

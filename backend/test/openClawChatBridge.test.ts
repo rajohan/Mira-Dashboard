@@ -1785,6 +1785,54 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("preserves compacted tool-call arguments when a later result coalesces", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.tool",
+            {
+                args: { input: "x".repeat(600_000) },
+                phase: "start",
+                runId: "large-tool-run",
+                sessionKey: MAIN,
+                toolCallId: "large-call",
+                toolName: "large-tool",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.tool",
+            {
+                phase: "result",
+                result: "done",
+                runId: "large-tool-run",
+                sessionKey: MAIN,
+                toolCallId: "large-call",
+                toolName: "large-tool",
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.events).toHaveLength(1);
+        const toolEvents = snapshot.events[0]!.canonicalEvents.filter(
+            (event) => event.kind === "tool"
+        );
+        expect(
+            toolEvents.some(
+                (event) =>
+                    event.message.toolCalls?.[0]?.arguments !== undefined &&
+                    JSON.stringify(event.message.toolCalls[0].arguments).length > 500_000
+            )
+        ).toBe(true);
+        expect(
+            toolEvents.some(
+                (event) =>
+                    event.message.toolResult?.content === "done" ||
+                    event.message.toolCalls?.[0]?.toolResult?.content === "done"
+            )
+        ).toBe(true);
+    });
+
     it("retains suppressed item diagnostics for snapshot replay", () => {
         const bridge = new OpenClawChatBridge();
         const thinking = bridge.recordEvent(

@@ -356,16 +356,44 @@ function coalesceReplayEnvelope(
     const nextPayload = asRecord(next.payload) || {};
     const previousData = asRecord(previousPayload.data) || previousPayload;
     const nextData = asRecord(nextPayload.data) || nextPayload;
-    return boundedCanonicalRuntimeEnvelope(
-        withCanonicalOpenClawEvents({
-            ...next,
-            payload: {
-                ...previousPayload,
-                ...nextPayload,
-                data: { ...previousData, ...nextData },
-            },
-        })
+    const canonical = withCanonicalOpenClawEvents({
+        ...next,
+        payload: {
+            ...previousPayload,
+            ...nextPayload,
+            data: { ...previousData, ...nextData },
+        },
+    });
+    const nextEventIds = new Set(canonical.canonicalEvents.map((event) => event.id));
+    const nextToolKeysWithArguments = new Set(
+        canonical.canonicalEvents.flatMap((event) =>
+            event.kind === "tool" &&
+            event.message.toolCalls?.some((toolCall) => toolCall.arguments !== undefined)
+                ? [event.toolKey]
+                : []
+        )
     );
+    const preservedToolCalls = new Map(
+        previous.canonicalEvents.flatMap((event) =>
+            event.kind === "tool" &&
+            event.message.toolCalls?.some((toolCall) => toolCall.arguments !== undefined)
+                ? [[event.toolKey, event] as const]
+                : []
+        )
+    );
+    return boundedCanonicalRuntimeEnvelope({
+        ...canonical,
+        canonicalEvents: [
+            ...preservedToolCalls
+                .values()
+                .filter(
+                    (event) =>
+                        !nextEventIds.has(event.id) &&
+                        !nextToolKeysWithArguments.has(event.toolKey)
+                ),
+            ...canonical.canonicalEvents,
+        ],
+    });
 }
 
 const TRANSCRIPT_BACKED_ITEM_KINDS = new Set([

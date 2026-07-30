@@ -108,6 +108,18 @@ describe("shared runtime contracts", () => {
                 sessionKey: "agent:main:main",
             },
         });
+        const topLevelSyntheticUser = withCanonicalOpenClawEvents({
+            ...common,
+            event: "session.message",
+            payload: {
+                content: "Continue",
+                model: "gpt-5.6-sol",
+                modelProvider: "openai",
+                role: "user",
+                runId: "synthetic-run",
+                sessionKey: "agent:main:main",
+            },
+        });
 
         expect(parseOpenClawRuntimeEnvelope(codex).canonicalEvents).toEqual(
             codex.canonicalEvents
@@ -133,6 +145,11 @@ describe("shared runtime contracts", () => {
             sequence: 65,
         });
         expect(syntheticUser.canonicalEvents[0]?.provider).toMatchObject({
+            format: "openclaw-session-message",
+            model: undefined,
+            provider: undefined,
+        });
+        expect(topLevelSyntheticUser.canonicalEvents[0]?.provider).toMatchObject({
             format: "openclaw-session-message",
             model: undefined,
             provider: undefined,
