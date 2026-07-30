@@ -65,6 +65,35 @@ describe("canonical chat turn projection", () => {
         });
     });
 
+    it("normalizes thinking from system finals before canonical validation", () => {
+        const result = projectChatWithCanonicalShadow(
+            [
+                {
+                    content: "Completed after analysis.",
+                    isFinal: true,
+                    role: "system",
+                    text: "Completed after analysis.",
+                    thinking: [{ text: "private analysis" }],
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(result.comparison).toMatchObject({
+            differenceKinds: [],
+            matches: true,
+            turnCount: 1,
+        });
+        expect(result.canonical?.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+            "thinking",
+            "assistant",
+        ]);
+    });
+
     it("retains stable source, sequence, lifecycle, and provider metadata", () => {
         const adapter = new OpenClawChatAdapter();
         const historyPage = canonicalizeOpenClawHistoryPage(
@@ -273,6 +302,78 @@ describe("canonical chat turn projection", () => {
         expect(first).toHaveLength(2);
         expect(first.map((turn) => turn.lifecycle)).toEqual(["unknown", "unknown"]);
         expect(replay.map((turn) => turn.id)).toEqual(first.map((turn) => turn.id));
+    });
+
+    it("splits consecutive runless prompts without continuation evidence", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "abandoned question",
+                    role: "user",
+                    text: "abandoned question",
+                },
+                {
+                    content: "replacement question",
+                    role: "user",
+                    text: "replacement question",
+                },
+                {
+                    content: "replacement answer",
+                    role: "assistant",
+                    text: "replacement answer",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(2);
+        expect(turns.map((turn) => turn.entries.map((entry) => entry.kind))).toEqual([
+            ["user"],
+            ["user", "assistant"],
+        ]);
+    });
+
+    it("keeps a runless steer with an in-progress tool response", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "initial question",
+                    role: "user",
+                    text: "initial question",
+                },
+                {
+                    content: "tool output",
+                    role: "toolResult",
+                    text: "tool output",
+                    toolResult: {
+                        content: "tool output",
+                        id: "tool-1",
+                        name: "search",
+                    },
+                },
+                {
+                    content: "steer the response",
+                    role: "user",
+                    text: "steer the response",
+                },
+                {
+                    content: "final answer",
+                    role: "assistant",
+                    text: "final answer",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(1);
+        expect(turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+            "user",
+            "tool",
+            "user",
+            "assistant",
+        ]);
     });
 
     it("preserves provider run identity on history-only turns", () => {
@@ -622,6 +723,10 @@ describe("canonical chat turn projection", () => {
         expect(result.legacy.rows).toHaveLength(1);
         expect(result.canonical).toBeUndefined();
         expect(result.comparison).toMatchObject({
+            canonicalError: {
+                message: "Canonical chat projection invariant failed: session",
+                name: "Error",
+            },
             differenceKinds: ["canonical-error"],
             matches: false,
             schemaVersion: 1,

@@ -369,7 +369,8 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
     const groups = new Map<string, ThinkingGroup>();
 
     for (const [index, message] of messages.entries()) {
-        if (message.role.toLowerCase() !== "assistant" || !message.thinking?.length) {
+        const role = message.role.toLowerCase();
+        if ((role !== "assistant" && role !== "system") || !message.thinking?.length) {
             continue;
         }
         const segment = segments[index] ?? 0;

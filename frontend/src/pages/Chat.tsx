@@ -19,7 +19,6 @@ import {
     writeStoredChatDiagnosticVisibility,
 } from "../components/features/chat/chatPageUtilities";
 import type { ChatPreviewItem } from "../components/features/chat/chatTypes";
-import { projectChatWithCanonicalShadow } from "../components/features/chat/domain/chatCanonicalProjection";
 import { createChatVisibility as createRuntimeVisibility } from "../components/features/chat/domain/chatPresentation";
 import { isSameChatSession } from "../components/features/chat/domain/chatState";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
@@ -32,6 +31,7 @@ import {
 import { useChatHistory } from "../components/features/chat/useChatHistory";
 import { useChatInputMedia } from "../components/features/chat/useChatInputMedia";
 import { useChatModels } from "../components/features/chat/useChatModels";
+import { useChatProjectionShadow } from "../components/features/chat/useChatProjectionShadow";
 import { useChatRuntime } from "../components/features/chat/useChatRuntime";
 import { useChatScroll } from "../components/features/chat/useChatScroll";
 import { Card } from "../components/ui/Card";
@@ -248,15 +248,15 @@ export function Chat() {
         transport,
     });
     const chatModelOptions = useChatModels(transport);
-    const chatVisibility = createRuntimeVisibility(showThinkingOutput, showToolOutput);
-    const projectionShadow = projectChatWithCanonicalShadow(
-        messages,
-        runtime.state,
+    const projectionShadow = useChatProjectionShadow({
+        deletedMessageKeys,
+        history: messages,
+        runtime: runtime.state,
         selectedSessionKey,
-        chatVisibility,
-        keepThinkingAfterFinal,
-        deletedMessageKeys
-    );
+        shouldKeepThinkingAfterFinal: keepThinkingAfterFinal,
+        shouldShowThinking: showThinkingOutput,
+        shouldShowTools: showToolOutput,
+    });
     const projection = projectionShadow.legacy;
     useEffect(() => {
         const { comparison } = projectionShadow;

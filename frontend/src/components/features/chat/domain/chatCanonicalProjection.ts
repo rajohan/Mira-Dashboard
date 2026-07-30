@@ -43,6 +43,10 @@ export type ChatProjectionShadowDifference =
     | "rows";
 
 export interface ChatProjectionShadowComparison {
+    canonicalError?: {
+        message: string;
+        name: string;
+    };
     canonicalFingerprint?: string;
     canonicalRowCount?: number;
     differenceKinds: ChatProjectionShadowDifference[];
@@ -67,6 +71,23 @@ export interface ChatProjectionShadowResult {
 interface CanonicalTurnDraft {
     entries: CanonicalChatTurnEntry[];
     run?: ChatRunState;
+}
+
+function canonicalProjectionErrorMetadata(error: unknown): {
+    message: string;
+    name: string;
+} {
+    const name =
+        error instanceof Error && /^[A-Za-z][A-Za-z0-9._ -]{0,79}$/.test(error.name)
+            ? error.name
+            : "UnknownError";
+    const message =
+        error instanceof Error &&
+        (error.message.startsWith("Canonical chat projection invariant failed:") ||
+            error.message.startsWith("Canonical chat turn invariant failed:"))
+            ? error.message
+            : "Unexpected canonical projection failure";
+    return { message, name };
 }
 
 function assertCanonicalProjectionContext(context: ChatProjectionContext): void {
@@ -259,6 +280,14 @@ function draftHasAnswer(draft: CanonicalTurnDraft): boolean {
     );
 }
 
+function draftHasToolContinuation(draft: CanonicalTurnDraft): boolean {
+    return draft.entries.some(
+        (entry) =>
+            entry.kind === "tool" ||
+            Boolean(entry.message.toolCalls?.length || entry.message.toolResult)
+    );
+}
+
 function draftRunId(draft: CanonicalTurnDraft): string | undefined {
     if (draft.run) {
         return draft.run.runId;
@@ -293,7 +322,7 @@ function shouldStartTurn(
     if (draft.run && run && draft.run.runId === run.runId) {
         return false;
     }
-    return draftHasAnswer(draft);
+    return draftHasAnswer(draft) || !draftHasToolContinuation(draft);
 }
 
 function uniqueProviders(
@@ -597,9 +626,10 @@ export function projectChatWithCanonicalShadow(
             comparison: compareChatProjectionShadow(legacy, projection, turns.length),
             legacy,
         };
-    } catch {
+    } catch (error) {
         return {
             comparison: {
+                canonicalError: canonicalProjectionErrorMetadata(error),
                 differenceKinds: ["canonical-error"],
                 legacyFingerprint: projectionFingerprint(projectionSections(legacy)),
                 legacyRowCount: legacy.rows.length,
