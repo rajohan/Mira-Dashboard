@@ -5093,6 +5093,10 @@ describe("Mira Dashboard frontend behavior", () => {
                     expect(JSON.parse(requestBodyText(init?.body))).toEqual({
                         deploy: true,
                         expectedHeadSha: "a".repeat(40),
+                        expectedStackHeads: [
+                            { headSha: "9".repeat(40), number: 188 },
+                            { headSha: "a".repeat(40), number: 189 },
+                        ],
                         mergeStack: true,
                     });
                     return Response.json({ isOk: true, message: "approved" });
@@ -5214,6 +5218,10 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         await approvePullRequest.result.current.mutateAsync({
             expectedHeadSha: "a".repeat(40),
+            expectedStackHeads: [
+                { headSha: "9".repeat(40), number: 188 },
+                { headSha: "a".repeat(40), number: 189 },
+            ],
             mergeStack: true,
             number: 189,
             willDeploy: true,

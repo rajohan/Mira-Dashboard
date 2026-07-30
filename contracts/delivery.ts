@@ -40,6 +40,11 @@ export const pullRequestStackSchema = v.strictObject({
     size: positiveIntegerSchema,
 });
 
+export const pullRequestExpectedHeadSchema = v.strictObject({
+    headSha: fullCommitShaSchema,
+    number: positiveIntegerSchema,
+});
+
 const optionalPullRequestStackSchema = v.optional(
     v.pipe(
         v.nullable(pullRequestStackSchema),
@@ -282,6 +287,9 @@ export const deploymentActionResponseSchema = v.strictObject({
 export const pullRequestApproveRequestSchema = strictJsonObjectSchema({
     deploy: v.optional(v.boolean()),
     expectedHeadSha: fullCommitShaSchema,
+    expectedStackHeads: v.optional(
+        v.pipe(v.array(pullRequestExpectedHeadSchema), v.minLength(1), v.maxLength(100))
+    ),
     mergeStack: v.optional(v.boolean()),
 });
 
@@ -310,6 +318,7 @@ export type PullRequestReview = v.InferOutput<typeof pullRequestReviewSchema>;
 export type PullRequestReviewConnection = v.InferOutput<
     typeof pullRequestReviewConnectionSchema
 >;
+export type PullRequestExpectedHead = v.InferOutput<typeof pullRequestExpectedHeadSchema>;
 export type PullRequestStack = v.InferOutput<typeof pullRequestStackSchema>;
 export type PullRequestSummary = v.InferOutput<typeof pullRequestSummarySchema>;
 export type PublicGitHubPullRequest = v.InferOutput<typeof publicGitHubPullRequestSchema>;

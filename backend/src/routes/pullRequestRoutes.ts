@@ -167,6 +167,7 @@ export const pullRequestRoutes = {
                 const response = await runPullRequestMutation(() =>
                     runPullRequestApproval(number, body?.deploy === true, {
                         expectedHeadSha: body.expectedHeadSha,
+                        expectedStackHeads: body.expectedStackHeads,
                         mergeStack: body?.mergeStack,
                     })
                 );

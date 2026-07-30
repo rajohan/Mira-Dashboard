@@ -3356,6 +3356,10 @@ describe("Mira Dashboard pages", () => {
                     expect(parseRequestBody(init)).toEqual({
                         deploy: false,
                         expectedHeadSha: "b".repeat(40),
+                        expectedStackHeads: [
+                            { headSha: "a".repeat(40), number: 352 },
+                            { headSha: "b".repeat(40), number: 353 },
+                        ],
                         mergeStack: true,
                     });
                     return Promise.resolve(
@@ -3437,7 +3441,7 @@ describe("Mira Dashboard pages", () => {
         expect(screen.getByRole("heading", { name: "Merge stack" })).toBeInTheDocument();
         expect(screen.getByText(/one all-or-nothing merge group/i)).toBeInTheDocument();
         expect(
-            screen.getByText(/selected layer is exact head bbbbbbbb/i)
+            screen.getByText(/Included exact heads: #352 aaaaaaaa → #353 bbbbbbbb/u)
         ).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Merge stack" }));
         await waitFor(() => {
@@ -3450,6 +3454,66 @@ describe("Mira Dashboard pages", () => {
                 )
             ).toBeInTheDocument();
         });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("keeps native stacks outside main read-only", async () => {
+        const defaultFetch = globalThis.fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                if (requestUrl(input) === "/api/pull-requests") {
+                    return Promise.resolve(
+                        Response.json({
+                            pullRequests: [
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "develop",
+                                    canReviewerApprove: true,
+                                    createdAt: "2026-07-30T08:00:00.000Z",
+                                    headRefName: "feat/develop-stack",
+                                    headRefOid: "c".repeat(40),
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 364,
+                                    previewEligible: true,
+                                    reviewDecision: "REVIEW_REQUIRED",
+                                    stack: {
+                                        baseRefName: "develop",
+                                        number: 361,
+                                        position: 1,
+                                        size: 1,
+                                    },
+                                    statusCheckRollup: [
+                                        {
+                                            conclusion: "SUCCESS",
+                                            status: "COMPLETED",
+                                        },
+                                    ],
+                                    title: "Develop-only stack",
+                                    updatedAt: "2026-07-30T09:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/364",
+                                },
+                            ],
+                        })
+                    );
+                }
+                return defaultFetch(input, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+        const stack = await screen.findByLabelText("GitHub stack #361");
+        expect(
+            within(stack).getByText(/Only main-rooted stacks can be managed/u)
+        ).toBeInTheDocument();
+        expect(within(stack).queryByRole("button", { name: "Approve PR" })).toBeNull();
+        expect(within(stack).queryByRole("button", { name: "Run in dev" })).toBeNull();
+        expect(within(stack).queryByRole("button", { name: /Merge/u })).toBeNull();
 
         view.unmount();
         view.queryClient.clear();

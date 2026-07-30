@@ -229,14 +229,22 @@ fi
     chmodSync(binaryPath, 0o755);
 }
 
-function writeFakeGhWithoutStackGraphqlFields(binaryPath: string, logPath: string): void {
+function writeFakeGhWithoutStackGraphqlFields(
+    binaryPath: string,
+    logPath: string,
+    probeFails = false
+): void {
     writeFileSync(
         binaryPath,
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
 if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
-  printf '%s\n' '{"data":{"__type":{"fields":[{"name":"number"}]}}}'
+  ${
+      probeFails
+          ? "printf 'stack metadata probe unavailable\\n' >&2\n  exit 2"
+          : `printf '%s\\n' '{"data":{"__type":{"fields":[{"name":"number"}]}}}'`
+  }
 elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
   printf '%s\n' '{"number":31,"title":"Fallback PR","body":"","url":"https://github.test/pr/31","headRefName":"fallback","headRefOid":"head31","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
 else
@@ -270,7 +278,7 @@ elif [[ "$1 $2 $3" == "pr close 5" ]]; then
 elif [[ "$1" == "api" && "$2" == repos/rajohan/Mira-Dashboard/stacks?pull_request=* ]]; then
   printf '[]\n'
 elif [[ "$1 $2" == "pr list" ]]; then
-  printf '0\n'
+  printf '[]\n'
 else
   echo "unexpected gh args: $*" >&2
   exit 2
@@ -307,9 +315,12 @@ fi
 function writeFakeGhForPullRequestMerge(
     binaryPath: string,
     logPath: string,
-    hasDependentPullRequest = false
+    dependentPullRequestNumbers: number[] = []
 ): void {
     const headSha = "1".repeat(40);
+    const dependentPullRequestsJson = JSON.stringify(
+        dependentPullRequestNumbers.map((number) => ({ number }))
+    );
     writeFileSync(
         binaryPath,
         String.raw`#!/usr/bin/env bash
@@ -351,7 +362,7 @@ elif [[ "$1 $2 $3" == "pr merge 11" ]]; then
 elif [[ "$1" == "api" && "$2" == "repos/rajohan/Mira-Dashboard/stacks?pull_request=11&per_page=2" ]]; then
   printf '[]\n'
 elif [[ "$1 $2" == "pr list" ]]; then
-  printf '%s\n' ${hasDependentPullRequest ? "1" : "0"}
+  printf '%s\n' ${JSON.stringify(dependentPullRequestsJson)}
 else
   echo "unexpected gh args: $*" >&2
   exit 2
@@ -375,6 +386,7 @@ function writeFakeGhForPullRequestStackMerge(
         | "request-error-merged",
     targetNumber: 11 | 12 | 13 = 13,
     options: {
+        changedHeadNumber?: 11 | 12 | 13;
         closedNumber?: 11 | 12 | 13;
         unconfirmedNumber?: 11 | 12 | 13;
     } = {}
@@ -384,6 +396,10 @@ function writeFakeGhForPullRequestStackMerge(
         12: "2".repeat(40),
         13: "3".repeat(40),
     };
+    const currentPullRequestHeadShas = { ...pullRequestHeadShas };
+    if (options.changedHeadNumber) {
+        currentPullRequestHeadShas[options.changedHeadNumber] = "9".repeat(40);
+    }
     const defaultPullRequestState =
         status === "pending-missing-id" || status === "pending-options-mismatch"
             ? "OPEN"
@@ -469,7 +485,7 @@ elif [[ "$1 $2 $3" == "pr view 11" ]]; then
           createdAt: "2026-07-30T10:00:00.000Z",
           deletions: 0,
           headRefName: "stack-bottom",
-          headRefOid: pullRequestHeadShas[11],
+          headRefOid: currentPullRequestHeadShas[11],
           isDraft: false,
           mergeable: "MERGEABLE",
           mergeStateStatus: "CLEAN",
@@ -493,7 +509,7 @@ elif [[ "$1 $2 $3" == "pr view 12" ]]; then
           createdAt: "2026-07-30T10:01:00.000Z",
           deletions: 0,
           headRefName: "stack-middle",
-          headRefOid: pullRequestHeadShas[12],
+          headRefOid: currentPullRequestHeadShas[12],
           isDraft: false,
           mergeable: "MERGEABLE",
           mergeStateStatus: "CLEAN",
@@ -517,7 +533,7 @@ elif [[ "$1 $2 $3" == "pr view 13" ]]; then
           createdAt: "2026-07-30T10:02:00.000Z",
           deletions: 0,
           headRefName: "stack-top",
-          headRefOid: pullRequestHeadShas[13],
+          headRefOid: currentPullRequestHeadShas[13],
           isDraft: false,
           mergeable: "MERGEABLE",
           mergeStateStatus: "CLEAN",
@@ -547,7 +563,7 @@ elif [[ "$1" == "api" && "$2" == ${JSON.stringify(
                       draft: false,
                       head: {
                           ref: "stack-bottom",
-                          sha: pullRequestHeadShas[11],
+                          sha: currentPullRequestHeadShas[11],
                       },
                       merged_at: null,
                       number: 11,
@@ -557,7 +573,7 @@ elif [[ "$1" == "api" && "$2" == ${JSON.stringify(
                       draft: false,
                       head: {
                           ref: "stack-middle",
-                          sha: pullRequestHeadShas[12],
+                          sha: currentPullRequestHeadShas[12],
                       },
                       merged_at: null,
                       number: 12,
@@ -567,7 +583,7 @@ elif [[ "$1" == "api" && "$2" == ${JSON.stringify(
                       draft: false,
                       head: {
                           ref: "stack-top",
-                          sha: pullRequestHeadShas[13],
+                          sha: currentPullRequestHeadShas[13],
                       },
                       merged_at: null,
                       number: 13,
@@ -841,6 +857,15 @@ function stackPullRequestSummary(
         url: `https://github.test/pr/${number}`,
         ...overrides,
     };
+}
+
+function expectedStackHeadsThrough(number: 11 | 12 | 13) {
+    return ([11, 12, 13] as const)
+        .filter((pullRequestNumber) => pullRequestNumber <= number)
+        .map((pullRequestNumber) => ({
+            headSha: String(pullRequestNumber - 10).repeat(40),
+            number: pullRequestNumber,
+        }));
 }
 
 function writeFakeGhForNativeStackReviewApproval(
@@ -4026,10 +4051,40 @@ fi
                 title: "Fallback PR",
             }),
         ]);
+        expect(await listDashboardPullRequests()).toEqual(pullRequests);
         expect(pullRequests[0]?.stack).toBeUndefined();
         const ghCommands = await Bun.file(ghLog).text();
-        expect(ghCommands.match(/api graphql/gu)).toHaveLength(2);
+        expect(ghCommands.match(/api graphql/gu)).toHaveLength(3);
+        expect(ghCommands.match(/__type\(name: "PullRequest"\)/gu)).toHaveLength(1);
         expect(ghCommands).toContain('__type(name: "PullRequest")');
+        expect(ghCommands).not.toContain("stackEntry");
+    });
+
+    it("lists ordinary pull requests when the optional stack capability probe fails", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-list-probe-failure-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-list-probe-failure-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhWithoutStackGraphqlFields(path.join(fakeBin, "gh"), ghLog, true);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+
+        const { listDashboardPullRequests } =
+            await import("../src/services/pullRequests.ts");
+
+        const pullRequests = await listDashboardPullRequests();
+        expect(pullRequests).toEqual([
+            expect.objectContaining({
+                number: 31,
+                title: "Fallback PR",
+            }),
+        ]);
+        expect(await listDashboardPullRequests()).toEqual(pullRequests);
+        expect(pullRequests[0]?.stack).toBeUndefined();
+        const ghCommands = await Bun.file(ghLog).text();
+        expect(ghCommands.match(/api graphql/gu)).toHaveLength(3);
+        expect(ghCommands.match(/__type\(name: "PullRequest"\)/gu)).toHaveLength(1);
         expect(ghCommands).not.toContain("stackEntry");
     });
 
@@ -4114,6 +4169,10 @@ fi
         ];
 
         expect(await validatePullRequestPreviewScope(scope[2]!, scope)).toBeUndefined();
+        const draftScope = [scope[0]!, scope[1]!, { ...scope[2]!, isDraft: true }];
+        expect(
+            await validatePullRequestPreviewScope(draftScope[2]!, draftScope)
+        ).toBeUndefined();
         expect(
             await validatePullRequestPreviewScope(
                 { ...scope[2]!, stack: undefined },
@@ -4562,8 +4621,21 @@ fi
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
         const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        expect(
+            await captureRejection(() =>
+                approvePullRequest(13, false, {
+                    expectedHeadSha: "3".repeat(40),
+                    mergeStack: true,
+                })
+            )
+        ).toMatchObject({
+            message:
+                "Native stack merge requires the expected head of every included pull request",
+            statusCode: 400,
+        });
         const result = await approvePullRequest(13, false, {
             expectedHeadSha: "3".repeat(40),
+            expectedStackHeads: expectedStackHeadsThrough(13),
             mergeStack: true,
         });
 
@@ -4628,6 +4700,7 @@ fi
         const { approvePullRequest } = await import("../src/services/pullRequests.ts");
         const pendingResult = await approvePullRequest(13, false, {
             expectedHeadSha: "3".repeat(40),
+            expectedStackHeads: expectedStackHeadsThrough(13),
             mergeStack: true,
         });
         expect(pendingResult).toMatchObject({
@@ -4646,6 +4719,7 @@ fi
             await captureRejection(() =>
                 approvePullRequest(13, false, {
                     expectedHeadSha: "3".repeat(40),
+                    expectedStackHeads: expectedStackHeadsThrough(13),
                     mergeStack: true,
                 })
             )
@@ -4663,6 +4737,7 @@ fi
             await captureRejection(() =>
                 approvePullRequest(13, false, {
                     expectedHeadSha: "3".repeat(40),
+                    expectedStackHeads: expectedStackHeadsThrough(13),
                     mergeStack: true,
                 })
             )
@@ -4679,6 +4754,7 @@ fi
             await captureRejection(() =>
                 approvePullRequest(13, false, {
                     expectedHeadSha: "3".repeat(40),
+                    expectedStackHeads: expectedStackHeadsThrough(13),
                     mergeStack: true,
                 })
             )
@@ -4693,12 +4769,35 @@ fi
         );
         const reconciledResult = await approvePullRequest(13, false, {
             expectedHeadSha: "3".repeat(40),
+            expectedStackHeads: expectedStackHeadsThrough(13),
             mergeStack: true,
         });
         expect(reconciledResult).toMatchObject({
             isOk: true,
             mergeStatus: "merged",
         });
+
+        writeFileSync(ghLog, "");
+        writeFakeGhForPullRequestStackMerge(
+            path.join(fakeBin, "gh"),
+            ghLog,
+            "merged",
+            13,
+            { changedHeadNumber: 11 }
+        );
+        expect(
+            await captureRejection(() =>
+                approvePullRequest(13, false, {
+                    expectedHeadSha: "3".repeat(40),
+                    expectedStackHeads: expectedStackHeadsThrough(13),
+                    mergeStack: true,
+                })
+            )
+        ).toMatchObject({
+            message:
+                "PR #11 changed after the Delivery confirmation. Refresh before merging the stack",
+        });
+        expect(await Bun.file(ghLog).text()).not.toContain("merge-async");
     });
 
     it("blocks ordinary merge and reject actions for native stack members", async () => {
@@ -4760,7 +4859,7 @@ fi
         const fakeBin = createTemporaryRoot("mira-pr-candidate-guard-bin-");
         const ghLog = path.join(fakeRoot, "gh.log");
         const gitLog = path.join(fakeRoot, "git.log");
-        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog, true);
+        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog, [11]);
         writeFakeGitForPullRequestStackMerge(
             path.join(fakeBin, "git"),
             fakeRoot,
@@ -4773,6 +4872,19 @@ fi
 
         const { approvePullRequest, rejectPullRequest } =
             await import("../src/services/pullRequests.ts");
+        expect(
+            await approvePullRequest(11, false, {
+                expectedHeadSha: "1".repeat(40),
+                mergeStack: false,
+            })
+        ).toMatchObject({
+            isOk: true,
+            message: "PR #11 merged",
+        });
+        expect(await Bun.file(ghLog).text()).toContain("pr merge 11");
+
+        writeFileSync(ghLog, "");
+        writeFakeGhForPullRequestMerge(path.join(fakeBin, "gh"), ghLog, [12]);
         expect(
             await captureRejection(() =>
                 approvePullRequest(11, false, {
@@ -4827,6 +4939,7 @@ fi
         const { approvePullRequest } = await import("../src/services/pullRequests.ts");
         const result = await approvePullRequest(12, false, {
             expectedHeadSha: "2".repeat(40),
+            expectedStackHeads: expectedStackHeadsThrough(12),
             mergeStack: true,
         });
 
@@ -4888,6 +5001,7 @@ fi
 
             const action = approvePullRequest(13, false, {
                 expectedHeadSha: "3".repeat(40),
+                expectedStackHeads: expectedStackHeadsThrough(13),
                 mergeStack: true,
             });
             expect(await captureRejection(() => action)).toMatchObject({
@@ -4932,6 +5046,7 @@ fi
 
             const action = approvePullRequest(13, true, {
                 expectedHeadSha: "3".repeat(40),
+                expectedStackHeads: expectedStackHeadsThrough(13),
                 mergeStack: true,
             });
             const outcome = await action.then(

@@ -19,6 +19,7 @@ import type {
     DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
+    PullRequestExpectedHead,
     PullRequestPreviewStatus,
     PullRequestSummary,
 } from "../../../contracts/delivery";
@@ -61,8 +62,8 @@ import { formatDate } from "../utils/format";
 /** Defines pending action. */
 type PendingAction =
     | undefined
-    | { type: "merge"; pr: PullRequestSummary }
-    | { type: "merge-deploy"; pr: PullRequestSummary }
+    | { type: "merge"; pr: PullRequestSummary; scope: PullRequestSummary[] }
+    | { type: "merge-deploy"; pr: PullRequestSummary; scope: PullRequestSummary[] }
     | { type: "review-approve"; pr: PullRequestSummary }
     | {
           type: "preview-rebuild";
@@ -552,6 +553,36 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
     }
 }
 
+function exactPullRequestHeadSummary(pullRequests: PullRequestSummary[]): string {
+    return pullRequests
+        .map(
+            (pullRequest) =>
+                `#${pullRequest.number} ${pullRequest.headRefOid?.slice(0, 8) ?? "unavailable"}`
+        )
+        .join(" → ");
+}
+
+function expectedStackHeadsForMerge(
+    pullRequest: PullRequestSummary,
+    scope: PullRequestSummary[]
+): PullRequestExpectedHead[] | undefined {
+    if (!pullRequest.stack) return undefined;
+    return scope.map((candidate) => {
+        if (
+            typeof candidate.headRefOid !== "string" ||
+            !FULL_COMMIT_SHA_PATTERN.test(candidate.headRefOid)
+        ) {
+            throw new Error(
+                `Refresh Delivery before merging because the exact head for PR #${candidate.number} is unavailable`
+            );
+        }
+        return {
+            headSha: candidate.headRefOid,
+            number: candidate.number,
+        };
+    });
+}
+
 /**
  * Performs action message.
  * @returns Action message result.
@@ -560,13 +591,13 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
     switch (action.type) {
         case "merge": {
             if (action.pr.stack) {
-                return `Merge GitHub stack #${action.pr.stack.number} through PR #${action.pr.number}: ${action.pr.title}?\n\nThe selected layer is exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}. GitHub will submit every open PR from the bottom of the stack through #${action.pr.number} as one all-or-nothing merge group. Direct merges use squash; a required merge queue uses its repository policy. Delivery removes each merged PR's clean local worktree and managed dev data only after every included PR confirms as merged. If GitHub queues the stack, Delivery retains every worktree. It will not deploy.`;
+                return `Merge GitHub stack #${action.pr.stack.number} through PR #${action.pr.number}: ${action.pr.title}?\n\nIncluded exact heads: ${exactPullRequestHeadSummary(action.scope)}. GitHub will submit every open PR from the bottom of the stack through #${action.pr.number} as one all-or-nothing merge group. Direct merges use squash; a required merge queue uses its repository policy. Delivery removes each merged PR's clean local worktree and managed dev data only after every included PR confirms as merged. If GitHub queues the stack, Delivery retains every worktree. It will not deploy.`;
             }
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"} and delete the remote branch. It will not deploy.`;
         }
         case "merge-deploy": {
             if (action.pr.stack) {
-                return `Merge and deploy GitHub stack #${action.pr.stack.number} through PR #${action.pr.number}: ${action.pr.title}?\n\nThe selected layer is exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}. GitHub will submit every open PR from the bottom of the stack through #${action.pr.number} as one all-or-nothing merge group. Direct merges use squash; a required merge queue uses its repository policy. After every included PR confirms as merged, Delivery removes its clean local worktree and managed dev data, syncs ${DEFAULT_BASE}, publishes an immutable release, atomically activates it, restarts web and worker, and verifies commit-bound readiness. If GitHub queues the stack, Delivery keeps all worktrees and does not auto-deploy; use Deploy latest ${DEFAULT_BASE} after the queue finishes.`;
+                return `Merge and deploy GitHub stack #${action.pr.stack.number} through PR #${action.pr.number}: ${action.pr.title}?\n\nIncluded exact heads: ${exactPullRequestHeadSummary(action.scope)}. GitHub will submit every open PR from the bottom of the stack through #${action.pr.number} as one all-or-nothing merge group. Direct merges use squash; a required merge queue uses its repository policy. After every included PR confirms as merged, Delivery removes its clean local worktree and managed dev data, syncs ${DEFAULT_BASE}, publishes an immutable release, atomically activates it, restarts web and worker, and verifies commit-bound readiness. If GitHub queues the stack, Delivery keeps all worktrees and does not auto-deploy; use Deploy latest ${DEFAULT_BASE} after the queue finishes.`;
             }
             return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge exact head ${action.pr.headRefOid?.slice(0, 8) ?? "shown in Delivery"}, sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
         }
@@ -893,8 +924,13 @@ export function Delivery() {
                             "Refresh Delivery before merging because the exact PR head is unavailable"
                         );
                     }
+                    const expectedStackHeads = expectedStackHeadsForMerge(
+                        action.pr,
+                        action.scope
+                    );
                     const result = await approvePullRequest.mutateAsync({
                         expectedHeadSha,
+                        expectedStackHeads,
                         mergeStack: action.pr.stack !== undefined,
                         number: action.pr.number,
                         willDeploy: false,
@@ -921,8 +957,13 @@ export function Delivery() {
                             "Refresh Delivery before merging because the exact PR head is unavailable"
                         );
                     }
+                    const expectedStackHeads = expectedStackHeadsForMerge(
+                        action.pr,
+                        action.scope
+                    );
                     const result = await approvePullRequest.mutateAsync({
                         expectedHeadSha,
+                        expectedStackHeads,
                         mergeStack: action.pr.stack !== undefined,
                         number: action.pr.number,
                         willDeploy: true,
@@ -1213,6 +1254,17 @@ export function Delivery() {
                 </p>
             );
         }
+        if (pr.stack && pr.stack.baseRefName !== DEFAULT_BASE) {
+            return (
+                <p className="col-span-full w-full text-xs text-primary-400">
+                    GitHub stack #{pr.stack.number} targets{" "}
+                    <span className="font-mono text-primary-300">
+                        {pr.stack.baseRefName}
+                    </span>
+                    . Only {DEFAULT_BASE}-rooted stacks can be managed from Delivery.
+                </p>
+            );
+        }
         const mergeGroup = pullRequestStackMergeGroup(pr, pullRequests);
         const draftPullRequest = mergeGroup.find((pullRequest) => pullRequest.isDraft);
         const checksBlockedPullRequest = mergeGroup.find(
@@ -1224,9 +1276,11 @@ export function Delivery() {
         const githubBlockedPullRequest = mergeGroup.find((pullRequest) =>
             isGithubMergeBlocked(pullRequest)
         );
-        const isExpectedHeadAvailable =
-            typeof pr.headRefOid === "string" &&
-            FULL_COMMIT_SHA_PATTERN.test(pr.headRefOid);
+        const missingExpectedHeadPullRequest = mergeGroup.find(
+            (pullRequest) =>
+                typeof pullRequest.headRefOid !== "string" ||
+                !FULL_COMMIT_SHA_PATTERN.test(pullRequest.headRefOid)
+        );
         const canUpdateBranch =
             !pr.stack &&
             pr.baseRefName === DEFAULT_BASE &&
@@ -1239,7 +1293,7 @@ export function Delivery() {
             checksBlockedPullRequest !== undefined ||
             reviewBlockedPullRequest !== undefined ||
             githubBlockedPullRequest !== undefined ||
-            !isExpectedHeadAvailable;
+            missingExpectedHeadPullRequest !== undefined;
         let mergeDisabledReason: string | undefined;
         if (draftPullRequest) {
             mergeDisabledReason = `PR #${draftPullRequest.number} is a draft`;
@@ -1249,9 +1303,8 @@ export function Delivery() {
             mergeDisabledReason = `Approve PR #${reviewBlockedPullRequest.number} before merging`;
         } else if (githubBlockedPullRequest) {
             mergeDisabledReason = `GitHub reports PR #${githubBlockedPullRequest.number} is blocked from merging`;
-        } else if (!isExpectedHeadAvailable) {
-            mergeDisabledReason =
-                "Refresh Delivery before merging because the exact PR head is unavailable";
+        } else if (missingExpectedHeadPullRequest) {
+            mergeDisabledReason = `Refresh Delivery before merging because the exact head for PR #${missingExpectedHeadPullRequest.number} is unavailable`;
         } else if (isProductionActionBlocked) {
             mergeDisabledReason = productionActionBlockedMessage;
         }
@@ -1316,7 +1369,13 @@ export function Delivery() {
                 {previewActions.controls}
                 <Button
                     variant="primary"
-                    onClick={() => setPendingAction({ type: "merge-deploy", pr })}
+                    onClick={() =>
+                        setPendingAction({
+                            pr,
+                            scope: mergeGroup,
+                            type: "merge-deploy",
+                        })
+                    }
                     disabled={isMergeDisabled}
                     aria-describedby={mergeDisabledReasonId}
                 >
@@ -1325,7 +1384,9 @@ export function Delivery() {
                 </Button>
                 <Button
                     variant="secondary"
-                    onClick={() => setPendingAction({ type: "merge", pr })}
+                    onClick={() =>
+                        setPendingAction({ pr, scope: mergeGroup, type: "merge" })
+                    }
                     disabled={isMergeDisabled}
                     aria-describedby={mergeDisabledReasonId}
                 >

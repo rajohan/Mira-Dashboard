@@ -176,11 +176,19 @@ describe("shared runtime contracts", () => {
             parsePullRequestApproveRequest({
                 deploy: true,
                 expectedHeadSha: "a".repeat(40),
+                expectedStackHeads: [
+                    { headSha: "9".repeat(40), number: 352 },
+                    { headSha: "a".repeat(40), number: 353 },
+                ],
                 mergeStack: true,
             })
         ).toEqual({
             deploy: true,
             expectedHeadSha: "a".repeat(40),
+            expectedStackHeads: [
+                { headSha: "9".repeat(40), number: 352 },
+                { headSha: "a".repeat(40), number: 353 },
+            ],
             mergeStack: true,
         });
         expect(parsePullRequestStackCreateRequest({ pullRequests: [352, 353] })).toEqual({
@@ -197,6 +205,13 @@ describe("shared runtime contracts", () => {
         expect(() =>
             parsePullRequestApproveRequest({
                 expectedHeadSha: "not-a-full-sha",
+                mergeStack: true,
+            })
+        ).toThrow();
+        expect(() =>
+            parsePullRequestApproveRequest({
+                expectedHeadSha: "a".repeat(40),
+                expectedStackHeads: [{ headSha: "short", number: 352 }],
                 mergeStack: true,
             })
         ).toThrow();

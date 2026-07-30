@@ -16,6 +16,7 @@ import {
     type ProductionCheckoutStatus,
     type PullRequestActionResponse,
     type PullRequestApproveRequest,
+    type PullRequestExpectedHead,
     type PullRequestPreviewStatus,
     type PullRequestPreviewStartRequest,
     type PullRequestRejectRequest,
@@ -106,7 +107,11 @@ async function fetchPullRequestPreview(): Promise<PullRequestPreviewStatus> {
 async function approvePullRequest(
     number: number,
     willDeploy: boolean,
-    options: { expectedHeadSha: string; mergeStack?: boolean }
+    options: {
+        expectedHeadSha: string;
+        expectedStackHeads?: PullRequestExpectedHead[];
+        mergeStack?: boolean;
+    }
 ): Promise<PullRequestActionResponse> {
     return apiPostParsed(
         `/pull-requests/${number}/approve`,
@@ -114,6 +119,7 @@ async function approvePullRequest(
         {
             deploy: willDeploy,
             expectedHeadSha: options.expectedHeadSha,
+            expectedStackHeads: options.expectedStackHeads,
             mergeStack: options.mergeStack,
         } satisfies PullRequestApproveRequest
     );
@@ -312,17 +318,20 @@ export function useApprovePullRequest() {
     return useMutation({
         mutationFn: ({
             expectedHeadSha,
+            expectedStackHeads,
             mergeStack,
             number,
             willDeploy,
         }: {
             expectedHeadSha: string;
+            expectedStackHeads?: PullRequestExpectedHead[];
             mergeStack?: boolean;
             number: number;
             willDeploy: boolean;
         }) =>
             approvePullRequest(number, willDeploy, {
                 expectedHeadSha,
+                expectedStackHeads,
                 mergeStack,
             }),
         onSuccess: () => {
