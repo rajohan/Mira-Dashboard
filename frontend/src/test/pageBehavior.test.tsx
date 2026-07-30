@@ -4840,6 +4840,50 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("does not report projection parity after selected chat history fails", async () => {
+        const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(findSocketRequest(socket, "sessions.list")).toBeDefined();
+        });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                dashboardSessionFixture({
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    id: "session-main",
+                    key: "agent:main:main",
+                    model: "codex",
+                    type: "MAIN",
+                    updatedAt: Date.parse("2026-07-30T10:00:00.000Z"),
+                }),
+            ],
+        });
+        await waitFor(() => {
+            expect(findSocketRequest(socket, "chat.history")).toBeDefined();
+        });
+        await respondToSocketRequest(
+            socket,
+            "chat.history",
+            { message: "history unavailable" },
+            false
+        );
+        await waitFor(() => {
+            expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
+        });
+
+        expect(chatApiState.projectionShadowRequests).toBe(0);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("clears chat history loading when the selected session disappears", async () => {
         const view = renderChatPage();
 

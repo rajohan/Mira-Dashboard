@@ -246,7 +246,13 @@ export function Chat() {
         shouldStickToBottomRef: shouldStickToBottomRef,
         transport,
     });
-    const { isLoadingHistory, messages, refreshSoon, setMessages } = history;
+    const {
+        hasSuccessfulHistoryLoad,
+        isLoadingHistory,
+        messages,
+        refreshSoon,
+        setMessages,
+    } = history;
     const runtime = useChatRuntime({
         onError: setSendError,
         onSettled: refreshSoon,
@@ -264,7 +270,11 @@ export function Chat() {
         shouldShowTools: showToolOutput,
     });
     const projection = projectionShadow.legacy;
-    const canReportProjectionShadow = Boolean(selectedSession) && !isLoadingHistory;
+    const canReportProjectionShadow =
+        Boolean(selectedSession) &&
+        hasSuccessfulHistoryLoad &&
+        isConnected &&
+        !isLoadingHistory;
     useEffect(() => {
         if (!canReportProjectionShadow) {
             return;

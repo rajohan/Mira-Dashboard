@@ -47,6 +47,41 @@ function transportWithHistory(history: ChatTransport["history"]): ChatTransport 
 }
 
 describe("chat history controller", () => {
+    it("marks history successful only after a selected-session load succeeds", async () => {
+        const history = jest
+            .fn<ChatTransport["history"]>()
+            .mockRejectedValueOnce(new Error("history unavailable"))
+            .mockResolvedValueOnce([message("recovered")]);
+        const selectedSessionKeyRef = {
+            current: SESSION,
+        } as RefObject<string>;
+        const stickToBottomRef = {
+            current: true,
+        } as RefObject<boolean>;
+        const { result } = renderHook(() =>
+            useChatHistory({
+                isConnected: true,
+                onError: jest.fn(),
+                selectedSessionKey: SESSION,
+                selectedSessionKeyRef,
+                setIsAtBottom: jest.fn(),
+                shouldStickToBottomRef: stickToBottomRef,
+                transport: transportWithHistory(history),
+            })
+        );
+
+        await waitFor(() => expect(result.current.isLoadingHistory).toBe(false));
+        expect(result.current.hasSuccessfulHistoryLoad).toBe(false);
+
+        act(() => result.current.refreshSoon(SESSION, 0));
+        await waitFor(() =>
+            expect(result.current.messages.map((entry) => entry.text)).toEqual([
+                "recovered",
+            ])
+        );
+        expect(result.current.hasSuccessfulHistoryLoad).toBe(true);
+    });
+
     it("preserves an optimistic send while the first history request is pending", async () => {
         const initialLoad = Promise.withResolvers<ChatHistoryMessage[]>();
         const history = jest
