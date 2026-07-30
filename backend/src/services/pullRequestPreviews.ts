@@ -20,6 +20,8 @@ import {
 import {
     isDashboardPullRequestOpen,
     listDashboardPullRequests,
+    pullRequestPreviewScope,
+    validatePullRequestPreviewScope,
     validatePrNumber,
 } from "./pullRequests.ts";
 import {
@@ -65,17 +67,24 @@ function executionPreviewCommitSha(value: unknown): string {
 }
 
 /**
- * Converts a GitHub PR summary into the constrained host-preview contract.
+ * Converts a GitHub PR summary and its included layers into the host-preview contract.
+ * @param pullRequest Selected pull request.
+ * @param scope Main-rooted pull requests included in the selected head.
  * @returns Converted a GitHub PR summary into the constrained host-preview contract.
  */
 export function pullRequestPreviewCandidate(
-    pullRequest: PullRequestSummary
+    pullRequest: PullRequestSummary,
+    scope: readonly PullRequestSummary[] = [pullRequest]
 ): PullRequestPreviewCandidate {
+    const rootPullRequest = scope[0];
     return {
-        authorLogin: pullRequest.author?.login,
-        baseRefName: pullRequest.baseRefName,
+        authorLogins: scope.map((candidate) => candidate.author?.login),
         commitSha: pullRequest.headRefOid || "",
         number: pullRequest.number,
+        rootBaseRefName:
+            rootPullRequest?.stack?.baseRefName ??
+            rootPullRequest?.baseRefName ??
+            pullRequest.baseRefName,
         title: pullRequest.title,
     };
 }
@@ -88,7 +97,17 @@ async function findPullRequest(number: number): Promise<PullRequestPreviewCandid
             statusCode: 404,
         });
     }
-    return pullRequestPreviewCandidate(pullRequest);
+    const scope = pullRequestPreviewScope(pullRequest, pullRequests);
+    if (!scope) {
+        throw Object.assign(
+            new Error(
+                `PR #${number} is not part of a main-rooted GitHub stack or linear stack candidate`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    await validatePullRequestPreviewScope(pullRequest, scope);
+    return pullRequestPreviewCandidate(pullRequest, scope);
 }
 
 /**
@@ -261,14 +280,25 @@ export async function reconcileClosedPullRequestPreview(
 /**
  * Queues one managed preview startup in the dedicated production worker.
  * @param number Number value.
+ * @param expectedHeadSha Exact pull request head confirmed by the user.
  * @returns Promise resolving to the prepare and start pull request preview result.
  */
 export async function prepareAndStartPullRequestPreview(
-    number: number
+    number: number,
+    expectedHeadSha: string
 ): Promise<PullRequestPreviewStatus> {
     const unavailable = unavailablePreviewControls();
     if (unavailable) return unavailable;
+    const expectedCommit = executionPreviewCommitSha(expectedHeadSha);
     const candidate = await findPullRequest(number);
+    if (candidate.commitSha !== expectedCommit) {
+        throw Object.assign(
+            new Error(
+                `PR #${number} changed after Delivery loaded it. Review the new head before starting dev`
+            ),
+            { statusCode: 409 }
+        );
+    }
     const current = await getPullRequestPreviewStatus();
     if (
         ["running", "starting", "stopping"].includes(current.status) &&
@@ -297,7 +327,7 @@ export async function prepareAndStartPullRequestPreview(
         actionKey: "dashboard.preview.start",
         displayName: `Start PR #${number} preview`,
         payload: {
-            commitSha: executionPreviewCommitSha(candidate.commitSha),
+            commitSha: expectedCommit,
             number,
         },
         resourceClass: "exclusive",

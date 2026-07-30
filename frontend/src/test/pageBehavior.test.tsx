@@ -1890,6 +1890,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     title: "Expand backend coverage",
                     url: "https://github.com/rajohan/Mira-Dashboard/pull/190",
                     headRefName: "test/backend",
+                    headRefOid: "a".repeat(40),
                     baseRefName: "main",
                     author: { login: "mira-2026" },
                     createdAt: "2026-06-24T08:00:00.000Z",
@@ -1993,7 +1994,11 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/pull-requests/190/approve") {
-        expect(parseRequestBody(init)).toEqual({ deploy: false });
+        expect(parseRequestBody(init)).toEqual({
+            deploy: false,
+            expectedHeadSha: "a".repeat(40),
+            mergeStack: false,
+        });
         return Response.json({
             isOk: true,
             message: "Merged PR #190",
@@ -3148,6 +3153,441 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("shows dependent PR chains and creates GitHub stacks bottom-to-top", async () => {
+        const user = userEvent.setup();
+        const defaultFetch = globalThis.fetch;
+        const stackCreateRequests: unknown[] = [];
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+                if (url === "/api/pull-requests") {
+                    return Promise.resolve(
+                        Response.json({
+                            pullRequests: [
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "main",
+                                    createdAt: "2026-07-30T07:00:00.000Z",
+                                    headRefName: "feat/models",
+                                    headRefOid: "c".repeat(40),
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 370,
+                                    previewEligible: true,
+                                    reviewDecision: "APPROVED",
+                                    reviewerApproved: true,
+                                    statusCheckRollup: [{ status: "SUCCESS" }],
+                                    title: "Add chat models",
+                                    updatedAt: "2026-07-30T08:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/370",
+                                },
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "feat/models",
+                                    createdAt: "2026-07-30T08:00:00.000Z",
+                                    headRefName: "feat/chat-ui",
+                                    headRefOid: "d".repeat(40),
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 371,
+                                    previewEligible: true,
+                                    reviewDecision: "APPROVED",
+                                    reviewerApproved: true,
+                                    statusCheckRollup: [{ status: "SUCCESS" }],
+                                    title: "Add chat UI",
+                                    updatedAt: "2026-07-30T09:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/371",
+                                },
+                            ],
+                        })
+                    );
+                }
+                if (method === "POST" && url === "/api/pull-requests/stacks") {
+                    stackCreateRequests.push(parseRequestBody(init));
+                    return Promise.resolve(
+                        Response.json({
+                            isOk: true,
+                            message: "GitHub stack #372 created with 2 PRs",
+                        })
+                    );
+                }
+                return defaultFetch(input, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+
+        const candidates = await screen.findByRole("region", {
+            name: "GitHub stack candidates",
+        });
+        expect(within(candidates).getByText("#370 → #371")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Add chat models" })).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Add chat UI" })).toBeInTheDocument();
+        expect(
+            screen.getAllByText(/in an unlinked GitHub stack candidate/u)
+        ).toHaveLength(2);
+        expect(screen.queryByRole("button", { name: "Merge only" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+        expect(
+            screen.getAllByText(/before reviewing, merging, or rejecting/u)
+        ).toHaveLength(2);
+        const runInDevButtons = screen.getAllByRole("button", { name: "Run in dev" });
+        expect(runInDevButtons).toHaveLength(2);
+        await user.click(runInDevButtons[1] as HTMLButtonElement);
+        const previewDialog = screen.getByRole("dialog", { name: "Run PR in dev" });
+        expect(
+            within(previewDialog).getByText(/Included layers: #370 → #371/u)
+        ).toBeInTheDocument();
+        expect(
+            within(previewDialog).getByText(/exact PR head dddddddd/u)
+        ).toBeInTheDocument();
+        await user.click(within(previewDialog).getByRole("button", { name: "Cancel" }));
+
+        await user.click(
+            within(candidates).getByRole("button", { name: "Create stack" })
+        );
+        expect(
+            screen.getByRole("heading", { name: "Create GitHub stack" })
+        ).toBeInTheDocument();
+        const dialog = screen.getByRole("dialog", { name: "Create GitHub stack" });
+        expect(within(dialog).getByText(/#370 → #371/u)).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Create GitHub stack" }));
+        await waitFor(() => {
+            expect(
+                screen.getByText("GitHub stack #372 created with 2 PRs")
+            ).toBeInTheDocument();
+        });
+        expect(stackCreateRequests).toEqual([{ pullRequests: [370, 371] }]);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("keeps standalone fork controls available when its head matches main", async () => {
+        const defaultFetch = globalThis.fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                if (requestUrl(input) === "/api/pull-requests") {
+                    return Promise.resolve(
+                        Response.json({
+                            pullRequests: [
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "main",
+                                    createdAt: "2026-07-30T07:00:00.000Z",
+                                    headRefName: "main",
+                                    headRefOid: "e".repeat(40),
+                                    isCrossRepository: true,
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 372,
+                                    canReviewerApprove: true,
+                                    previewEligible: false,
+                                    reviewDecision: "REVIEW_REQUIRED",
+                                    reviewerApproved: false,
+                                    statusCheckRollup: [{ status: "SUCCESS" }],
+                                    title: "Fork default branch",
+                                    updatedAt: "2026-07-30T08:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/372",
+                                },
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "main",
+                                    createdAt: "2026-07-30T08:00:00.000Z",
+                                    headRefName: "ordinary-root",
+                                    headRefOid: "f".repeat(40),
+                                    isCrossRepository: false,
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 373,
+                                    previewEligible: false,
+                                    reviewDecision: "APPROVED",
+                                    reviewerApproved: true,
+                                    statusCheckRollup: [{ status: "SUCCESS" }],
+                                    title: "Ordinary root PR",
+                                    updatedAt: "2026-07-30T09:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/373",
+                                },
+                            ],
+                        })
+                    );
+                }
+                return defaultFetch(input, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+
+        expect(await screen.findByText("Fork default branch")).toBeInTheDocument();
+        expect(screen.queryByText(/ambiguous or incomplete dependent chain/u)).toBeNull();
+        expect(screen.getByRole("button", { name: "Approve PR" })).toBeEnabled();
+        expect(screen.getAllByRole("button", { name: "Merge only" })).toHaveLength(2);
+        expect(screen.getAllByRole("button", { name: "Reject" })).toHaveLength(2);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("groups native stacks and merges through the selected layer with cleanup details", async () => {
+        const user = userEvent.setup();
+        const defaultFetch = globalThis.fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+                if (url === "/api/pull-requests") {
+                    return Promise.resolve(
+                        Response.json({
+                            pullRequests: [
+                                {
+                                    additions: 8,
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "main",
+                                    body: "Canonical foundation",
+                                    canReviewerApprove: false,
+                                    changedFiles: 2,
+                                    createdAt: "2026-07-30T07:00:00.000Z",
+                                    deletions: 1,
+                                    headRefName: "feat/canonical-chat-v2",
+                                    headRefOid: "a".repeat(40),
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 352,
+                                    previewEligible: true,
+                                    reviewDecision: "APPROVED",
+                                    reviewerApproved: true,
+                                    stack: {
+                                        baseRefName: "main",
+                                        number: 360,
+                                        position: 1,
+                                        size: 2,
+                                    },
+                                    statusCheckRollup: [
+                                        {
+                                            conclusion: "SUCCESS",
+                                            status: "COMPLETED",
+                                        },
+                                    ],
+                                    title: "Canonical chat foundation",
+                                    updatedAt: "2026-07-30T08:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/352",
+                                },
+                                {
+                                    additions: 14,
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "feat/canonical-chat-v2",
+                                    body: "Stacked projection",
+                                    canReviewerApprove: false,
+                                    changedFiles: 4,
+                                    createdAt: "2026-07-30T08:00:00.000Z",
+                                    deletions: 3,
+                                    headRefName: "feat/chat-state-machine-matrix",
+                                    headRefOid: "b".repeat(40),
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 353,
+                                    previewEligible: true,
+                                    reviewDecision: "APPROVED",
+                                    reviewerApproved: true,
+                                    stack: {
+                                        baseRefName: "main",
+                                        number: 360,
+                                        position: 2,
+                                        size: 2,
+                                    },
+                                    statusCheckRollup: [
+                                        {
+                                            conclusion: "SUCCESS",
+                                            status: "COMPLETED",
+                                        },
+                                    ],
+                                    title: "Canonical state machine",
+                                    updatedAt: "2026-07-30T09:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/353",
+                                },
+                            ],
+                        })
+                    );
+                }
+                if (method === "POST" && url === "/api/pull-requests/353/approve") {
+                    expect(parseRequestBody(init)).toEqual({
+                        deploy: false,
+                        expectedHeadSha: "b".repeat(40),
+                        expectedStackHeads: [
+                            { headSha: "a".repeat(40), number: 352 },
+                            { headSha: "b".repeat(40), number: 353 },
+                        ],
+                        mergeStack: true,
+                    });
+                    return Promise.resolve(
+                        Response.json({
+                            cleanups: [
+                                {
+                                    branch: "feat/canonical-chat-v2",
+                                    message:
+                                        "Removed local worktree for feat/canonical-chat-v2",
+                                    status: "removed",
+                                },
+                                {
+                                    branch: "feat/chat-state-machine-matrix",
+                                    message:
+                                        "Removed local worktree for feat/chat-state-machine-matrix",
+                                    status: "removed",
+                                },
+                            ],
+                            isOk: true,
+                            mergeStatus: "merged",
+                            message: "Stack #360 merged through PR #353 (2 PRs)",
+                            previewCleanups: [
+                                {
+                                    message: "No managed PR dev data found for #352",
+                                    number: 352,
+                                    status: "skipped",
+                                },
+                                {
+                                    message: "No managed PR dev data found for #353",
+                                    number: 353,
+                                    status: "skipped",
+                                },
+                            ],
+                        })
+                    );
+                }
+                return defaultFetch(input, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+
+        await waitFor(() => {
+            expect(
+                screen.getByRole("link", { name: "Canonical state machine" })
+            ).toBeInTheDocument();
+        });
+        expect(screen.getByRole("region", { name: "GitHub stacks" })).toBeInTheDocument();
+        const stack = screen.getByLabelText("GitHub stack #360");
+        expect(within(stack).getByText("Bottom → top")).toBeInTheDocument();
+        expect(within(stack).getByText("1/2")).toBeInTheDocument();
+        expect(within(stack).getByText("2/2")).toBeInTheDocument();
+        expect(
+            within(stack).getByRole("button", {
+                name: "Merge stack through #353",
+            })
+        ).toBeEnabled();
+        expect(within(stack).queryByRole("button", { name: "Reject" })).toBeNull();
+        expect(
+            within(stack).getAllByText(/closing one member leaves a blocker/u)
+        ).toHaveLength(2);
+        const stackRunInDevButtons = within(stack).getAllByRole("button", {
+            name: "Run in dev",
+        });
+        expect(stackRunInDevButtons).toHaveLength(2);
+        await user.click(stackRunInDevButtons[1] as HTMLButtonElement);
+        const previewDialog = screen.getByRole("dialog", { name: "Run PR in dev" });
+        expect(
+            within(previewDialog).getByText(/Included layers: #352 → #353/u)
+        ).toBeInTheDocument();
+        await user.click(within(previewDialog).getByRole("button", { name: "Cancel" }));
+
+        await user.click(
+            within(stack).getByRole("button", {
+                name: "Merge stack through #353",
+            })
+        );
+        expect(screen.getByRole("heading", { name: "Merge stack" })).toBeInTheDocument();
+        expect(screen.getByText(/one all-or-nothing merge group/i)).toBeInTheDocument();
+        expect(
+            screen.getByText(/Included exact heads: #352 aaaaaaaa → #353 bbbbbbbb/u)
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Merge stack" }));
+        await waitFor(() => {
+            expect(
+                screen.getByText(/Stack #360 merged through PR #353 \(2 PRs\)/u)
+            ).toBeInTheDocument();
+            expect(
+                screen.getByText(
+                    /Removed local worktree for feat\/chat-state-machine-matrix/u
+                )
+            ).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("keeps native stacks outside main read-only", async () => {
+        const defaultFetch = globalThis.fetch;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                if (requestUrl(input) === "/api/pull-requests") {
+                    return Promise.resolve(
+                        Response.json({
+                            pullRequests: [
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "develop",
+                                    canReviewerApprove: true,
+                                    createdAt: "2026-07-30T08:00:00.000Z",
+                                    headRefName: "feat/develop-stack",
+                                    headRefOid: "c".repeat(40),
+                                    isDraft: false,
+                                    mergeable: "MERGEABLE",
+                                    mergeStateStatus: "CLEAN",
+                                    number: 364,
+                                    previewEligible: true,
+                                    reviewDecision: "REVIEW_REQUIRED",
+                                    stack: {
+                                        baseRefName: "develop",
+                                        number: 361,
+                                        position: 1,
+                                        size: 1,
+                                    },
+                                    statusCheckRollup: [
+                                        {
+                                            conclusion: "SUCCESS",
+                                            status: "COMPLETED",
+                                        },
+                                    ],
+                                    title: "Develop-only stack",
+                                    updatedAt: "2026-07-30T09:00:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/364",
+                                },
+                            ],
+                        })
+                    );
+                }
+                return defaultFetch(input, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+        const stack = await screen.findByLabelText("GitHub stack #361");
+        expect(
+            within(stack).getByText(/Only main-rooted stacks can be managed/u)
+        ).toBeInTheDocument();
+        expect(within(stack).queryByRole("button", { name: "Approve PR" })).toBeNull();
+        expect(within(stack).queryByRole("button", { name: "Run in dev" })).toBeNull();
+        expect(within(stack).queryByRole("button", { name: /Merge/u })).toBeNull();
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("keeps PR dev status messages ahead of pull request action buttons", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -3337,7 +3777,9 @@ describe("Mira Dashboard pages", () => {
                         method === "POST" &&
                         url === "/api/pull-requests/335/preview/start"
                     ) {
-                        expect(parseRequestBody(init)).toEqual({});
+                        expect(parseRequestBody(init)).toEqual({
+                            expectedHeadSha: "a".repeat(40),
+                        });
                         preview = {
                             commitSha: "a".repeat(40),
                             number: 335,
@@ -3449,6 +3891,9 @@ describe("Mira Dashboard pages", () => {
                         method === "POST" &&
                         url === "/api/pull-requests/335/preview/start"
                     ) {
+                        expect(parseRequestBody(init)).toEqual({
+                            expectedHeadSha: "a".repeat(40),
+                        });
                         startCalls += 1;
                         preview = {
                             ...preview,
@@ -3485,7 +3930,8 @@ describe("Mira Dashboard pages", () => {
         expect(
             screen.getByRole("heading", { name: "Rebuild PR dev" })
         ).toBeInTheDocument();
-        expect(screen.getByText(/latest PR head/u)).toBeInTheDocument();
+        expect(screen.getByText(/exact PR head aaaaaaaa/u)).toBeInTheDocument();
+        expect(screen.getByText(/Included layers: #335/u)).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Rebuild PR dev" }));
 
         await waitFor(() => {

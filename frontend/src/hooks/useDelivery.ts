@@ -16,8 +16,11 @@ import {
     type ProductionCheckoutStatus,
     type PullRequestActionResponse,
     type PullRequestApproveRequest,
+    type PullRequestExpectedHead,
     type PullRequestPreviewStatus,
+    type PullRequestPreviewStartRequest,
     type PullRequestRejectRequest,
+    type PullRequestStackCreateRequest,
     type PullRequestSummary,
 } from "../../../contracts/delivery";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
@@ -98,19 +101,41 @@ async function fetchPullRequestPreview(): Promise<PullRequestPreviewStatus> {
  * Performs approve pull request.
  * @param number Number value.
  * @param willDeploy Whether will deploy.
+ * @param options Exact-head and native stack merge options.
  * @returns Approve pull request result.
  */
 async function approvePullRequest(
     number: number,
-    willDeploy: boolean
+    willDeploy: boolean,
+    options: {
+        expectedHeadSha: string;
+        expectedStackHeads?: PullRequestExpectedHead[];
+        mergeStack?: boolean;
+    }
 ): Promise<PullRequestActionResponse> {
     return apiPostParsed(
         `/pull-requests/${number}/approve`,
         parsePullRequestActionResponse,
         {
             deploy: willDeploy,
+            expectedHeadSha: options.expectedHeadSha,
+            expectedStackHeads: options.expectedStackHeads,
+            mergeStack: options.mergeStack,
         } satisfies PullRequestApproveRequest
     );
+}
+
+/**
+ * Creates a native GitHub stack from an existing linear pull request chain.
+ * @param pullRequests Pull request numbers ordered from bottom to top.
+ * @returns Stack creation result.
+ */
+async function createPullRequestStack(
+    pullRequests: number[]
+): Promise<PullRequestActionResponse> {
+    return apiPostParsed("/pull-requests/stacks", parsePullRequestActionResponse, {
+        pullRequests,
+    } satisfies PullRequestStackCreateRequest);
 }
 
 /**
@@ -186,15 +211,17 @@ async function rollbackDashboard(
 /**
  * Starts or updates the managed preview slot.
  * @param number Number value.
+ * @param expectedHeadSha Exact pull request head confirmed in Delivery.
  * @returns Promise resolving to the start pull request preview result.
  */
 async function startPullRequestPreview(
-    number: number
+    number: number,
+    expectedHeadSha: string
 ): Promise<PullRequestPreviewStatus> {
     const response = await apiPostParsed(
         `/pull-requests/${number}/preview/start`,
         parsePullRequestPreviewMutationResponse,
-        {}
+        { expectedHeadSha } satisfies PullRequestPreviewStartRequest
     );
     return response.preview;
 }
@@ -289,8 +316,24 @@ export function useApprovePullRequest() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ number, willDeploy }: { number: number; willDeploy: boolean }) =>
-            approvePullRequest(number, willDeploy),
+        mutationFn: ({
+            expectedHeadSha,
+            expectedStackHeads,
+            mergeStack,
+            number,
+            willDeploy,
+        }: {
+            expectedHeadSha: string;
+            expectedStackHeads?: PullRequestExpectedHead[];
+            mergeStack?: boolean;
+            number: number;
+            willDeploy: boolean;
+        }) =>
+            approvePullRequest(number, willDeploy, {
+                expectedHeadSha,
+                expectedStackHeads,
+                mergeStack,
+            }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: deliveryKeys.list() });
             void queryClient.invalidateQueries({
@@ -302,6 +345,22 @@ export function useApprovePullRequest() {
             void queryClient.invalidateQueries({
                 queryKey: deliveryKeys.releaseStatus(),
             });
+        },
+    });
+}
+
+/**
+ * Creates a native GitHub stack and refreshes Delivery metadata.
+ * @returns Native stack creation mutation.
+ */
+export function useCreatePullRequestStack() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ pullRequests }: { pullRequests: number[] }) =>
+            createPullRequestStack(pullRequests),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: deliveryKeys.list() });
         },
     });
 }
@@ -323,7 +382,16 @@ export function useApprovePullRequestReview() {
                     (current = []) =>
                         current.map((pullRequest) =>
                             pullRequest.number === updatedPullRequest.number
-                                ? updatedPullRequest
+                                ? {
+                                      ...updatedPullRequest,
+                                      previewEligible:
+                                          updatedPullRequest.stack === undefined &&
+                                          pullRequest.stack !== undefined
+                                              ? pullRequest.previewEligible
+                                              : updatedPullRequest.previewEligible,
+                                      stack:
+                                          updatedPullRequest.stack ?? pullRequest.stack,
+                                  }
                                 : pullRequest
                         )
                 );
@@ -431,7 +499,13 @@ export function useStartPullRequestPreview() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ number }: { number: number }) => startPullRequestPreview(number),
+        mutationFn: ({
+            expectedHeadSha,
+            number,
+        }: {
+            expectedHeadSha: string;
+            number: number;
+        }) => startPullRequestPreview(number, expectedHeadSha),
         onSuccess: (preview) => {
             queryClient.setQueryData(deliveryKeys.preview(), preview);
             void queryClient.invalidateQueries({

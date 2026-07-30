@@ -60,6 +60,7 @@ export {
     deliveryKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useCreatePullRequestStack,
     useDashboardDeployments,
     useDashboardReleaseStatus,
     useDeployDashboard,

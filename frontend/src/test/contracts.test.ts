@@ -10,7 +10,11 @@ import {
 } from "../../../contracts/accountSecurity";
 import { parseApiErrorResponse } from "../../../contracts/apiErrors";
 import { parseBackupStatusResponse } from "../../../contracts/backups";
-import { parsePullRequestApproveRequest } from "../../../contracts/delivery";
+import {
+    parsePullRequestApproveRequest,
+    parsePullRequestPreviewStartRequest,
+    parsePullRequestStackCreateRequest,
+} from "../../../contracts/delivery";
 import { parseExecRequest } from "../../../contracts/exec";
 import { parseFileContent, parseFilesResponse } from "../../../contracts/files";
 import {
@@ -165,6 +169,54 @@ describe("shared runtime contracts", () => {
                 },
             ]);
         }
+    });
+
+    it("validates exact-head stack merge and linear stack creation requests", () => {
+        expect(
+            parsePullRequestApproveRequest({
+                deploy: true,
+                expectedHeadSha: "a".repeat(40),
+                expectedStackHeads: [
+                    { headSha: "9".repeat(40), number: 352 },
+                    { headSha: "a".repeat(40), number: 353 },
+                ],
+                mergeStack: true,
+            })
+        ).toEqual({
+            deploy: true,
+            expectedHeadSha: "a".repeat(40),
+            expectedStackHeads: [
+                { headSha: "9".repeat(40), number: 352 },
+                { headSha: "a".repeat(40), number: 353 },
+            ],
+            mergeStack: true,
+        });
+        expect(parsePullRequestStackCreateRequest({ pullRequests: [352, 353] })).toEqual({
+            pullRequests: [352, 353],
+        });
+        expect(
+            parsePullRequestPreviewStartRequest({
+                expectedHeadSha: "b".repeat(40),
+            })
+        ).toEqual({ expectedHeadSha: "b".repeat(40) });
+        expect(() =>
+            parsePullRequestStackCreateRequest({ pullRequests: [352] })
+        ).toThrow();
+        expect(() =>
+            parsePullRequestApproveRequest({
+                expectedHeadSha: "not-a-full-sha",
+                mergeStack: true,
+            })
+        ).toThrow();
+        expect(() =>
+            parsePullRequestApproveRequest({
+                expectedHeadSha: "a".repeat(40),
+                expectedStackHeads: [{ headSha: "short", number: 352 }],
+                mergeStack: true,
+            })
+        ).toThrow();
+        expect(() => parsePullRequestApproveRequest({ deploy: false })).toThrow();
+        expect(() => parsePullRequestPreviewStartRequest({})).toThrow();
     });
 
     it("validates exec and scheduled-job transport shapes before service logic", () => {

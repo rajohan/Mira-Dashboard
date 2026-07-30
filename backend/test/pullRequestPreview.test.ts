@@ -49,6 +49,7 @@ import type {
 } from "../src/services/scheduledJobs.ts";
 import * as scheduledJobs from "../src/services/scheduledJobs.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
+import { captureRejection } from "./support/rejections.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const COMMIT = "a".repeat(40);
@@ -63,9 +64,17 @@ function readJsonRecord(filePath: string): Record<string, unknown> {
     return value;
 }
 
-function previewRouteRequest(number: string) {
+function previewRouteRequest(number: string, expectedHeadSha?: string) {
     return Object.assign(
         new Request(`https://dashboard.test/api/pull-requests/${number}/preview`, {
+            body:
+                expectedHeadSha === undefined
+                    ? undefined
+                    : JSON.stringify({ expectedHeadSha }),
+            headers:
+                expectedHeadSha === undefined
+                    ? undefined
+                    : { "Content-Type": "application/json" },
             method: "POST",
         }),
         { params: { number } }
@@ -179,19 +188,19 @@ describe("managed pull request preview", () => {
         process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
 
         try {
-            expect(getDeliveryPullRequestPreviewStatus()).resolves.toEqual({
+            expect(await getDeliveryPullRequestPreviewStatus()).toEqual({
                 controlsAvailable: false,
                 message:
                     "PR dev controls are available only from the production Dashboard.",
                 status: "stopped",
             });
-            expect(prepareAndStartPullRequestPreview(342)).resolves.toEqual({
+            expect(await prepareAndStartPullRequestPreview(342, COMMIT)).toEqual({
                 controlsAvailable: false,
                 message:
                     "PR dev controls are available only from the production Dashboard.",
                 status: "stopped",
             });
-            expect(prepareAndStopPullRequestPreview(342)).resolves.toEqual({
+            expect(await prepareAndStopPullRequestPreview(342)).toEqual({
                 controlsAvailable: false,
                 message:
                     "PR dev controls are available only from the production Dashboard.",
@@ -721,10 +730,10 @@ describe("managed pull request preview", () => {
 
         try {
             const candidate = {
-                authorLogin: "mira-2026",
-                baseRefName: "main",
+                authorLogins: ["mira-2026"],
                 commitSha: COMMIT,
                 number: 335,
+                rootBaseRefName: "main",
                 title: "Trusted preview",
             };
             const running = await startPullRequestPreview(candidate, {
@@ -1116,25 +1125,32 @@ describe("managed pull request preview", () => {
         };
 
         try {
-            expect(prepareAndStartPullRequestPreview(335)).resolves.toMatchObject({
+            expect(await prepareAndStartPullRequestPreview(335, COMMIT)).toMatchObject({
                 commitSha: COMMIT,
                 number: 335,
                 status: "starting",
                 title: "Trusted preview",
                 updatedAt: expect.any(String),
             });
+            expect(
+                await captureRejection(() =>
+                    prepareAndStartPullRequestPreview(335, "b".repeat(40))
+                )
+            ).toMatchObject({ statusCode: 409 });
             statusSpy.mockResolvedValueOnce({
                 number: 334,
                 status: "running",
             });
-            expect(prepareAndStartPullRequestPreview(335)).rejects.toMatchObject({
-                statusCode: 409,
-            });
-            expect(prepareAndStopPullRequestPreview(335)).resolves.toEqual({
+            expect(
+                await captureRejection(() =>
+                    prepareAndStartPullRequestPreview(335, COMMIT)
+                )
+            ).toMatchObject({ statusCode: 409 });
+            expect(await prepareAndStopPullRequestPreview(335)).toEqual({
                 number: 335,
                 status: "stopped",
             });
-            expect(prepareAndStopPullRequestPreview()).resolves.toEqual({
+            expect(await prepareAndStopPullRequestPreview()).toEqual({
                 number: 335,
                 status: "stopped",
             });
@@ -1169,7 +1185,7 @@ describe("managed pull request preview", () => {
                 await import("../src/routes/pullRequestRoutes.ts");
             const startResponse = await pullRequestRoutes[
                 "/api/pull-requests/:number/preview/start"
-            ].POST(previewRouteRequest("335"));
+            ].POST(previewRouteRequest("335", COMMIT));
             expect(startResponse.status).toBe(202);
             expect(startResponse.json()).resolves.toMatchObject({
                 isOk: true,
@@ -1179,6 +1195,22 @@ describe("managed pull request preview", () => {
                     status: "starting",
                     title: "Trusted preview",
                     updatedAt: expect.any(String),
+                },
+            });
+            const missingHeadResponse = await pullRequestRoutes[
+                "/api/pull-requests/:number/preview/start"
+            ].POST(previewRouteRequest("335", ""));
+            expect(missingHeadResponse.status).toBe(400);
+            expect(await missingHeadResponse.json()).toMatchObject({
+                error: {
+                    code: "invalid_request",
+                    details: {
+                        issues: [
+                            {
+                                path: "body.expectedHeadSha",
+                            },
+                        ],
+                    },
                 },
             });
 
@@ -1262,7 +1294,7 @@ describe("managed pull request preview", () => {
                 "/api/pull-requests/:number/preview/stop",
             ] as const) {
                 const invalidResponse = await pullRequestRoutes[route].POST(
-                    previewRouteRequest("invalid")
+                    previewRouteRequest("invalid", COMMIT)
                 );
                 expect(invalidResponse.status).toBe(400);
                 expect(invalidResponse.json()).resolves.toEqual(
@@ -1277,7 +1309,7 @@ describe("managed pull request preview", () => {
             );
             const failedStartResponse = await pullRequestRoutes[
                 "/api/pull-requests/:number/preview/start"
-            ].POST(previewRouteRequest("335"));
+            ].POST(previewRouteRequest("335", COMMIT));
             expect(failedStartResponse.status).toBe(503);
             expect(failedStartResponse.json()).resolves.toEqual(
                 apiErrorExpectation("preview startup unavailable")
@@ -1329,9 +1361,10 @@ describe("managed pull request preview", () => {
             });
             expect(startSpy).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    authorLogin: "mira-2026",
+                    authorLogins: ["mira-2026"],
                     commitSha: COMMIT,
                     number: 335,
+                    rootBaseRefName: "main",
                 }),
                 expect.objectContaining({
                     protectFromCancellation: expect.any(Function),
@@ -1422,29 +1455,38 @@ describe("managed pull request preview", () => {
                 status: "stopped",
             });
             expect(
-                startPullRequestPreview(
-                    {
-                        authorLogin: "external",
-                        baseRefName: "main",
-                        commitSha: COMMIT,
-                        number: 335,
-                        title: "Untrusted PR",
-                    },
-                    { config }
+                await captureRejection(() =>
+                    startPullRequestPreview(
+                        {
+                            authorLogins: ["mira-2026", "external"],
+                            commitSha: COMMIT,
+                            number: 335,
+                            rootBaseRefName: "main",
+                            title: "Untrusted PR",
+                        },
+                        { config }
+                    )
                 )
-            ).rejects.toThrow("Pull request author is not allowed to run host previews");
+            ).toMatchObject({
+                message:
+                    "Every pull request included in a host preview must have an allowed author",
+            });
             expect(
-                startPullRequestPreview(
-                    {
-                        authorLogin: "mira-2026",
-                        baseRefName: "release",
-                        commitSha: COMMIT,
-                        number: 335,
-                        title: "Wrong base",
-                    },
-                    { config }
+                await captureRejection(() =>
+                    startPullRequestPreview(
+                        {
+                            authorLogins: ["mira-2026"],
+                            commitSha: COMMIT,
+                            number: 335,
+                            rootBaseRefName: "release",
+                            title: "Wrong base",
+                        },
+                        { config }
+                    )
                 )
-            ).rejects.toThrow("Only main-targeted pull requests can be previewed");
+            ).toMatchObject({
+                message: "Only main-rooted pull requests can be previewed",
+            });
         } finally {
             rmSync(root, { force: true, recursive: true });
         }
