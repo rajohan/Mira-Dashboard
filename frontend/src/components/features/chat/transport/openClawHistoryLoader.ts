@@ -35,10 +35,16 @@ function historySequence(row: CanonicalChatHistoryRow): number | undefined {
     return row.sequence;
 }
 
-function hasCompleteHistorySequenceMetadata(
+function hasIncrementalHistorySequenceMetadata(
     rows: readonly CanonicalChatHistoryRow[]
 ): boolean {
-    return rows.every((row) => historySequence(row) !== undefined);
+    const sequences = rows.flatMap((row) => {
+        const sequence = historySequence(row);
+        return sequence === undefined ? [] : [sequence];
+    });
+    return (
+        sequences.length === rows.length && new Set(sequences).size === sequences.length
+    );
 }
 
 function parseHistoryPage(raw: unknown, requestedOffset: number): OpenClawHistoryPage {
@@ -242,7 +248,7 @@ export class OpenClawHistoryLoader {
         if (
             !shouldCache ||
             throughSequence === undefined ||
-            !hasCompleteHistorySequenceMetadata(orderedRows)
+            !hasIncrementalHistorySequenceMetadata(orderedRows)
         ) {
             this.#cache.delete(cacheKey);
         } else {
@@ -270,12 +276,13 @@ export class OpenClawHistoryLoader {
             totalMessages !== undefined &&
             cached.limit === limit &&
             totalMessages >= cached.throughSequence &&
+            hasIncrementalHistorySequenceMetadata(cached.rows) &&
             isSameHistorySession(cached.sessionId, first.sessionId)
         );
         if (!canReuse || !cached || totalMessages === undefined) {
             return this.#loadFresh(cacheKey, sessionKey, limit, first);
         }
-        if (!hasCompleteHistorySequenceMetadata(first.messages)) {
+        if (!hasIncrementalHistorySequenceMetadata(first.messages)) {
             return this.#loadFresh(cacheKey, sessionKey, limit, first, false);
         }
         const pages =
@@ -288,7 +295,7 @@ export class OpenClawHistoryLoader {
                       cached.throughSequence
                   );
         const orderedRows = orderedUniqueMessages(pages);
-        if (!hasCompleteHistorySequenceMetadata(orderedRows)) {
+        if (!hasIncrementalHistorySequenceMetadata(orderedRows)) {
             return this.#loadFresh(cacheKey, sessionKey, limit, first, false);
         }
         const merged = mergeCachedHistoryRows(cached, orderedRows, totalMessages);

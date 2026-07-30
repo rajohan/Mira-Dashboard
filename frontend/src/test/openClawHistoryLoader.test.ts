@@ -179,6 +179,57 @@ describe("OpenClaw history loader", () => {
         expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
     });
 
+    it("reloads same-sequence sibling rows instead of collapsing them in cache", async () => {
+        let output = "stale output";
+        const requests: number[] = [];
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), (request) => {
+            return Promise.try(() => {
+                requests.push(request.offset);
+                return {
+                    hasMore: false,
+                    messages: [
+                        rawMessage(
+                            1,
+                            "assistant",
+                            [
+                                {
+                                    id: "call-1",
+                                    name: "bash",
+                                    type: "toolCall",
+                                },
+                            ],
+                            {
+                                __openclaw: {
+                                    id: "tool-call-message",
+                                    seq: 1,
+                                },
+                            }
+                        ),
+                        rawMessage(1, "tool", output, {
+                            __openclaw: {
+                                id: "tool-result-message",
+                                seq: 1,
+                            },
+                            toolCallId: "call-1",
+                            toolName: "bash",
+                        }),
+                    ],
+                    offset: 0,
+                    sessionId: "session-1",
+                    totalMessages: 2,
+                };
+            });
+        });
+
+        const initial = await loader.history(SESSION, 2);
+        output = "current output";
+        const refreshed = await loader.history(SESSION, 2);
+
+        expect(requests).toEqual([0, 0]);
+        expect(initial[0]?.toolCalls?.[0]?.toolResult?.content).toBe("stale output");
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
     it("appends newly persisted messages without reloading older cached pages", async () => {
         let totalMessages = 4;
         const requests: number[] = [];
