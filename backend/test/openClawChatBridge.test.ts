@@ -5,10 +5,8 @@ import {
     type OpenClawRuntimeSnapshot,
 } from "../../contracts/chat.ts";
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
-import {
-    OpenClawChatBridge,
-    type OpenClawChatSnapshotStore,
-} from "../src/chat/openClawChatBridge.ts";
+import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
+import type { OpenClawChatSnapshotStore } from "../src/chat/openClawChatPersistence.ts";
 import { OpenClawChatRequestBoundaries } from "../src/chat/openClawChatRequestBoundaries.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 

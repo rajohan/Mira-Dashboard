@@ -1,5 +1,4 @@
 import {
-    OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
 } from "../../../contracts/chat.ts";
@@ -9,1153 +8,88 @@ import {
 } from "../../../contracts/chat/openClawRuntimeAdapter.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
+    hasRunIdentifier,
+    isActiveConversationAtBoundary,
+    isAgentSessionKey,
+    isExactSessionKey,
+    isMatchingSessionEcho,
+    isPromotableRunlessUserLedRun,
+    isProvisionalRunId,
+    isRunlessRunId,
+    isSameSessionKey,
+    INTERRUPTED_RUN_PROMOTION_WINDOW_MS,
+    latestOptionalTimestamp,
+    matchingSessionKeys,
+    MAX_RUN_ASSOCIATIONS,
+    normalizedSessionKey,
+    promotableInterruptedConversationRuns,
+    sessionMessageRequestId,
+    sessionMessageRunId,
+    type OpenClawChatSessionIdentity,
+    type RepairedInterruptedRun,
+} from "./openClawChatIdentity.ts";
+import {
+    hasActiveConversationRun,
+    hasChatFinal,
+    isAuxiliaryOnlyCompletion,
+    isCompactionEvent,
+    isCompactionOnlyRun,
+    isConversationContinuationEvent,
+    isMetadataOnlyCompletionEnvelope,
+    isMetadataOnlyRunlessCompletion,
+    isSettlingLifecycleEvent,
+    isTerminalEvent,
+    runtimeSessionBoundary,
+    type RuntimeSessionInstance,
+} from "./openClawChatLifecycle.ts";
+import {
+    MAX_CHAT_RUNTIME_SESSIONS,
+    OPENCLAW_CHAT_PERSIST_DEBOUNCE_MS,
+    type OpenClawChatSnapshotStore,
+} from "./openClawChatPersistence.ts";
+import {
+    asRecord,
+    compactTerminalPayload,
+    runtimePayloadView,
+    runtimeSessionId,
+    sessionMessageActiveRunIds,
+    stringField,
+    withRuntimeIdentity,
+} from "./openClawChatProviderAdapter.ts";
+import {
     OpenClawChatRequestBoundaries,
     type OpenClawChatRequestBoundaryMetadata,
 } from "./openClawChatRequestBoundaries.ts";
+import {
+    ACTIVE_RUN_TTL_MS,
+    boundedCanonicalRuntimeEnvelope,
+    coalesceReplayEnvelope,
+    compactCompletedRun,
+    firstSequence,
+    lastSequence,
+    MAX_BYTES_ACROSS_REPLAY,
+    MAX_BYTES_PER_EVENT,
+    MAX_RUNS_PER_SESSION,
+    oldestEvictableSessionKey,
+    oldestReplayBudgetSessionKey,
+    replayBytes,
+    replayCoalescingKey,
+    RETAINED_RUNTIME_EVENTS,
+    shouldRetainRuntimeEvent,
+    snapshotFromRetainedRuns,
+    trimRetainedRun,
+    type RetainedRun,
+} from "./openClawChatRetention.ts";
 
 const logger = createStructuredLogger("openclaw-chat");
-
-/** A minimal session shape used to recover missing session keys on runtime events. */
-export interface OpenClawChatSessionIdentity {
-    id: string;
-    key: string;
-    runId?: string;
-    activeRunId?: string;
-    currentRunId?: string;
-}
-
-/** Storage boundary for the latest bounded replay of each chat session. */
-export interface OpenClawChatSnapshotStore {
-    clear(): void;
-    delete(sessionKey: string): void;
-    keys(): string[];
-    load(sessionKey: string): OpenClawRuntimeSnapshot | undefined;
-    maximumSequence(): number;
-    promote(
-        sourceSessionKey: string,
-        canonicalSessionKey: string,
-        sourceSnapshot: OpenClawRuntimeSnapshot,
-        canonicalSnapshot: OpenClawRuntimeSnapshot
-    ): void;
-    save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void;
-}
 
 interface OpenClawChatBridgeOptions {
     maxReplayBytes?: number;
 }
 
-interface RetainedRun {
-    completed: boolean;
-    eventBytes: number[];
-    events: OpenClawRuntimeEnvelope[];
-    firstSequence: number;
-    interruptionEligible: boolean;
-    interruptedAt?: number;
-    runId: string;
-    terminalSequence: number;
-    totalBytes: number;
-    updatedAt: number;
-}
-
-interface RepairedInterruptedRun {
-    interruptedRunIds: string[];
-    providerRunId: string;
-}
-
-interface RuntimeSessionInstance {
-    id: string;
-    startedAt: number;
-}
-
-const MAX_EVENTS_PER_ACTIVE_RUN = 20_000;
-const MAX_BYTES_PER_ACTIVE_RUN = 64_000_000;
-const MAX_BYTES_PER_EVENT = 1_000_000;
-const MAX_RUNS_PER_SESSION = 4;
-const MAX_BYTES_ACROSS_REPLAY = MAX_BYTES_PER_ACTIVE_RUN * MAX_RUNS_PER_SESSION;
-export const MAX_CHAT_RUNTIME_SESSIONS = 50;
-const MAX_RUN_ASSOCIATIONS = 200;
-const ACTIVE_RUN_TTL_MS = 6 * 60 * 60_000;
-const INTERRUPTED_RUN_PROMOTION_WINDOW_MS = 15 * 60_000;
-const PERSIST_DEBOUNCE_MS = 250;
-const SESSION_ECHO_WINDOW_MS = 60_000;
-const TERMINAL_FAILURE_STATES = new Set(["aborted", "error", "failed"]);
-const COMPACTION_TERMINAL_STATES = new Set([
-    "aborted",
-    "complete",
-    "completed",
-    "end",
-    "error",
-    "failed",
-    "failure",
-    "finished",
-]);
-const RETAINED_EVENTS = new Set([
-    "agent",
-    "chat",
-    "model.completed",
-    "session.ended",
-    "session.compaction",
-    "session.message",
-    "session.started",
-    "session.tool",
-]);
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-    return value && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : undefined;
-}
-
-function stringField(
-    record: Record<string, unknown> | undefined,
-    key: string
-): string | undefined {
-    const value = record?.[key];
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function safeNumberField(
-    record: Record<string, unknown> | undefined,
-    key: string
-): number | undefined {
-    const value = record?.[key];
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-        ? value
-        : undefined;
-}
-
 /**
- * Returns the later defined timestamp without inventing a fallback value.
- * @param left Left value.
- * @param right Right value.
- * @returns the later defined timestamp without inventing a fallback value.
- */
-function latestOptionalTimestamp(
-    left: number | undefined,
-    right: number | undefined
-): number | undefined {
-    if (left === undefined) {
-        return right;
-    }
-    if (right === undefined) {
-        return left;
-    }
-    return Math.max(left, right);
-}
-
-/**
- * Uses the same nested event-data precedence as the browser runtime adapter.
- * @param payload Request or event payload.
- * @returns Runtime payload view result.
- */
-function runtimePayloadView(payload: unknown): Record<string, unknown> | undefined {
-    const record = asRecord(payload);
-    if (!record) {
-        return undefined;
-    }
-    const data = asRecord(record.data);
-    return data ? { ...record, ...data } : record;
-}
-
-function runtimeSessionId(payload: unknown): string | undefined {
-    const record = asRecord(payload);
-    const payloadView = runtimePayloadView(payload);
-    return (
-        stringField(payloadView, "sessionId") ||
-        stringField(asRecord(payloadView?.session), "sessionId") ||
-        stringField(asRecord(record?.session), "sessionId")
-    );
-}
-
-function runtimeSessionBoundary(
-    envelope: OpenClawRuntimeEnvelope
-): RuntimeSessionInstance | undefined {
-    const sessionId = runtimeSessionId(envelope.payload);
-    const payloadView = runtimePayloadView(envelope.payload);
-    if (!sessionId || !payloadView) {
-        return undefined;
-    }
-
-    const stream = (stringField(payloadView, "stream") || "").toLowerCase();
-    const phase = (stringField(payloadView, "phase") || "").toLowerCase();
-    const isLifecycleStart =
-        envelope.event === "agent" && stream === "lifecycle" && phase === "start";
-    const isSessionStart = envelope.event === "session.started";
-    const isInitialUserMessage =
-        envelope.event === "session.message" &&
-        sessionMessageRole(envelope.payload) === "user" &&
-        safeNumberField(payloadView, "messageSeq") === 1;
-    if (!isLifecycleStart && !isSessionStart && !isInitialUserMessage) {
-        return undefined;
-    }
-
-    return {
-        id: sessionId,
-        startedAt:
-            safeNumberField(payloadView, "startedAt") ||
-            safeNumberField(payloadView, "ts") ||
-            envelope.runtimeRecordedAt,
-    };
-}
-
-/**
- * Makes nested runtime identities available at the envelope boundary as well.
- * @returns With runtime identity result.
- */
-function withRuntimeIdentity(
-    payload: Record<string, unknown>,
-    {
-        runId,
-        sessionKey,
-        shouldRemoveSessionKey = false,
-    }: {
-        runId?: string;
-        sessionKey?: string;
-        shouldRemoveSessionKey?: boolean;
-    }
-): Record<string, unknown> {
-    const normalized = { ...payload };
-    if (runId) {
-        normalized.runId = runId;
-    }
-    if (shouldRemoveSessionKey) {
-        delete normalized.sessionKey;
-    } else if (sessionKey) {
-        normalized.sessionKey = sessionKey;
-    }
-
-    const data = asRecord(payload.data);
-    if (!data) {
-        return normalized;
-    }
-    const normalizedData = { ...data };
-    if (runId && Object.hasOwn(data, "runId")) {
-        normalizedData.runId = runId;
-    }
-    if (shouldRemoveSessionKey) {
-        delete normalizedData.sessionKey;
-    } else if (sessionKey && Object.hasOwn(data, "sessionKey")) {
-        normalizedData.sessionKey = sessionKey;
-    }
-    normalized.data = normalizedData;
-    return normalized;
-}
-
-function nestedRuntimeItem(
-    data: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-    return asRecord(data?.item) || asRecord(data?.payload) || data;
-}
-
-function hasRuntimeItemText(
-    data: Record<string, unknown>,
-    item: Record<string, unknown>
-): boolean {
-    return ["delta", "progressText", "summary", "text", "meta", "content"].some((key) => {
-        const value = data[key] ?? item[key];
-        return Array.isArray(value)
-            ? value.length > 0
-            : value !== undefined && value !== null && value !== "";
-    });
-}
-
-function shouldRetainRuntimeEvent(
-    event: unknown,
-    payload: Record<string, unknown>,
-    canonicalEvents: OpenClawRuntimeEnvelope["canonicalEvents"]
-): boolean {
-    if (event === "session.started" && !stringField(payload, "runId")) {
-        return false;
-    }
-    if (event !== "agent") {
-        return true;
-    }
-    const data = runtimePayloadView(payload);
-    const stream = stringField(data, "stream") || "";
-    if (stream.startsWith("codex_app_server.")) {
-        return false;
-    }
-    if (stream !== "item" || !data) {
-        return true;
-    }
-    const item = nestedRuntimeItem(data) || data;
-    const phase = stringField(data, "phase") || stringField(item, "phase") || "";
-    const kind = (
-        stringField(item, "kind") ||
-        stringField(item, "type") ||
-        stringField(data, "kind") ||
-        ""
-    ).toLowerCase();
-    if (kind === "command" && data.suppressChannelProgress === true) {
-        // Native Codex commands are followed by richer session.tool events with
-        // the same item ID. Retaining both lifecycle pairs turns one visible
-        // tool bubble into four replay events and prematurely evicts thinking.
-        return false;
-    }
-    return (
-        !["start", "end"].includes(phase) ||
-        !/\b(?:analysis|reasoning|thinking)\b/u.test(kind) ||
-        hasRuntimeItemText(data, item) ||
-        canonicalEvents.some(
-            (canonicalEvent) =>
-                canonicalEvent.kind === "thinking" &&
-                (canonicalEvent.message.text.trim() ||
-                    canonicalEvent.message.thinking?.some((block) => block.text.trim()))
-        )
-    );
-}
-
-function replayToolData(
-    envelope: OpenClawRuntimeEnvelope
-): Record<string, unknown> | undefined {
-    const payload = asRecord(envelope.payload);
-    const data = runtimePayloadView(payload);
-    if (
-        envelope.event === "session.tool" ||
-        (envelope.event === "agent" && stringField(data, "stream") === "tool")
-    ) {
-        return data;
-    }
-    return undefined;
-}
-
-function replayToolIdentifier(
-    data: Record<string, unknown> | undefined
-): string | undefined {
-    return (
-        stringField(data, "toolCallId") ||
-        stringField(data, "callId") ||
-        stringField(data, "itemId") ||
-        stringField(data, "id")
-    );
-}
-
-function replayCoalescingKey(envelope: OpenClawRuntimeEnvelope): string | undefined {
-    const toolData = replayToolData(envelope);
-    if (toolData) {
-        const itemId = replayToolIdentifier(toolData);
-        return itemId ? `${String(envelope.event)}:tool:${itemId}` : undefined;
-    }
-    if (envelope.event !== "agent") {
-        return undefined;
-    }
-    const data = runtimePayloadView(envelope.payload);
-    if (!data || stringField(data, "stream") !== "item") {
-        return undefined;
-    }
-    const item = nestedRuntimeItem(data) || data;
-    const phase = stringField(data, "phase") || stringField(item, "phase");
-    if (phase !== "update" || data.delta !== undefined || item.delta !== undefined) {
-        return undefined;
-    }
-    const itemId = stringField(data, "itemId") || stringField(item, "itemId");
-    return itemId ? `agent:item:${itemId}` : undefined;
-}
-
-function coalesceReplayEnvelope(
-    previous: OpenClawRuntimeEnvelope,
-    next: OpenClawRuntimeEnvelope
-): OpenClawRuntimeEnvelope {
-    if (!replayToolData(previous) || !replayToolData(next)) {
-        return next;
-    }
-    const previousPayload = asRecord(previous.payload) || {};
-    const nextPayload = asRecord(next.payload) || {};
-    const previousData = asRecord(previousPayload.data) || previousPayload;
-    const nextData = asRecord(nextPayload.data) || nextPayload;
-    const canonical = withCanonicalOpenClawEvents({
-        ...next,
-        payload: {
-            ...previousPayload,
-            ...nextPayload,
-            data: { ...previousData, ...nextData },
-        },
-    });
-    const nextEventIds = new Set(canonical.canonicalEvents.map((event) => event.id));
-    const nextToolKeysWithArguments = new Set(
-        canonical.canonicalEvents.flatMap((event) =>
-            event.kind === "tool" &&
-            event.message.toolCalls?.some((toolCall) => toolCall.arguments !== undefined)
-                ? [event.toolKey]
-                : []
-        )
-    );
-    const preservedToolCalls = new Map(
-        previous.canonicalEvents.flatMap((event) =>
-            event.kind === "tool" &&
-            event.message.toolCalls?.some((toolCall) => toolCall.arguments !== undefined)
-                ? [[event.toolKey, event] as const]
-                : []
-        )
-    );
-    return boundedCanonicalRuntimeEnvelope({
-        ...canonical,
-        canonicalEvents: [
-            ...preservedToolCalls
-                .values()
-                .filter(
-                    (event) =>
-                        !nextEventIds.has(event.id) &&
-                        !nextToolKeysWithArguments.has(event.toolKey)
-                ),
-            ...canonical.canonicalEvents,
-        ],
-    });
-}
-
-const TRANSCRIPT_BACKED_ITEM_KINDS = new Set([
-    "command",
-    "custom_tool_call",
-    "custom_tool_call_output",
-    "function_call",
-    "function_call_output",
-    "tool_call",
-    "tool_call_output",
-    "tool_result",
-    "tool_use",
-    "toolcall",
-    "toolresult",
-]);
-
-function isTranscriptBackedToolEnvelope(envelope: OpenClawRuntimeEnvelope): boolean {
-    if (replayToolData(envelope)) {
-        return true;
-    }
-    if (envelope.event !== "agent") {
-        return false;
-    }
-    const data = runtimePayloadView(envelope.payload);
-    if (!data || stringField(data, "stream") !== "item") {
-        return false;
-    }
-    const item = nestedRuntimeItem(data) || data;
-    const kind = (
-        stringField(item, "kind") ||
-        stringField(item, "type") ||
-        stringField(data, "kind") ||
-        ""
-    ).toLowerCase();
-    return TRANSCRIPT_BACKED_ITEM_KINDS.has(kind);
-}
-
-function trimRetainedRun(run: RetainedRun): void {
-    while (
-        run.events.length > 1 &&
-        (run.events.length > MAX_EVENTS_PER_ACTIVE_RUN ||
-            run.totalBytes > MAX_BYTES_PER_ACTIVE_RUN)
-    ) {
-        const transcriptBackedIndex = run.events.findIndex((event) =>
-            isTranscriptBackedToolEnvelope(event)
-        );
-        const removalIndex = transcriptBackedIndex === -1 ? 0 : transcriptBackedIndex;
-        run.events.splice(removalIndex, 1);
-        run.totalBytes -= run.eventBytes.splice(removalIndex, 1)[0] || 0;
-    }
-}
-
-function compactCompletedRun(run: RetainedRun): void {
-    const retainedEvents = run.events.filter(
-        (event) => !isTranscriptBackedToolEnvelope(event)
-    );
-    if (retainedEvents.length === run.events.length) {
-        return;
-    }
-    run.events = retainedEvents;
-    run.eventBytes = retainedEvents.map((event) =>
-        Buffer.byteLength(JSON.stringify(event))
-    );
-    run.totalBytes = run.eventBytes.reduce((total, bytes) => total + bytes, 0);
-}
-
-function hasRunIdentifier(session: OpenClawChatSessionIdentity, runId: string): boolean {
-    return [
-        session.id,
-        session.key,
-        session.runId,
-        session.activeRunId,
-        session.currentRunId,
-    ].includes(runId);
-}
-
-function isAgentSessionKey(sessionKey: string): boolean {
-    return /^agent:[^:]+:.+$/iu.test(sessionKey.trim());
-}
-
-function normalizedSessionKey(sessionKey: string): string {
-    return sessionKey.trim().toLowerCase();
-}
-
-function isExactSessionKey(left: string, right: string): boolean {
-    return normalizedSessionKey(left) === normalizedSessionKey(right);
-}
-
-function isSameSessionKey(left: string, right: string): boolean {
-    const normalizedLeft = normalizedSessionKey(left);
-    const normalizedRight = normalizedSessionKey(right);
-    if (normalizedLeft === normalizedRight) {
-        return true;
-    }
-    const leftMatch = normalizedLeft.match(/^agent:([^:]+):(.+)$/u);
-    const rightMatch = normalizedRight.match(/^agent:([^:]+):(.+)$/u);
-    if (leftMatch && rightMatch) {
-        return leftMatch[1] === rightMatch[1] && leftMatch[2] === rightMatch[2];
-    }
-    return leftMatch
-        ? leftMatch[2] === normalizedRight
-        : rightMatch?.[2] === normalizedLeft;
-}
-
-function isAgentCompactionEvent(event: unknown, payload: unknown): boolean {
-    const record = asRecord(payload);
-    const data = asRecord(record?.data);
-    const stream = stringField(data, "stream") || stringField(record, "stream");
-    return event === "agent" && stream?.toLowerCase() === "compaction";
-}
-
-function isCompactionEvent(event: unknown, payload: unknown): boolean {
-    return event === "session.compaction" || isAgentCompactionEvent(event, payload);
-}
-
-function isSettlingLifecycleEvent(event: unknown, payload: unknown): boolean {
-    const record = runtimePayloadView(payload);
-    const stream = (stringField(record, "stream") || "").toLowerCase();
-    const phase = (stringField(record, "phase") || "").toLowerCase();
-    return (
-        event === "agent" && stream === "lifecycle" && ["end", "error"].includes(phase)
-    );
-}
-
-/**
- * Identifies provider work that can continue one interrupted conversation.
- * @param event Event to handle.
- * @param payload Request or event payload.
- * @returns Whether the event continues the active conversation.
- */
-function isConversationContinuationEvent(event: unknown, payload: unknown): boolean {
-    return !(
-        isCompactionEvent(event, payload) ||
-        (event === "session.message" && sessionMessageRole(payload) === "user")
-    );
-}
-
-function isCompactionOnlyRun(run: RetainedRun): boolean {
-    return (
-        run.events.length > 0 &&
-        run.events.every((event) => isCompactionEvent(event.event, event.payload))
-    );
-}
-
-function matchingSessionKeys(
-    sessionKey: string,
-    sessions: readonly OpenClawChatSessionIdentity[]
-): Map<string, string> {
-    const matches = new Map<string, string>();
-    for (const session of sessions) {
-        if (isSameSessionKey(session.key, sessionKey)) {
-            matches.set(normalizedSessionKey(session.key), session.key);
-        }
-    }
-    return matches;
-}
-
-function isTerminalEvent(event: unknown, payload: unknown): boolean {
-    if (event === "model.completed" || event === "session.ended") {
-        return true;
-    }
-
-    const record = runtimePayloadView(payload);
-    const compactionOperation = (stringField(record, "operation") || "").toLowerCase();
-    const eventPhase = (stringField(record, "phase") || "").toLowerCase();
-    const eventStatus = (stringField(record, "status") || "").toLowerCase();
-    const isRetryingCompaction =
-        record?.willRetry === true ||
-        eventPhase === "retrying" ||
-        eventStatus === "retrying";
-    const isTerminalCompaction =
-        ((event === "session.compaction" && compactionOperation === "compact") ||
-            isAgentCompactionEvent(event, payload)) &&
-        !isRetryingCompaction &&
-        (COMPACTION_TERMINAL_STATES.has(eventPhase) ||
-            COMPACTION_TERMINAL_STATES.has(eventStatus));
-    return (
-        (event === "chat" &&
-            ["aborted", "error", "final"].includes(
-                (stringField(record, "state") || "").toLowerCase()
-            )) ||
-        (event === "session.message" &&
-            sessionMessageRole(payload) === "assistant" &&
-            sessionMessageStopReason(payload) === "stop") ||
-        isTerminalCompaction ||
-        isSettlingLifecycleEvent(event, payload)
-    );
-}
-
-function compactTerminalPayload(
-    payload: Record<string, unknown> | undefined,
-    runId: string | undefined,
-    sessionKey: string
-): Record<string, unknown> {
-    const data = asRecord(payload?.data);
-    const payloadView = runtimePayloadView(payload);
-    const compactData = {
-        aborted: data?.aborted === true ? true : undefined,
-        completed: data?.completed === true ? true : undefined,
-        error: stringField(data, "error"),
-        errorMessage: stringField(data, "errorMessage"),
-        operation: stringField(data, "operation"),
-        operationId: stringField(data, "operationId"),
-        phase: stringField(data, "phase"),
-        promptError: stringField(data, "promptError"),
-        state: stringField(data, "state"),
-        status: stringField(data, "status"),
-        stream: stringField(data, "stream"),
-    };
-    const hasCompactData = Object.values(compactData).some(
-        (value) => value !== undefined
-    );
-    return {
-        aborted: payloadView?.aborted === true ? true : undefined,
-        completed: payloadView?.completed === true ? true : undefined,
-        data: hasCompactData ? compactData : undefined,
-        error: stringField(payloadView, "error"),
-        errorMessage: stringField(payloadView, "errorMessage"),
-        operation: stringField(payloadView, "operation"),
-        operationId: stringField(payloadView, "operationId"),
-        phase: stringField(payloadView, "phase"),
-        promptError: stringField(payloadView, "promptError"),
-        role: sessionMessageRole(payload),
-        runId,
-        sessionKey,
-        state: stringField(payloadView, "state"),
-        status: stringField(payloadView, "status"),
-        stopReason: sessionMessageStopReason(payload),
-        stream: stringField(payloadView, "stream"),
-    };
-}
-
-const COMPACT_PROVIDER_METADATA_KEYS = [
-    "aborted",
-    "callId",
-    "completed",
-    "error",
-    "errorMessage",
-    "id",
-    "idempotencyKey",
-    "itemId",
-    "itemKind",
-    "kind",
-    "model",
-    "name",
-    "operation",
-    "operationId",
-    "phase",
-    "promptError",
-    "provider",
-    "role",
-    "runId",
-    "sessionId",
-    "sessionKey",
-    "state",
-    "status",
-    "stopReason",
-    "stream",
-    "timestamp",
-    "toolCallId",
-    "toolName",
-    "tool_call_id",
-    "tool_name",
-    "ts",
-    "type",
-    "willRetry",
-] as const;
-
-function compactProviderMetadata(
-    record: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-    if (!record) {
-        return undefined;
-    }
-    const compact: Record<string, unknown> = {};
-    for (const key of COMPACT_PROVIDER_METADATA_KEYS) {
-        const value = record[key];
-        if (
-            typeof value === "boolean" ||
-            typeof value === "number" ||
-            (typeof value === "string" && value.length <= 4096)
-        ) {
-            compact[key] = value;
-        }
-    }
-    for (const key of ["item", "message", "payload"] as const) {
-        const nested = compactProviderMetadata(asRecord(record[key]));
-        if (nested && Object.keys(nested).length > 0) {
-            compact[key] = nested;
-        }
-    }
-    return compact;
-}
-
-function compactCanonicalProviderPayload(payload: unknown): Record<string, unknown> {
-    const rawPayload = asRecord(payload);
-    const payloadView = runtimePayloadView(payload);
-    const compact = compactProviderMetadata(payloadView) || {};
-    const data = compactProviderMetadata(asRecord(rawPayload?.data));
-    return data && Object.keys(data).length > 0 ? { ...compact, data } : compact;
-}
-
-function boundedCanonicalRuntimeEnvelope(
-    envelope: OpenClawRuntimeEnvelope
-): OpenClawRuntimeEnvelope {
-    if (Buffer.byteLength(JSON.stringify(envelope)) <= MAX_BYTES_PER_EVENT) {
-        return envelope;
-    }
-    const compacted = {
-        ...envelope,
-        payload: compactCanonicalProviderPayload(envelope.payload),
-    };
-    if (Buffer.byteLength(JSON.stringify(compacted)) <= MAX_BYTES_PER_EVENT) {
-        return compacted;
-    }
-    if (!isTerminalEvent(envelope.event, envelope.payload)) {
-        return envelope;
-    }
-    const terminalEvents = envelope.canonicalEvents.flatMap((event) =>
-        event.kind === "finish"
-            ? [
-                  {
-                      ...event,
-                      error:
-                          event.error && event.error.length <= 4096
-                              ? event.error
-                              : undefined,
-                      message: undefined,
-                  },
-              ]
-            : []
-    );
-    const terminalEnvelope = {
-        ...compacted,
-        canonicalEvents: terminalEvents,
-    };
-    return Buffer.byteLength(JSON.stringify(terminalEnvelope)) <= MAX_BYTES_PER_EVENT
-        ? terminalEnvelope
-        : envelope;
-}
-
-function isProvisionalRunId(runId: string): boolean {
-    return (
-        isRunlessRunId(runId) ||
-        runId.startsWith("dashboard-chat-") ||
-        runId.startsWith("dashboard-compact-")
-    );
-}
-
-function isRunlessRunId(runId: string): boolean {
-    return runId === "runless" || /^runless:\d+$/u.test(runId);
-}
-
-function isMetadataOnlyCompletionEnvelope(envelope: OpenClawRuntimeEnvelope): boolean {
-    if (envelope.event !== "session.ended" && envelope.event !== "model.completed") {
-        return false;
-    }
-    const payload = asRecord(envelope.payload);
-    const data = asRecord(payload?.data);
-    const terminalStates = [
-        stringField(payload, "state"),
-        stringField(payload, "status"),
-        stringField(data, "phase"),
-        stringField(data, "status"),
-    ].map((value) => value?.toLowerCase());
-    return (
-        payload?.aborted !== true &&
-        data?.aborted !== true &&
-        !stringField(payload, "error") &&
-        !stringField(payload, "errorMessage") &&
-        !stringField(payload, "promptError") &&
-        !stringField(data, "error") &&
-        !stringField(data, "errorMessage") &&
-        !stringField(data, "promptError") &&
-        payload?.message === undefined &&
-        payload?.content === undefined &&
-        payload?.text === undefined &&
-        terminalStates.every((value) => !TERMINAL_FAILURE_STATES.has(value || ""))
-    );
-}
-
-function isMetadataOnlyRunlessCompletion(run: RetainedRun): boolean {
-    return (
-        isRunlessRunId(run.runId) &&
-        run.events.length > 0 &&
-        run.events.every((event) => isMetadataOnlyCompletionEnvelope(event))
-    );
-}
-
-function isAuxiliaryOnlyCompletion(run: RetainedRun): boolean {
-    return isMetadataOnlyRunlessCompletion(run) || isCompactionOnlyRun(run);
-}
-
-function lastSequence(run: RetainedRun): number {
-    return run.events.at(-1)?.runtimeSequence ?? -1;
-}
-
-function firstSequence(run: RetainedRun): number {
-    return run.firstSequence;
-}
-
-function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
-    let latest = -Infinity;
-    for (const run of runs) {
-        latest = Math.max(latest, run.updatedAt);
-    }
-    return latest;
-}
-
-function hasActiveConversationRun(runs: ReadonlyMap<string, RetainedRun>): boolean {
-    return runs.values().some((run) => !run.completed && !isCompactionOnlyRun(run));
-}
-
-function replayBytes(runs: Iterable<RetainedRun>): number {
-    let bytes = 0;
-    for (const run of runs) {
-        bytes += run.totalBytes;
-    }
-    return bytes;
-}
-
-function oldestReplayBudgetSessionKey(
-    sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
-    protectedSessionKey?: string
-): string | undefined {
-    let hasOldestActiveRun = true;
-    let oldestSessionKey: string | undefined;
-    let oldestUpdatedAt = Infinity;
-    for (const [candidateSessionKey, runs] of sessions) {
-        if (
-            protectedSessionKey &&
-            isSameSessionKey(candidateSessionKey, protectedSessionKey)
-        ) {
-            continue;
-        }
-        const hasActiveRun = runs.values().some((run) => !run.completed);
-        const updatedAt = latestRunUpdatedAt(runs.values());
-        if (
-            oldestSessionKey === undefined ||
-            (hasOldestActiveRun && !hasActiveRun) ||
-            (hasOldestActiveRun === hasActiveRun && updatedAt < oldestUpdatedAt)
-        ) {
-            hasOldestActiveRun = hasActiveRun;
-            oldestSessionKey = candidateSessionKey;
-            oldestUpdatedAt = updatedAt;
-        }
-    }
-    return oldestSessionKey;
-}
-
-function oldestEvictableSessionKey(
-    sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
-    protectedSessionKey?: string
-): string | undefined {
-    let oldestSessionKey: string | undefined;
-    let oldestUpdatedAt = Infinity;
-    for (const [candidateSessionKey, runs] of sessions) {
-        if (
-            protectedSessionKey &&
-            isSameSessionKey(candidateSessionKey, protectedSessionKey)
-        ) {
-            continue;
-        }
-        const updatedAt = latestRunUpdatedAt(runs.values());
-        if (updatedAt < oldestUpdatedAt) {
-            oldestSessionKey = candidateSessionKey;
-            oldestUpdatedAt = updatedAt;
-        }
-    }
-    return oldestSessionKey;
-}
-
-function normalizedMessageText(value: unknown): string {
-    if (typeof value === "string") {
-        return value.trim();
-    }
-    if (!Array.isArray(value)) {
-        return "";
-    }
-    return value
-        .map((block) => {
-            if (typeof block === "string") {
-                return block;
-            }
-            const record = asRecord(block);
-            if (["thinking", "toolCall"].includes(String(record?.type))) {
-                return "";
-            }
-            return typeof record?.text === "string" ? record.text : "";
-        })
-        .filter(Boolean)
-        .join("\n\n")
-        .trim();
-}
-
-function messageSignature(payload: unknown): string | undefined {
-    const record = runtimePayloadView(payload);
-    if (!record) {
-        return undefined;
-    }
-    const message = asRecord(record.message);
-    const candidates = message
-        ? [message.text, message.content]
-        : [record.message, record.content, record.text];
-    for (const candidate of candidates) {
-        const text = normalizedMessageText(candidate);
-        if (text) {
-            return `text:${text}`;
-        }
-    }
-    for (const candidate of candidates) {
-        if (
-            candidate === undefined ||
-            candidate === null ||
-            candidate === "" ||
-            (Array.isArray(candidate) && candidate.length === 0)
-        ) {
-            continue;
-        }
-        try {
-            const serialized = JSON.stringify(candidate);
-            if (serialized) {
-                return `content:${serialized}`;
-            }
-        } catch {
-            return undefined;
-        }
-    }
-    return undefined;
-}
-
-function hasChatFinal(run: RetainedRun): boolean {
-    return run.events.some(
-        (candidate) =>
-            candidate.event === "chat" &&
-            (
-                stringField(runtimePayloadView(candidate.payload), "state") || ""
-            ).toLowerCase() === "final"
-    );
-}
-
-function sessionMessageRole(payload: unknown): string | undefined {
-    const record = runtimePayloadView(payload);
-    return (
-        stringField(record, "role") || stringField(asRecord(record?.message), "role")
-    )?.toLowerCase();
-}
-
-function sessionMessageStopReason(payload: unknown): string | undefined {
-    const record = runtimePayloadView(payload);
-    const message = asRecord(record?.message);
-    return (
-        stringField(message, "stopReason") || stringField(record, "stopReason")
-    )?.toLowerCase();
-}
-
-function sessionMessageRunId(event: unknown, payload: unknown): string | undefined {
-    if (event !== "session.message" || sessionMessageRole(payload) !== "user") {
-        return undefined;
-    }
-    const record = runtimePayloadView(payload);
-    const activeRunIds = sessionMessageActiveRunIds(payload);
-    const providerRunIds = [...new Set(activeRunIds)].filter(
-        (runId) => !isProvisionalRunId(runId)
-    );
-    if (providerRunIds.length === 1) {
-        return providerRunIds[0];
-    }
-    const idempotencyKey =
-        stringField(asRecord(record?.message), "idempotencyKey") ||
-        stringField(record, "idempotencyKey");
-    return idempotencyKey?.match(/^(dashboard-chat-.+):user$/u)?.[1];
-}
-
-function sessionMessageActiveRunIds(payload: unknown): string[] {
-    const activeRunIds = runtimePayloadView(payload)?.activeRunIds;
-    return Array.isArray(activeRunIds)
-        ? [
-              ...new Set(
-                  activeRunIds.filter(
-                      (runId): runId is string =>
-                          typeof runId === "string" && runId.trim().length > 0
-                  )
-              ),
-          ]
-        : [];
-}
-
-function sessionMessageRequestId(event: unknown, payload: unknown): string | undefined {
-    if (event !== "session.message" || sessionMessageRole(payload) !== "user") {
-        return undefined;
-    }
-    const record = runtimePayloadView(payload);
-    const idempotencyKey =
-        stringField(asRecord(record?.message), "idempotencyKey") ||
-        stringField(record, "idempotencyKey");
-    return idempotencyKey?.match(/^(.+):user$/u)?.[1];
-}
-
-function isRunlessUserLedRun(run: RetainedRun): boolean {
-    const firstEvent = run.events[0];
-    return (
-        !run.completed &&
-        isRunlessRunId(run.runId) &&
-        firstEvent?.event === "session.message" &&
-        sessionMessageRole(firstEvent.payload) === "user"
-    );
-}
-
-function isPromotableRunlessUserLedRun(
-    run: RetainedRun,
-    envelope: OpenClawRuntimeEnvelope,
-    runs: ReadonlyMap<string, RetainedRun>
-): boolean {
-    if (isRunlessUserLedRun(run)) {
-        return true;
-    }
-    const firstEvent = run.events[0];
-    const terminalEvent = run.events.find(
-        (event) => event.runtimeSequence === run.terminalSequence
-    );
-    const isLatestSessionRun = runs
-        .values()
-        .every((candidate) => lastSequence(candidate) <= lastSequence(run));
-    const isLatestCompletedSyntheticTurn = Boolean(
-        isLatestSessionRun &&
-        run.completed &&
-        isRunlessRunId(run.runId) &&
-        firstEvent?.event === "session.message" &&
-        sessionMessageRole(firstEvent.payload) === "user" &&
-        terminalEvent?.event === "session.message" &&
-        sessionMessageRole(terminalEvent.payload) === "assistant" &&
-        sessionMessageStopReason(terminalEvent.payload) === "stop" &&
-        envelope.runtimeSequence > run.terminalSequence
-    );
-    if (!isLatestCompletedSyntheticTurn || !terminalEvent) {
-        return false;
-    }
-    if (isMetadataOnlyCompletionEnvelope(envelope)) {
-        return true;
-    }
-    const terminalSignature = messageSignature(terminalEvent.payload);
-    return Boolean(
-        terminalSignature && terminalSignature === messageSignature(envelope.payload)
-    );
-}
-
-function isPromotableInterruptedConversationRun(
-    run: RetainedRun,
-    envelope: OpenClawRuntimeEnvelope,
-    requestBoundary?: number
-): boolean {
-    const providerRunId = stringField(runtimePayloadView(envelope.payload), "runId");
-    const resumeDelay = envelope.runtimeRecordedAt - (run.interruptedAt ?? run.updatedAt);
-    return (
-        providerRunId !== undefined &&
-        providerRunId.length > 0 &&
-        resumeDelay >= -5000 &&
-        resumeDelay <= INTERRUPTED_RUN_PROMOTION_WINDOW_MS &&
-        !run.completed &&
-        run.interruptionEligible &&
-        !isProvisionalRunId(providerRunId) &&
-        isConversationContinuationEvent(envelope.event, envelope.payload) &&
-        envelope.runtimeSequence > lastSequence(run) &&
-        !(
-            requestBoundary !== undefined &&
-            requestBoundary < envelope.runtimeSequence &&
-            firstSequence(run) <= requestBoundary
-        )
-    );
-}
-
-function promotableInterruptedConversationRuns(
-    envelope: OpenClawRuntimeEnvelope,
-    runs: ReadonlyMap<string, RetainedRun>,
-    requestBoundary?: number,
-    providerRun?: RetainedRun
-): RetainedRun[] {
-    const candidates = runs
-        .values()
-        .filter(
-            (run) =>
-                run !== providerRun &&
-                isPromotableInterruptedConversationRun(run, envelope, requestBoundary)
-        )
-        .toArray();
-    if (candidates.length === 0) {
-        return [];
-    }
-    if (
-        candidates.length > 1 &&
-        candidates.some((run) => run.interruptedAt === undefined)
-    ) {
-        return [];
-    }
-    const candidateSet = new Set(candidates);
-    const coversEveryActiveConversation = runs
-        .values()
-        .every(
-            (run) =>
-                run === providerRun ||
-                run.completed ||
-                isCompactionOnlyRun(run) ||
-                candidateSet.has(run)
-        );
-    return coversEveryActiveConversation
-        ? candidates.toSorted(
-              (left, right) =>
-                  firstSequence(left) - firstSequence(right) ||
-                  left.runId.localeCompare(right.runId)
-          )
-        : [];
-}
-
-function isActiveConversationAtBoundary(
-    run: RetainedRun,
-    requestBoundary: number
-): boolean {
-    return (
-        !run.completed &&
-        !isCompactionOnlyRun(run) &&
-        firstSequence(run) <= requestBoundary
-    );
-}
-
-function isMatchingSessionEcho(
-    run: RetainedRun,
-    envelope: OpenClawRuntimeEnvelope
-): boolean {
-    const role = sessionMessageRole(envelope.payload);
-    if (role && role !== "assistant") {
-        return false;
-    }
-    const elapsedMilliseconds = envelope.runtimeRecordedAt - run.updatedAt;
-    if (elapsedMilliseconds < -5000 || elapsedMilliseconds > SESSION_ECHO_WINDOW_MS) {
-        return false;
-    }
-    const signature = messageSignature(envelope.payload);
-    return Boolean(
-        signature &&
-        run.events.some(
-            (candidate) =>
-                candidate.event === "chat" &&
-                (
-                    stringField(runtimePayloadView(candidate.payload), "state") || ""
-                ).toLowerCase() === "final" &&
-                messageSignature(candidate.payload) === signature
-        )
-    );
-}
-
-/**
- * Quarantines the OpenClaw-specific runtime replay contract behind one backend
- * boundary. Dashboard chat code consumes this bridge instead of owning cache,
- * alias, retention, and request-cleanup rules inside the generic Gateway relay.
+ * Coordinates canonical provider, lifecycle, identity, retention, request
+ * boundary, and persistence seams for live Gateway chat runtime replay.
  */
 export class OpenClawChatBridge {
     readonly #hydratedSessionLookups = new Set<string>();
@@ -1566,58 +500,12 @@ export class OpenClawChatBridge {
         shouldIncludePersistenceMetadata = false,
         requestBoundaries: OpenClawChatRequestBoundaryMetadata = {}
     ): OpenClawRuntimeSnapshot {
-        const snapshots = runs ? runs.values().toArray() : [];
-        const active = snapshots.filter((snapshot) => !snapshot.completed);
-        const completed = snapshots
-            .filter((snapshot) => snapshot.completed)
-            .toSorted((left, right) => right.terminalSequence - left.terminalSequence);
-        const newestCompleted = completed[0];
-        const latestConversation = completed.find(
-            (snapshot) => !isAuxiliaryOnlyCompletion(snapshot)
+        return snapshotFromRetainedRuns(
+            runs,
+            this.#sequence,
+            shouldIncludePersistenceMetadata,
+            requestBoundaries
         );
-        const completedToReplay = latestConversation || newestCompleted;
-        const activeConversation = active.filter(
-            (snapshot) => !isCompactionOnlyRun(snapshot)
-        );
-        let selected: RetainedRun[];
-        if (activeConversation.length > 0) {
-            selected = active;
-        } else if (active.length > 0) {
-            selected = latestConversation ? [latestConversation, ...active] : active;
-        } else {
-            selected = completedToReplay ? [completedToReplay] : [];
-        }
-
-        const interruptedAtByRun = shouldIncludePersistenceMetadata
-            ? Object.fromEntries(
-                  selected.flatMap((snapshot) =>
-                      snapshot.interruptedAt === undefined
-                          ? []
-                          : [[snapshot.runId, snapshot.interruptedAt]]
-                  )
-              )
-            : {};
-        const firstSequenceByRun = shouldIncludePersistenceMetadata
-            ? Object.fromEntries(
-                  selected.map((snapshot) => [snapshot.runId, snapshot.firstSequence])
-              )
-            : {};
-
-        return {
-            completed: active.length === 0 && selected.length > 0,
-            events: selected
-                .flatMap((snapshot) => snapshot.events)
-                .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence),
-            ...(Object.keys(firstSequenceByRun).length > 0 && {
-                firstSequenceByRun,
-            }),
-            ...(Object.keys(interruptedAtByRun).length > 0 && {
-                interruptedAtByRun,
-            }),
-            ...(shouldIncludePersistenceMetadata && requestBoundaries),
-            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
-            throughSequence: this.#sequence,
-        };
     }
 
     #snapshotFromMemory(
@@ -1720,7 +608,7 @@ export class OpenClawChatBridge {
         this.#persistenceTimer = setTimeout(() => {
             this.#persistenceTimer = undefined;
             this.#flushPendingPersistence();
-        }, PERSIST_DEBOUNCE_MS);
+        }, OPENCLAW_CHAT_PERSIST_DEBOUNCE_MS);
     }
 
     #evictSessionFromMemory(sessionKey: string): void {
@@ -2091,8 +979,10 @@ export class OpenClawChatBridge {
                 const oldestSessionKey =
                     oldestReplayBudgetSessionKey(
                         this.#runsBySession,
+                        isSameSessionKey,
                         storageProtectedSessionKey
-                    ) ?? oldestReplayBudgetSessionKey(this.#runsBySession);
+                    ) ??
+                    oldestReplayBudgetSessionKey(this.#runsBySession, isSameSessionKey);
                 if (!oldestSessionKey) {
                     break;
                 }
@@ -2116,6 +1006,7 @@ export class OpenClawChatBridge {
         while (this.#runsBySession.size > MAX_CHAT_RUNTIME_SESSIONS) {
             const oldestSessionKey = oldestEvictableSessionKey(
                 this.#runsBySession,
+                isSameSessionKey,
                 storageProtectedSessionKey
             );
             if (!oldestSessionKey) {
@@ -2168,7 +1059,7 @@ export class OpenClawChatBridge {
         payload: unknown,
         sessions: readonly OpenClawChatSessionIdentity[]
     ): unknown {
-        if (typeof event !== "string" || !RETAINED_EVENTS.has(event)) {
+        if (typeof event !== "string" || !RETAINED_RUNTIME_EVENTS.has(event)) {
             return payload;
         }
 
@@ -2761,7 +1652,10 @@ export class OpenClawChatBridge {
         shouldPersist = true,
         retentionPayload?: Record<string, unknown>
     ): string[] {
-        if (typeof envelope.event !== "string" || !RETAINED_EVENTS.has(envelope.event)) {
+        if (
+            typeof envelope.event !== "string" ||
+            !RETAINED_RUNTIME_EVENTS.has(envelope.event)
+        ) {
             return [];
         }
 

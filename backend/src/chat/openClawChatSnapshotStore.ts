@@ -8,7 +8,7 @@ import { database } from "../database.ts";
 import {
     MAX_CHAT_RUNTIME_SESSIONS,
     type OpenClawChatSnapshotStore,
-} from "./openClawChatBridge.ts";
+} from "./openClawChatPersistence.ts";
 import { MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES } from "./openClawChatRequestBoundaries.ts";
 
 interface SnapshotRow {
