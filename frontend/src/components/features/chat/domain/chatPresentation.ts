@@ -433,14 +433,25 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
 }
 
 /**
- * Applies visibility as a pure projection. Raw messages are never mutated or
- * discarded, so toggling diagnostics can always reveal the same current run.
- * @param messages Messages value.
+ * Normalizes thinking into stable standalone messages before visibility policy.
+ * @param messages Reconciled messages.
+ * @returns Structured messages with deterministic thinking placement.
+ */
+export function structureChatMessages(
+    messages: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    return collapseRunThinking(messages);
+}
+
+/**
+ * Applies visibility to already-structured messages. Input messages are never
+ * mutated or discarded outside the returned projection.
+ * @param messages Structured messages.
  * @param visibility Visibility value.
  * @param shouldKeepThinkingAfterFinal Whether should keep thinking after final.
- * @returns Present chat messages result.
+ * @returns Presented chat messages.
  */
-export function presentChatMessages(
+export function presentStructuredChatMessages(
     messages: ChatHistoryMessage[],
     visibility: ChatVisibilitySettings,
     shouldKeepThinkingAfterFinal = true
@@ -476,7 +487,7 @@ export function presentChatMessages(
         pendingToolMedia = undefined;
     };
 
-    for (const message of collapseRunThinking(messages)) {
+    for (const message of messages) {
         const role = message.role.toLowerCase();
         const isTool = TOOL_ROLE_VARIANTS.includes(role);
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
@@ -540,6 +551,26 @@ export function presentChatMessages(
 
     return applyFinalThinkingPreference(
         visible,
+        visibility,
+        shouldKeepThinkingAfterFinal
+    );
+}
+
+/**
+ * Structures and applies visibility as a pure projection. Raw messages are
+ * never mutated, so toggling diagnostics can reveal the same current run.
+ * @param messages Reconciled messages.
+ * @param visibility Visibility value.
+ * @param shouldKeepThinkingAfterFinal Whether should keep thinking after final.
+ * @returns Presented chat messages.
+ */
+export function presentChatMessages(
+    messages: ChatHistoryMessage[],
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal = true
+): ChatHistoryMessage[] {
+    return presentStructuredChatMessages(
+        structureChatMessages(messages),
         visibility,
         shouldKeepThinkingAfterFinal
     );

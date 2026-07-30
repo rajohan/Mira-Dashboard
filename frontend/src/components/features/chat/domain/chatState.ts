@@ -1,3 +1,7 @@
+import type {
+    CanonicalChatEvent,
+    CanonicalChatProviderMetadata,
+} from "../../../../../../contracts/chatCanonical";
 import { currentIsoString } from "../../../../utils/date";
 import {
     type ChatHistoryMessage,
@@ -59,11 +63,32 @@ export interface ChatRuntimeState {
 }
 
 interface RuntimeEventBase {
+    id?: string;
+    origin?: CanonicalChatEvent["origin"];
+    provider?: CanonicalChatProviderMetadata;
     runAliases?: string[];
     runId?: string;
     sequence: number;
     sessionKey: string;
     timestamp: string;
+}
+
+function withRuntimeMessageProvenance(
+    message: ChatHistoryMessage,
+    event: RuntimeEventBase
+): ChatHistoryMessage {
+    return event.id
+        ? {
+              ...message,
+              provenance: {
+                  id: event.id,
+                  origin: event.origin,
+                  provider: event.provider,
+                  sequence: event.sequence,
+                  source: "openclaw-runtime",
+              },
+          }
+        : message;
 }
 
 export type ChatRuntimeEvent =
@@ -530,9 +555,10 @@ function applyAssistantEvent(
             !run.assistantSource ||
             run.assistantSource === event.source ||
             run.phase !== "active");
+    const sourcedMessage = withRuntimeMessageProvenance(event.message, event);
     const incoming = canUseText
-        ? event.message
-        : { ...event.message, content: [], text: "" };
+        ? sourcedMessage
+        : { ...sourcedMessage, content: [], text: "" };
     if (!incoming.text && !hasNonTextDetails(incoming)) {
         return run;
     }
@@ -730,7 +756,7 @@ function applyDiagnosticEvent(
             key,
             event.kind,
             {
-                ...event.message,
+                ...withRuntimeMessageProvenance(event.message, event),
                 timestamp: event.message.timestamp || event.timestamp,
             },
             event.sequence,
@@ -744,7 +770,7 @@ function applyUserEvent(
     event: Extract<ChatRuntimeEvent, { kind: "user" }>
 ): ChatRunState {
     const message = {
-        ...event.message,
+        ...withRuntimeMessageProvenance(event.message, event),
         timestamp: event.message.timestamp || event.timestamp,
     };
     const key = `user:${messageDeleteKey(message)}`;

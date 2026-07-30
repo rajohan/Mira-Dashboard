@@ -1,4 +1,8 @@
 import type { ChatTransportAttachment } from "../../../../../contracts/chat";
+import type {
+    CanonicalChatEvent,
+    CanonicalChatProviderMetadata,
+} from "../../../../../contracts/chatCanonical";
 
 /** Defines normalized role variants that represent tool result rows. */
 export const TOOL_ROLE_VARIANTS: readonly string[] = [
@@ -389,6 +393,15 @@ export interface ChatVisibilitySettings {
     shouldShowTools: boolean;
 }
 
+/** Provider-independent source identity retained while projecting one message. */
+export interface ChatMessageProvenance {
+    id: string;
+    origin?: CanonicalChatEvent["origin"];
+    provider?: CanonicalChatProviderMetadata;
+    sequence?: number;
+    source: "openclaw-history" | "openclaw-runtime";
+}
+
 /** Represents chat history message. */
 export interface ChatHistoryMessage {
     role: string;
@@ -412,6 +425,8 @@ export interface ChatHistoryMessage {
     runtimeKey?: string;
     /** Canonical Gateway event order used only while reconciling runtime rows. */
     runtimeSequence?: number;
+    /** Canonical transport identity used to assemble versioned turns. */
+    provenance?: ChatMessageProvenance;
 }
 
 /**

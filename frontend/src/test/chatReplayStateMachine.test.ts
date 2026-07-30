@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
 import type { ChatHistoryMessage, ChatRow } from "../components/features/chat/chatTypes";
+import { projectChatWithCanonicalShadow } from "../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,
     hasPrimaryAnswerContent,
 } from "../components/features/chat/domain/chatPresentation";
-import { projectChat } from "../components/features/chat/domain/chatProjection";
 import {
     type ChatRuntimeEvent,
     createChatRuntimeState,
@@ -225,7 +225,7 @@ function projectionFor(
     history: ChatHistoryMessage[],
     state: ReturnType<typeof createChatRuntimeState>
 ) {
-    return projectChat(
+    const shadow = projectChatWithCanonicalShadow(
         history,
         state,
         SESSION,
@@ -233,6 +233,12 @@ function projectionFor(
         true,
         new Set()
     );
+    expect(shadow.comparison).toMatchObject({
+        differenceKinds: [],
+        matches: true,
+        schemaVersion: 1,
+    });
+    return shadow.legacy;
 }
 
 const EVENTS = replayScenario();

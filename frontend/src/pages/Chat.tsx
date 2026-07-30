@@ -19,8 +19,8 @@ import {
     writeStoredChatDiagnosticVisibility,
 } from "../components/features/chat/chatPageUtilities";
 import type { ChatPreviewItem } from "../components/features/chat/chatTypes";
+import { projectChatWithCanonicalShadow } from "../components/features/chat/domain/chatCanonicalProjection";
 import { createChatVisibility as createRuntimeVisibility } from "../components/features/chat/domain/chatPresentation";
-import { projectChat } from "../components/features/chat/domain/chatProjection";
 import { isSameChatSession } from "../components/features/chat/domain/chatState";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
@@ -110,6 +110,7 @@ export function Chat() {
     const resetConfirmResolverRef = useRef<((wasConfirmed: boolean) => void) | undefined>(
         undefined
     );
+    const reportedProjectionMismatchRef = useRef("");
 
     const [draft, setDraft] = useState("");
     const [isAtBottom, setIsAtBottom] = useState(true);
@@ -248,7 +249,7 @@ export function Chat() {
     });
     const chatModelOptions = useChatModels(transport);
     const chatVisibility = createRuntimeVisibility(showThinkingOutput, showToolOutput);
-    const projection = projectChat(
+    const projectionShadow = projectChatWithCanonicalShadow(
         messages,
         runtime.state,
         selectedSessionKey,
@@ -256,6 +257,29 @@ export function Chat() {
         keepThinkingAfterFinal,
         deletedMessageKeys
     );
+    const projection = projectionShadow.legacy;
+    useEffect(() => {
+        const { comparison } = projectionShadow;
+        if (comparison.matches) {
+            return;
+        }
+        const signature = [
+            comparison.legacyFingerprint,
+            comparison.canonicalFingerprint || "canonical-error",
+            ...comparison.differenceKinds,
+        ].join(":");
+        if (reportedProjectionMismatchRef.current === signature) {
+            return;
+        }
+        reportedProjectionMismatchRef.current = signature;
+        console.warn("Canonical chat projection shadow mismatch", {
+            canonicalRowCount: comparison.canonicalRowCount,
+            differenceKinds: comparison.differenceKinds,
+            legacyRowCount: comparison.legacyRowCount,
+            schemaVersion: comparison.schemaVersion,
+            turnCount: comparison.turnCount,
+        });
+    }, [projectionShadow]);
     const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
     const chatRows = projectChatActivityRows({
         activeRuns: projection.activeRuns,

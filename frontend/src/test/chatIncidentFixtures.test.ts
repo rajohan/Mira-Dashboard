@@ -23,6 +23,8 @@ describe("chat incident fixtures", () => {
                 runCount: result.runCount,
             }).toEqual(fixture.expected);
             expect(new Set(result.rowKeys).size).toBe(result.rowKeys.length);
+            expect(result.shadowMatches).toBe(true);
+            expect(result.turnCount).toBeGreaterThan(0);
         }
     });
 
