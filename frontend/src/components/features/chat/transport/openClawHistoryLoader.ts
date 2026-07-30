@@ -35,6 +35,16 @@ function historySequence(row: CanonicalChatHistoryRow): number | undefined {
     return row.sequence;
 }
 
+function hasSequenceFingerprintIdentity(row: CanonicalChatHistoryRow): boolean {
+    const sequence = historySequence(row);
+    if (sequence === undefined) {
+        return false;
+    }
+    const rowPrefix = `openclaw-history:${encodeURIComponent(row.sessionKey)}:`;
+    const sourcePrefix = encodeURIComponent(`sequence:${sequence}:fingerprint:`);
+    return row.id.startsWith(`${rowPrefix}${sourcePrefix}`);
+}
+
 function hasIncrementalHistorySequenceMetadata(
     rows: readonly CanonicalChatHistoryRow[]
 ): boolean {
@@ -109,11 +119,58 @@ function mergeCachedHistoryRows(
                 : ([[historyMessageId(row), row]] as const);
         })
     );
+    const sequenceFingerprintIds = new Map<number, Set<string>>();
+    for (const [id, row] of cachedById) {
+        const sequence = historySequence(row);
+        if (sequence === undefined || !hasSequenceFingerprintIdentity(row)) {
+            continue;
+        }
+        const ids = sequenceFingerprintIds.get(sequence) ?? new Set<string>();
+        ids.add(id);
+        sequenceFingerprintIds.set(sequence, ids);
+    }
     const appendedRows: CanonicalChatHistoryRow[] = [];
     let didRewriteCachedRows = false;
+    const replacedFingerprintSequences = new Set<number>();
+    const freshFingerprintRows = new Map<number, CanonicalChatHistoryRow[]>();
+    for (const row of freshRows) {
+        const sequence = historySequence(row);
+        if (
+            sequence === undefined ||
+            sequence > throughSequence ||
+            !hasSequenceFingerprintIdentity(row)
+        ) {
+            continue;
+        }
+        freshFingerprintRows.set(sequence, [
+            ...(freshFingerprintRows.get(sequence) ?? []),
+            row,
+        ]);
+    }
+    for (const [sequence, rows] of freshFingerprintRows) {
+        const cachedIds = sequenceFingerprintIds.get(sequence);
+        if (
+            sequence > cached.throughSequence ||
+            !cachedIds ||
+            rows.every((row) => cachedIds.has(historyMessageId(row)))
+        ) {
+            continue;
+        }
+        for (const staleId of cachedIds) {
+            cachedById.delete(staleId);
+        }
+        for (const row of rows) {
+            cachedById.set(historyMessageId(row), row);
+        }
+        didRewriteCachedRows = true;
+        replacedFingerprintSequences.add(sequence);
+    }
     for (const row of freshRows) {
         const sequence = historySequence(row);
         if (sequence === undefined || sequence > throughSequence) {
+            continue;
+        }
+        if (replacedFingerprintSequences.has(sequence)) {
             continue;
         }
         const id = historyMessageId(row);

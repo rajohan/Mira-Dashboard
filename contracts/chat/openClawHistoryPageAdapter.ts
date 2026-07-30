@@ -16,6 +16,7 @@ import {
 } from "./openClawHistoryNormalizer";
 
 interface CanonicalizeOpenClawHistoryPageOptions {
+    messageId?: string;
     offset: number;
     sessionKey: string;
 }
@@ -113,12 +114,13 @@ export function canonicalizeOpenClawHistoryPage(
         throw new Error("OpenClaw chat history session key is required");
     }
     const responseOffset = nonNegativeInteger(page?.offset);
+    const isAnchoredWindow = Boolean(options.messageId?.trim());
     const isCompleteSnapshot =
         page?.completeSnapshot === true &&
         page?.hasMore !== true &&
         nonNegativeInteger(page?.nextOffset) === undefined;
     if (
-        (responseOffset === undefined && !isCompleteSnapshot) ||
+        (responseOffset === undefined && !isCompleteSnapshot && !isAnchoredWindow) ||
         (responseOffset !== undefined && responseOffset !== options.offset)
     ) {
         throw new Error(

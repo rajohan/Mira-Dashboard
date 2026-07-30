@@ -329,6 +329,27 @@ describe("canonical chat history contract", () => {
         expect(page.messages).toHaveLength(1);
     });
 
+    it("accepts anchored history windows without pagination offsets", () => {
+        const page = canonicalizeOpenClawHistoryPage(
+            {
+                messages: [{ content: "Anchored", role: "assistant" }],
+                sessionId: "session-1",
+            },
+            {
+                messageId: "message-anchor",
+                offset: 0,
+                sessionKey: SESSION,
+            }
+        );
+
+        expect(page).toMatchObject({
+            hasMore: false,
+            offset: 0,
+            sessionId: "session-1",
+        });
+        expect(page.messages).toHaveLength(1);
+    });
+
     it("rejects missing and mismatched provider page offsets", () => {
         expect(() =>
             canonicalizeOpenClawHistoryPage(

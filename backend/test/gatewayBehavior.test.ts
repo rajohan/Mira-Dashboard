@@ -188,7 +188,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 return { runId: "acknowledged-run" };
             }
             if (method === "chat.history") {
-                return {
+                const response = {
                     hasMore: false,
                     messages: [
                         {
@@ -211,6 +211,11 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                     sessionKey: "agent:main:main",
                     totalMessages: 1,
                 };
+                if (requestParameters.messageId === "history-message-1") {
+                    const { offset: _offset, ...anchoredResponse } = response;
+                    return anchoredResponse;
+                }
+                return response;
             }
             if (method === "demo.fail") {
                 throw new Error("gateway rejected");
@@ -1288,6 +1293,37 @@ describe("gateway behavior", () => {
                 sessionId: "sess1",
                 sessionKey: "agent:main:main",
                 totalMessages: 1,
+            },
+        });
+
+        socket.emitMessage({
+            id: "history-anchor",
+            method: "chat.history",
+            params: {
+                messageId: "history-message-1",
+                sessionKey: "agent:main:main",
+            },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"history-anchor"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            isOk?: boolean;
+                            payload?: { messages?: unknown[]; offset?: number };
+                        }
+                )
+                .find((message) => message.id === "history-anchor")
+        ).toMatchObject({
+            isOk: true,
+            payload: {
+                messages: [expect.objectContaining({ sequence: 1 })],
+                offset: 0,
             },
         });
 

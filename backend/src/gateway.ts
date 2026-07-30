@@ -1211,6 +1211,10 @@ async function forwardRequest(
                         : undefined
                 );
                 payload = canonicalizeOpenClawHistoryPage(payload, {
+                    messageId:
+                        typeof parameters.messageId === "string"
+                            ? parameters.messageId
+                            : undefined,
                     offset:
                         typeof parameters.offset === "number" &&
                         Number.isSafeInteger(parameters.offset) &&
