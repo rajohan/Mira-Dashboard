@@ -48,6 +48,7 @@ import {
 } from "../../../contracts/openClawConfig";
 import { parseCreateReportInput } from "../../../contracts/reports";
 import { ContractValidationError } from "../../../contracts/runtime";
+import { parseSocketEnvelope } from "../../../contracts/socket";
 import { parseCreateTaskRequest, parseUpdateTaskRequest } from "../../../contracts/tasks";
 
 function captureContractError(operation: () => unknown): ContractValidationError {
@@ -125,6 +126,7 @@ describe("shared runtime contracts", () => {
         expect(parseOpenClawRuntimeEnvelope(codex).canonicalEvents).toEqual(
             codex.canonicalEvents
         );
+        expect(parseSocketEnvelope(codex).canonicalEvents).toEqual(codex.canonicalEvents);
         expect(codex.canonicalEvents.at(-1)).toMatchObject({
             id: "openclaw:agent%3Amain%3Amain:64:finish",
             lifecycle: "completed",

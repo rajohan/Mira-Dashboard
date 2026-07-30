@@ -24,6 +24,7 @@ import { createElement, type ReactNode } from "react";
 import type { CacheEnvelope } from "../../../contracts/cache";
 import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
 import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
+import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
 import type { DatabaseOverviewResponse } from "../../../contracts/database";
 import type { DashboardDiagnosticsResponse } from "../../../contracts/health";
 import type { AppObservabilityMetrics, Metrics } from "../../../contracts/metrics";
@@ -3186,6 +3187,41 @@ describe("Mira Dashboard frontend behavior", () => {
                 await Promise.resolve();
             });
 
+            const liveEvents: unknown[] = [];
+            const unsubscribe = result.current.subscribe((event) => {
+                liveEvents.push(event);
+            });
+            const liveEnvelope = withCanonicalOpenClawEvents({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        name: "bash",
+                        phase: "result",
+                        result: "completed",
+                        toolCallId: "call-1",
+                    },
+                    runId: "run-1",
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                },
+                runtimeRecordedAt: Date.now(),
+                runtimeSequence: 8,
+                type: "event",
+            });
+            act(() => {
+                socket.message(liveEnvelope);
+            });
+            expect(liveEvents).toEqual([
+                expect.objectContaining({
+                    kind: "status",
+                    sequence: expect.any(Number),
+                }),
+                expect.objectContaining({
+                    kind: "tool",
+                    sequence: expect.any(Number),
+                }),
+            ]);
+
             const snapshotPromise = result.current.snapshot("agent:main:main");
             const snapshotRequest = JSON.parse(socket.sent.at(-1)!) as {
                 id: string;
@@ -3250,6 +3286,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 });
             });
             expect(rejectedCompactPromise).rejects.toBe("compaction unavailable");
+            unsubscribe();
             unmount();
         } finally {
             authActions.clearSession();
