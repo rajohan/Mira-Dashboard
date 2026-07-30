@@ -86,8 +86,8 @@ the adapter boundary:
 ```text
 OpenClaw Gateway
   -> backend OpenClawChatBridge + shared provider adapter
-       (raw shapes -> versioned canonical events + bounded replay journal)
-  -> frontend OpenClaw transport (validates canonical events)
+       (raw shapes -> versioned canonical events/history + bounded replay journal)
+  -> frontend OpenClaw transport (validates canonical events/history)
   -> chat reducer (session/run state machine)
   -> reconciliation + visibility projection
   -> existing Chat UI components
@@ -107,6 +107,24 @@ The runtime combines several event sources into one visible conversation:
 - tool call diagnostics;
 - tool result diagnostics;
 - terminal chat state events.
+
+`chat.history` crosses the same backend-owned provider boundary. The backend
+first hydrates omitted image blocks, then emits canonical history page schema
+v1. Every row carries a stable session-scoped ID, optional Gateway sequence,
+canonical message, source, and explicit provider/model metadata. Provider
+`__openclaw.id` and `__openclaw.seq` are authoritative when present. Older rows
+without that metadata receive deterministic content identities but cannot
+participate in incremental sequence caching.
+
+The frontend accepts only canonical history pages and rows. It can fold a
+canonical tool-result row into its matching canonical assistant call across
+pagination boundaries, but it does not inspect raw provider content to derive
+roles, tools, thinking, attachments, timestamps, or run identity. Per-row
+provider/model values are taken from the raw history message itself; stale
+page- or session-level model metadata is never inherited. This matters because
+observed Codex history uses UUID message IDs and separated tool rows, while
+Synthetic uses short provider IDs and can combine thinking plus a tool call in
+one assistant message.
 
 ### Session URL State
 

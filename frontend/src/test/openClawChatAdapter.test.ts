@@ -5,9 +5,18 @@ import {
     createChatRuntimeState,
     reduceChatRuntime,
 } from "../components/features/chat/domain/chatState";
-import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
+import { OpenClawChatAdapter as CanonicalOpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
+import { canonicalHistoryRows } from "./support/canonicalChatHistory";
 
 const SESSION = "agent:main:main";
+
+class OpenClawChatAdapter extends CanonicalOpenClawChatAdapter {
+    override history(raw: unknown) {
+        return super.history(
+            canonicalHistoryRows(Array.isArray(raw) ? raw : [], SESSION)
+        );
+    }
+}
 
 function envelope(
     event: string,

@@ -189,18 +189,27 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
             }
             if (method === "chat.history") {
                 return {
+                    hasMore: false,
                     messages: [
                         {
+                            __openclaw: {
+                                id: "history-message-1",
+                                seq: 1,
+                            },
                             content: [
                                 { text: "see image", type: "text" },
                                 { source: { omitted: true }, type: "image" },
                             ],
+                            model: "gpt-test",
+                            provider: "openai",
                             role: "assistant",
                             timestamp: 1_782_345_600_000,
                         },
                     ],
+                    offset: 0,
                     sessionId: "sess1",
                     sessionKey: "agent:main:main",
+                    totalMessages: 1,
                 };
             }
             if (method === "demo.fail") {
@@ -1236,24 +1245,49 @@ describe("gateway behavior", () => {
                     (raw) =>
                         JSON.parse(raw) as {
                             id?: string;
-                            payload?: { messages?: Array<{ content?: unknown[] }> };
+                            payload?: {
+                                messages?: Array<{
+                                    message?: { content?: unknown[] };
+                                }>;
+                            };
                         }
                 )
                 .find((message) => message.id === "history-1")
         ).toMatchObject({
             payload: {
+                hasMore: false,
                 messages: [
                     {
-                        content: [
-                            { text: "see image", type: "text" },
-                            {
-                                data: "base64-image",
-                                mimeType: "image/png",
-                                type: "image",
-                            },
-                        ],
+                        id: "openclaw-history:agent%3Amain%3Amain:history-message-1",
+                        message: {
+                            content: [
+                                { text: "see image", type: "text" },
+                                {
+                                    data: "base64-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            role: "assistant",
+                            text: "see image",
+                        },
+                        provider: {
+                            eventName: "chat.history",
+                            format: "openclaw-history",
+                            model: "gpt-test",
+                            provider: "openai",
+                        },
+                        schemaVersion: 1,
+                        sequence: 1,
+                        sessionKey: "agent:main:main",
+                        source: "openclaw-history",
                     },
                 ],
+                offset: 0,
+                schemaVersion: 1,
+                sessionId: "sess1",
+                sessionKey: "agent:main:main",
+                totalMessages: 1,
             },
         });
 

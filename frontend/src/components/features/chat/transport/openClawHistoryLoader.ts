@@ -1,8 +1,8 @@
 import {
-    asRecord,
-    stringValue,
-} from "../../../../../../contracts/chat/openClawAdapterValues";
-import type { RawOpenClawHistoryMessage } from "../../../../../../contracts/chat/openClawHistoryNormalizer";
+    parseCanonicalChatHistoryPage,
+    type CanonicalChatHistoryPage,
+    type CanonicalChatHistoryRow,
+} from "../../../../../../contracts/chatCanonicalHistory";
 import type { ChatHistoryMessage } from "../chatTypes";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 import { appendOpenClawHistory } from "./openClawHistoryAdapter";
@@ -15,67 +15,38 @@ export interface OpenClawHistoryPageRequest extends Record<string, unknown> {
 
 type RequestHistoryPage = (request: OpenClawHistoryPageRequest) => Promise<unknown>;
 
-interface OpenClawHistoryPage {
-    hasMore: boolean;
-    messages: RawOpenClawHistoryMessage[];
-    nextOffset?: number;
-    requestedOffset: number;
-    sessionId?: string;
-    totalMessages?: number;
-}
+type OpenClawHistoryPage = CanonicalChatHistoryPage;
 
 interface OpenClawHistoryCacheEntry {
     limit: number;
     messages: ChatHistoryMessage[];
-    rawMessages: RawOpenClawHistoryMessage[];
+    rows: CanonicalChatHistoryRow[];
     sessionId?: string;
     throughSequence: number;
 }
 
 const MAX_CACHED_HISTORY_ENTRIES = 2;
 
-function nonNegativeInteger(value: unknown): number | undefined {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-        ? value
-        : undefined;
+function historyMessageId(row: CanonicalChatHistoryRow): string {
+    return row.id;
 }
 
-function historyMetadata(
-    message: RawOpenClawHistoryMessage
-): Record<string, unknown> | undefined {
-    return asRecord(message.__openclaw);
-}
-
-function historyMessageId(message: RawOpenClawHistoryMessage): string | undefined {
-    return stringValue(historyMetadata(message)?.id);
-}
-
-function historySequence(message: RawOpenClawHistoryMessage): number | undefined {
-    return nonNegativeInteger(historyMetadata(message)?.seq);
+function historySequence(row: CanonicalChatHistoryRow): number | undefined {
+    return row.sequence;
 }
 
 function hasCompleteHistorySequenceMetadata(
-    messages: readonly RawOpenClawHistoryMessage[]
+    rows: readonly CanonicalChatHistoryRow[]
 ): boolean {
-    return messages.every((message) => historySequence(message) !== undefined);
+    return rows.every((row) => historySequence(row) !== undefined);
 }
 
 function parseHistoryPage(raw: unknown, requestedOffset: number): OpenClawHistoryPage {
-    const result = asRecord(raw);
-    const messages = Array.isArray(result?.messages)
-        ? result.messages.filter(
-              (message): message is RawOpenClawHistoryMessage =>
-                  asRecord(message) !== undefined
-          )
-        : [];
-    return {
-        hasMore: result?.hasMore === true,
-        messages,
-        nextOffset: nonNegativeInteger(result?.nextOffset),
-        requestedOffset,
-        sessionId: stringValue(result?.sessionId),
-        totalMessages: nonNegativeInteger(result?.totalMessages),
-    };
+    const page = parseCanonicalChatHistoryPage(raw, "chat.history");
+    if (page.offset !== requestedOffset) {
+        throw new Error("OpenClaw returned a mismatched chat history page offset");
+    }
+    return page;
 }
 
 function isSameHistorySession(
@@ -99,72 +70,68 @@ function hasPageReachedSequence(page: OpenClawHistoryPage, sequence: number): bo
 function appendUniquePageMessages(
     page: OpenClawHistoryPage,
     seenIds: Set<string>,
-    messages: RawOpenClawHistoryMessage[]
+    rows: CanonicalChatHistoryRow[]
 ): void {
-    for (const message of page.messages) {
-        const id = historyMessageId(message);
-        if (!id || !seenIds.has(id)) {
-            if (id) {
-                seenIds.add(id);
-            }
-            messages.push(message);
+    for (const row of page.messages) {
+        const id = historyMessageId(row);
+        if (!seenIds.has(id)) {
+            seenIds.add(id);
+            rows.push(row);
         }
     }
 }
 
-function orderedUniqueMessages(
-    pages: OpenClawHistoryPage[]
-): RawOpenClawHistoryMessage[] {
+function orderedUniqueMessages(pages: OpenClawHistoryPage[]): CanonicalChatHistoryRow[] {
     const seenIds = new Set<string>();
-    const messages: RawOpenClawHistoryMessage[] = [];
+    const rows: CanonicalChatHistoryRow[] = [];
     for (const page of pages.toReversed()) {
-        appendUniquePageMessages(page, seenIds, messages);
+        appendUniquePageMessages(page, seenIds, rows);
     }
-    return messages;
+    return rows;
 }
 
 interface MergedCachedHistory {
-    appendedRawMessages: RawOpenClawHistoryMessage[];
+    appendedRows: CanonicalChatHistoryRow[];
     didRewriteCachedRows: boolean;
-    rawMessages: RawOpenClawHistoryMessage[];
+    rows: CanonicalChatHistoryRow[];
 }
 
 function mergeCachedHistoryRows(
     cached: OpenClawHistoryCacheEntry,
-    freshMessages: RawOpenClawHistoryMessage[],
+    freshRows: CanonicalChatHistoryRow[],
     throughSequence: number
 ): MergedCachedHistory {
     const cachedBySequence = new Map(
-        cached.rawMessages.flatMap((message) => {
-            const sequence = historySequence(message);
+        cached.rows.flatMap((row) => {
+            const sequence = historySequence(row);
             return sequence === undefined || sequence > throughSequence
                 ? []
-                : ([[sequence, message]] as const);
+                : ([[sequence, row]] as const);
         })
     );
-    const appendedRawMessages: RawOpenClawHistoryMessage[] = [];
+    const appendedRows: CanonicalChatHistoryRow[] = [];
     let didRewriteCachedRows = false;
-    for (const message of freshMessages) {
-        const sequence = historySequence(message);
+    for (const row of freshRows) {
+        const sequence = historySequence(row);
         if (sequence === undefined || sequence > throughSequence) {
             continue;
         }
         const previous = cachedBySequence.get(sequence);
         if (sequence > cached.throughSequence) {
-            appendedRawMessages.push(message);
-        } else if (previous && JSON.stringify(previous) !== JSON.stringify(message)) {
+            appendedRows.push(row);
+        } else if (previous && JSON.stringify(previous) !== JSON.stringify(row)) {
             didRewriteCachedRows = true;
         }
-        cachedBySequence.set(sequence, message);
+        cachedBySequence.set(sequence, row);
     }
     return {
-        appendedRawMessages,
+        appendedRows,
         didRewriteCachedRows,
-        rawMessages: cachedBySequence
+        rows: cachedBySequence
             .entries()
             .toArray()
             .toSorted(([left], [right]) => left - right)
-            .map(([, message]) => message),
+            .map(([, row]) => row),
     };
 }
 
@@ -225,7 +192,7 @@ export class OpenClawHistoryLoader {
         throughSequence?: number
     ): Promise<OpenClawHistoryPage[]> {
         const pages = [first];
-        const visitedOffsets = new Set([first.requestedOffset]);
+        const visitedOffsets = new Set([first.offset]);
         let page = first;
         while (
             page.hasMore &&
@@ -235,7 +202,7 @@ export class OpenClawHistoryLoader {
             const nextOffset = page.nextOffset;
             if (
                 nextOffset === undefined ||
-                nextOffset <= page.requestedOffset ||
+                nextOffset <= page.offset ||
                 visitedOffsets.has(nextOffset)
             ) {
                 throw new Error("OpenClaw returned an invalid chat history page offset");
@@ -262,27 +229,27 @@ export class OpenClawHistoryLoader {
     ): Promise<ChatHistoryMessage[]> {
         const pages = await this.#pagesUntil(sessionKey, limit, first);
         const throughSequence = first.totalMessages;
-        const orderedMessages = orderedUniqueMessages(pages);
-        const rawMessages = orderedMessages.filter((message) => {
-            const sequence = historySequence(message);
+        const orderedRows = orderedUniqueMessages(pages);
+        const rows = orderedRows.filter((row) => {
+            const sequence = historySequence(row);
             return (
                 throughSequence === undefined ||
                 sequence === undefined ||
                 sequence <= throughSequence
             );
         });
-        const messages = this.#adapter.history(rawMessages);
+        const messages = this.#adapter.history(rows);
         if (
             !shouldCache ||
             throughSequence === undefined ||
-            !hasCompleteHistorySequenceMetadata(orderedMessages)
+            !hasCompleteHistorySequenceMetadata(orderedRows)
         ) {
             this.#cache.delete(cacheKey);
         } else {
             this.#remember(cacheKey, {
                 limit,
                 messages,
-                rawMessages,
+                rows,
                 sessionId: first.sessionId,
                 throughSequence,
             });
@@ -320,22 +287,22 @@ export class OpenClawHistoryLoader {
                       first,
                       cached.throughSequence
                   );
-        const orderedMessages = orderedUniqueMessages(pages);
-        if (!hasCompleteHistorySequenceMetadata(orderedMessages)) {
+        const orderedRows = orderedUniqueMessages(pages);
+        if (!hasCompleteHistorySequenceMetadata(orderedRows)) {
             return this.#loadFresh(cacheKey, sessionKey, limit, first, false);
         }
-        const merged = mergeCachedHistoryRows(cached, orderedMessages, totalMessages);
-        let messages = appendOpenClawHistory(cached.messages, merged.appendedRawMessages);
+        const merged = mergeCachedHistoryRows(cached, orderedRows, totalMessages);
+        let messages = appendOpenClawHistory(cached.messages, merged.appendedRows);
         if (merged.didRewriteCachedRows) {
-            messages = this.#adapter.history(merged.rawMessages);
+            messages = this.#adapter.history(merged.rows);
         }
-        if (!merged.didRewriteCachedRows && merged.appendedRawMessages.length === 0) {
+        if (!merged.didRewriteCachedRows && merged.appendedRows.length === 0) {
             messages = cached.messages;
         }
         this.#remember(cacheKey, {
             limit,
             messages,
-            rawMessages: merged.rawMessages,
+            rows: merged.rows,
             sessionId: first.sessionId || cached.sessionId,
             throughSequence: totalMessages,
         });

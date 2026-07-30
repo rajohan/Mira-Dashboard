@@ -34,7 +34,12 @@ function unsigned32(value: number): number {
     return value < 0 ? value + 4_294_967_296 : value;
 }
 
-function contentFingerprint(content: string): string {
+/**
+ * Builds a compact deterministic fingerprint for canonical chat content.
+ * @param content Content to fingerprint.
+ * @returns Non-cryptographic content identity.
+ */
+export function canonicalChatContentFingerprint(content: string): string {
     let firstHash = 2_166_136_261;
     let secondHash = 2_654_435_761;
     for (let index = 0; index < content.length; index += 1) {
@@ -54,7 +59,7 @@ function attachmentIdentity(attachment: CanonicalChatAttachment): string {
         attachment.fileName,
         attachment.mimeType || "unknown",
         attachment.sizeBytes ?? "unknown",
-        content ? contentFingerprint(content) : attachment.id,
+        content ? canonicalChatContentFingerprint(content) : attachment.id,
     ].join("::");
 }
 

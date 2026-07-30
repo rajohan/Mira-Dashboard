@@ -21,6 +21,7 @@ import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 
 import type { CacheEnvelope } from "../../../contracts/cache";
+import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openClawHistoryPageAdapter";
 import type { Metrics } from "../../../contracts/metrics";
 import type { Session } from "../../../contracts/sessions";
 import { requestBodyText, requestUrl } from "../../../test/support/fetch";
@@ -285,6 +286,25 @@ async function respondToSocketRequest(
         throw new Error(`No socket request found for ${method}`);
     }
     socket.respondedRequestIds.add(request.id);
+    const responsePayload =
+        method === "chat.history"
+            ? canonicalizeOpenClawHistoryPage(payload, {
+                  offset:
+                      typeof request.params === "object" &&
+                      request.params !== null &&
+                      "offset" in request.params &&
+                      typeof request.params.offset === "number"
+                          ? request.params.offset
+                          : 0,
+                  sessionKey:
+                      typeof request.params === "object" &&
+                      request.params !== null &&
+                      "sessionKey" in request.params &&
+                      typeof request.params.sessionKey === "string"
+                          ? request.params.sessionKey
+                          : "agent:main:main",
+              })
+            : payload;
 
     await act(async () => {
         socket.emit("message", {
@@ -292,7 +312,7 @@ async function respondToSocketRequest(
                 type: "response",
                 id: request.id,
                 isOk,
-                payload,
+                payload: responsePayload,
             }),
         });
         await Promise.resolve();

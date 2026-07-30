@@ -1,9 +1,24 @@
 import { describe, expect, it } from "bun:test";
 
 import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
-import { OpenClawHistoryLoader } from "../components/features/chat/transport/openClawHistoryLoader";
+import {
+    OpenClawHistoryLoader as CanonicalOpenClawHistoryLoader,
+    type OpenClawHistoryPageRequest,
+} from "../components/features/chat/transport/openClawHistoryLoader";
+import { canonicalHistoryPage } from "./support/canonicalChatHistory";
 
 const SESSION = "agent:main:main";
+
+class OpenClawHistoryLoader extends CanonicalOpenClawHistoryLoader {
+    constructor(
+        adapter: OpenClawChatAdapter,
+        requestPage: (request: OpenClawHistoryPageRequest) => unknown
+    ) {
+        super(adapter, async (request) =>
+            canonicalHistoryPage(await requestPage(request), request)
+        );
+    }
+}
 
 function rawMessage(
     sequence: number,

@@ -1,19 +1,13 @@
 import { asRecord } from "../../../../../../contracts/chat/openClawAdapterValues";
-import type { RawOpenClawHistoryMessage } from "../../../../../../contracts/chat/openClawHistoryNormalizer";
 import { parseCanonicalChatEvents } from "../../../../../../contracts/chatCanonical";
+import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chatCanonicalHistory";
 import type { ChatHistoryMessage } from "../chatTypes";
 import type { ChatRuntimeEvent } from "../domain/chatState";
 import { adaptOpenClawHistory } from "./openClawHistoryAdapter";
 
 /** The single provider boundary used by the frontend chat system. */
 export class OpenClawChatAdapter {
-    history(messages: unknown): ChatHistoryMessage[] {
-        const rows = Array.isArray(messages)
-            ? messages.filter(
-                  (message): message is RawOpenClawHistoryMessage =>
-                      asRecord(message) !== undefined
-              )
-            : undefined;
+    history(rows: CanonicalChatHistoryRow[]): ChatHistoryMessage[] {
         return adaptOpenClawHistory(rows);
     }
 

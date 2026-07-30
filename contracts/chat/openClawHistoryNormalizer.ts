@@ -35,6 +35,8 @@ export interface RawOpenClawHistoryMessage {
     MediaPaths?: unknown;
     MediaType?: unknown;
     MediaTypes?: unknown;
+    model?: unknown;
+    provider?: unknown;
     idempotencyKey?: unknown;
     runId?: unknown;
     stopReason?: unknown;

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
+import { canonicalizeOpenClawHistoryPage } from "../../contracts/chat/openClawHistoryPageAdapter.ts";
 import type { GatewayMetrics } from "../../contracts/metrics.ts";
 import type { Session } from "../../contracts/sessions.ts";
 import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
@@ -1209,6 +1210,18 @@ async function forwardRequest(
                         ? parameters.sessionKey
                         : undefined
                 );
+                payload = canonicalizeOpenClawHistoryPage(payload, {
+                    offset:
+                        typeof parameters.offset === "number" &&
+                        Number.isSafeInteger(parameters.offset) &&
+                        parameters.offset >= 0
+                            ? parameters.offset
+                            : 0,
+                    sessionKey:
+                        typeof parameters.sessionKey === "string"
+                            ? parameters.sessionKey
+                            : "",
+                });
             }
             const pending = pendingRequests.get(id);
             pendingRequests.delete(id);
