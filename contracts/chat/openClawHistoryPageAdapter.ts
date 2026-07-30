@@ -119,12 +119,16 @@ export function canonicalizeOpenClawHistoryPage(
     }
     const responseOffset = nonNegativeInteger(page?.offset);
     const isAnchoredWindow = Boolean(options.messageId?.trim());
+    const isFirstPage = options.offset === 0;
     const isCompleteSnapshot =
         page?.completeSnapshot === true &&
         page?.hasMore !== true &&
         nonNegativeInteger(page?.nextOffset) === undefined;
     if (
-        (responseOffset === undefined && !isCompleteSnapshot && !isAnchoredWindow) ||
+        (responseOffset === undefined &&
+            !isFirstPage &&
+            !isCompleteSnapshot &&
+            !isAnchoredWindow) ||
         (responseOffset !== undefined && responseOffset !== options.offset)
     ) {
         throw new Error(

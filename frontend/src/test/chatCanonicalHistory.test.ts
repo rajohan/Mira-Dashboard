@@ -383,13 +383,19 @@ describe("canonical chat history contract", () => {
         expect(page.messages).toHaveLength(1);
     });
 
-    it("rejects missing and mismatched provider page offsets", () => {
-        expect(() =>
+    it("accepts an omitted first-page offset and rejects unsafe page offsets", () => {
+        expect(
             canonicalizeOpenClawHistoryPage(
                 { messages: [] },
                 { offset: 0, sessionKey: SESSION }
+            ).offset
+        ).toBe(0);
+        expect(() =>
+            canonicalizeOpenClawHistoryPage(
+                { messages: [] },
+                { offset: 2, sessionKey: SESSION }
             )
-        ).toThrow("requested 0, received missing");
+        ).toThrow("requested 2, received missing");
         expect(() =>
             canonicalizeOpenClawHistoryPage(
                 { messages: [], offset: 1 },

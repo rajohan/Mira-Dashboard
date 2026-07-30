@@ -211,7 +211,10 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                     sessionKey: "agent:main:main",
                     totalMessages: 1,
                 };
-                if (requestParameters.messageId === "history-message-1") {
+                if (
+                    requestParameters.messageId === "history-message-1" ||
+                    requestParameters.offset === undefined
+                ) {
                     const { offset: _offset, ...anchoredResponse } = response;
                     return anchoredResponse;
                 }
