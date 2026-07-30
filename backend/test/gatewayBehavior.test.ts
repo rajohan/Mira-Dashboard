@@ -306,6 +306,29 @@ afterEach(() => {
 });
 
 describe("gateway behavior", () => {
+    it("normalizes every supported sessions.list response wrapper", async () => {
+        const { normalizeGatewaySessionList } = await import("../src/gateway.ts");
+        const session = {
+            key: "agent:wrapped:subagent:test",
+            sessionId: "wrapped-session",
+            updatedAt: "2026-07-30T22:00:00.000Z",
+        };
+
+        for (const response of [
+            [session],
+            { sessions: [session] },
+            { result: { sessions: [session] } },
+            { data: { sessions: [session] } },
+        ]) {
+            expect(normalizeGatewaySessionList(response)).toEqual([
+                expect.objectContaining({
+                    id: "wrapped-session",
+                    key: "agent:wrapped:subagent:test",
+                }),
+            ]);
+        }
+    });
+
     it("waits through transient connect errors during bootstrap", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
