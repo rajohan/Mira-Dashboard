@@ -8,6 +8,9 @@ import {
 
 const nonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
 
+/** Current Dashboard-owned format for bounded OpenClaw runtime replay snapshots. */
+export const OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION = 1;
+
 export const chatTransportAttachmentSchema = v.strictObject({
     content: v.string(),
     fileName: nonEmptyStringSchema,
@@ -64,6 +67,7 @@ export const openClawRuntimeSnapshotSchema = v.strictObject({
     replayScope: v.optional(v.pipe(v.string(), v.trim(), v.nonEmpty())),
     requestBoundary: v.optional(nonNegativeIntegerSchema),
     runtimeGeneration: v.optional(v.pipe(v.string(), v.trim(), v.nonEmpty())),
+    schemaVersion: v.literal(OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION),
     throughSequence: nonNegativeIntegerSchema,
 });
 

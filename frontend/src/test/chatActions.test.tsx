@@ -3,13 +3,17 @@ import { describe, expect, it, jest } from "bun:test";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { type SetStateAction, useState } from "react";
 
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
 import type { Session } from "../../../contracts/sessions";
 import type {
     ChatHistoryMessage,
     ChatSendAttachment,
 } from "../components/features/chat/chatTypes";
 import { createChatRuntimeState } from "../components/features/chat/domain/chatState";
-import type { ChatTransport } from "../components/features/chat/transport/chatTransport";
+import type {
+    ChatRuntimeSnapshot,
+    ChatTransport,
+} from "../components/features/chat/transport/chatTransport";
 import { useChatActions } from "../components/features/chat/useChatActions";
 import type { ChatRuntimeController } from "../components/features/chat/useChatRuntime";
 import { SecurityVerificationCancelledError } from "../lib/securityVerification";
@@ -55,11 +59,12 @@ function fakeTransport(
         patchSession: jest.fn(async () => {}),
         send,
         snapshot: jest.fn(() =>
-            Promise.try(() => ({
+            Promise.resolve<ChatRuntimeSnapshot>({
                 completed: false,
                 events: [],
+                schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
                 throughSequence: 0,
-            }))
+            })
         ),
         subscribe,
     };

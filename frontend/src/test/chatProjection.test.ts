@@ -4609,6 +4609,116 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("keeps one parent run through a second restart and mid-run compaction", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: message("user", "question", "run-before-restart"),
+                runId: "run-before-restart",
+            }),
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "tool-before", name: "first-tool" }],
+                },
+                runId: "run-before-restart",
+                toolKey: "tool:tool-before",
+            }),
+            event(48, {
+                kind: "user",
+                message: message(
+                    "user",
+                    "steer after first restart",
+                    "run-after-first-restart"
+                ),
+                runAliases: ["run-before-restart"],
+                runId: "run-after-first-restart",
+            }),
+            event(64, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:run-after-first-restart",
+                text: "Compacting context",
+            }),
+            event(80, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:run-after-first-restart",
+                text: "Context compacted",
+            }),
+            event(96, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "tool-after", name: "second-tool" }],
+                },
+                runAliases: ["run-after-first-restart"],
+                runId: "run-after-second-restart",
+                toolKey: "tool:tool-after",
+            }),
+            event(112, {
+                kind: "user",
+                message: message(
+                    "user",
+                    "steer after second restart",
+                    "run-after-second-restart"
+                ),
+                runId: "run-after-second-restart",
+            }),
+            event(128, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "after compaction", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "after-compaction", text: "after compaction" }],
+                },
+                runId: "run-after-second-restart",
+            }),
+            event(144, {
+                kind: "finish",
+                message: message("assistant", "done", "run-after-second-restart"),
+                outcome: "completed",
+                runId: "run-after-second-restart",
+            }),
+        ]);
+        const projection = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const labels = projection.rows.map(
+            (row) =>
+                row.message.toolCalls?.[0]?.name ||
+                (row.message.thinking?.length ? "thinking" : row.message.text)
+        );
+
+        expect(Object.keys(runtime.sessions[SESSION]?.runs || {}).toSorted()).toEqual(
+            ["compaction:run-after-first-restart", "run-after-second-restart"].toSorted()
+        );
+        expect(projection.activeRuns).toEqual([]);
+        expect(projection.compactionStatus).toMatchObject({ phase: "complete" });
+        expect(labels).toEqual([
+            "question",
+            "first-tool",
+            "steer after first restart",
+            "second-tool",
+            "steer after second restart",
+            "thinking",
+            "done",
+        ]);
+    });
+
     it("anchors the earliest runtime prompt ahead of a timestamp-skewed steer", () => {
         const runId = "runtime-only-skewed-users";
         const runtime = reduceChatRuntime(createChatRuntimeState(), [

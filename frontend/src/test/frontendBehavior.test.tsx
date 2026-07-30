@@ -22,6 +22,7 @@ import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 
 import type { CacheEnvelope } from "../../../contracts/cache";
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
 import type { DatabaseOverviewResponse } from "../../../contracts/database";
 import type { DashboardDiagnosticsResponse } from "../../../contracts/health";
 import type { AppObservabilityMetrics, Metrics } from "../../../contracts/metrics";
@@ -3203,6 +3204,7 @@ describe("Mira Dashboard frontend behavior", () => {
                         events: [],
                         replayScope: "gateway-scope",
                         runtimeGeneration: "backend-generation",
+                        schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
                         throughSequence: 7,
                     },
                 });
@@ -3212,6 +3214,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 events: [],
                 replayScope: "gateway-scope",
                 runtimeGeneration: "backend-generation",
+                schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
                 throughSequence: 127,
             });
 

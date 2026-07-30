@@ -1,6 +1,9 @@
 import { describe, expect, it, jest } from "bun:test";
 
-import type { OpenClawRuntimeSnapshot } from "../../contracts/chat.ts";
+import {
+    OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    type OpenClawRuntimeSnapshot,
+} from "../../contracts/chat.ts";
 import {
     OpenClawChatBridge,
     type OpenClawChatSnapshotStore,
@@ -167,6 +170,7 @@ function persistedSnapshot(
                 type: "event",
             },
         ],
+        schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
         throughSequence: sequence,
     };
 }
@@ -191,6 +195,7 @@ describe("OpenClaw chat bridge", () => {
         expect(restoredBridge.snapshot(MAIN)).toEqual({
             completed: false,
             events: [thinking],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: thinking.runtimeSequence,
         });
 
@@ -2550,6 +2555,7 @@ describe("OpenClaw chat bridge", () => {
                     type: "event",
                 },
             ],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 4,
         });
 
@@ -3147,6 +3153,7 @@ describe("OpenClaw chat bridge", () => {
                 [runIds[1]]: now - 1500,
             },
             requestBoundary: 6,
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 7,
         });
 
@@ -3194,6 +3201,149 @@ describe("OpenClaw chat bridge", () => {
         expect(
             resumed.events.map((event) => (event.payload as { runId?: string }).runId)
         ).toEqual(Array.from({ length: resumed.events.length }, () => "provider-fourth"));
+    });
+
+    it("keeps steers canonical across repeated restart recovery with mid-run compaction", () => {
+        const store = new MemorySnapshotStore();
+        const runIds = [
+            "provider-before-restart",
+            "provider-after-first-restart",
+            "provider-after-second-restart",
+        ] as const;
+        let bridge = new OpenClawChatBridge(store);
+        let steerIndex = 0;
+        const recordSteer = (runId: string, message: string) => {
+            steerIndex += 1;
+            const requestId = `dashboard-chat-restart-steer-${steerIndex}`;
+            const boundary = bridge.captureRequestBoundary(MAIN, requestId);
+            bridge.handleSuccessfulRequest(
+                "chat.send",
+                { idempotencyKey: requestId, message, sessionKey: MAIN },
+                { runId },
+                boundary
+            );
+            bridge.recordEvent(
+                "session.message",
+                {
+                    activeRunIds: [runId],
+                    message: {
+                        content: message,
+                        idempotencyKey: `${requestId}:user`,
+                        role: "user",
+                    },
+                    sessionKey: MAIN,
+                },
+                []
+            );
+        };
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before restart" },
+                runId: runIds[0],
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        recordSteer(runIds[0], "steer before restart");
+        bridge.markGatewayDisconnected();
+        expect(bridge.flush()).toBe(true);
+        bridge = new OpenClawChatBridge(store);
+
+        const firstResume = bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    item: { kind: "preamble", progressText: "first resume" },
+                    phase: "update",
+                    stream: "item",
+                },
+                runId: runIds[1],
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(firstResume.runtimeRunAliases).toEqual([runIds[0]]);
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "start",
+                runId: runIds[1],
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: runIds[1],
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        expect(bridge.snapshot(MAIN).completed).toBe(false);
+        recordSteer(runIds[1], "steer after compaction");
+        bridge.markGatewayDisconnected();
+        expect(bridge.flush()).toBe(true);
+        bridge = new OpenClawChatBridge(store);
+
+        const secondResume = bridge.recordEvent(
+            "session.tool",
+            {
+                args: { command: "pwd" },
+                name: "exec",
+                runId: runIds[2],
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(secondResume.runtimeRunAliases).toEqual([runIds[1]]);
+        recordSteer(runIds[2], "steer after second restart");
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: runIds[2],
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        const payloads = snapshot.events.map(
+            (event) => event.payload as Record<string, unknown>
+        );
+        const parentPayloads = payloads.filter(
+            (payload) => payload.stream !== "compaction"
+        );
+        expect(snapshot.completed).toBe(true);
+        expect(parentPayloads.every((payload) => payload.runId === runIds[2])).toBe(true);
+        expect(
+            payloads
+                .filter((payload) => payload.stream === "compaction")
+                .map((payload) => payload.phase)
+        ).toEqual(["start", "end"]);
+        expect(
+            payloads
+                .map((payload) => {
+                    const message = payload.message as
+                        | Record<string, unknown>
+                        | undefined;
+                    return message?.role === "user" ? message.content : undefined;
+                })
+                .filter(Boolean)
+        ).toEqual([
+            "steer before restart",
+            "steer after compaction",
+            "steer after second restart",
+        ]);
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
     });
 
     it("repairs a resumed run when a queued post-restart send left an earlier boundary", () => {
@@ -4404,6 +4554,7 @@ describe("OpenClaw chat bridge", () => {
             pendingRequestBoundaries: {
                 "dashboard-chat-newer-alias-request": 20,
             },
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 20,
         });
         store.snapshots.set("main", {
@@ -4423,6 +4574,7 @@ describe("OpenClaw chat bridge", () => {
                 },
             ],
             requestBoundary: 10,
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 10,
         });
         const restarted = new OpenClawChatBridge(store);
@@ -4584,6 +4736,7 @@ describe("OpenClaw chat bridge", () => {
                     type: "event",
                 },
             ],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 2,
         });
         const restarted = new OpenClawChatBridge(store);
@@ -4684,6 +4837,7 @@ describe("OpenClaw chat bridge", () => {
                 runtimeSequence: index + 1,
                 type: "event" as const,
             })),
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 2,
         });
         const restarted = new OpenClawChatBridge(store);
@@ -5099,6 +5253,7 @@ describe("OpenClaw chat bridge", () => {
                     type: "event",
                 },
             ],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 7,
         });
         const bridge = new OpenClawChatBridge(store);

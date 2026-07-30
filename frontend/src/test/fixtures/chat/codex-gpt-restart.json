@@ -1,0 +1,151 @@
+{
+    "deliveryFormat": "codex-separated-runtime-events",
+    "expected": {
+        "activeRunCount": 0,
+        "rows": [
+            {
+                "role": "user",
+                "text": "Inspect repository",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "user"
+            },
+            {
+                "role": "assistant",
+                "text": "",
+                "thinkingText": "",
+                "toolNames": ["functions.exec_command"],
+                "toolResults": ["fixture-output"],
+                "type": "tool"
+            },
+            {
+                "role": "assistant",
+                "text": "",
+                "thinkingText": "Inspect repository state.Summarize result.",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "thinking"
+            },
+            {
+                "role": "assistant",
+                "text": "Repository fixture complete.",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "assistant"
+            }
+        ],
+        "runCount": 1
+    },
+    "history": [
+        {
+            "content": "Inspect repository",
+            "role": "user",
+            "runId": "codex-run-before-restart",
+            "timestamp": "2026-07-30T08:00:00.000Z"
+        }
+    ],
+    "id": "codex-gpt-restart",
+    "providerFormat": "codex-gpt",
+    "redaction": "synthetic",
+    "runtimeSnapshot": {
+        "completed": true,
+        "events": [
+            {
+                "event": "agent",
+                "payload": {
+                    "data": {
+                        "delta": "Inspect repository state."
+                    },
+                    "runId": "codex-run-before-restart",
+                    "sessionKey": "agent:main:main",
+                    "stream": "reasoning",
+                    "ts": 1785398400100
+                },
+                "runtimeRecordedAt": 1785398400100,
+                "runtimeSequence": 10,
+                "type": "event"
+            },
+            {
+                "event": "session.tool",
+                "payload": {
+                    "data": {
+                        "args": {
+                            "command": "pwd"
+                        },
+                        "id": "fixture-call",
+                        "name": "functions.exec_command",
+                        "phase": "start"
+                    },
+                    "runId": "codex-run-before-restart",
+                    "sessionKey": "agent:main:main",
+                    "stream": "tool",
+                    "ts": 1785398400200
+                },
+                "runtimeRecordedAt": 1785398400200,
+                "runtimeSequence": 11,
+                "type": "event"
+            },
+            {
+                "event": "session.tool",
+                "payload": {
+                    "data": {
+                        "args": {
+                            "command": "pwd"
+                        },
+                        "id": "fixture-call",
+                        "name": "functions.exec_command",
+                        "phase": "result",
+                        "result": "fixture-output"
+                    },
+                    "runId": "codex-run-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "stream": "tool",
+                    "ts": 1785398400300
+                },
+                "runtimeRecordedAt": 1785398400300,
+                "runtimeRunAliases": ["codex-run-before-restart"],
+                "runtimeSequence": 12,
+                "type": "event"
+            },
+            {
+                "event": "agent",
+                "payload": {
+                    "data": {
+                        "delta": "Summarize result."
+                    },
+                    "runId": "codex-run-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "stream": "reasoning",
+                    "ts": 1785398400400
+                },
+                "runtimeRecordedAt": 1785398400400,
+                "runtimeRunAliases": ["codex-run-before-restart"],
+                "runtimeSequence": 13,
+                "type": "event"
+            },
+            {
+                "event": "chat",
+                "payload": {
+                    "message": {
+                        "content": "Repository fixture complete.",
+                        "role": "assistant"
+                    },
+                    "runId": "codex-run-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "state": "final",
+                    "ts": 1785398400500
+                },
+                "runtimeRecordedAt": 1785398400500,
+                "runtimeRunAliases": ["codex-run-before-restart"],
+                "runtimeSequence": 14,
+                "type": "event"
+            }
+        ],
+        "schemaVersion": 1,
+        "throughSequence": 14
+    },
+    "schemaVersion": 1,
+    "sessionKey": "agent:main:main"
+}

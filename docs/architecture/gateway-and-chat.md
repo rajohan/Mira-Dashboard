@@ -256,14 +256,18 @@ SQLite uses two related tables:
 - `chat_runtime_snapshot_events` stores one serialized replay event per runtime
   sequence.
 
-The current `rows-v2` metadata stores a SHA-256 fingerprint for every retained
-event, the original first sequence for every retained run, pending `chat.send`
-boundaries keyed by request ID, and the latest settled new-turn boundary when one
-exists. The durable first sequence cannot move when a later tool/item update
+The current Dashboard-owned snapshot contract is `schemaVersion: 1`. Its
+`rows-v2` metadata stores a SHA-256 fingerprint for every retained event, the
+original first sequence for every retained run, pending `chat.send` boundaries
+keyed by request ID, and the latest settled new-turn boundary when one exists.
+Unversioned metadata and unknown explicit versions fail closed: their watermarks
+are ignored and both metadata and event rows are deleted when loaded. Replay is
+a rebuildable cache, so the Dashboard deliberately carries no legacy migration
+path. The durable first sequence cannot move when a later tool/item update
 coalesces over the run's first retained envelope. An unchanged prefix only
 appends new event rows; coalescing, trimming, or a same-sequence content change
 replaces stale rows. Older inline and `rows-v1` cache layouts are intentionally
-unsupported and should be cleared or migrated when deploying the schema change.
+unsupported and are rebuilt from OpenClaw history and new runtime events.
 
 Replay limits are:
 
@@ -410,11 +414,13 @@ thinking after the canonical tools but before the final answer.
 
 ### Provider Session Messages
 
-OpenClaw providers do not all emit the same live assistant shape. In particular,
-Synthetic can place thinking, a tool call, and assistant text inside one
-`session.message`. The OpenClaw adapter splits that message into independent
-thinking, tool, and primary assistant events before it reaches the reducer. A
-Synthetic assistant message with `stopReason: "toolUse"` remains nonterminal;
+OpenClaw providers do not all emit the same live assistant shape. Codex/GPT can
+deliver reasoning, tool progress/results, and the final answer across separate
+`agent`, `session.tool`, and `chat` envelopes. Synthetic can place thinking, a
+tool call, and assistant text inside one `session.message`. The OpenClaw adapter
+keeps these provider formats at its boundary and emits provider-independent
+events before they reach the reducer. A Synthetic assistant message with
+`stopReason: "toolUse"` remains nonterminal;
 `stopReason: "stop"` completes the run in both the frontend adapter and backend
 replay bridge. History normalization carries that same explicit stop evidence
 into projection, so an intermediate assistant commentary row cannot terminate a
@@ -496,6 +502,10 @@ The user can dismiss a visible global error without clearing chat state.
 
 When changing chat event handling, test these cases:
 
+- versioned, synthetic/redacted incident fixtures replay both Codex/GPT's
+  separated event stream (including a restart run alias) and Synthetic's mixed
+  `session.message` format through the production adapter, reducer, and
+  projection, with the same semantic rows and unique projected row keys;
 - streaming text merges with final assistant messages;
 - a final message does not duplicate a local pending row, recovered-text echo,
   diagnostic-only row, or an earlier final from the same run;

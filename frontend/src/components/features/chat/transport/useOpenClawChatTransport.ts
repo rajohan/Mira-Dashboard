@@ -93,6 +93,7 @@ export function useOpenClawChatTransport(): ChatTransport {
             events: adapter.snapshot(result),
             replayScope: result.replayScope,
             runtimeGeneration: result.runtimeGeneration,
+            schemaVersion: result.schemaVersion,
             throughSequence: openClawThroughSequence(result.throughSequence),
         };
     };

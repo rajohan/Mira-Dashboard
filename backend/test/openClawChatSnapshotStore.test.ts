@@ -1,7 +1,10 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 
-import type { OpenClawRuntimeSnapshot } from "../../contracts/chat.ts";
+import {
+    OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    type OpenClawRuntimeSnapshot,
+} from "../../contracts/chat.ts";
 import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 import { database, enableRequiredWalJournalMode } from "../src/database.ts";
@@ -22,6 +25,7 @@ function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnaps
                 type: "event",
             },
         ],
+        schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
         throughSequence: sequence,
     };
 }
@@ -199,6 +203,7 @@ describe("OpenClaw chat snapshot store", () => {
                 "dashboard-chat-pending": 7,
             },
             requestBoundary: 7,
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 7,
         };
 
@@ -234,6 +239,7 @@ describe("OpenClaw chat snapshot store", () => {
         const expandedSnapshot: OpenClawRuntimeSnapshot = {
             completed: false,
             events: [...firstSnapshot.events, secondEvent],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 2,
         };
 
@@ -266,20 +272,121 @@ describe("OpenClaw chat snapshot store", () => {
             const metadata = database
                 .prepare(
                     `SELECT length(snapshot_json) AS bytes,
+                            json_extract(snapshot_json, '$.schemaVersion') AS schema_version,
                             json_extract(snapshot_json, '$.eventStorage') AS storage
                      FROM chat_runtime_snapshots
                      WHERE gateway_scope = ? AND session_key = ?`
                 )
                 .get(gatewayScope, sessionKey) as {
                 bytes: number;
+                schema_version: number;
                 storage: string;
             };
 
             expect(retainedEventRow.rowid).toBe(firstEventRow.rowid);
             expect(eventCount.count).toBe(2);
-            expect(metadata).toEqual({ bytes: expect.any(Number), storage: "rows-v2" });
+            expect(metadata).toEqual({
+                bytes: expect.any(Number),
+                schema_version: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+                storage: "rows-v2",
+            });
             expect(metadata.bytes).toBeLessThan(1000);
             expect(store.load(sessionKey)).toEqual(expandedSnapshot);
+        } finally {
+            store.clear();
+        }
+    });
+
+    it("deletes unversioned rows-v2 snapshots instead of migrating cache data", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const snapshot = snapshotFor(sessionKey, 19);
+
+        try {
+            store.save(sessionKey, snapshot);
+            const row = database
+                .prepare(
+                    `SELECT snapshot_json
+                     FROM chat_runtime_snapshots
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { snapshot_json: string };
+            const unversionedMetadata = JSON.parse(row.snapshot_json) as Record<
+                string,
+                unknown
+            >;
+            delete unversionedMetadata.schemaVersion;
+            database
+                .prepare(
+                    `UPDATE chat_runtime_snapshots
+                     SET snapshot_json = ?
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .run(JSON.stringify(unversionedMetadata), gatewayScope, sessionKey);
+
+            expect(store.maximumSequence()).toBe(0);
+            expect(store.load(sessionKey)).toBeUndefined();
+            const remainingEvents = database
+                .prepare(
+                    `SELECT count(*) AS count
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { count: number };
+            expect(remainingEvents.count).toBe(0);
+        } finally {
+            store.clear();
+        }
+    });
+
+    it("deletes unsupported snapshot versions and ignores their watermark", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+
+        try {
+            store.save(sessionKey, snapshotFor(sessionKey, 23));
+            const row = database
+                .prepare(
+                    `SELECT snapshot_json
+                     FROM chat_runtime_snapshots
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { snapshot_json: string };
+            const unsupportedMetadata = JSON.parse(row.snapshot_json) as Record<
+                string,
+                unknown
+            >;
+            unsupportedMetadata.schemaVersion =
+                OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION + 1;
+            unsupportedMetadata.throughSequence = 999;
+            database
+                .prepare(
+                    `UPDATE chat_runtime_snapshots
+                     SET snapshot_json = ?
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .run(JSON.stringify(unsupportedMetadata), gatewayScope, sessionKey);
+
+            expect(store.maximumSequence()).toBe(0);
+            expect(store.load(sessionKey)).toBeUndefined();
+            const remainingMetadata = database
+                .prepare(
+                    `SELECT count(*) AS count
+                     FROM chat_runtime_snapshots
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { count: number };
+            const remainingEvents = database
+                .prepare(
+                    `SELECT count(*) AS count
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { count: number };
+            expect(remainingMetadata.count).toBe(0);
+            expect(remainingEvents.count).toBe(0);
         } finally {
             store.clear();
         }
@@ -304,6 +411,7 @@ describe("OpenClaw chat snapshot store", () => {
                     runtimeSequence: 2,
                 },
             ],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 2,
         };
 
@@ -409,6 +517,24 @@ describe("OpenClaw chat snapshot store", () => {
                     }),
                     "2026-07-17T20:00:00.000Z"
                 );
+            database
+                .prepare(
+                    `INSERT INTO chat_runtime_snapshots (
+                        gateway_scope,
+                        session_key,
+                        snapshot_json,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?)`
+                )
+                .run(
+                    gatewayScope,
+                    "agent:test:unsupported-layout",
+                    JSON.stringify({
+                        eventStorage: "rows-v1",
+                        throughSequence: 74,
+                    }),
+                    "2026-07-17T20:00:00.000Z"
+                );
 
             expect(store.maximumSequence()).toBe(73);
         } finally {
@@ -435,6 +561,7 @@ describe("OpenClaw chat snapshot store", () => {
                     type: "event",
                 },
             ],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 1,
         });
         const firstSnapshot = snapshot("first-run");
@@ -481,6 +608,7 @@ describe("OpenClaw chat snapshot store", () => {
                             type: "event",
                         },
                     ],
+                    schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
                     throughSequence: index + 1,
                 });
             }
@@ -549,7 +677,12 @@ describe("OpenClaw chat snapshot store", () => {
             store.promote(
                 sourceKey,
                 canonicalKey,
-                { completed: false, events: [], throughSequence: 100 },
+                {
+                    completed: false,
+                    events: [],
+                    schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+                    throughSequence: 100,
+                },
                 canonicalSnapshot
             );
 
