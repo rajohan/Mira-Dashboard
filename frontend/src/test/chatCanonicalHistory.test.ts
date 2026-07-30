@@ -310,6 +310,39 @@ describe("canonical chat history contract", () => {
         expect(page.messages.map((row) => row.sequence)).toEqual([7, 7]);
     });
 
+    it("includes top-level media references in seq-only row identity", () => {
+        const page = canonicalizeOpenClawHistoryPage(
+            {
+                messages: [
+                    {
+                        __openclaw: { seq: 8 },
+                        content: "Generated image",
+                        MediaPath: "/tmp/first.png",
+                        MediaType: "image/png",
+                        role: "assistant",
+                    },
+                    {
+                        __openclaw: { seq: 8 },
+                        content: "Generated image",
+                        MediaPath: "/tmp/second.webp",
+                        MediaType: "image/webp",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+            },
+            { offset: 0, sessionKey: SESSION }
+        );
+
+        expect(new Set(page.messages.map((row) => row.id)).size).toBe(2);
+        expect(page.messages.map((row) => row.sequence)).toEqual([8, 8]);
+        expect(
+            page.messages.map((row) =>
+                row.message.attachments?.map((attachment) => attachment.fileName)
+            )
+        ).toEqual([["first.png"], ["second.webp"]]);
+    });
+
     it("accepts OpenClaw complete snapshots without pagination offsets", () => {
         const page = canonicalizeOpenClawHistoryPage(
             {

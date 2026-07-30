@@ -62,6 +62,10 @@ function historyRowId(
             stableCanonicalChatStringify({
                 content: summarizeCanonicalChatValueForFingerprint(message.content),
                 isError: message.isError,
+                mediaPath: summarizeCanonicalChatValueForFingerprint(message.MediaPath),
+                mediaPaths: summarizeCanonicalChatValueForFingerprint(message.MediaPaths),
+                mediaType: summarizeCanonicalChatValueForFingerprint(message.MediaType),
+                mediaTypes: summarizeCanonicalChatValueForFingerprint(message.MediaTypes),
                 role: message.role,
                 runId: message.runId,
                 stopReason: message.stopReason,
