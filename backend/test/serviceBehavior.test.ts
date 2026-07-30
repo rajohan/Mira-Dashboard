@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { PullRequestSummary } from "../../contracts/delivery.ts";
 import { parseGitWorkspaceSummary } from "../../contracts/git.ts";
 import { parseJsonText, requestUrl } from "../../test/support/fetch.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
@@ -202,7 +203,9 @@ function writeFakeGh(binaryPath: string): void {
         binaryPath,
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+  printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
   if [[ "$*" == *'baseRefName: "main"'* ]]; then
     echo "pull request list unexpectedly filtered to main" >&2
     exit 2
@@ -232,11 +235,9 @@ function writeFakeGhWithoutStackGraphqlFields(binaryPath: string, logPath: strin
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
-  if [[ "$*" == *"stackEntry"* ]]; then
-    echo "GraphQL: Field 'stackEntry' doesn't exist on type 'PullRequest'" >&2
-    exit 1
-  fi
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+  printf '%s\n' '{"data":{"__type":{"fields":[{"name":"number"}]}}}'
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
   printf '%s\n' '{"number":31,"title":"Fallback PR","body":"","url":"https://github.test/pr/31","headRefName":"fallback","headRefOid":"head31","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
 else
   echo "unexpected gh args: $*" >&2
@@ -363,7 +364,15 @@ fi
 function writeFakeGhForPullRequestStackMerge(
     binaryPath: string,
     logPath: string,
-    status: "enqueued" | "failed" | "merged",
+    status:
+        | "enqueued"
+        | "failed"
+        | "head-mismatch"
+        | "merged"
+        | "pending-merged"
+        | "pending-missing-id"
+        | "pending-options-mismatch"
+        | "request-error-merged",
     targetNumber: 11 | 12 | 13 = 13,
     options: {
         closedNumber?: 11 | 12 | 13;
@@ -375,24 +384,56 @@ function writeFakeGhForPullRequestStackMerge(
         12: "2".repeat(40),
         13: "3".repeat(40),
     };
-    const asyncResult =
-        status === "merged"
-            ? {
-                  details: {
-                      message: "Pull request was merged.",
-                      sha: "a".repeat(40),
-                  },
-                  status,
-              }
-            : {
-                  details: {
-                      message:
-                          status === "enqueued"
-                              ? "Pull request was added to the merge queue."
-                              : "Required check failed.",
-                  },
-                  status,
-              };
+    const defaultPullRequestState =
+        status === "pending-missing-id" || status === "pending-options-mismatch"
+            ? "OPEN"
+            : "MERGED";
+    let asyncResult: Record<string, unknown>;
+    if (status.startsWith("pending")) {
+        asyncResult = {
+            details: {
+                expected_head_sha: pullRequestHeadShas[targetNumber],
+                merge_action: "default",
+                merge_method: status === "pending-options-mismatch" ? "merge" : "squash",
+                message: "Stack merge is pending.",
+                ...(status === "pending-merged" ? { uuid: "merge-uuid" } : {}),
+            },
+            status: "pending",
+        };
+    } else if (status === "head-mismatch") {
+        asyncResult = {
+            details: {
+                expected_head_sha: "9".repeat(40),
+                message: "The pull request head changed.",
+            },
+            status: "merged",
+        };
+    } else if (status === "merged") {
+        asyncResult = {
+            details: {
+                message: "Pull request was merged.",
+                sha: "a".repeat(40),
+            },
+            status,
+        };
+    } else {
+        asyncResult = {
+            details: {
+                message:
+                    status === "enqueued"
+                        ? "Pull request was added to the merge queue."
+                        : "Required check failed.",
+            },
+            status,
+        };
+    }
+    const polledMergeResult = JSON.stringify({
+        details: {
+            message: "Pull request was merged.",
+            sha: "a".repeat(40),
+        },
+        status: "merged",
+    });
     writeFileSync(
         binaryPath,
         String.raw`#!/usr/bin/env bash
@@ -401,15 +442,21 @@ printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
 set -- "$@" "" "" "" ""
 if [[ "$1 $2 $3" == "pr view 11" && "$*" == *"--json state"* ]]; then
   printf '%s\n' ${JSON.stringify(
-      JSON.stringify({ state: options.unconfirmedNumber === 11 ? "CLOSED" : "MERGED" })
+      JSON.stringify({
+          state: options.unconfirmedNumber === 11 ? "CLOSED" : defaultPullRequestState,
+      })
   )}
 elif [[ "$1 $2 $3" == "pr view 12" && "$*" == *"--json state"* ]]; then
   printf '%s\n' ${JSON.stringify(
-      JSON.stringify({ state: options.unconfirmedNumber === 12 ? "CLOSED" : "MERGED" })
+      JSON.stringify({
+          state: options.unconfirmedNumber === 12 ? "CLOSED" : defaultPullRequestState,
+      })
   )}
 elif [[ "$1 $2 $3" == "pr view 13" && "$*" == *"--json state"* ]]; then
   printf '%s\n' ${JSON.stringify(
-      JSON.stringify({ state: options.unconfirmedNumber === 13 ? "CLOSED" : "MERGED" })
+      JSON.stringify({
+          state: options.unconfirmedNumber === 13 ? "CLOSED" : defaultPullRequestState,
+      })
   )}
 elif [[ "$1 $2 $3" == "pr view 11" ]]; then
   printf '%s\n' ${JSON.stringify(
@@ -534,8 +581,16 @@ elif [[ "$1" == "api" && "$2" == ${JSON.stringify(
 elif [[ "$1 $2 $3" == "api -X PUT" && "$4" == ${JSON.stringify(
             `repos/rajohan/Mira-Dashboard/pulls/${targetNumber}/merge-async`
         )} ]]; then
-  printf '%s\n' ${JSON.stringify(JSON.stringify(asyncResult))}
-  ${status === "failed" ? "exit 1" : "exit 0"}
+  ${
+      status === "request-error-merged"
+          ? "echo 'request interrupted' >&2\n  exit 1"
+          : `printf '%s\\n' ${JSON.stringify(JSON.stringify(asyncResult))}
+  ${status === "failed" ? "exit 1" : "exit 0"}`
+  }
+elif [[ "$1" == "api" && "$2" == ${JSON.stringify(
+            `repos/rajohan/Mira-Dashboard/pulls/${targetNumber}/merge-async/merge-uuid`
+        )} ]]; then
+  printf '%s\n' ${JSON.stringify(polledMergeResult)}
 else
   echo "unexpected gh args: $*" >&2
   exit 2
@@ -604,7 +659,12 @@ fi
 
 function writeFakeGhForPullRequestStackCreation(
     binaryPath: string,
-    logPath: string
+    logPath: string,
+    options: {
+        apiUnavailable?: boolean;
+        existingStackNumber?: number;
+        topBaseRefName?: string;
+    } = {}
 ): void {
     const bottomSha = "4".repeat(40);
     const topSha = "5".repeat(40);
@@ -613,7 +673,9 @@ function writeFakeGhForPullRequestStackCreation(
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+  printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
           additions: 1,
@@ -634,8 +696,41 @@ if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
           title: "Create bottom",
           updatedAt: "2026-07-30T11:00:00.000Z",
           url: "https://github.test/pr/21",
+          ...(options.existingStackNumber
+              ? {
+                    stack: {
+                        baseRefName: "main",
+                        number: options.existingStackNumber,
+                        position: 1,
+                        size: 2,
+                    },
+                }
+              : {}),
       })
   )}
+  printf '%s\n' ${JSON.stringify(
+      JSON.stringify({
+          additions: 1,
+          author: { login: "mira-2026" },
+          baseRefName: options.topBaseRefName ?? "stack-create-bottom",
+          body: "",
+          changedFiles: 1,
+          createdAt: "2026-07-30T10:01:00.000Z",
+          deletions: 0,
+          headRefName: "stack-create-top",
+          headRefOid: topSha,
+          isDraft: false,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          number: 22,
+          reviewDecision: null,
+          statusCheckRollup: [{ conclusion: "success", name: "ci" }],
+          title: "Create top",
+          updatedAt: "2026-07-30T11:01:00.000Z",
+          url: "https://github.test/pr/22",
+      })
+  )}
+elif [[ "$1 $2 $3" == "pr view 22" ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
           additions: 1,
@@ -651,41 +746,191 @@ if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
           mergeable: "MERGEABLE",
           mergeStateStatus: "CLEAN",
           number: 22,
-          reviewDecision: "APPROVED",
+          reviewDecision: null,
+          reviews: [],
           statusCheckRollup: [{ conclusion: "success", name: "ci" }],
           title: "Create top",
           updatedAt: "2026-07-30T11:01:00.000Z",
           url: "https://github.test/pr/22",
       })
   )}
+elif [[ "$1" == "api" && "$2" == "repos/rajohan/Mira-Dashboard/stacks?pull_request=22&per_page=2" ]]; then
+  printf '[]\n'
+elif [[ "$1 $2 $3" == "pr review 22" ]]; then
+  printf 'review ok\n'
 elif [[ "$1 $2 $3" == "api -X POST" && "$4" == "repos/rajohan/Mira-Dashboard/stacks" ]]; then
-  printf '%s\n' ${JSON.stringify(
-      JSON.stringify({
-          base: { ref: "main" },
-          created_at: "2026-07-30T12:00:00.000Z",
-          id: 500,
-          node_id: "S_stack500",
-          number: 500,
-          open: true,
-          pull_requests: [
-              {
-                  draft: false,
-                  head: { ref: "stack-create-bottom", sha: bottomSha },
-                  merged_at: null,
-                  number: 21,
-                  state: "open",
-              },
-              {
-                  draft: false,
-                  head: { ref: "stack-create-top", sha: topSha },
-                  merged_at: null,
-                  number: 22,
-                  state: "open",
-              },
-          ],
-          url: "https://api.github.test/stacks/500",
-      })
-  )}
+  ${
+      options.apiUnavailable
+          ? 'printf \'HTTP/2 404 Not Found\\ncontent-type: application/json\\n\\n{"message":"Not Found"}\\n\'\n  exit 1'
+          : `printf '%s\\n' ${JSON.stringify(
+                JSON.stringify({
+                    base: { ref: "main" },
+                    created_at: "2026-07-30T12:00:00.000Z",
+                    id: 500,
+                    node_id: "S_stack500",
+                    number: 500,
+                    open: true,
+                    pull_requests: [
+                        {
+                            draft: false,
+                            head: { ref: "stack-create-bottom", sha: bottomSha },
+                            merged_at: null,
+                            number: 21,
+                            state: "open",
+                        },
+                        {
+                            draft: false,
+                            head: { ref: "stack-create-top", sha: topSha },
+                            merged_at: null,
+                            number: 22,
+                            state: "open",
+                        },
+                    ],
+                    url: "https://api.github.test/stacks/500",
+                })
+            )}`
+  }
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function stackPullRequestSummary(
+    number: 11 | 12 | 13,
+    overrides: Partial<PullRequestSummary> = {}
+): PullRequestSummary {
+    const position = number - 10;
+    const headRefNames = {
+        11: "stack-bottom",
+        12: "stack-middle",
+        13: "stack-top",
+    } as const;
+    const baseRefNames = {
+        11: "main",
+        12: "stack-bottom",
+        13: "stack-middle",
+    } as const;
+    return {
+        additions: 1,
+        author: { login: "mira-2026" },
+        baseRefName: baseRefNames[number],
+        body: "",
+        changedFiles: 1,
+        createdAt: `2026-07-30T10:0${position}:00.000Z`,
+        deletions: 0,
+        headRefName: headRefNames[number],
+        headRefOid: String(position).repeat(40),
+        isDraft: false,
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "CLEAN",
+        number,
+        reviewDecision: "APPROVED",
+        stack: {
+            baseRefName: "main",
+            number: 360,
+            position,
+            size: 3,
+        },
+        statusCheckRollup: [{ conclusion: "success", name: "ci" }],
+        title: `Stack PR ${number}`,
+        updatedAt: `2026-07-30T11:0${position}:00.000Z`,
+        url: `https://github.test/pr/${number}`,
+        ...overrides,
+    };
+}
+
+function writeFakeGhForNativeStackReviewApproval(
+    binaryPath: string,
+    logPath: string
+): void {
+    const reviewedPath = `${logPath}.reviewed`;
+    const bottomSha = "1".repeat(40);
+    const middleSha = "2".repeat(40);
+    const bottom = stackPullRequestSummary(11, {
+        stack: {
+            baseRefName: "main",
+            number: 360,
+            position: 1,
+            size: 2,
+        },
+    });
+    const middle = stackPullRequestSummary(12, {
+        reviewDecision: undefined,
+        stack: {
+            baseRefName: "main",
+            number: 360,
+            position: 2,
+            size: 2,
+        },
+    });
+    const { stack: _stack, ...directMiddle } = middle;
+    const directMiddleBeforeReview = JSON.stringify({
+        ...directMiddle,
+        reviews: [],
+    });
+    const directMiddleAfterReview = JSON.stringify({
+        ...directMiddle,
+        reviewDecision: "APPROVED",
+        reviews: [],
+    });
+    const nativeStack = JSON.stringify([
+        {
+            base: { ref: "main" },
+            created_at: "2026-07-30T10:05:00.000Z",
+            id: 360,
+            node_id: "S_stack360",
+            number: 360,
+            open: true,
+            pull_requests: [
+                {
+                    draft: false,
+                    head: { ref: "stack-bottom", sha: bottomSha },
+                    merged_at: null,
+                    number: 11,
+                    state: "open",
+                },
+                {
+                    draft: false,
+                    head: { ref: "stack-middle", sha: middleSha },
+                    merged_at: null,
+                    number: 12,
+                    state: "open",
+                },
+            ],
+            url: "https://api.github.test/stacks/360",
+        },
+    ]);
+    const bottomRow = JSON.stringify(bottom);
+    const approvedMiddleRow = JSON.stringify({
+        ...middle,
+        reviewDecision: "APPROVED",
+    });
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+set -- "$@" "" "" "" ""
+if [[ "$1 $2 $3" == "pr view 12" ]]; then
+  if [[ -f ${JSON.stringify(reviewedPath)} ]]; then
+    printf '%s\n' ${JSON.stringify(directMiddleAfterReview)}
+  else
+    printf '%s\n' ${JSON.stringify(directMiddleBeforeReview)}
+  fi
+elif [[ "$1" == "api" && "$2" == "repos/rajohan/Mira-Dashboard/stacks?pull_request=12&per_page=2" ]]; then
+  printf '%s\n' ${JSON.stringify(nativeStack)}
+elif [[ "$1 $2 $3" == "pr review 12" ]]; then
+  touch ${JSON.stringify(reviewedPath)}
+  printf 'review ok\n'
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+  printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+  printf '%s\n' ${JSON.stringify(bottomRow)}
+  printf '%s\n' ${JSON.stringify(approvedMiddleRow)}
 else
   echo "unexpected gh args: $*" >&2
   exit 2
@@ -3784,7 +4029,8 @@ fi
         expect(pullRequests[0]?.stack).toBeUndefined();
         const ghCommands = await Bun.file(ghLog).text();
         expect(ghCommands.match(/api graphql/gu)).toHaveLength(2);
-        expect(ghCommands).toContain("stackEntry");
+        expect(ghCommands).toContain('__type(name: "PullRequest")');
+        expect(ghCommands).not.toContain("stackEntry");
     });
 
     it("creates a native GitHub stack only from an existing linear PR chain", async () => {
@@ -3810,11 +4056,173 @@ fi
         expect(ghCommands).toContain("pull_requests[]=21");
         expect(ghCommands).toContain("pull_requests[]=22");
 
-        expect(createPullRequestStack([22, 21])).rejects.toThrow(
-            "The bottom pull request must target main"
+        expect(
+            await captureRejection(() => createPullRequestStack([22, 21]))
+        ).toMatchObject({ message: "The bottom pull request must target main" });
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 21]))
+        ).toMatchObject({ message: "A stack cannot contain duplicate pull requests" });
+
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 23]))
+        ).toMatchObject({
+            message: "PR #23 is not an open pull request in this repository",
+        });
+
+        writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog, {
+            existingStackNumber: 499,
+        });
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 22]))
+        ).toMatchObject({
+            message: "PR #21 already belongs to GitHub stack #499",
+        });
+
+        writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog, {
+            topBaseRefName: "another-branch",
+        });
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 22]))
+        ).toMatchObject({ message: "PR #22 must target stack-create-bottom" });
+
+        writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog, {
+            apiUnavailable: true,
+        });
+        expect(
+            await captureRejection(() => createPullRequestStack([21, 22]))
+        ).toMatchObject({
+            message: "GitHub stacks are not enabled for this repository or token",
+        });
+    });
+
+    it("revalidates every native stack layer before starting its preview", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-stack-preview-scope-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-stack-preview-scope-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhForPullRequestStackMerge(path.join(fakeBin, "gh"), ghLog, "merged");
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+
+        const { validatePullRequestPreviewScope } =
+            await import("../src/services/pullRequests.ts");
+        const scope = [
+            stackPullRequestSummary(11),
+            stackPullRequestSummary(12),
+            stackPullRequestSummary(13),
+        ];
+
+        expect(await validatePullRequestPreviewScope(scope[2]!, scope)).toBeUndefined();
+        expect(
+            await validatePullRequestPreviewScope(
+                { ...scope[2]!, stack: undefined },
+                scope
+            )
+        ).toBeUndefined();
+        expect(
+            await captureRejection(() =>
+                validatePullRequestPreviewScope(scope[2]!, [
+                    { ...scope[0]!, headRefOid: "9".repeat(40) },
+                    scope[1]!,
+                    scope[2]!,
+                ])
+            )
+        ).toMatchObject({
+            message: "PR #11 changed while Delivery loaded the stack preview",
+        });
+        expect(
+            await captureRejection(() =>
+                validatePullRequestPreviewScope(scope[2]!, [scope[0]!, scope[2]!])
+            )
+        ).toMatchObject({
+            message: "PR #12 changed while Delivery loaded the stack preview",
+        });
+
+        writeFakeGhForPullRequestStackMerge(
+            path.join(fakeBin, "gh"),
+            ghLog,
+            "merged",
+            13,
+            { closedNumber: 12 }
         );
-        expect(createPullRequestStack([21, 21])).rejects.toThrow(
-            "A stack cannot contain duplicate pull requests"
+        expect(
+            await captureRejection(() =>
+                validatePullRequestPreviewScope(scope[2]!, scope)
+            )
+        ).toMatchObject({
+            message: "PR #12 is closed and blocks this stack preview",
+        });
+    });
+
+    it("allows review approval on an upper linear stack candidate", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
+        const fakeRoot = createTemporaryRoot("mira-pr-candidate-review-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-candidate-review-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhForPullRequestStackCreation(path.join(fakeBin, "gh"), ghLog);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.RAJOHAN_GITHUB_TOKEN = "test-review-token";
+
+        const { approvePullRequestReview, listDashboardPullRequests } =
+            await import("../src/services/pullRequests.ts");
+        const pullRequests = await listDashboardPullRequests();
+        const candidate = pullRequests.find((pullRequest) => pullRequest.number === 22);
+        expect(candidate).toMatchObject({
+            canReviewerApprove: true,
+            previewEligible: true,
+        });
+        const result = await approvePullRequestReview(22);
+
+        expect(result).toMatchObject({
+            isOk: true,
+            message: "PR #22 review approved",
+            pullRequest: {
+                number: 22,
+                previewEligible: true,
+            },
+        });
+        expect(await Bun.file(ghLog).text()).toContain(
+            "pr review 22 --approve --repo rajohan/Mira-Dashboard"
+        );
+    });
+
+    it("allows review approval on an upper native GitHub stack layer", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
+        const fakeRoot = createTemporaryRoot("mira-pr-native-stack-review-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-native-stack-review-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhForNativeStackReviewApproval(path.join(fakeBin, "gh"), ghLog);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.RAJOHAN_GITHUB_TOKEN = "test-review-token";
+
+        const { approvePullRequestReview } =
+            await import("../src/services/pullRequests.ts");
+        const result = await approvePullRequestReview(12);
+
+        expect(result).toMatchObject({
+            isOk: true,
+            message: "PR #12 review approved",
+            pullRequest: {
+                canReviewerApprove: false,
+                number: 12,
+                previewEligible: true,
+                reviewerApproved: true,
+                stack: {
+                    number: 360,
+                    position: 2,
+                    size: 2,
+                },
+            },
+        });
+        expect(await Bun.file(ghLog).text()).toContain(
+            "pr review 12 --approve --repo rajohan/Mira-Dashboard"
         );
     });
 
@@ -3995,7 +4403,7 @@ fi
             )
         );
         expect(missingApproveHeadRoute.status).toBe(400);
-        expect(missingApproveHeadRoute.json()).resolves.toMatchObject({
+        expect(await missingApproveHeadRoute.json()).toMatchObject({
             error: {
                 code: "invalid_request",
                 details: {
@@ -4097,10 +4505,10 @@ fi
                     status: "skipped",
                 },
             });
-            expect(Bun.file(ghLog).text()).resolves.toContain(
+            expect(await Bun.file(ghLog).text()).toContain(
                 `pr merge 11 --squash --delete-branch --repo rajohan/Mira-Dashboard --match-head-commit ${"1".repeat(40)}`
             );
-            expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
+            expect(await Bun.file(gitLog).text()).toContain("worktree remove");
             expect(existsSync(localWorktree)).toBe(false);
             expect(
                 database
@@ -4188,6 +4596,109 @@ fi
                 `worktree remove ${path.join(worktreeRoot, branch)}`
             );
         }
+    });
+
+    it("polls pending stack merges and rejects inconsistent asynchronous results", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-stack-async-root-");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const fakeBin = createTemporaryRoot("mira-pr-stack-async-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        const gitLog = path.join(fakeRoot, "git.log");
+        for (const branch of ["stack-bottom", "stack-middle", "stack-top"]) {
+            mkdirSync(path.join(worktreeRoot, branch), { recursive: true });
+        }
+        writeFakeGhForPullRequestStackMerge(
+            path.join(fakeBin, "gh"),
+            ghLog,
+            "pending-merged"
+        );
+        writeFakeGitForPullRequestStackMerge(
+            path.join(fakeBin, "git"),
+            fakeRoot,
+            worktreeRoot,
+            gitLog
+        );
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+
+        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        const pendingResult = await approvePullRequest(13, false, {
+            expectedHeadSha: "3".repeat(40),
+            mergeStack: true,
+        });
+        expect(pendingResult).toMatchObject({
+            isOk: true,
+            mergeStatus: "merged",
+        });
+        const pendingCommands = await Bun.file(ghLog).text();
+        expect(pendingCommands).toContain("pulls/13/merge-async/merge-uuid");
+
+        writeFakeGhForPullRequestStackMerge(
+            path.join(fakeBin, "gh"),
+            ghLog,
+            "head-mismatch"
+        );
+        expect(
+            await captureRejection(() =>
+                approvePullRequest(13, false, {
+                    expectedHeadSha: "3".repeat(40),
+                    mergeStack: true,
+                })
+            )
+        ).toMatchObject({
+            message:
+                "PR #13 changed while GitHub accepted the stack merge. Verify the stack state before retrying",
+        });
+
+        writeFakeGhForPullRequestStackMerge(
+            path.join(fakeBin, "gh"),
+            ghLog,
+            "pending-missing-id"
+        );
+        expect(
+            await captureRejection(() =>
+                approvePullRequest(13, false, {
+                    expectedHeadSha: "3".repeat(40),
+                    mergeStack: true,
+                })
+            )
+        ).toMatchObject({
+            message: "GitHub stack merge returned pending without a result id",
+        });
+
+        writeFakeGhForPullRequestStackMerge(
+            path.join(fakeBin, "gh"),
+            ghLog,
+            "pending-options-mismatch"
+        );
+        expect(
+            await captureRejection(() =>
+                approvePullRequest(13, false, {
+                    expectedHeadSha: "3".repeat(40),
+                    mergeStack: true,
+                })
+            )
+        ).toMatchObject({
+            message: "PR #13 already has an incompatible pending stack merge request",
+        });
+
+        writeFakeGhForPullRequestStackMerge(
+            path.join(fakeBin, "gh"),
+            ghLog,
+            "request-error-merged"
+        );
+        const reconciledResult = await approvePullRequest(13, false, {
+            expectedHeadSha: "3".repeat(40),
+            mergeStack: true,
+        });
+        expect(reconciledResult).toMatchObject({
+            isOk: true,
+            mergeStatus: "merged",
+        });
     });
 
     it("blocks ordinary merge and reject actions for native stack members", async () => {
@@ -4383,7 +4894,7 @@ fi
                 message:
                     scenario === "closed"
                         ? "PR #12 is closed and blocks merging through PR #13"
-                        : "GitHub reported the stack merged, but PR #12 did not confirm as merged. Worktrees were retained",
+                        : "GitHub reported the stack merged, but PR #12 did not confirm as merged. Worktrees were retained; verify GitHub, then run production sync before deploying",
             });
             for (const branch of branches) {
                 expect(existsSync(path.join(worktreeRoot, branch))).toBe(true);
@@ -4532,16 +5043,22 @@ fi
     });
 
     it("rejects oversized GitHub JSON stream rows when listing pull requests", async () => {
-        const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
-            () =>
-                ({
+        const spawnSpy = jest
+            .spyOn(processModule, "spawnProcess")
+            .mockImplementation((_executable, arguments_) => {
+                const isPullRequestList = arguments_.includes("--paginate");
+                return {
                     exited: Promise.resolve(0),
                     kill: () => {},
                     pid: 12_345,
                     stderr: readableUtf8Stream(""),
-                    stdout: readableUtf8Stream(`${"x".repeat(1024 * 1024 + 1)}\n`),
-                }) as unknown as processModule.BunProcess
-        );
+                    stdout: readableUtf8Stream(
+                        isPullRequestList
+                            ? `${"x".repeat(1024 * 1024 + 1)}\n`
+                            : '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}\n'
+                    ),
+                } as unknown as processModule.BunProcess;
+            });
         const killSpy = jest
             .spyOn(processModule, "killProcessGroup")
             .mockImplementation(() => {});
@@ -4549,9 +5066,9 @@ fi
         try {
             const { listDashboardPullRequests } =
                 await import("../src/services/pullRequests.ts");
-            expect(listDashboardPullRequests()).rejects.toThrow(
-                "GitHub CLI JSON line was too large"
-            );
+            expect(
+                await captureRejection(() => listDashboardPullRequests())
+            ).toMatchObject({ message: "GitHub CLI JSON line was too large" });
             expect(killSpy).toHaveBeenCalledWith(expect.any(Object), "SIGTERM");
         } finally {
             spawnSpy.mockRestore();
@@ -4614,23 +5131,31 @@ fi
         } = await import("../src/services/pullRequests.ts");
 
         expect(
-            approvePullRequest(6, false, { expectedHeadSha: "6".repeat(40) })
-        ).rejects.toThrow("Draft pull requests cannot be approved from the dashboard");
-        expect(rejectPullRequest(7, "Wrong base")).rejects.toThrow(
-            "Only main-targeted pull requests can be managed here"
-        );
-        expect(updatePullRequestBranch(8)).rejects.toThrow(
-            "Pull request branch is not behind the base branch"
-        );
-        expect(updatePullRequestBranch(9)).rejects.toThrow(
-            "Pull request branch has merge conflicts"
-        );
-        expect(approvePullRequestReview(10)).rejects.toThrow(
-            "Rajohan cannot approve his own pull request"
-        );
-        expect(approvePullRequestReview(6)).rejects.toThrow(
-            "Draft pull requests cannot be approved from the dashboard"
-        );
+            await captureRejection(() =>
+                approvePullRequest(6, false, {
+                    expectedHeadSha: "6".repeat(40),
+                })
+            )
+        ).toMatchObject({
+            message: "Draft pull requests cannot be approved from the dashboard",
+        });
+        expect(
+            await captureRejection(() => rejectPullRequest(7, "Wrong base"))
+        ).toMatchObject({
+            message: "Only main-targeted pull requests can be managed here",
+        });
+        expect(await captureRejection(() => updatePullRequestBranch(8))).toMatchObject({
+            message: "Pull request branch is not behind the base branch",
+        });
+        expect(await captureRejection(() => updatePullRequestBranch(9))).toMatchObject({
+            message: "Pull request branch has merge conflicts",
+        });
+        expect(await captureRejection(() => approvePullRequestReview(10))).toMatchObject({
+            message: "Rajohan cannot approve his own pull request",
+        });
+        expect(await captureRejection(() => approvePullRequestReview(6))).toMatchObject({
+            message: "Draft pull requests cannot be approved from the dashboard",
+        });
     });
 
     it("refreshes weather cache through the Open-Meteo fallback when wttr fails", async () => {

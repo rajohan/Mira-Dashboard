@@ -5220,11 +5220,10 @@ describe("Mira Dashboard frontend behavior", () => {
         });
 
         const createStack = renderHookWithQueryClient(() => useCreatePullRequestStack());
-        expect(
-            createStack.result.current.mutateAsync({
-                pullRequests: [188, 189],
-            })
-        ).resolves.toMatchObject({ message: "stack created" });
+        const createStackResponse = await createStack.result.current.mutateAsync({
+            pullRequests: [188, 189],
+        });
+        expect(createStackResponse).toMatchObject({ message: "stack created" });
 
         const approveReview = renderHookWithQueryClient(() =>
             useApprovePullRequestReview()

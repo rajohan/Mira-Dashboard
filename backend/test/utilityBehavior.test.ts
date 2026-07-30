@@ -180,7 +180,7 @@ describe("backend service utilities", () => {
             }),
             expect.objectContaining({
                 baseRefName: "mira/preview",
-                canReviewerApprove: false,
+                canReviewerApprove: true,
                 headRefName: "mira/stacked-preview",
                 number: 336,
                 previewEligible: true,
