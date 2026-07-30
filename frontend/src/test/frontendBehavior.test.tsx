@@ -6235,6 +6235,24 @@ describe("Mira Dashboard frontend behavior", () => {
         ]);
         expect(duplicatePersistedUserEvent).toHaveLength(1);
 
+        const duplicateRuntimeUserEvent = dedupeMessages([
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                runtimeKey: "user:before-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:00.000Z",
+            }),
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                runtimeKey: "user:after-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:00.000Z",
+            }),
+        ]);
+        expect(duplicateRuntimeUserEvent).toHaveLength(1);
+
         const repeatedPersistedUserTurns = dedupeMessages([
             chatMessage({
                 role: "user",

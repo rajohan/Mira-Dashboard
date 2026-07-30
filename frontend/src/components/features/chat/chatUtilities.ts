@@ -836,7 +836,7 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         const role = message.role.toLowerCase();
         const exactUserEvent =
             role === "user" && message.runId && message.timestamp
-                ? messageDeleteKey(message)
+                ? messageDeleteKey({ ...message, runtimeKey: undefined })
                 : undefined;
         if (exactUserEvent && seenExactUserEvents.has(exactUserEvent)) {
             continue;
