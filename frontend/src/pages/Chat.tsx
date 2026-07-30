@@ -23,8 +23,8 @@ import { createChatVisibility as createRuntimeVisibility } from "../components/f
 import { isSameChatSession } from "../components/features/chat/domain/chatState";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
-import { useChatActions } from "../components/features/chat/useChatActions";
 import { useCanonicalChatProjection } from "../components/features/chat/useCanonicalChatProjection";
+import { useChatActions } from "../components/features/chat/useChatActions";
 import {
     projectChatActivityRows,
     useChatCompactionIndicator,
