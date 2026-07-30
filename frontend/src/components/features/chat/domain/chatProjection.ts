@@ -1827,14 +1827,19 @@ export function renderChatProjectionRows(
     messages: ChatHistoryMessage[],
     deletedMessageKeys: ReadonlySet<string>
 ): ChatRow[] {
+    const deleteKeyOccurrences = new Map<string, number>();
     return messages.flatMap((message) => {
-        const deleteKeys = projectedMessageDeleteKeys(message);
+        const deleteKeys = projectedMessageDeleteKeys(message).map((baseKey) => {
+            const occurrence = deleteKeyOccurrences.get(baseKey) ?? 0;
+            deleteKeyOccurrences.set(baseKey, occurrence + 1);
+            return chatProjectionRowOccurrenceKey(baseKey, occurrence);
+        });
         return deleteKeys.some((key) => deletedMessageKeys.has(key))
             ? []
             : [
                   {
                       deleteKeys,
-                      key: projectedMessageRowKey(message),
+                      key: deleteKeys[0] ?? projectedMessageRowKey(message),
                       kind:
                           message.local === true &&
                           message.runId &&
@@ -1893,6 +1898,10 @@ export function appendChatProjectionStatus(
     return typing ? [...rows, typing] : rows;
 }
 
+function chatProjectionRowOccurrenceKey(baseKey: string, occurrence: number): string {
+    return occurrence === 0 ? baseKey : `${baseKey}::row-occurrence:${occurrence}`;
+}
+
 function uniqueChatProjectionRowKeys(rows: ChatRow[]): ChatRow[] {
     const usedKeys = new Set<string>();
     const occurrences = new Map<string, number>();
@@ -1902,7 +1911,7 @@ function uniqueChatProjectionRowKeys(rows: ChatRow[]): ChatRow[] {
         let key = baseKey;
         while (usedKeys.has(key)) {
             occurrence += 1;
-            key = `${baseKey}::row-occurrence:${occurrence}`;
+            key = chatProjectionRowOccurrenceKey(baseKey, occurrence);
         }
         occurrences.set(baseKey, occurrence);
         usedKeys.add(key);

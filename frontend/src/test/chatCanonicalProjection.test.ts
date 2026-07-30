@@ -955,7 +955,33 @@ describe("canonical chat turn projection", () => {
         ]);
         expect(new Set(keys).size).toBe(keys.length);
         expect(keys[2]).toBe(`${keys[0]}::row-occurrence:1`);
+        expect(first.projection.rows[0]?.deleteKeys).toEqual([keys[0]]);
+        expect(first.projection.rows[2]?.deleteKeys).toEqual([keys[2]]);
         expect(replay.projection.rows.map((row) => row.key)).toEqual(keys);
+
+        const withoutFirstPrompt = projectCanonicalChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(first.projection.rows[0]?.deleteKeys)
+        );
+        expect(withoutFirstPrompt.projection.rows.map((row) => row.message.text)).toEqual(
+            ["first answer", "repeat", "second answer"]
+        );
+
+        const withoutSecondPrompt = projectCanonicalChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(first.projection.rows[2]?.deleteKeys)
+        );
+        expect(
+            withoutSecondPrompt.projection.rows.map((row) => row.message.text)
+        ).toEqual(["repeat", "first answer", "second answer"]);
     });
 
     it("fails closed when canonical validation detects an invalid session", () => {
