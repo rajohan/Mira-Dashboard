@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
+import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
 import {
     createChatRuntimeState,
     reduceChatRuntime,
@@ -11,9 +12,10 @@ const SESSION = "agent:main:main";
 function envelope(
     event: string,
     payload: Record<string, unknown>,
-    runtimeSequence: number
+    runtimeSequence: number,
+    runtimeRecordedAt = 1_752_664_800_000
 ) {
-    return {
+    return withCanonicalOpenClawEvents({
         event,
         payload: {
             runId: "run-1",
@@ -21,9 +23,10 @@ function envelope(
             ts: 1_752_664_800_000,
             ...payload,
         },
+        runtimeRecordedAt,
         runtimeSequence,
         type: "event",
-    };
+    });
 }
 
 describe("OpenClaw chat adapter", () => {
@@ -99,10 +102,12 @@ describe("OpenClaw chat adapter", () => {
             { data: { delta: "continued" }, stream: "reasoning" },
             8
         );
-        const events = adapter.event({
-            ...raw,
-            runtimeRunAliases: ["run-before-restart", "run-before-restart", ""],
-        });
+        const events = adapter.event(
+            withCanonicalOpenClawEvents({
+                ...raw,
+                runtimeRunAliases: ["run-before-restart", "run-before-restart", ""],
+            })
+        );
 
         expect(events).not.toHaveLength(0);
         expect(
@@ -112,19 +117,21 @@ describe("OpenClaw chat adapter", () => {
 
     it("preserves a backend run replacement when the provider event has no visible draft", () => {
         const adapter = new OpenClawChatAdapter();
-        const events = adapter.event({
-            event: "session.tool",
-            payload: {
-                name: "typing",
-                phase: "result",
-                runId: "run-after-restart",
-                sessionKey: SESSION,
-            },
-            runtimeRecordedAt: Date.now(),
-            runtimeRunAliases: ["run-before-restart"],
-            runtimeSequence: 9,
-            type: "event",
-        });
+        const events = adapter.event(
+            withCanonicalOpenClawEvents({
+                event: "session.tool",
+                payload: {
+                    name: "typing",
+                    phase: "result",
+                    runId: "run-after-restart",
+                    sessionKey: SESSION,
+                },
+                runtimeRecordedAt: Date.now(),
+                runtimeRunAliases: ["run-before-restart"],
+                runtimeSequence: 9,
+                type: "event",
+            })
+        );
 
         expect(events).toEqual([
             expect.objectContaining({
@@ -188,9 +195,9 @@ describe("OpenClaw chat adapter", () => {
     it("restores active-run status from a replayed session start", () => {
         const adapter = new OpenClawChatAdapter();
         const started = adapter.event(envelope("session.started", {}, 8));
-        const runlessStart = envelope("session.started", {}, 9);
-        Reflect.deleteProperty(runlessStart.payload, "runId");
-        const ignoredRunlessStart = adapter.event(runlessStart);
+        const ignoredRunlessStart = adapter.event(
+            envelope("session.started", { runId: undefined }, 9)
+        );
         const final = adapter.event(
             envelope(
                 "chat",
@@ -230,6 +237,25 @@ describe("OpenClaw chat adapter", () => {
         ).toEqual([]);
     });
 
+    it("rejects provider runtime envelopes that bypass backend canonicalization", () => {
+        const adapter = new OpenClawChatAdapter();
+
+        expect(() =>
+            adapter.event({
+                event: "chat",
+                payload: {
+                    deltaText: "raw provider data",
+                    runId: "raw-run",
+                    sessionKey: SESSION,
+                    state: "delta",
+                },
+                runtimeRecordedAt: Date.now(),
+                runtimeSequence: 10,
+                type: "event",
+            })
+        ).toThrow("chat.runtimeEvent.canonicalEvents");
+    });
+
     it("sorts snapshot events by the backend sequence", () => {
         const adapter = new OpenClawChatAdapter();
         const events = adapter.snapshot({
@@ -264,33 +290,17 @@ describe("OpenClaw chat adapter", () => {
         expect(queued[0]?.sequence).toBe(64);
     });
 
-    it("keeps fallback sequences ahead of previously observed provider sequences", () => {
-        const adapter = new OpenClawChatAdapter();
-        const sequenced = adapter.event(
-            envelope("chat", { deltaText: "first", state: "delta" }, 100)
-        );
-        const unsequenced = envelope(
-            "chat",
-            { deltaText: "second", state: "delta" },
-            0
-        ) as Record<string, unknown>;
-        delete unsequenced.runtimeSequence;
-
-        const fallback = adapter.event(unsequenced);
-
-        expect(fallback[0]?.sequence).toBeGreaterThan(sequenced[0]?.sequence || 0);
-    });
-
     it("uses the backend recording time when a provider event has no timestamp", () => {
         const adapter = new OpenClawChatAdapter();
-        const raw = envelope("chat", { deltaText: "hello", state: "delta" }, 1);
-        const payload: Record<string, unknown> = {
-            ...raw.payload,
-            ts: Number.MAX_VALUE,
-        };
         const recordedAt = Date.parse("2026-07-16T12:34:56.000Z");
-
-        const events = adapter.event({ ...raw, payload, runtimeRecordedAt: recordedAt });
+        const events = adapter.event(
+            envelope(
+                "chat",
+                { deltaText: "hello", state: "delta", ts: Number.MAX_VALUE },
+                1,
+                recordedAt
+            )
+        );
 
         expect(events[0]?.timestamp).toBe("2026-07-16T12:34:56.000Z");
     });
@@ -534,25 +544,30 @@ describe("OpenClaw chat adapter", () => {
                 envelope("chat", { errorMessage: "request failed", state: "error" }, 12)
             ),
         ]);
-        const otherSession = adapter.event({
-            ...envelope("chat", { errorMessage: "model failed", state: "error" }, 13),
-            payload: {
-                errorMessage: "model failed",
-                runId: "run-1",
-                sessionKey: "agent:main:other",
-                state: "error",
-            },
-        });
-        const runlessToolError = adapter.event({
-            event: "chat",
-            payload: {
-                errorMessage: "⚠️ 🛠️ `run lint` failed",
-                sessionKey: SESSION,
-                state: "error",
-            },
-            runtimeSequence: 14,
-            type: "event",
-        });
+        const otherSession = adapter.event(
+            envelope(
+                "chat",
+                {
+                    errorMessage: "model failed",
+                    runId: "run-1",
+                    sessionKey: "agent:main:other",
+                    state: "error",
+                },
+                13
+            )
+        );
+        const runlessToolError = adapter.event(
+            envelope(
+                "chat",
+                {
+                    errorMessage: "⚠️ 🛠️ `run lint` failed",
+                    runId: undefined,
+                    sessionKey: SESSION,
+                    state: "error",
+                },
+                14
+            )
+        );
         const duplicateToolMessage = adapter.event(
             envelope(
                 "chat",

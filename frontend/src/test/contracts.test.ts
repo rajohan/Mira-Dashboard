@@ -11,6 +11,12 @@ import {
 import { parseApiErrorResponse } from "../../../contracts/apiErrors";
 import { parseBackupStatusResponse } from "../../../contracts/backups";
 import {
+    OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    parseOpenClawRuntimeEnvelope,
+    parseOpenClawRuntimeSnapshot,
+} from "../../../contracts/chat";
+import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
+import {
     parsePullRequestApproveRequest,
     parsePullRequestPreviewStartRequest,
     parsePullRequestStackCreateRequest,
@@ -53,6 +59,102 @@ function captureContractError(operation: () => unknown): ContractValidationError
 }
 
 describe("shared runtime contracts", () => {
+    it("requires stable canonical chat events while preserving provider format metadata", () => {
+        const common = {
+            runtimeRecordedAt: Date.parse("2026-07-30T08:00:00.000Z"),
+            runtimeSequence: 4,
+            type: "event" as const,
+        };
+        const codex = withCanonicalOpenClawEvents({
+            ...common,
+            event: "chat",
+            payload: {
+                message: { content: "Done", role: "assistant" },
+                runId: "codex-run",
+                sessionKey: "agent:main:main",
+                state: "final",
+            },
+        });
+        const synthetic = withCanonicalOpenClawEvents({
+            ...common,
+            event: "session.message",
+            payload: {
+                message: {
+                    content: [{ text: "Done", type: "text" }],
+                    model: "syn:large:text",
+                    provider: "synthetic",
+                    role: "assistant",
+                    stopReason: "stop",
+                },
+                model: "gpt-5.6-sol",
+                modelProvider: "openai",
+                runId: "synthetic-run",
+                sessionKey: "agent:main:main",
+            },
+        });
+        const syntheticUser = withCanonicalOpenClawEvents({
+            ...common,
+            event: "session.message",
+            payload: {
+                message: {
+                    content: "Continue",
+                    role: "user",
+                },
+                model: "gpt-5.6-sol",
+                modelProvider: "openai",
+                runId: "synthetic-run",
+                sessionKey: "agent:main:main",
+            },
+        });
+
+        expect(parseOpenClawRuntimeEnvelope(codex).canonicalEvents).toEqual(
+            codex.canonicalEvents
+        );
+        expect(codex.canonicalEvents.at(-1)).toMatchObject({
+            id: "openclaw:agent%3Amain%3Amain:64:finish",
+            lifecycle: "completed",
+            outcome: "completed",
+            provider: { format: "openclaw-chat" },
+            schemaVersion: 1,
+            sequence: 64,
+        });
+        expect(synthetic.canonicalEvents.at(-1)).toMatchObject({
+            id: "openclaw:agent%3Amain%3Amain:65:finish",
+            lifecycle: "completed",
+            outcome: "completed",
+            provider: {
+                format: "openclaw-session-message",
+                model: "syn:large:text",
+                provider: "synthetic",
+            },
+            schemaVersion: 1,
+            sequence: 65,
+        });
+        expect(syntheticUser.canonicalEvents[0]?.provider).toMatchObject({
+            format: "openclaw-session-message",
+            model: undefined,
+            provider: undefined,
+        });
+        expect(
+            withCanonicalOpenClawEvents(codex).canonicalEvents.map((event) => event.id)
+        ).toEqual(codex.canonicalEvents.map((event) => event.id));
+
+        const rawEnvelope: Record<string, unknown> = { ...codex };
+        Reflect.deleteProperty(rawEnvelope, "canonicalEvents");
+        expect(
+            captureContractError(() => parseOpenClawRuntimeEnvelope(rawEnvelope))
+                .issues[0]?.path
+        ).toBe("runtimeEvent.canonicalEvents");
+        expect(() =>
+            parseOpenClawRuntimeSnapshot({
+                completed: true,
+                events: [codex],
+                schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION - 1,
+                throughSequence: 4,
+            })
+        ).toThrow(ContractValidationError);
+    });
+
     it("accepts provider-null Moltbook avatars and normalizes feed display data", () => {
         const feed = parseMoltbookFeed({
             hasMore: false,

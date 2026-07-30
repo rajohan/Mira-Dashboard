@@ -23,6 +23,7 @@ import { createElement, type ReactNode } from "react";
 
 import type { CacheEnvelope } from "../../../contracts/cache";
 import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
+import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
 import type { DatabaseOverviewResponse } from "../../../contracts/database";
 import type { DashboardDiagnosticsResponse } from "../../../contracts/health";
 import type { AppObservabilityMetrics, Metrics } from "../../../contracts/metrics";
@@ -75,7 +76,6 @@ import {
     buildSlashCommandSuggestions,
     slashCommandCanonicalName,
 } from "../components/features/chat/slashCommands";
-import { normalizeOpenClawHistoryMessage } from "../components/features/chat/transport/openClawHistoryNormalizer";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
 import {
     formatBytes as formatDatabaseBytes,

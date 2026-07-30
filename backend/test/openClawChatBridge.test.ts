@@ -4,6 +4,7 @@ import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeSnapshot,
 } from "../../contracts/chat.ts";
+import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import {
     OpenClawChatBridge,
     type OpenClawChatSnapshotStore,
@@ -137,17 +138,17 @@ function payloads(bridge: OpenClawChatBridge, sessionKey = MAIN) {
 
 function runtimeEnvelope(
     runtimeSequence: number,
-    event: "agent" | "session.message" | "session.tool",
+    event: string,
     payload: Record<string, unknown>,
     runtimeRecordedAt: number
 ) {
-    return {
+    return withCanonicalOpenClawEvents({
         event,
         payload,
         runtimeRecordedAt,
         runtimeSequence,
         type: "event" as const,
-    };
+    });
 }
 
 function persistedSnapshot(
@@ -160,7 +161,7 @@ function persistedSnapshot(
     return {
         completed: state === "final",
         events: [
-            {
+            withCanonicalOpenClawEvents({
                 event: state ? "chat" : "agent",
                 payload: state
                     ? { message: "done", runId, sessionKey, state }
@@ -168,7 +169,7 @@ function persistedSnapshot(
                 runtimeRecordedAt,
                 runtimeSequence: sequence,
                 type: "event",
-            },
+            }),
         ],
         schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
         throughSequence: sequence,
@@ -444,6 +445,19 @@ describe("OpenClaw chat bridge", () => {
             []
         );
 
+        expect(
+            (retained.payload as { data?: { delta?: string } }).data?.delta
+        ).toBeUndefined();
+        expect(
+            retained.canonicalEvents.find((event) => event.kind === "thinking")
+        ).toMatchObject({
+            message: {
+                thinking: [{ text: "x".repeat(600_000) }],
+            },
+        });
+        expect(Buffer.byteLength(JSON.stringify(retained))).toBeLessThanOrEqual(
+            1_000_000
+        );
         expect(store.snapshots.get(sessionKey)?.events).toEqual([retained]);
         expect(store.loadedKeys).toEqual([]);
 
@@ -2506,54 +2520,50 @@ describe("OpenClaw chat bridge", () => {
         store.snapshots.set(MAIN, {
             completed: false,
             events: [
-                {
-                    event: "agent",
-                    payload: {
+                runtimeEnvelope(
+                    1,
+                    "agent",
+                    {
                         data: { phase: "start" },
                         runId: provisionalRunId,
                         sessionKey: MAIN,
                         stream: "lifecycle",
                     },
-                    runtimeRecordedAt: now - 3,
-                    runtimeSequence: 1,
-                    type: "event",
-                },
-                {
-                    event: "agent",
-                    payload: {
+                    now - 3
+                ),
+                runtimeEnvelope(
+                    2,
+                    "agent",
+                    {
                         data: { delta: "before restart" },
                         runId: provisionalRunId,
                         sessionKey: MAIN,
                         stream: "thinking",
                     },
-                    runtimeRecordedAt: now - 2,
-                    runtimeSequence: 2,
-                    type: "event",
-                },
-                {
-                    event: "agent",
-                    payload: {
+                    now - 2
+                ),
+                runtimeEnvelope(
+                    3,
+                    "agent",
+                    {
                         data: { phase: "start" },
                         runId: providerRunId,
                         sessionKey: MAIN,
                         stream: "lifecycle",
                     },
-                    runtimeRecordedAt: now - 1,
-                    runtimeSequence: 3,
-                    type: "event",
-                },
-                {
-                    event: "agent",
-                    payload: {
+                    now - 1
+                ),
+                runtimeEnvelope(
+                    4,
+                    "agent",
+                    {
                         data: { delta: "after restart" },
                         runId: providerRunId,
                         sessionKey: MAIN,
                         stream: "thinking",
                     },
-                    runtimeRecordedAt: now,
-                    runtimeSequence: 4,
-                    type: "event",
-                },
+                    now
+                ),
             ],
             schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 4,
@@ -4536,17 +4546,16 @@ describe("OpenClaw chat bridge", () => {
         store.snapshots.set(MAIN, {
             completed: false,
             events: [
-                {
-                    event: "agent",
-                    payload: {
+                runtimeEnvelope(
+                    15,
+                    "agent",
+                    {
                         runId: provisionalRunId,
                         sessionKey: MAIN,
                         stream: "thinking",
                     },
-                    runtimeRecordedAt: now - 1,
-                    runtimeSequence: 15,
-                    type: "event",
-                },
+                    now - 1
+                ),
             ],
             interruptedAtByRun: {
                 [provisionalRunId]: now,
@@ -4560,18 +4569,17 @@ describe("OpenClaw chat bridge", () => {
         store.snapshots.set("main", {
             completed: true,
             events: [
-                {
-                    event: "chat",
-                    payload: {
+                runtimeEnvelope(
+                    10,
+                    "chat",
+                    {
                         message: "older alias answer",
                         runId: "older-alias-run",
                         sessionKey: "main",
                         state: "final",
                     },
-                    runtimeRecordedAt: now - 2,
-                    runtimeSequence: 10,
-                    type: "event",
-                },
+                    now - 2
+                ),
             ],
             requestBoundary: 10,
             schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
@@ -4712,29 +4720,27 @@ describe("OpenClaw chat bridge", () => {
         store.snapshots.set("main", {
             completed: false,
             events: [
-                {
-                    event: "agent",
-                    payload: {
+                runtimeEnvelope(
+                    1,
+                    "agent",
+                    {
                         runId: provisionalRunId,
                         sessionKey: "main",
                         stream: "thinking",
                     },
-                    runtimeRecordedAt: now - 2,
-                    runtimeSequence: 1,
-                    type: "event",
-                },
-                {
-                    event: "chat",
-                    payload: {
+                    now - 2
+                ),
+                runtimeEnvelope(
+                    2,
+                    "chat",
+                    {
                         message: "older completed work",
                         runId: "completed-short-key-run",
                         sessionKey: "main",
                         state: "final",
                     },
-                    runtimeRecordedAt: now - 1,
-                    runtimeSequence: 2,
-                    type: "event",
-                },
+                    now - 1
+                ),
             ],
             schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 2,
@@ -4830,13 +4836,14 @@ describe("OpenClaw chat bridge", () => {
         store.snapshots.set(MAIN, providerSnapshot);
         store.snapshots.set("main", {
             completed: false,
-            events: provisionalRunIds.map((runId, index) => ({
-                event: "agent",
-                payload: { runId, sessionKey: "main", stream: "thinking" },
-                runtimeRecordedAt: now - 2 + index,
-                runtimeSequence: index + 1,
-                type: "event" as const,
-            })),
+            events: provisionalRunIds.map((runId, index) =>
+                runtimeEnvelope(
+                    index + 1,
+                    "agent",
+                    { runId, sessionKey: "main", stream: "thinking" },
+                    now - 2 + index
+                )
+            ),
             schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 2,
         });
@@ -4947,13 +4954,28 @@ describe("OpenClaw chat bridge", () => {
         );
         expect(bridge.flush()).toBe(true);
 
-        expect(
-            new OpenClawChatBridge(store).snapshot(MAIN).events[0]?.payload
-        ).toMatchObject({
+        const restored = new OpenClawChatBridge(store).snapshot(MAIN).events[0]!;
+        expect(restored.payload).toMatchObject({
             data: { runId: "provider-nested", sessionKey: MAIN },
             runId: "provider-nested",
             sessionKey: MAIN,
         });
+        expect(restored.canonicalEvents).toEqual([
+            expect.objectContaining({
+                kind: "status",
+                runId: "provider-nested",
+                sessionKey: MAIN,
+            }),
+            expect.objectContaining({
+                kind: "thinking",
+                message: expect.objectContaining({
+                    runId: "provider-nested",
+                    thinking: [{ snapshot: false, text: "nested reasoning" }],
+                }),
+                runId: "provider-nested",
+                sessionKey: MAIN,
+            }),
+        ]);
     });
 
     it("selects completed replay by terminal order after delayed older events", () => {
@@ -5241,17 +5263,16 @@ describe("OpenClaw chat bridge", () => {
         store.snapshots.set(MAIN, {
             completed: true,
             events: [
-                {
-                    event: "chat",
-                    payload: {
+                runtimeEnvelope(
+                    7,
+                    "chat",
+                    {
                         message: "persisted old answer",
                         sessionKey: MAIN,
                         state: "final",
                     },
-                    runtimeRecordedAt: Date.now() - 1000,
-                    runtimeSequence: 7,
-                    type: "event",
-                },
+                    Date.now() - 1000
+                ),
             ],
             schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 7,
@@ -5721,16 +5742,27 @@ describe("OpenClaw chat bridge", () => {
             []
         );
 
+        const compactMessage = expect.objectContaining({
+            role: "assistant",
+            stopReason: "stop",
+        });
         expect(bridge.snapshot(MAIN)).toMatchObject({
             completed: true,
             events: [
                 expect.objectContaining({
+                    canonicalEvents: [
+                        expect.objectContaining({
+                            kind: "finish",
+                            lifecycle: "completed",
+                            message: undefined,
+                            outcome: "completed",
+                        }),
+                    ],
                     event: "session.message",
                     payload: expect.objectContaining({
-                        role: "assistant",
+                        message: compactMessage,
                         runId: "large-synthetic-run",
                         sessionKey: MAIN,
-                        stopReason: "stop",
                     }),
                 }),
             ],

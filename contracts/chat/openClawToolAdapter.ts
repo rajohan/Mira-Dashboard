@@ -1,6 +1,9 @@
-import { type ChatHistoryMessage, extractImages, mergeChatImages } from "../chatTypes";
-import { stableChatStringify } from "../chatUtilities";
-import type { ChatOperationPhase } from "../domain/chatState";
+import type { CanonicalChatMessage, CanonicalChatOperationPhase } from "../chatCanonical";
+import {
+    extractCanonicalChatImages,
+    mergeCanonicalChatImages,
+} from "../chatCanonicalMessage";
+import { stableCanonicalChatStringify } from "../chatCanonicalUtilities";
 import {
     argumentDetail,
     asRecord,
@@ -40,7 +43,7 @@ function compactionOperationPhase(
     isRetrying: boolean,
     isTerminal: boolean,
     isSuccessful: boolean
-): ChatOperationPhase {
+): CanonicalChatOperationPhase {
     if (isRetrying) {
         return "retrying";
     }
@@ -54,7 +57,7 @@ export function openClawToolMessage(
     data: Record<string, unknown>,
     runId: string | undefined,
     timestamp: string
-): { key: string; message: ChatHistoryMessage } | undefined {
+): { key: string; message: CanonicalChatMessage } | undefined {
     const name = stringValue(data.name) || stringValue(data.toolName) || "tool";
     if (isNonWorkTool(name)) {
         return undefined;
@@ -103,9 +106,11 @@ export function openClawToolMessage(
         timestamp,
     });
     const resultContent = resultMessage.text || runtimeText(result);
-    const resultImages = mergeChatImages(
-        resultMessage.images?.length ? resultMessage.images : extractImages(result),
-        extractImages(data.images)
+    const resultImages = mergeCanonicalChatImages(
+        resultMessage.images?.length
+            ? resultMessage.images
+            : extractCanonicalChatImages(result),
+        extractCanonicalChatImages(data.images)
     );
     const shouldCreateResult = Boolean(
         hasResult &&
@@ -139,7 +144,7 @@ export function openClawToolMessage(
         arguments_ !== undefined || !hasResult
             ? { id, name, arguments: arguments_, toolResult }
             : undefined;
-    const message: ChatHistoryMessage = toolCall
+    const message: CanonicalChatMessage = toolCall
         ? {
               role: "assistant",
               content: "",
@@ -154,12 +159,14 @@ export function openClawToolMessage(
           }
         : {
               ...resultMessage,
+              content: "",
+              text: toolResult ? "" : resultMessage.text,
               toolResult,
               timestamp,
               local: true,
               runId,
           };
-    const argumentIdentity = stableChatStringify(arguments_ ?? undefined);
+    const argumentIdentity = stableCanonicalChatStringify(arguments_ ?? undefined);
     return {
         key: id ? `tool:${id}` : `tool:${name}:${argumentIdentity}`,
         message,
@@ -188,7 +195,11 @@ export function openClawProgress(
     stream: string,
     phase: string,
     data: Record<string, unknown>
-): { operation?: "compact"; operationPhase?: ChatOperationPhase; text?: string } {
+): {
+    operation?: "compact";
+    operationPhase?: CanonicalChatOperationPhase;
+    text?: string;
+} {
     if (eventName === "session.started") {
         return { text: "Thinking" };
     }

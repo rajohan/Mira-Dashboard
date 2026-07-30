@@ -3,6 +3,10 @@ import {
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
 } from "../../../contracts/chat.ts";
+import {
+    withCanonicalOpenClawEvents,
+    withCurrentCanonicalOpenClawIdentity,
+} from "../../../contracts/chat/openClawRuntimeAdapter.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
     OpenClawChatRequestBoundaries,
@@ -352,14 +356,16 @@ function coalesceReplayEnvelope(
     const nextPayload = asRecord(next.payload) || {};
     const previousData = asRecord(previousPayload.data) || previousPayload;
     const nextData = asRecord(nextPayload.data) || nextPayload;
-    return {
-        ...next,
-        payload: {
-            ...previousPayload,
-            ...nextPayload,
-            data: { ...previousData, ...nextData },
-        },
-    };
+    return boundedCanonicalRuntimeEnvelope(
+        withCanonicalOpenClawEvents({
+            ...next,
+            payload: {
+                ...previousPayload,
+                ...nextPayload,
+                data: { ...previousData, ...nextData },
+            },
+        })
+    );
 }
 
 const TRANSCRIPT_BACKED_ITEM_KINDS = new Set([
@@ -590,6 +596,115 @@ function compactTerminalPayload(
         stopReason: sessionMessageStopReason(payload),
         stream: stringField(payloadView, "stream"),
     };
+}
+
+const COMPACT_PROVIDER_METADATA_KEYS = [
+    "aborted",
+    "callId",
+    "completed",
+    "error",
+    "errorMessage",
+    "id",
+    "idempotencyKey",
+    "itemId",
+    "itemKind",
+    "kind",
+    "model",
+    "name",
+    "operation",
+    "operationId",
+    "phase",
+    "promptError",
+    "provider",
+    "role",
+    "runId",
+    "sessionId",
+    "sessionKey",
+    "state",
+    "status",
+    "stopReason",
+    "stream",
+    "timestamp",
+    "toolCallId",
+    "toolName",
+    "tool_call_id",
+    "tool_name",
+    "ts",
+    "type",
+    "willRetry",
+] as const;
+
+function compactProviderMetadata(
+    record: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+    if (!record) {
+        return undefined;
+    }
+    const compact: Record<string, unknown> = {};
+    for (const key of COMPACT_PROVIDER_METADATA_KEYS) {
+        const value = record[key];
+        if (
+            typeof value === "boolean" ||
+            typeof value === "number" ||
+            (typeof value === "string" && value.length <= 4096)
+        ) {
+            compact[key] = value;
+        }
+    }
+    for (const key of ["item", "message", "payload"] as const) {
+        const nested = compactProviderMetadata(asRecord(record[key]));
+        if (nested && Object.keys(nested).length > 0) {
+            compact[key] = nested;
+        }
+    }
+    return compact;
+}
+
+function compactCanonicalProviderPayload(payload: unknown): Record<string, unknown> {
+    const rawPayload = asRecord(payload);
+    const payloadView = runtimePayloadView(payload);
+    const compact = compactProviderMetadata(payloadView) || {};
+    const data = compactProviderMetadata(asRecord(rawPayload?.data));
+    return data && Object.keys(data).length > 0 ? { ...compact, data } : compact;
+}
+
+function boundedCanonicalRuntimeEnvelope(
+    envelope: OpenClawRuntimeEnvelope
+): OpenClawRuntimeEnvelope {
+    if (Buffer.byteLength(JSON.stringify(envelope)) <= MAX_BYTES_PER_EVENT) {
+        return envelope;
+    }
+    const compacted = {
+        ...envelope,
+        payload: compactCanonicalProviderPayload(envelope.payload),
+    };
+    if (Buffer.byteLength(JSON.stringify(compacted)) <= MAX_BYTES_PER_EVENT) {
+        return compacted;
+    }
+    if (!isTerminalEvent(envelope.event, envelope.payload)) {
+        return envelope;
+    }
+    const terminalEvents = envelope.canonicalEvents.flatMap((event) =>
+        event.kind === "finish"
+            ? [
+                  {
+                      ...event,
+                      error:
+                          event.error && event.error.length <= 4096
+                              ? event.error
+                              : undefined,
+                      message: undefined,
+                  },
+              ]
+            : []
+    );
+    const terminalEnvelope = {
+        ...compacted,
+        canonicalEvents: terminalEvents,
+    };
+    return Buffer.byteLength(JSON.stringify(terminalEnvelope)) <= MAX_BYTES_PER_EVENT
+        ? terminalEnvelope
+        : envelope;
 }
 
 function isProvisionalRunId(runId: string): boolean {
@@ -1758,26 +1873,33 @@ export class OpenClawChatBridge {
                 ) {
                     return [envelope];
                 }
-                const rewritten = {
-                    ...envelope,
-                    payload: withRuntimeIdentity(payload, {
-                        sessionKey: canonicalStorageKey,
-                    }),
-                };
+                const rewritten = boundedCanonicalRuntimeEnvelope(
+                    withCurrentCanonicalOpenClawIdentity({
+                        ...envelope,
+                        payload: withRuntimeIdentity(payload, {
+                            sessionKey: canonicalStorageKey,
+                        }),
+                    })
+                );
                 if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_EVENT) {
                     return [rewritten];
                 }
                 if (!isTerminalEvent(envelope.event, rewritten.payload)) {
                     return [];
                 }
-                const compact = {
-                    ...envelope,
-                    payload: compactTerminalPayload(
-                        asRecord(rewritten.payload),
-                        stringField(payloadView, "runId"),
-                        canonicalStorageKey
-                    ),
-                };
+                const rewrittenPayload = asRecord(rewritten.payload);
+                const payloadRunId = stringField(payloadView, "runId");
+                const compactPayload = compactTerminalPayload(
+                    rewrittenPayload,
+                    payloadRunId,
+                    canonicalStorageKey
+                );
+                const compact = boundedCanonicalRuntimeEnvelope(
+                    withCurrentCanonicalOpenClawIdentity({
+                        ...envelope,
+                        payload: compactPayload,
+                    })
+                );
                 return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_EVENT
                     ? [compact]
                     : [];
@@ -2133,7 +2255,12 @@ export class OpenClawChatBridge {
     #replaceRunEvents(run: RetainedRun, events: OpenClawRuntimeEnvelope[]): void {
         const uniqueEvents = new Map<number, OpenClawRuntimeEnvelope>();
         for (const event of events) {
-            uniqueEvents.set(event.runtimeSequence, event);
+            uniqueEvents.set(
+                event.runtimeSequence,
+                boundedCanonicalRuntimeEnvelope(
+                    withCurrentCanonicalOpenClawIdentity(event)
+                )
+            );
         }
         run.events = uniqueEvents
             .values()
@@ -2165,24 +2292,29 @@ export class OpenClawChatBridge {
                 return [envelope];
             }
 
-            const rewritten = {
-                ...envelope,
-                payload: withRuntimeIdentity(payload, { runId: providerRunId }),
-            };
+            const rewritten = boundedCanonicalRuntimeEnvelope(
+                withCurrentCanonicalOpenClawIdentity({
+                    ...envelope,
+                    payload: withRuntimeIdentity(payload, { runId: providerRunId }),
+                })
+            );
             if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_EVENT) {
                 return [rewritten];
             }
             if (!isTerminalEvent(envelope.event, rewritten.payload)) {
                 return [];
             }
-            const compact = {
-                ...envelope,
-                payload: compactTerminalPayload(
-                    asRecord(rewritten.payload),
-                    providerRunId,
-                    storageSessionKey
-                ),
-            };
+            const compactPayload = compactTerminalPayload(
+                asRecord(rewritten.payload),
+                providerRunId,
+                storageSessionKey
+            );
+            const compact = boundedCanonicalRuntimeEnvelope(
+                withCurrentCanonicalOpenClawIdentity({
+                    ...envelope,
+                    payload: compactPayload,
+                })
+            );
             return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_EVENT
                 ? [compact]
                 : [];
@@ -2497,20 +2629,22 @@ export class OpenClawChatBridge {
         sessionKey: string,
         repaired: RepairedInterruptedRun
     ): OpenClawRuntimeEnvelope {
-        return {
-            event: "chat.runtimeIdentity",
-            payload: {
-                runId: repaired.providerRunId,
-                sessionKey,
-            },
-            runtimeRecordedAt: Date.now(),
-            runtimeRunAliases: repaired.interruptedRunIds,
-            // Identity controls are live events too. They must advance the
-            // sequence so a reconnect snapshot containing the provider event
-            // that triggered the repair cannot deduplicate this alias rewrite.
-            runtimeSequence: ++this.#sequence,
-            type: "event",
-        };
+        return boundedCanonicalRuntimeEnvelope(
+            withCanonicalOpenClawEvents({
+                event: "chat.runtimeIdentity",
+                payload: {
+                    runId: repaired.providerRunId,
+                    sessionKey,
+                },
+                runtimeRecordedAt: Date.now(),
+                runtimeRunAliases: repaired.interruptedRunIds,
+                // Identity controls are live events too. They must advance the
+                // sequence so a reconnect snapshot containing the provider event
+                // that triggered the repair cannot deduplicate this alias rewrite.
+                runtimeSequence: ++this.#sequence,
+                type: "event",
+            })
+        );
     }
 
     #promoteProvisionalRun(
@@ -2662,14 +2796,16 @@ export class OpenClawChatBridge {
         const serializedBytes = Buffer.byteLength(JSON.stringify(envelope));
         let retainedEnvelope: OpenClawRuntimeEnvelope | undefined;
         if (isTerminal) {
-            retainedEnvelope = {
-                ...envelope,
-                payload: compactTerminalPayload(
-                    payload,
-                    explicitRunId,
-                    storageSessionKey
-                ),
-            };
+            retainedEnvelope = boundedCanonicalRuntimeEnvelope(
+                withCurrentCanonicalOpenClawIdentity({
+                    ...envelope,
+                    payload: compactTerminalPayload(
+                        payload,
+                        explicitRunId,
+                        storageSessionKey
+                    ),
+                })
+            );
         }
         if (serializedBytes <= MAX_BYTES_PER_EVENT) {
             retainedEnvelope = envelope;
@@ -3396,13 +3532,15 @@ export class OpenClawChatBridge {
         if (enrichedSessionKey && enrichedSessionKey !== providedSessionKey) {
             this.#ensureSessionLoaded(enrichedSessionKey);
         }
-        const envelope: OpenClawRuntimeEnvelope = {
-            type: "event",
-            event,
-            payload: enrichedPayload,
-            runtimeRecordedAt: Date.now(),
-            runtimeSequence: ++this.#sequence,
-        };
+        const envelope = boundedCanonicalRuntimeEnvelope(
+            withCanonicalOpenClawEvents({
+                type: "event",
+                event,
+                payload: enrichedPayload,
+                runtimeRecordedAt: Date.now(),
+                runtimeSequence: ++this.#sequence,
+            })
+        );
         const requestId = sessionMessageRequestId(event, enrichedPayload);
         let requestRepair: RepairedInterruptedRun | undefined;
         if (enrichedSessionKey && requestId) {
@@ -3437,7 +3575,12 @@ export class OpenClawChatBridge {
             ...this.#retain(envelope),
         ].filter((runId, index, aliases) => aliases.indexOf(runId) === index);
         return runtimeRunAliases.length > 0
-            ? { ...envelope, runtimeRunAliases }
+            ? boundedCanonicalRuntimeEnvelope(
+                  withCurrentCanonicalOpenClawIdentity({
+                      ...envelope,
+                      runtimeRunAliases,
+                  })
+              )
             : envelope;
     }
 

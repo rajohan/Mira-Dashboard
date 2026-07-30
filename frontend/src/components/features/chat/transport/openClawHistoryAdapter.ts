@@ -1,8 +1,8 @@
-import { type ChatHistoryMessage, mergeChatAttachments } from "../chatTypes";
 import {
     normalizeOpenClawHistoryMessage,
     type RawOpenClawHistoryMessage,
-} from "./openClawHistoryNormalizer";
+} from "../../../../../../contracts/chat/openClawHistoryNormalizer";
+import { type ChatHistoryMessage, mergeChatAttachments } from "../chatTypes";
 
 function matchingToolCallIndex(
     message: ChatHistoryMessage,

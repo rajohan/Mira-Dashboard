@@ -1,15 +1,5 @@
 import { describe, expect, it, jest } from "bun:test";
 
-import { messageDeleteKey } from "../components/features/chat/chatUtilities";
-import {
-    createChatVisibility,
-    presentChatMessages,
-} from "../components/features/chat/domain/chatPresentation";
-import { projectChat } from "../components/features/chat/domain/chatProjection";
-import {
-    createChatRuntimeState,
-    reduceChatRuntime,
-} from "../components/features/chat/domain/chatState";
 import {
     argumentDetail,
     asRecord,
@@ -22,7 +12,18 @@ import {
     rawString,
     runtimeText,
     stringValue,
-} from "../components/features/chat/transport/openClawAdapterValues";
+} from "../../../contracts/chat/openClawAdapterValues";
+import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
+import { messageDeleteKey } from "../components/features/chat/chatUtilities";
+import {
+    createChatVisibility,
+    presentChatMessages,
+} from "../components/features/chat/domain/chatPresentation";
+import { projectChat } from "../components/features/chat/domain/chatProjection";
+import {
+    createChatRuntimeState,
+    reduceChatRuntime,
+} from "../components/features/chat/domain/chatState";
 import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
 
 const SESSION = "agent:main:main";
@@ -32,7 +33,7 @@ function envelope(
     payload: Record<string, unknown>,
     runtimeSequence: number
 ) {
-    return {
+    return withCanonicalOpenClawEvents({
         event,
         payload: {
             runId: "run-variants",
@@ -40,9 +41,10 @@ function envelope(
             ts: 1_752_664_800_000,
             ...payload,
         },
+        runtimeRecordedAt: 1_752_664_800_000,
         runtimeSequence,
         type: "event",
-    };
+    });
 }
 
 describe("OpenClaw adapter variants", () => {

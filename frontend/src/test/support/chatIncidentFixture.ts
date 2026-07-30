@@ -1,6 +1,6 @@
 import * as v from "valibot";
 
-import { openClawRuntimeSnapshotSchema } from "../../../../contracts/chat";
+import { withCanonicalOpenClawEvents } from "../../../../contracts/chat/openClawRuntimeAdapter";
 import { nonNegativeIntegerSchema, parseContract } from "../../../../contracts/runtime";
 import type {
     ChatHistoryMessage,
@@ -21,6 +21,20 @@ import { OpenClawChatAdapter } from "../../components/features/chat/transport/op
 export const CHAT_INCIDENT_FIXTURE_SCHEMA_VERSION = 1;
 
 const nonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
+const rawOpenClawRuntimeEnvelopeSchema = v.strictObject({
+    event: v.unknown(),
+    payload: v.unknown(),
+    runtimeRecordedAt: nonNegativeIntegerSchema,
+    runtimeRunAliases: v.optional(v.array(nonEmptyStringSchema)),
+    runtimeSequence: nonNegativeIntegerSchema,
+    type: v.literal("event"),
+});
+const rawOpenClawRuntimeSnapshotSchema = v.strictObject({
+    completed: v.boolean(),
+    events: v.array(rawOpenClawRuntimeEnvelopeSchema),
+    schemaVersion: v.literal(1),
+    throughSequence: nonNegativeIntegerSchema,
+});
 const canonicalRowSchema = v.strictObject({
     role: nonEmptyStringSchema,
     text: v.string(),
@@ -43,7 +57,7 @@ const chatIncidentFixtureSchema = v.strictObject({
     id: nonEmptyStringSchema,
     providerFormat: v.picklist(["codex-gpt", "synthetic-model"]),
     redaction: v.literal("synthetic"),
-    runtimeSnapshot: openClawRuntimeSnapshotSchema,
+    runtimeSnapshot: rawOpenClawRuntimeSnapshotSchema,
     schemaVersion: v.literal(CHAT_INCIDENT_FIXTURE_SCHEMA_VERSION),
     sessionKey: nonEmptyStringSchema,
 });
@@ -119,7 +133,12 @@ export function replayChatIncidentFixture(
 ): ChatIncidentFixtureResult {
     const adapter = new OpenClawChatAdapter();
     const history = adapter.history(fixture.history);
-    const events = adapter.snapshot(fixture.runtimeSnapshot);
+    const events = adapter.snapshot({
+        ...fixture.runtimeSnapshot,
+        events: fixture.runtimeSnapshot.events.map((event) =>
+            withCanonicalOpenClawEvents(event)
+        ),
+    });
     const runtime = reduceChatRuntime(createChatRuntimeState(), events);
     const projection = projectChat(
         history,
