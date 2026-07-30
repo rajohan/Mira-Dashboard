@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openClawHistoryPageAdapter";
 import { parseCanonicalChatHistoryPage } from "../../../contracts/chatCanonicalHistory";
+import { summarizeCanonicalChatValueForFingerprint } from "../../../contracts/chatCanonicalMessage";
 
 const SESSION = "agent:main:format-probe";
 
@@ -227,6 +228,32 @@ describe("canonical chat history contract", () => {
 
         expect(first.messages[0]?.id).not.toContain("image-head");
         expect(changedTool.messages[0]?.id).not.toBe(first.messages[0]?.id);
+    });
+
+    it("bounds canonical media fields without rewriting similarly named tool data", () => {
+        const summarized = summarizeCanonicalChatValueForFingerprint([
+            {
+                data: "a".repeat(10_000),
+                mimeType: "image/png",
+                type: "image",
+            },
+            {
+                arguments: { data: "tool-data-must-remain-exact" },
+                name: "exec",
+                type: "toolCall",
+            },
+            {
+                contentBase64: "b".repeat(10_000),
+                fileName: "result.png",
+                kind: "image",
+            },
+        ]) as Array<Record<string, unknown>>;
+
+        expect(summarized[0]?.data).toMatchObject({ length: 10_000 });
+        expect(
+            (summarized[1]?.arguments as Record<string, unknown> | undefined)?.data
+        ).toBe("tool-data-must-remain-exact");
+        expect(summarized[2]?.contentBase64).toMatchObject({ length: 10_000 });
     });
 
     it("rejects missing and mismatched provider page offsets", () => {
