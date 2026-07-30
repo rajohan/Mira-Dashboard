@@ -223,14 +223,16 @@ function rowSemantics(row: ChatRow): unknown {
 
 function projectionFor(
     history: ChatHistoryMessage[],
-    state: ReturnType<typeof createChatRuntimeState>
+    state: ReturnType<typeof createChatRuntimeState>,
+    visibility = createChatVisibility(true, true),
+    shouldKeepThinkingAfterFinal = true
 ) {
     const shadow = projectChatWithCanonicalShadow(
         history,
         state,
         SESSION,
-        createChatVisibility(true, true),
-        true,
+        visibility,
+        shouldKeepThinkingAfterFinal,
         new Set()
     );
     expect(shadow.comparison).toMatchObject({
@@ -245,42 +247,96 @@ const EVENTS = replayScenario();
 const BASELINE_STATE = reduceChatRuntime(createChatRuntimeState(), EVENTS);
 const BASELINE_PROJECTION = projectionFor([], BASELINE_STATE);
 const BASELINE_ROWS = BASELINE_PROJECTION.rows.map(rowSemantics);
-const SEEDS = Array.from({ length: 64 }, (_, index) => index + 1);
+const DEFAULT_SEED_COUNT = 64;
+const PROJECTION_POLICIES = [false, true].flatMap((showThinking) =>
+    [false, true].flatMap((showTools) =>
+        [false, true].map((shouldKeepThinkingAfterFinal) => ({
+            shouldKeepThinkingAfterFinal,
+            visibility: createChatVisibility(showThinking, showTools),
+        }))
+    )
+);
+const BASELINE_ROWS_BY_POLICY = PROJECTION_POLICIES.map(
+    ({ shouldKeepThinkingAfterFinal, visibility }) =>
+        projectionFor(
+            [],
+            BASELINE_STATE,
+            visibility,
+            shouldKeepThinkingAfterFinal
+        ).rows.map(rowSemantics)
+);
+
+function soakSeedCount(): number {
+    const configured = process.env.MIRA_CHAT_REPLAY_SOAK_SEEDS;
+    if (!configured) {
+        return DEFAULT_SEED_COUNT;
+    }
+    const count = Number(configured);
+    if (!Number.isSafeInteger(count) || count < DEFAULT_SEED_COUNT || count > 16_384) {
+        throw new Error(
+            `MIRA_CHAT_REPLAY_SOAK_SEEDS must be an integer from ${DEFAULT_SEED_COUNT} to 16384`
+        );
+    }
+    return count;
+}
+
+function verifyFaultedReplay(seed: number): void {
+    const result = runChatReplayStateMachine(EVENTS, seed);
+    const history = historyVariants()[seed % historyVariants().length]!;
+    const projection = projectionFor(history, result.state);
+    const normalizedState = { ...result.state, generation: 0 };
+
+    expect(normalizedState).toEqual(BASELINE_STATE);
+    expect(projection.rows.map(rowSemantics)).toEqual(BASELINE_ROWS);
+    for (const [policyIndex, policy] of PROJECTION_POLICIES.entries()) {
+        const policyProjection = projectionFor(
+            history,
+            result.state,
+            policy.visibility,
+            policy.shouldKeepThinkingAfterFinal
+        );
+        expect(policyProjection.rows.map(rowSemantics)).toEqual(
+            BASELINE_ROWS_BY_POLICY[policyIndex]
+        );
+    }
+    expect(new Set(projection.rows.map((row) => row.key)).size).toBe(
+        projection.rows.length
+    );
+    expect(projection.activeRuns).toEqual([]);
+    expect(projection.compactionStatus).toMatchObject({ phase: "complete" });
+    expect(result.steps.filter((step) => step.kind === "reconnect")).toHaveLength(2);
+    expect(
+        result.steps.some((step) => new Set(step.sequences).size < step.sequences.length)
+    ).toBe(true);
+    const checkpointSequences = result.checkpoints.map(
+        (checkpoint) => checkpoint.sessions[SESSION]?.lastSequence ?? -1
+    );
+    expect(checkpointSequences[0]).toBe(checkpointSequences[1]);
+    expect(checkpointSequences).toEqual(
+        checkpointSequences.toSorted((left, right) => left - right)
+    );
+    expect(checkpointSequences.at(-1)).toBe(EVENTS.at(-1)?.sequence);
+}
+
+const SEED_COUNT = soakSeedCount();
+const SEEDS = Array.from(
+    { length: Math.min(DEFAULT_SEED_COUNT, SEED_COUNT) },
+    (_, index) => index + 1
+);
 
 describe("chat replay state machine", () => {
     it.each(SEEDS)(
         "preserves canonical state and projection across generated faults (seed %d)",
-        (seed) => {
-            const result = runChatReplayStateMachine(EVENTS, seed);
-            const history = historyVariants()[seed % historyVariants().length]!;
-            const projection = projectionFor(history, result.state);
-            const normalizedState = { ...result.state, generation: 0 };
-
-            expect(normalizedState).toEqual(BASELINE_STATE);
-            expect(projection.rows.map(rowSemantics)).toEqual(BASELINE_ROWS);
-            expect(new Set(projection.rows.map((row) => row.key)).size).toBe(
-                projection.rows.length
-            );
-            expect(projection.activeRuns).toEqual([]);
-            expect(projection.compactionStatus).toMatchObject({ phase: "complete" });
-            expect(result.steps.filter((step) => step.kind === "reconnect")).toHaveLength(
-                2
-            );
-            expect(
-                result.steps.some(
-                    (step) => new Set(step.sequences).size < step.sequences.length
-                )
-            ).toBe(true);
-            const checkpointSequences = result.checkpoints.map(
-                (checkpoint) => checkpoint.sessions[SESSION]?.lastSequence ?? -1
-            );
-            expect(checkpointSequences[0]).toBe(checkpointSequences[1]);
-            expect(checkpointSequences).toEqual(
-                checkpointSequences.toSorted((left, right) => left - right)
-            );
-            expect(checkpointSequences.at(-1)).toBe(EVENTS.at(-1)?.sequence);
-        }
+        verifyFaultedReplay
     );
+
+    if (SEED_COUNT > DEFAULT_SEED_COUNT) {
+        it(`soaks canonical parity through seed ${SEED_COUNT}`, () => {
+            for (let seed = DEFAULT_SEED_COUNT + 1; seed <= SEED_COUNT; seed += 1) {
+                verifyFaultedReplay(seed);
+            }
+        }, 120_000);
+    }
 
     it("keeps partial and duplicate history semantically equivalent", () => {
         for (const history of historyVariants()) {
