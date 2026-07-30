@@ -96,10 +96,14 @@ export class OpenClawChatIdentityRegistry {
         runId: string,
         sessions: readonly OpenClawChatSessionIdentity[]
     ): string | undefined {
-        const candidateSessionKeys = new Set(this.#sessionsByRun.get(runId));
+        const candidateSessionKeys = new Set(
+            [...(this.#sessionsByRun.get(runId) ?? [])].map((sessionKey) =>
+                normalizedSessionKey(sessionKey)
+            )
+        );
         for (const session of sessions) {
             if (hasRunIdentifier(session, runId)) {
-                candidateSessionKeys.add(session.key);
+                candidateSessionKeys.add(normalizedSessionKey(session.key));
             }
         }
         return candidateSessionKeys.size === 1

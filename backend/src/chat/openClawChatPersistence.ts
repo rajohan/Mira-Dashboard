@@ -451,42 +451,44 @@ export class OpenClawChatPersistenceCoordinator {
         if (!this.#store) {
             return true;
         }
+        const sourceStorageKey = normalizedSessionKey(sourceSessionKey);
+        const canonicalStorageKey = normalizedSessionKey(canonicalSessionKey);
         if (
             !this.#retryStoreClear() ||
-            !this.#retryPendingSessionClear(sourceSessionKey) ||
-            !this.#retryPendingSessionClear(canonicalSessionKey) ||
-            !this.#retryExactDelete(sourceSessionKey) ||
-            !this.#retryExactDelete(canonicalSessionKey)
+            !this.#retryPendingSessionClear(sourceStorageKey) ||
+            !this.#retryPendingSessionClear(canonicalStorageKey) ||
+            !this.#retryExactDelete(sourceStorageKey) ||
+            !this.#retryExactDelete(canonicalStorageKey)
         ) {
             return false;
         }
         try {
             this.#store.promote(
-                sourceSessionKey,
-                canonicalSessionKey,
+                sourceStorageKey,
+                canonicalStorageKey,
                 sourceSnapshot,
                 canonicalSnapshot
             );
             for (const pendingKey of this.#pendingDeleteKeys) {
                 if (
-                    isExactSessionKey(pendingKey, sourceSessionKey) ||
-                    isExactSessionKey(pendingKey, canonicalSessionKey)
+                    isExactSessionKey(pendingKey, sourceStorageKey) ||
+                    isExactSessionKey(pendingKey, canonicalStorageKey)
                 ) {
                     this.#pendingDeleteKeys.delete(pendingKey);
                 }
             }
             if (sourceSnapshot.events.length === 0) {
-                this.#loadedStoreKeys.delete(sourceSessionKey);
+                this.#loadedStoreKeys.delete(sourceStorageKey);
             } else {
-                this.#loadedStoreKeys.add(sourceSessionKey);
+                this.#loadedStoreKeys.add(sourceStorageKey);
             }
             if (canonicalSnapshot.events.length === 0) {
-                this.#loadedStoreKeys.delete(canonicalSessionKey);
+                this.#loadedStoreKeys.delete(canonicalStorageKey);
             } else {
-                this.#loadedStoreKeys.add(canonicalSessionKey);
+                this.#loadedStoreKeys.add(canonicalStorageKey);
             }
-            this.markHydratedLookup(sourceSessionKey);
-            this.markHydratedLookup(canonicalSessionKey);
+            this.markHydratedLookup(sourceStorageKey);
+            this.markHydratedLookup(canonicalStorageKey);
             this.#recordStoreSuccess();
             return true;
         } catch (error) {

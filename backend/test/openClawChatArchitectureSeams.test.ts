@@ -179,6 +179,15 @@ describe("OpenClaw chat architecture seams", () => {
             id: "provider-session",
             startedAt: 42,
         });
+        expect(
+            registry.sessionKeyForRun("provider-run", [
+                {
+                    id: "main",
+                    key: " AGENT:MAIN:MAIN ",
+                    runId: "provider-run",
+                },
+            ])
+        ).toBe("agent:main:main");
         registry.forgetSession("agent:main:main");
         expect(registry.sessionKeyForRun("provider-run", [])).toBeUndefined();
     });
@@ -235,6 +244,29 @@ describe("OpenClaw chat architecture seams", () => {
         expect(persistence.isLoaded("agent:main:main")).toBe(true);
         expect(persistence.deleteSession("agent:main:main")).toBe(true);
         expect(snapshots.size).toBe(0);
+
+        const emptySnapshot: OpenClawRuntimeSnapshot = {
+            completed: false,
+            events: [],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+            throughSequence: 0,
+        };
+        expect(
+            persistence.promote(
+                " AGENT:MAIN:ALIAS ",
+                " AGENT:MAIN:MAIN ",
+                emptySnapshot,
+                memorySnapshot
+            )
+        ).toBe(true);
+        expect(snapshots.keys().toArray()).toEqual([
+            "agent:main:alias",
+            "agent:main:main",
+        ]);
+        expect(persistence.isLoaded("AGENT:MAIN:ALIAS")).toBe(false);
+        expect(persistence.isLoaded("AGENT:MAIN:MAIN")).toBe(true);
+        expect(persistence.isHydratedLookup(" AGENT:MAIN:ALIAS ")).toBe(true);
+        expect(persistence.isHydratedLookup(" AGENT:MAIN:MAIN ")).toBe(true);
     });
 
     it("owns provider filtering and replay selection in the retention seam", () => {
