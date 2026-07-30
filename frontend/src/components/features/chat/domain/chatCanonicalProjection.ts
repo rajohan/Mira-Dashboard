@@ -245,7 +245,7 @@ function canonicalEntry(
         origin: message.provenance?.origin,
         provider: message.provenance?.provider,
         relatedSources: message.provenance?.relatedSources,
-        sequence: message.provenance?.sequence ?? message.runtimeSequence,
+        sequence: message.runtimeSequence ?? message.provenance?.sequence,
         source,
     };
 }

@@ -181,6 +181,13 @@ describe("canonical chat turn projection", () => {
             "assistant",
             "assistant",
         ]);
+        const toolEventSequences = runtimeEvents.flatMap((event) =>
+            event.kind === "tool" ? [event.sequence] : []
+        );
+        expect(toolEventSequences.length).toBeGreaterThan(1);
+        expect(turn?.entries.find((entry) => entry.kind === "tool")?.sequence).toBe(
+            Math.min(...toolEventSequences)
+        );
         expect(turn?.sequenceStart).toBe(1);
         expect(turn?.sequenceEnd).toBeGreaterThan(turn?.sequenceStart ?? 0);
         expect(replay.canonical?.turns.map((candidate) => candidate.id)).toEqual(
