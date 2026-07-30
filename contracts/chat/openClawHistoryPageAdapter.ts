@@ -44,6 +44,66 @@ function historyProvider(
     };
 }
 
+const HISTORY_MEDIA_BLOCK_TYPES = new Set(["image", "image_url", "input_image"]);
+const HISTORY_MEDIA_DATA_FIELDS = new Set([
+    "base64",
+    "contentBase64",
+    "data",
+    "image_url",
+]);
+const HISTORY_MEDIA_SAMPLE_LENGTH = 64;
+
+function summarizedMediaData(value: string): {
+    edgeFingerprint: string;
+    length: number;
+} {
+    const edgeSample =
+        value.length <= HISTORY_MEDIA_SAMPLE_LENGTH * 2
+            ? value
+            : `${value.slice(0, HISTORY_MEDIA_SAMPLE_LENGTH)}${value.slice(
+                  -HISTORY_MEDIA_SAMPLE_LENGTH
+              )}`;
+    return {
+        edgeFingerprint: canonicalChatContentFingerprint(edgeSample),
+        length: value.length,
+    };
+}
+
+function summarizeEmbeddedMediaData(value: unknown, field = ""): unknown {
+    if (
+        typeof value === "string" &&
+        (HISTORY_MEDIA_DATA_FIELDS.has(field) || value.startsWith("data:image/"))
+    ) {
+        return summarizedMediaData(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => summarizeEmbeddedMediaData(item));
+    }
+    const record = asRecord(value);
+    if (!record) {
+        return value;
+    }
+    return Object.fromEntries(
+        Object.entries(record).map(([key, item]) => [
+            key,
+            summarizeEmbeddedMediaData(item, key),
+        ])
+    );
+}
+
+function summarizeContentForFingerprint(content: unknown): unknown {
+    const summarizeBlock = (block: unknown): unknown => {
+        const record = asRecord(block);
+        return record &&
+            HISTORY_MEDIA_BLOCK_TYPES.has(stringValue(record.type)?.toLowerCase() || "")
+            ? summarizeEmbeddedMediaData(record)
+            : block;
+    };
+    return Array.isArray(content)
+        ? content.map((block) => summarizeBlock(block))
+        : summarizeBlock(content);
+}
+
 function historyRowId(
     sessionKey: string,
     message: RawOpenClawHistoryMessage,
@@ -54,7 +114,7 @@ function historyRowId(
         providerId ||
         `fingerprint:${canonicalChatContentFingerprint(
             stableCanonicalChatStringify({
-                content: message.content,
+                content: summarizeContentForFingerprint(message.content),
                 isError: message.isError,
                 role: message.role,
                 runId: message.runId,
@@ -101,6 +161,14 @@ export function canonicalizeOpenClawHistoryPage(
     if (!sessionKey) {
         throw new Error("OpenClaw chat history session key is required");
     }
+    const responseOffset = nonNegativeInteger(page?.offset);
+    if (responseOffset === undefined || responseOffset !== options.offset) {
+        throw new Error(
+            `OpenClaw chat history offset mismatch: requested ${options.offset}, received ${
+                responseOffset ?? "missing"
+            }`
+        );
+    }
     const messages = Array.isArray(page?.messages)
         ? page.messages
               .filter(
@@ -113,7 +181,7 @@ export function canonicalizeOpenClawHistoryPage(
         hasMore: page?.hasMore === true,
         messages,
         nextOffset: nonNegativeInteger(page?.nextOffset),
-        offset: nonNegativeInteger(page?.offset) ?? options.offset,
+        offset: responseOffset,
         schemaVersion: CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
         sessionId: stringValue(page?.sessionId),
         sessionKey,

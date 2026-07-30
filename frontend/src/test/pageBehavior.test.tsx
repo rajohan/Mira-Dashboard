@@ -286,25 +286,32 @@ async function respondToSocketRequest(
         throw new Error(`No socket request found for ${method}`);
     }
     socket.respondedRequestIds.add(request.id);
-    const responsePayload =
-        method === "chat.history"
-            ? canonicalizeOpenClawHistoryPage(payload, {
-                  offset:
-                      typeof request.params === "object" &&
-                      request.params !== null &&
-                      "offset" in request.params &&
-                      typeof request.params.offset === "number"
-                          ? request.params.offset
-                          : 0,
-                  sessionKey:
-                      typeof request.params === "object" &&
-                      request.params !== null &&
-                      "sessionKey" in request.params &&
-                      typeof request.params.sessionKey === "string"
-                          ? request.params.sessionKey
-                          : "agent:main:main",
-              })
-            : payload;
+    let responsePayload = payload;
+    if (method === "chat.history") {
+        const requestParameters =
+            typeof request.params === "object" && request.params !== null
+                ? request.params
+                : {};
+        const offset =
+            "offset" in requestParameters && typeof requestParameters.offset === "number"
+                ? requestParameters.offset
+                : 0;
+        const rawPage =
+            typeof payload === "object" && payload !== null && !Array.isArray(payload)
+                ? {
+                      ...payload,
+                      ...(!("offset" in payload) && { offset }),
+                  }
+                : payload;
+        responsePayload = canonicalizeOpenClawHistoryPage(rawPage, {
+            offset,
+            sessionKey:
+                "sessionKey" in requestParameters &&
+                typeof requestParameters.sessionKey === "string"
+                    ? requestParameters.sessionKey
+                    : "agent:main:main",
+        });
+    }
 
     await act(async () => {
         socket.emit("message", {

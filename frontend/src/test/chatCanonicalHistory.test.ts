@@ -175,6 +175,75 @@ describe("canonical chat history contract", () => {
         });
     });
 
+    it("summarizes hydrated media bytes while preserving text and tool identity", () => {
+        const imageData = `image-head-${"a".repeat(200_000)}-image-tail`;
+        const raw = {
+            messages: [
+                {
+                    content: [
+                        { text: "Inspect", type: "text" },
+                        {
+                            arguments: { command: "pwd" },
+                            id: "tool-1",
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                        { data: imageData, mimeType: "image/png", type: "image" },
+                    ],
+                    role: "assistant",
+                },
+            ],
+            offset: 0,
+        };
+        const first = canonicalizeOpenClawHistoryPage(raw, {
+            offset: 0,
+            sessionKey: SESSION,
+        });
+        const changedTool = canonicalizeOpenClawHistoryPage(
+            {
+                ...raw,
+                messages: [
+                    {
+                        ...raw.messages[0],
+                        content: [
+                            { text: "Inspect", type: "text" },
+                            {
+                                arguments: { command: "ls" },
+                                id: "tool-1",
+                                name: "functions.exec_command",
+                                type: "toolCall",
+                            },
+                            {
+                                data: imageData,
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                        ],
+                    },
+                ],
+            },
+            { offset: 0, sessionKey: SESSION }
+        );
+
+        expect(first.messages[0]?.id).not.toContain("image-head");
+        expect(changedTool.messages[0]?.id).not.toBe(first.messages[0]?.id);
+    });
+
+    it("rejects missing and mismatched provider page offsets", () => {
+        expect(() =>
+            canonicalizeOpenClawHistoryPage(
+                { messages: [] },
+                { offset: 0, sessionKey: SESSION }
+            )
+        ).toThrow("requested 0, received missing");
+        expect(() =>
+            canonicalizeOpenClawHistoryPage(
+                { messages: [], offset: 1 },
+                { offset: 0, sessionKey: SESSION }
+            )
+        ).toThrow("requested 0, received 1");
+    });
+
     it("invalidates raw provider pages at the frontend contract boundary", () => {
         expect(() =>
             parseCanonicalChatHistoryPage({
