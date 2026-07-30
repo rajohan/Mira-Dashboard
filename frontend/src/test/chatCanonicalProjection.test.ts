@@ -922,6 +922,42 @@ describe("canonical chat turn projection", () => {
         expect(result.turns[0]?.entries[0]?.message.images?.[0]?.data).toBe(imageData);
     });
 
+    it("renders repeated metadata-free prompts with stable unique row keys", () => {
+        const history = [
+            { content: "repeat", role: "user", text: "repeat" },
+            { content: "first answer", role: "assistant", text: "first answer" },
+            { content: "repeat", role: "user", text: "repeat" },
+            { content: "second answer", role: "assistant", text: "second answer" },
+        ];
+        const first = projectCanonicalChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const replay = projectCanonicalChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const keys = first.projection.rows.map((row) => row.key);
+
+        expect(first.projection.rows.map((row) => row.message.text)).toEqual([
+            "repeat",
+            "first answer",
+            "repeat",
+            "second answer",
+        ]);
+        expect(new Set(keys).size).toBe(keys.length);
+        expect(keys[2]).toBe(`${keys[0]}::row-occurrence:1`);
+        expect(replay.projection.rows.map((row) => row.key)).toEqual(keys);
+    });
+
     it("fails closed when canonical validation detects an invalid session", () => {
         expect(() =>
             projectCanonicalChat(

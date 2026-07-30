@@ -1893,6 +1893,23 @@ export function appendChatProjectionStatus(
     return typing ? [...rows, typing] : rows;
 }
 
+function uniqueChatProjectionRowKeys(rows: ChatRow[]): ChatRow[] {
+    const usedKeys = new Set<string>();
+    const occurrences = new Map<string, number>();
+    return rows.map((row) => {
+        const baseKey = row.key;
+        let occurrence = occurrences.get(baseKey) ?? 0;
+        let key = baseKey;
+        while (usedKeys.has(key)) {
+            occurrence += 1;
+            key = `${baseKey}::row-occurrence:${occurrence}`;
+        }
+        occurrences.set(baseKey, occurrence);
+        usedKeys.add(key);
+        return key === baseKey ? row : { ...row, key };
+    });
+}
+
 /**
  * Selects the latest visible context-compaction lifecycle.
  * @param runs Ordered session runs.
@@ -1916,13 +1933,14 @@ export function finalizeChatProjection(
 ): ChatProjection {
     const { context } = presentation.structure.reconciliation;
     const activeRuns = selectActiveChatProjectionRuns(context);
+    const rows = appendChatProjectionStatus(
+        renderChatProjectionRows(presentation.messages, deletedMessageKeys),
+        presentation.messages,
+        activeRuns
+    );
     return {
         activeRuns,
         compactionStatus: selectChatCompactionStatus(context.runs),
-        rows: appendChatProjectionStatus(
-            renderChatProjectionRows(presentation.messages, deletedMessageKeys),
-            presentation.messages,
-            activeRuns
-        ),
+        rows: uniqueChatProjectionRowKeys(rows),
     };
 }
