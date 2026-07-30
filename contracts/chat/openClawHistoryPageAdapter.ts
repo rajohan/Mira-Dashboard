@@ -55,23 +55,26 @@ function historyRowId(
 ): string {
     const providerId = stringValue(metadata?.id);
     const providerSequence = nonNegativeInteger(metadata?.seq);
-    const sourceId =
-        providerId ||
-        (providerSequence === undefined
-            ? `position:${fallbackPosition}:fingerprint:${canonicalChatContentFingerprint(
-                  stableCanonicalChatStringify({
-                      content: summarizeCanonicalChatValueForFingerprint(message.content),
-                      isError: message.isError,
-                      role: message.role,
-                      runId: message.runId,
-                      stopReason: message.stopReason,
-                      text: message.text,
-                      timestamp: message.timestamp,
-                      toolCallId: message.toolCallId ?? message.tool_call_id,
-                      toolName: message.toolName ?? message.tool_name,
-                  })
-              )}`
-            : `sequence:${providerSequence}`);
+    let sourceId = providerId;
+    if (!sourceId) {
+        const fingerprint = canonicalChatContentFingerprint(
+            stableCanonicalChatStringify({
+                content: summarizeCanonicalChatValueForFingerprint(message.content),
+                isError: message.isError,
+                role: message.role,
+                runId: message.runId,
+                stopReason: message.stopReason,
+                text: message.text,
+                timestamp: message.timestamp,
+                toolCallId: message.toolCallId ?? message.tool_call_id,
+                toolName: message.toolName ?? message.tool_name,
+            })
+        );
+        sourceId =
+            providerSequence === undefined
+                ? `position:${fallbackPosition}:fingerprint:${fingerprint}`
+                : `sequence:${providerSequence}:fingerprint:${fingerprint}`;
+    }
     return `openclaw-history:${encodeURIComponent(sessionKey)}:${encodeURIComponent(
         sourceId
     )}`;

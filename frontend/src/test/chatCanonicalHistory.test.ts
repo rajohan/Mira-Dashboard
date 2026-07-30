@@ -279,6 +279,37 @@ describe("canonical chat history contract", () => {
         );
     });
 
+    it("keeps distinct seq-only sibling rows when provider ids are absent", () => {
+        const page = canonicalizeOpenClawHistoryPage(
+            {
+                messages: [
+                    {
+                        __openclaw: { seq: 7 },
+                        content: [
+                            {
+                                arguments: { command: "pwd" },
+                                name: "functions.exec_command",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    {
+                        __openclaw: { seq: 7 },
+                        content: [{ text: "/workspace", type: "text" }],
+                        role: "toolResult",
+                        toolName: "functions.exec_command",
+                    },
+                ],
+                offset: 0,
+            },
+            { offset: 0, sessionKey: SESSION }
+        );
+
+        expect(new Set(page.messages.map((row) => row.id)).size).toBe(2);
+        expect(page.messages.map((row) => row.sequence)).toEqual([7, 7]);
+    });
+
     it("accepts OpenClaw complete snapshots without pagination offsets", () => {
         const page = canonicalizeOpenClawHistoryPage(
             {
