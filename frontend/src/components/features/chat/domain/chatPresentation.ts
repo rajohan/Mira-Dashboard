@@ -20,6 +20,11 @@ export function createChatVisibility(
     return { shouldShowThinking, shouldShowTools };
 }
 
+function isAnswerCapableRole(role: string): boolean {
+    const normalizedRole = role.toLowerCase();
+    return normalizedRole === "assistant" || normalizedRole === "system";
+}
+
 /**
  * Removes thinking content without disturbing explicit media on the message.
  * @returns Strip thinking from message result.
@@ -141,7 +146,7 @@ function applyFinalThinkingPreference(
         const isDiagnosticTool = hasToolOutput && !hasPrimaryContent;
         const role = message.role.toLowerCase();
         const isPrimaryAnswer =
-            (role === "assistant" || role === "system") &&
+            isAnswerCapableRole(role) &&
             details.isPrimaryAnswerContent &&
             isRenderableChatHistoryMessage(withoutThinking, visibility);
         response.push({
@@ -280,16 +285,12 @@ function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {
 }
 
 function isSettledAnswerMessage(message: ChatHistoryMessage): boolean {
-    const role = message.role.toLowerCase();
-    return (
-        (role === "assistant" || role === "system") && hasPrimaryAnswerContent(message)
-    );
+    return isAnswerCapableRole(message.role) && hasPrimaryAnswerContent(message);
 }
 
 function isExplicitFinalMessage(message: ChatHistoryMessage): boolean {
-    const role = message.role.toLowerCase();
     return (
-        (role === "assistant" || role === "system") &&
+        isAnswerCapableRole(message.role) &&
         message.isFinal === true &&
         hasPrimaryAnswerContent(message)
     );
@@ -386,7 +387,7 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
 
     for (const [index, message] of messages.entries()) {
         const role = message.role.toLowerCase();
-        if ((role !== "assistant" && role !== "system") || !message.thinking?.length) {
+        if (!isAnswerCapableRole(role) || !message.thinking?.length) {
             continue;
         }
         const segment = segments[index] ?? 0;
@@ -559,8 +560,7 @@ export function presentStructuredChatMessages(
         }
 
         const canReceivePendingToolMedia =
-            (role === "assistant" || role === "system") &&
-            !isThinkingOnlyMessage(message);
+            isAnswerCapableRole(role) && !isThinkingOnlyMessage(message);
         if (
             role === "user" ||
             (pendingToolMedia &&

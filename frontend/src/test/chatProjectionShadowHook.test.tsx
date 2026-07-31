@@ -40,7 +40,14 @@ describe("chat projection shadow hook", () => {
     });
 
     it("reprojects when a semantic input changes", () => {
-        const history: ChatHistoryMessage[] = [];
+        const history: ChatHistoryMessage[] = [
+            {
+                content: [{ text: "private analysis", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "private analysis" }],
+            },
+        ];
         const runtime = createChatRuntimeState();
         const deletedMessageKeys = new Set<string>();
         const { result, rerender } = renderHook(
@@ -61,5 +68,8 @@ describe("chat projection shadow hook", () => {
         rerender({ shouldShowThinking: false });
 
         expect(result.current).not.toBe(initial);
+        expect(initial.legacy.rows.length).toBeGreaterThan(
+            result.current.legacy.rows.length
+        );
     });
 });

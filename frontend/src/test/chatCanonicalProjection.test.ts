@@ -17,15 +17,18 @@ const SESSION = "agent:main:canonical-turn-probe";
 const RUN = "synthetic-turn-run";
 
 function runtimeEnvelope(message: Record<string, unknown>, runtimeSequence: number) {
+    const at = Date.parse(
+        `2026-07-30T06:20:${String(runtimeSequence).padStart(2, "0")}.000Z`
+    );
     return withCanonicalOpenClawEvents({
         event: "session.message",
         payload: {
             message,
             runId: RUN,
             sessionKey: SESSION,
-            ts: Date.parse(`2026-07-30T06:20:0${runtimeSequence}.000Z`),
+            ts: at,
         },
-        runtimeRecordedAt: Date.parse(`2026-07-30T06:20:0${runtimeSequence}.000Z`),
+        runtimeRecordedAt: at,
         runtimeSequence,
         type: "event",
     });
