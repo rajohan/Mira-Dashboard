@@ -34,7 +34,9 @@ interface ChatHistoryOptions {
 interface ChatHistoryState {
     isResolved: boolean;
     messages: ChatHistoryMessage[];
+    resolvedConnectionGeneration?: number;
     sessionKey: string;
+    successfulConnectionGeneration?: number;
 }
 
 type ChatHistoryRequestResult =
@@ -116,7 +118,9 @@ export function useChatHistory({
                             previous.sessionKey === sessionKey ? previous.messages : [],
                             history
                         ),
+                        resolvedConnectionGeneration: transport.connectionGeneration,
                         sessionKey,
+                        successfulConnectionGeneration: transport.connectionGeneration,
                     }));
                     if (shouldStickToBottomRef.current) {
                         setIsAtBottom(true);
@@ -182,6 +186,7 @@ export function useChatHistory({
 
         const abortController = new AbortController();
         const isNewSession = historyLoadSessionRef.current !== selectedSessionKey;
+        const requestConnectionGeneration = transport.connectionGeneration;
         historyLoadSessionRef.current = selectedSessionKey;
         void (async () => {
             const result = await requestHistory(
@@ -198,7 +203,9 @@ export function useChatHistory({
                         previous.sessionKey === selectedSessionKey
                             ? previous.messages
                             : [],
+                    resolvedConnectionGeneration: requestConnectionGeneration,
                     sessionKey: selectedSessionKey,
+                    successfulConnectionGeneration: undefined,
                 }));
                 reportErrorFromEffect(result.error);
                 return;
@@ -209,7 +216,9 @@ export function useChatHistory({
                     previous.sessionKey === selectedSessionKey ? previous.messages : [],
                     result.messages
                 ),
+                resolvedConnectionGeneration: requestConnectionGeneration,
                 sessionKey: selectedSessionKey,
+                successfulConnectionGeneration: requestConnectionGeneration,
             }));
             reportErrorFromEffect(undefined);
             if (isNewSession) {
@@ -224,7 +233,12 @@ export function useChatHistory({
             );
         })();
         return () => abortController.abort();
-    }, [isConnected, selectedSessionKey, shouldStickToBottomRef]);
+    }, [
+        isConnected,
+        selectedSessionKey,
+        shouldStickToBottomRef,
+        transport.connectionGeneration,
+    ]);
 
     useEffect(() => {
         if (
@@ -232,7 +246,8 @@ export function useChatHistory({
             !selectedSessionKey ||
             !selectedSessionUpdatedAt ||
             historyState.sessionKey !== selectedSessionKey ||
-            !historyState.isResolved
+            !historyState.isResolved ||
+            historyState.resolvedConnectionGeneration !== transport.connectionGeneration
         ) {
             return;
         }
@@ -254,7 +269,9 @@ export function useChatHistory({
                     previous.sessionKey === requestSessionKey ? previous.messages : [],
                     result.messages
                 ),
+                resolvedConnectionGeneration: transport.connectionGeneration,
                 sessionKey: requestSessionKey,
+                successfulConnectionGeneration: transport.connectionGeneration,
             }));
             setIsAtBottomFromEffect(shouldStickToBottomRef.current);
         })();
@@ -266,11 +283,13 @@ export function useChatHistory({
         };
     }, [
         historyState.isResolved,
+        historyState.resolvedConnectionGeneration,
         historyState.sessionKey,
         isConnected,
         selectedSessionKey,
         selectedSessionUpdatedAt,
         shouldStickToBottomRef,
+        transport.connectionGeneration,
     ]);
 
     useEffect(() => {
@@ -304,7 +323,9 @@ export function useChatHistory({
                             : [],
                         result.messages
                     ),
+                    resolvedConnectionGeneration: transport.connectionGeneration,
                     sessionKey: selectedSessionKey,
+                    successfulConnectionGeneration: transport.connectionGeneration,
                 }));
                 setIsAtBottomFromEffect(shouldStickToBottomRef.current);
             } finally {
@@ -319,7 +340,12 @@ export function useChatHistory({
             abortController.abort();
             clearInterval(interval);
         };
-    }, [isConnected, selectedSessionKey, shouldStickToBottomRef]);
+    }, [
+        isConnected,
+        selectedSessionKey,
+        shouldStickToBottomRef,
+        transport.connectionGeneration,
+    ]);
 
     useEffect(
         () => () => {
@@ -333,10 +359,15 @@ export function useChatHistory({
 
     const visibleMessages =
         historyState.sessionKey === selectedSessionKey ? historyState.messages : [];
+    const hasSuccessfulHistoryLoad =
+        historyState.sessionKey === selectedSessionKey &&
+        historyState.successfulConnectionGeneration === transport.connectionGeneration;
     const isLoadingHistory =
         isConnected &&
         Boolean(selectedSessionKey) &&
-        (historyState.sessionKey !== selectedSessionKey || !historyState.isResolved);
+        (historyState.sessionKey !== selectedSessionKey ||
+            !historyState.isResolved ||
+            historyState.resolvedConnectionGeneration !== transport.connectionGeneration);
     const setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>> = (action) => {
         setHistoryState((previous) => {
             const currentMessages =
@@ -345,11 +376,20 @@ export function useChatHistory({
                 isResolved:
                     previous.sessionKey === selectedSessionKey && previous.isResolved,
                 messages: typeof action === "function" ? action(currentMessages) : action,
+                resolvedConnectionGeneration:
+                    previous.sessionKey === selectedSessionKey
+                        ? previous.resolvedConnectionGeneration
+                        : undefined,
                 sessionKey: selectedSessionKey,
+                successfulConnectionGeneration:
+                    previous.sessionKey === selectedSessionKey
+                        ? previous.successfulConnectionGeneration
+                        : undefined,
             };
         });
     };
     return {
+        hasSuccessfulHistoryLoad,
         isLoadingHistory,
         messages: visibleMessages,
         refreshSoon,

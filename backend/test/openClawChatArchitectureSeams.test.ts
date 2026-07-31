@@ -15,6 +15,7 @@ import {
     isTerminalEvent,
     runtimeSessionBoundary,
 } from "../src/chat/openClawChatLifecycle.ts";
+import { OpenClawChatRuntimeMetricsRecorder } from "../src/chat/openClawChatMetrics.ts";
 import {
     OpenClawChatPersistenceCoordinator,
     type OpenClawChatSnapshotStore,
@@ -233,6 +234,7 @@ describe("OpenClaw chat architecture seams", () => {
         };
         const persistence = new OpenClawChatPersistenceCoordinator(store, {
             ensureSessionLoaded: () => true,
+            metrics: new OpenClawChatRuntimeMetricsRecorder(),
             snapshotFromMemory: () => memorySnapshot,
         });
 

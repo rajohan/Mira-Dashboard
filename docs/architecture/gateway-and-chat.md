@@ -179,6 +179,15 @@ counts; transcript content, stable IDs, and internal fingerprints are not
 logged. Existing incident fixtures, projection regressions, and generated replay
 state-machine traces require exact shadow parity before the path can be cut over.
 
+The browser submits one authenticated, versioned observation when a selected
+session's structural parity state changes. The strict telemetry contract accepts
+only row/run/turn counts, compaction phases, and bounded difference categories;
+message content, session/run/message IDs, and local comparison fingerprints
+cannot cross the boundary. Backend process-local counters expose matches,
+mismatches by section, canonical failures, and the last observation timestamp in
+application observability. Counters reset on backend restart and are evidence for
+a soak window, not durable chat data.
+
 ### Session URL State
 
 The selected chat session is stored in the `/chat?session=<session-key>` query.
@@ -359,6 +368,13 @@ compacts the raw payload to identity/lifecycle metadata. If a terminal canonical
 message alone exceeds the limit, the bridge keeps a message-free canonical
 finish marker so replay still settles the run. The byte limits themselves are
 unchanged.
+
+Authenticated application observability reports current, peak, and configured
+replay bytes; retained sessions, runs, and events; memory/session-limit
+evictions; and successful/failed snapshot-store mutations. The rolling
+`writesPerMinute` value counts successful mutating store calls in the previous
+60 seconds. These measurements establish real replay cost before any limit is
+adjusted.
 
 Replay limits are:
 

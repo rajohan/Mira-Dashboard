@@ -3,7 +3,7 @@ import os from "node:os";
 import Path from "node:path";
 
 import { canonicalizeOpenClawHistoryPage } from "../../contracts/chat/openClawHistoryPageAdapter.ts";
-import type { GatewayMetrics } from "../../contracts/metrics.ts";
+import type { ChatRuntimeMetrics, GatewayMetrics } from "../../contracts/metrics.ts";
 import type { Session } from "../../contracts/sessions.ts";
 import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
 import { parseDashboardSocketRequest } from "../../contracts/socket.ts";
@@ -1501,6 +1501,14 @@ function getMetrics(): GatewayMetrics {
     };
 }
 
+/**
+ * Returns content-free chat replay, persistence, and shadow parity metrics.
+ * @returns Current chat runtime metrics.
+ */
+function getChatMetrics(): ChatRuntimeMetrics {
+    return chatReplayState.bridge.getMetrics();
+}
+
 /** Returns gateway ws. */
 function getGatewayWs(): undefined {
     return;
@@ -1623,6 +1631,7 @@ export default {
     getSessions,
     isConnected,
     getMetrics,
+    getChatMetrics,
     getGatewayWs,
     sendSessionMessage,
     abortSessionRun,
