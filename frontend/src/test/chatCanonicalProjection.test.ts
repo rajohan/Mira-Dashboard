@@ -442,7 +442,7 @@ describe("canonical chat turn projection", () => {
     });
 
     it("preserves a thinking-only runless steer through production structuring", () => {
-        const result = projectChatWithCanonicalShadow(
+        const result = projectCanonicalChat(
             [
                 {
                     content: "initial question",
@@ -474,15 +474,14 @@ describe("canonical chat turn projection", () => {
             new Set()
         );
 
-        expect(result.comparison.matches).toBe(true);
-        expect(result.canonical?.turns).toHaveLength(1);
-        expect(result.canonical?.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+        expect(result.turns).toHaveLength(1);
+        expect(result.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
             "user",
             "user",
             "thinking",
             "assistant",
         ]);
-        expect(result.canonical?.projection.rows.map((row) => row.message.text)).toEqual([
+        expect(result.projection.rows.map((row) => row.message.text)).toEqual([
             "initial question",
             "steer",
             "",
