@@ -140,27 +140,63 @@ function historyMessageDeleteKey(message: ChatHistoryMessage): string {
     });
 }
 
+/**
+ * Gives an optimistic prompt and its runless history echo one bounded delete alias.
+ * Two overlapping buckets cover the runtime echo window without hiding the same
+ * prompt sent much later. Local rows also carry the no-time alias because Gateway
+ * history may omit the provider timestamp together with the run identity.
+ * @returns Bounded recovery aliases for runless user history.
+ */
+function runlessUserRecoveryDeleteKeys(message: ChatHistoryMessage): string[] {
+    const contentIdentity = canonicalChatContentFingerprint(
+        messageDeleteKey({
+            ...message,
+            runId: undefined,
+            runtimeKey: undefined,
+            timestamp: undefined,
+        })
+    );
+    const timestamp = messageTimestamp(message);
+    const scopes = new Set<string>();
+    if (timestamp === undefined || message.local === true) {
+        scopes.add("no-time");
+    }
+    if (timestamp !== undefined) {
+        const bucketWidth = RUNTIME_USER_ECHO_WINDOW_MS * 2;
+        scopes.add(`time-${Math.floor(timestamp / bucketWidth)}`);
+        scopes.add(
+            `time-${Math.floor((timestamp + RUNTIME_USER_ECHO_WINDOW_MS) / bucketWidth)}`
+        );
+    }
+    return [...scopes].map(
+        (scope) => `chat-user-recovery:v1:${scope}:${contentIdentity}`
+    );
+}
+
 function scopedUserRecoveryDeleteKeys(
     message: ChatHistoryMessage,
     runs: ChatRunState[]
 ): string[] {
     const runId = message.runId?.trim();
+    const runlessKeys =
+        message.local === true || !runId ? runlessUserRecoveryDeleteKeys(message) : [];
     if (!runId) {
-        return [];
+        return runlessKeys;
     }
     const matchingRun = runs.find((run) => isRunMatchingMessage(run, message));
     const runIds = matchingRun ? [matchingRun.runId, ...matchingRun.aliases] : [runId];
     return [
-        ...new Set(
-            runIds.map((candidateRunId) =>
+        ...new Set([
+            ...runIds.map((candidateRunId) =>
                 messageDeleteKey({
                     ...message,
                     runId: candidateRunId,
                     runtimeKey: undefined,
                     timestamp: undefined,
                 })
-            )
-        ),
+            ),
+            ...runlessKeys,
+        ]),
     ];
 }
 
@@ -296,7 +332,9 @@ function projectedMessageDeleteIdentity(
         };
     }
     if (userKeys.length > 0) {
-        return { baseKeys: userKeys, persistedKeyCount: userKeys.length };
+        const persistedKeyCount =
+            !message.runId && message.local !== true ? 1 : userKeys.length;
+        return { baseKeys: userKeys, persistedKeyCount };
     }
     const currentKey = projectedMessageRowKey(message);
     if (!message.runId || message.local === true) {

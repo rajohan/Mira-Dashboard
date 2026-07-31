@@ -990,7 +990,6 @@ describe("canonical chat turn projection", () => {
                         source: "openclaw-history",
                     },
                     role: "user",
-                    runId: optimisticRunId,
                     text: "queued prompt",
                     timestamp: "2026-07-31T04:00:02.000Z",
                 },
@@ -998,11 +997,38 @@ describe("canonical chat turn projection", () => {
             { deletedMessageKeys: new Set(optimisticDeleteKeys) }
         ).projection;
 
-        expect(optimisticDeleteKeys).toEqual([
+        expect(optimisticDeleteKeys?.slice(0, 2)).toEqual([
             "user::2026-07-31T04:00:00.000Z::no-run::queued prompt",
             "user::no-time::dashboard-chat-delete::queued prompt",
         ]);
+        expect(
+            optimisticDeleteKeys?.some((key) =>
+                key.startsWith("chat-user-recovery:v1:time-")
+            )
+        ).toBe(true);
+        expect(
+            optimisticDeleteKeys?.some((key) =>
+                key.startsWith("chat-user-recovery:v1:no-time:")
+            )
+        ).toBe(true);
         expect(recovered.rows).toEqual([]);
+
+        const recoveredWithoutTimestamp = projectDefault(
+            [
+                {
+                    content: "queued prompt",
+                    provenance: {
+                        id: "history-prompt-without-time",
+                        sequence: 13,
+                        source: "openclaw-history",
+                    },
+                    role: "user",
+                    text: "queued prompt",
+                },
+            ],
+            { deletedMessageKeys: new Set(optimisticDeleteKeys) }
+        ).projection;
+        expect(recoveredWithoutTimestamp.rows).toEqual([]);
 
         const laterUnrelatedPrompt = projectDefault(
             [
@@ -1014,7 +1040,6 @@ describe("canonical chat turn projection", () => {
                         source: "openclaw-history",
                     },
                     role: "user",
-                    runId: "dashboard-chat-later",
                     text: "queued prompt",
                     timestamp: "2026-07-31T05:00:00.000Z",
                 },
