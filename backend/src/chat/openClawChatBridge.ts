@@ -3621,10 +3621,12 @@ export class OpenClawChatBridge {
         ].filter((runId, index, aliases) => aliases.indexOf(runId) === index);
         return runtimeRunAliases.length > 0
             ? boundedCanonicalRuntimeEnvelope(
-                  withCurrentCanonicalOpenClawIdentity({
-                      ...envelope,
-                      runtimeRunAliases,
-                  })
+                  withCurrentCanonicalOpenClawIdentity(
+                      withCanonicalOpenClawEvents({
+                          ...envelope,
+                          runtimeRunAliases,
+                      })
+                  )
               )
             : envelope;
     }

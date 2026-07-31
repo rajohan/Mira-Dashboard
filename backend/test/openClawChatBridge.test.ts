@@ -3566,6 +3566,46 @@ describe("OpenClaw chat bridge", () => {
         }
     });
 
+    it("emits canonical identity when an invisible event resumes an interrupted run", () => {
+        const store = new MemorySnapshotStore();
+        const interruptedRunId = "provider-before-invisible-resume";
+        const resumedRunId = "provider-after-invisible-resume";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before restart" },
+                runId: interruptedRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected();
+        expect(bridge.flush()).toBe(true);
+
+        const restarted = new OpenClawChatBridge(store);
+        const resumed = restarted.recordEvent(
+            "session.tool",
+            {
+                name: "typing",
+                phase: "result",
+                runId: resumedRunId,
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(resumed.runtimeRunAliases).toEqual([interruptedRunId]);
+        expect(resumed.canonicalEvents).toEqual([
+            expect.objectContaining({
+                kind: "identity",
+                runAliases: [interruptedRunId],
+                runId: resumedRunId,
+            }),
+        ]);
+    });
+
     it("measures a quiet run's reconnect window from the Gateway disconnect", () => {
         const store = new MemorySnapshotStore();
         const provisionalRunId = "dashboard-chat-quiet-before-restart";
