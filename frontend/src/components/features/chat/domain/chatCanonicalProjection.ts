@@ -557,11 +557,7 @@ export function projectCanonicalChat(
     const structure = structureChatProjectionContext(reconciliation);
     assertCanonicalStructure(structure, reconciliation);
     const reconciliationContinuations = continuedUserOrdinalsFromDrafts(
-        draftCanonicalChatTurns(
-            reconciliation.messages,
-            context.runs,
-            new Set<number>()
-        )
+        draftCanonicalChatTurns(reconciliation.messages, context.runs, new Set<number>())
     );
     const turns = assembleCanonicalChatTurnsWithContinuations(
         structure.messages,
