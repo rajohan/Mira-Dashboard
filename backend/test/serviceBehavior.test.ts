@@ -203,9 +203,9 @@ function writeFakeGh(binaryPath: string): void {
         binaryPath,
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
   if [[ "$*" == *'baseRefName: "main"'* ]]; then
     echo "pull request list unexpectedly filtered to main" >&2
     exit 2
@@ -240,13 +240,13 @@ function writeFakeGhWithoutStackGraphqlFields(
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   ${
       probeFails
           ? "printf 'stack metadata probe unavailable\\n' >&2\n  exit 2"
           : `printf '%s\\n' '{"data":{"__type":{"fields":[{"name":"number"}]}}}'`
   }
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
   printf '%s\n' '{"number":31,"title":"Fallback PR","body":"","url":"https://github.test/pr/31","headRefName":"fallback","headRefOid":"head31","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
 else
   echo "unexpected gh args: $*" >&2
@@ -710,9 +710,9 @@ function writeFakeGhForPullRequestStackCreation(
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
           additions: 1,
@@ -1028,9 +1028,9 @@ elif [[ "$1" == "api" && "$2" == "repos/rajohan/Mira-Dashboard/stacks?pull_reque
 elif [[ "$1 $2 $3" == "pr review 12" ]]; then
   touch ${JSON.stringify(reviewedPath)}
   printf 'review ok\n'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
   printf '%s\n' ${JSON.stringify(bottomRow)}
   printf '%s\n' ${JSON.stringify(approvedMiddleRow)}
 else
@@ -2860,7 +2860,7 @@ else
 fi
 printf '%s\n' \
   "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${projectPaths.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${releasesRoot}/current/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
   "WorkingDirectory=${releasesRoot}/current/backend"
 `
         );
@@ -3410,7 +3410,7 @@ else
 fi
 printf '%s\n' \
   "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${projectPaths.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${releasesRoot}/current/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
   'WorkingDirectory=${releasesRoot}/current/backend'
 `
         );
@@ -3569,7 +3569,11 @@ printf 'scheduled\n'
                 "Atomic release activated. Web, worker, commit, and 31-second worker stability checks passed"
             );
             expect(restartCommand).toContain("updatedAt: new Date().toISOString()");
-            expect(restartCommand).toContain(".checks.release.backendCommit");
+            expect(restartCommand).toContain(
+                'current_release=$(/usr/bin/realpath --canonicalize-existing "$project_root/production/releases/current"'
+            );
+            expect(restartCommand).toContain(".commitSha");
+            expect(restartCommand).not.toContain(".checks.release.backendCommit");
             expect(restartCommand).toContain("releaseLifecycle.js");
             expect(restartCommand).toContain("MIRA_DEPLOYMENT_SNAPSHOT_ID=");
             expect(restartCommand).toContain('execution?.status === "success"');
@@ -5358,7 +5362,7 @@ fi
         const spawnSpy = jest
             .spyOn(processModule, "spawnProcess")
             .mockImplementation((_executable, arguments_) => {
-                const isPullRequestList = arguments_.includes("--paginate");
+                const isPullRequestList = arguments_.includes("limit=100");
                 return {
                     exited: Promise.resolve(0),
                     kill: () => {},
@@ -6294,23 +6298,24 @@ fi
             );
             expect(fractionalRequest).resolves.toEqual({ fractional: true });
 
-            const timeoutCallCount = timeoutSpy.mock.calls.length;
-            const noDeadlineRequest = client.request(
-                "demo.no-deadline",
+            const boundedRequest = client.request(
+                "demo.bounded",
                 {},
-                { shouldWaitIndefinitely: true }
+                {
+                    timeoutMs: Number.MAX_SAFE_INTEGER,
+                }
             );
-            expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
-            const noDeadlineFrame = JSON.parse(socket!.sent[5]!) as { id: string };
+            expect(timeoutSpy.mock.calls.at(-1)?.[1]).toBe(2_147_483_647);
+            const boundedFrame = JSON.parse(socket!.sent[5]!) as { id: string };
             socket?.message(
                 JSON.stringify({
-                    id: noDeadlineFrame.id,
+                    id: boundedFrame.id,
                     ok: true,
-                    payload: { completed: true },
+                    payload: { bounded: true },
                     type: "res",
                 })
             );
-            expect(noDeadlineRequest).resolves.toEqual({ completed: true });
+            expect(boundedRequest).resolves.toEqual({ bounded: true });
         } finally {
             timeoutSpy.mockRestore();
         }
@@ -8475,6 +8480,11 @@ fi
                                 status: "exited",
                                 updatedAt: Date.now() - 120_000,
                             },
+                            {
+                                key: "agent:researcher:main",
+                                model: "openai/gpt-5.5",
+                                updatedAt: 1e100,
+                            },
                             { key: "", model: "ignored" },
                         ],
                     };
@@ -8949,6 +8959,12 @@ fi
         mkdirSync(path.join(packageRoot, "skills", "builtinSkill"), {
             recursive: true,
         });
+        mkdirSync(path.join(openclawHome, "workspace", "skills", "linkedSkill"), {
+            recursive: true,
+        });
+        mkdirSync(path.join(openclawHome, "workspace", "skills", "oversizedSkill"), {
+            recursive: true,
+        });
         mkdirSync(
             path.join(packageRoot, "dist", "extensions", "demo", "skills", "extraSkill"),
             { recursive: true }
@@ -8960,6 +8976,16 @@ fi
         writeFileSync(
             path.join(packageRoot, "skills", "builtinSkill", "SKILL.md"),
             "# Builtin skill\n"
+        );
+        const secretFile = path.join(routeRoot, "secret.txt");
+        writeFileSync(secretFile, "description: must not be disclosed\n");
+        symlinkSync(
+            secretFile,
+            path.join(openclawHome, "workspace", "skills", "linkedSkill", "SKILL.md")
+        );
+        writeFileSync(
+            path.join(openclawHome, "workspace", "skills", "oversizedSkill", "SKILL.md"),
+            `description: ${"x".repeat(256 * 1024)}\n`
         );
         writeFileSync(
             path.join(
@@ -9049,6 +9075,10 @@ fi
                 name: "workspaceSkill",
                 source: "workspace",
             })
+        );
+        expect(skillsBody.skills.map((skill) => skill.name)).not.toContain("linkedSkill");
+        expect(skillsBody.skills.map((skill) => skill.name)).not.toContain(
+            "oversizedSkill"
         );
         expect(skillsBody.skills).toContainEqual(
             expect.objectContaining({

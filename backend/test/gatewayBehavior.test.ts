@@ -339,6 +339,28 @@ describe("gateway behavior", () => {
                 key: "agent:wrapped:subagent:test",
             }),
         ]);
+        expect(
+            normalizeGatewaySessionList([
+                {
+                    key: "agent:malformed:main",
+                    model: 123,
+                    modelProvider: { name: "bad" },
+                    thinkingLevels: "bad",
+                    thinkingOptions: [null, " high ", 42],
+                    updatedAt: "2026-07-30T22:00:00.000Z",
+                },
+                {
+                    key: "agent:out-of-range:main",
+                    updatedAt: 1e100,
+                },
+            ])
+        ).toEqual([
+            expect.objectContaining({
+                key: "agent:malformed:main",
+                model: "Unknown",
+                thinkingOptions: ["high"],
+            }),
+        ]);
     });
 
     it("waits through transient connect errors during bootstrap", async () => {
@@ -1035,7 +1057,7 @@ describe("gateway behavior", () => {
         expect(
             client?.requests.find(({ method }) => method === "sessions.compact")
         ).toMatchObject({
-            options: { shouldWaitIndefinitely: true },
+            options: { timeoutMs: 15 * 60_000 },
             parameters: { key: "agent:main:main" },
         });
         const researcherSession = sessionsMessage?.sessions?.find(

@@ -151,8 +151,14 @@ async function createManagedRelease(
     mkdirSync(path.join(releasePath, "backend", "config"), { recursive: true });
     mkdirSync(path.join(releasePath, "backend", "dist"), { recursive: true });
     mkdirSync(path.join(releasePath, "dist", "assets"), { recursive: true });
+    mkdirSync(path.join(releasePath, "scripts"), { recursive: true });
     writeFileSync(path.join(releasePath, "package.json"), "{}\n");
     writeFileSync(path.join(releasePath, "bun.lock"), "root-lock\n");
+    writeFileSync(
+        path.join(releasePath, "scripts", "runManagedDashboardRelease.sh"),
+        '#!/usr/bin/env bash\nexec bun "$@"\n',
+        { mode: 0o755 }
+    );
     writeFileSync(
         path.join(releasePath, "backend", "config", "log-rotation.json"),
         '{"jobs":[]}\n'

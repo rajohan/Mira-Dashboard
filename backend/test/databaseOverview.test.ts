@@ -260,7 +260,10 @@ describe("database overview service", () => {
             );
             expect(
                 overview.deadTuples.find((table) => table.relname === "logs")
-            ).toBeUndefined();
+            ).toMatchObject({
+                database: "mira",
+                n_dead_tup: "1001",
+            });
             expect(overview.overview.maintenance).toMatchObject({
                 status: "review",
                 hintCount: 4,
@@ -307,9 +310,12 @@ describe("database overview service", () => {
             expect(torrentCountQueries).toHaveLength(4);
 
             process.env.FAKE_DOCKER_FAIL_COMET = "1";
-            expect(getDatabaseOverview()).rejects.toThrow(
-                "docker exec failed with exit code 1"
-            );
+            const degradedOverview = await getDatabaseOverview();
+            expect(degradedOverview).toMatchObject({
+                overview: {
+                    torrentCounts: { bitmagnet: 11, comet: 0 },
+                },
+            });
         } finally {
             if (originalPath === undefined) {
                 delete process.env.PATH;

@@ -30,8 +30,14 @@ export async function createReleaseFixture(
     mkdirSync(path.join(releaseRoot, "backend", "config"), { recursive: true });
     mkdirSync(path.join(releaseRoot, "backend", "dist"), { recursive: true });
     mkdirSync(path.join(releaseRoot, "dist", "assets"), { recursive: true });
+    mkdirSync(path.join(releaseRoot, "scripts"), { recursive: true });
     writeFileSync(path.join(releaseRoot, "package.json"), "{}\n");
     writeFileSync(path.join(releaseRoot, "bun.lock"), "root-lock\n");
+    writeFileSync(
+        path.join(releaseRoot, "scripts", "runManagedDashboardRelease.sh"),
+        '#!/usr/bin/env bash\nexec bun "$@"\n',
+        { mode: 0o755 }
+    );
     writeFileSync(
         path.join(releaseRoot, "backend", "config", "log-rotation.json"),
         '{"jobs":[]}\n'

@@ -66,8 +66,14 @@ function temporaryReleaseRoot(): string {
     mkdirSync(path.join(root, "backend", "dist"), { recursive: true });
     mkdirSync(path.join(root, "backend", "config"), { recursive: true });
     mkdirSync(path.join(root, "dist", "assets"), { recursive: true });
+    mkdirSync(path.join(root, "scripts"), { recursive: true });
     writeFileSync(path.join(root, "package.json"), "{}\n");
     writeFileSync(path.join(root, "bun.lock"), "root-lock\n");
+    writeFileSync(
+        path.join(root, "scripts", "runManagedDashboardRelease.sh"),
+        '#!/usr/bin/env bash\nexec bun "$@"\n',
+        { mode: 0o755 }
+    );
     writeFileSync(
         path.join(root, "backend", "config", "log-rotation.json"),
         '{"jobs":[]}\n'
@@ -216,6 +222,7 @@ describe("Dashboard release manifest", () => {
             "dist/build-identity.json",
             "dist/index.html",
             "package.json",
+            "scripts/runManagedDashboardRelease.sh",
         ]);
         expect(
             manifest.artifacts.every(

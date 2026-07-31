@@ -4,6 +4,11 @@ import type {
     CanonicalChatThinking,
     CanonicalChatToolCall,
 } from "./chatCanonical";
+import {
+    boundCanonicalChatToolValue,
+    MAX_CANONICAL_CHAT_TEXT_CHARACTERS,
+    truncateCanonicalChatText,
+} from "./chatCanonicalUtilities";
 
 const CHAT_IMAGE_URL_PROTOCOLS = new Set(["http:", "https:"]);
 const DASHBOARD_URL_FALLBACK_ORIGIN = "https://dashboard.invalid";
@@ -61,6 +66,18 @@ const CANONICAL_MEDIA_DATA_FIELDS = new Set([
     "image_url",
 ]);
 const CANONICAL_MEDIA_SAMPLE_LENGTH = 64;
+export const MAX_CANONICAL_CHAT_IMAGES = 10;
+export const MAX_CANONICAL_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS =
+    Math.ceil((MAX_CANONICAL_CHAT_IMAGE_BYTES * 4) / 3) + 8;
+const MAX_CANONICAL_CHAT_THINKING_BLOCKS = 100;
+const MAX_CANONICAL_CHAT_TOOL_CALLS = 100;
+const EMBEDDED_CHAT_IMAGE_MIME_TYPES = new Set([
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+]);
 
 function canonicalChatRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
@@ -195,7 +212,7 @@ export function canonicalChatPortableDashboardMediaUrl(
     if (
         !parsed ||
         !dashboardMediaKind(parsed.url.pathname) ||
-        (currentDashboardOrigin() && !parsed.isSameDashboardOrigin)
+        !parsed.isSameDashboardOrigin
     ) {
         return undefined;
     }
@@ -215,16 +232,7 @@ function dashboardMediaReference(value: string): DashboardMediaReference | undef
     if (parsed.isSameDashboardOrigin) {
         return { kind, url: candidate };
     }
-    if (currentDashboardOrigin() || !CHAT_IMAGE_URL_PROTOCOLS.has(parsed.url.protocol)) {
-        return undefined;
-    }
-    // Backend normalization has no browser origin. Known Dashboard media routes
-    // are portable, so remove the untrusted origin instead of either dropping
-    // the preview or allowing an external host to become an inline image.
-    return {
-        kind,
-        url: `${parsed.url.pathname}${parsed.url.search}${parsed.url.hash}`,
-    };
+    return undefined;
 }
 
 function dashboardMediaKindFromUrl(url: string): DashboardMediaKind | undefined {
@@ -334,14 +342,82 @@ export function mergeCanonicalChatImages(
     next: CanonicalChatImage[] = []
 ): CanonicalChatImage[] {
     const seen = new Set<string>();
-    return [...previous, ...next].filter((image) => {
-        const identity = JSON.stringify(image);
+    const images: CanonicalChatImage[] = [];
+    for (const image of [...previous, ...next]) {
+        const normalized = normalizeCanonicalChatImage(image);
+        if (!normalized) {
+            continue;
+        }
+        const identity = JSON.stringify(
+            summarizeCanonicalChatValueForFingerprint(normalized)
+        );
         if (seen.has(identity)) {
-            return false;
+            continue;
         }
         seen.add(identity);
-        return true;
-    });
+        images.push(normalized);
+        if (images.length >= MAX_CANONICAL_CHAT_IMAGES) {
+            break;
+        }
+    }
+    return images;
+}
+
+function embeddedImageMimeType(value: string): string | undefined {
+    const match = /^data:([^;,]+);base64,/iu.exec(value.trim());
+    return match?.[1] ? normalizeCanonicalChatMimeType(match[1]) : undefined;
+}
+
+function boundedEmbeddedImageData(
+    value: string | undefined,
+    declaredMimeType: string | undefined
+): string | undefined {
+    if (!value) {
+        return undefined;
+    }
+    const normalized = value.trim();
+    if (!normalized || normalized.length > MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS) {
+        return undefined;
+    }
+    const dataMimeType = embeddedImageMimeType(normalized);
+    const mimeType = normalizeCanonicalChatMimeType(
+        dataMimeType || declaredMimeType || "image/png"
+    );
+    return EMBEDDED_CHAT_IMAGE_MIME_TYPES.has(mimeType) ? normalized : undefined;
+}
+
+function canonicalImageHasUrl(image: CanonicalChatImage): boolean {
+    return Boolean(
+        image.url ||
+        image.openUrl ||
+        image.source?.url ||
+        (typeof image.image_url === "string" ? image.image_url : image.image_url?.url)
+    );
+}
+
+/**
+ * Bounds one provider image while retaining URL-backed images and supported payloads.
+ * @param image Provider image block.
+ * @returns Safe bounded image, or undefined when it has no usable source.
+ */
+export function normalizeCanonicalChatImage(
+    image: CanonicalChatImage
+): CanonicalChatImage | undefined {
+    const declaredMimeType = image.source?.media_type || image.mimeType;
+    const data = boundedEmbeddedImageData(image.data, declaredMimeType);
+    const sourceData = boundedEmbeddedImageData(image.source?.data, declaredMimeType);
+    const normalized: CanonicalChatImage = {
+        ...image,
+        alt: image.alt ? truncateCanonicalChatText(image.alt, 4096) : image.alt,
+        data,
+        source: image.source ? { ...image.source, data: sourceData } : undefined,
+    };
+    if (normalized.source && !Object.values(normalized.source).some(Boolean)) {
+        normalized.source = undefined;
+    }
+    return data || sourceData || canonicalImageHasUrl(normalized)
+        ? normalized
+        : undefined;
 }
 
 /**
@@ -419,7 +495,7 @@ export function extractCanonicalChatImages(content: unknown): CanonicalChatImage
               }
             : undefined;
 
-        images.push({
+        const image = normalizeCanonicalChatImage({
             alt: typeof record.alt === "string" ? record.alt : undefined,
             data: typeof record.data === "string" ? record.data : undefined,
             image_url: imageUrl,
@@ -432,6 +508,12 @@ export function extractCanonicalChatImages(content: unknown): CanonicalChatImage
             type,
             url: typeof record.url === "string" ? record.url : undefined,
         });
+        if (image) {
+            images.push(image);
+        }
+        if (images.length >= MAX_CANONICAL_CHAT_IMAGES) {
+            break;
+        }
     }
     return images;
 }
@@ -461,7 +543,10 @@ export function extractCanonicalChatThinking(content: unknown): CanonicalChatThi
             text = record.thinking;
         }
         if (text.trim()) {
-            blocks.push({ text });
+            blocks.push({ text: truncateCanonicalChatText(text, 256 * 1024) });
+        }
+        if (blocks.length >= MAX_CANONICAL_CHAT_THINKING_BLOCKS) {
+            break;
         }
     }
     return blocks;
@@ -490,10 +575,13 @@ export function extractCanonicalChatToolCalls(content: unknown): CanonicalChatTo
         const id = typeof record.id === "string" ? record.id.trim() : "";
         const name = typeof record.name === "string" ? record.name.trim() : "";
         calls.push({
-            arguments: record.arguments,
+            arguments: boundCanonicalChatToolValue(record.arguments),
             id: id || undefined,
             name: name || "tool",
         });
+        if (calls.length >= MAX_CANONICAL_CHAT_TOOL_CALLS) {
+            break;
+        }
     }
     return calls;
 }
@@ -523,31 +611,38 @@ export function canonicalChatAttachmentKind(
  */
 export function normalizeCanonicalChatText(content: unknown): string {
     if (typeof content === "string") {
-        return content;
+        return truncateCanonicalChatText(content, MAX_CANONICAL_CHAT_TEXT_CHARACTERS);
     }
     if (Array.isArray(content)) {
-        return content
-            .map((item) => {
-                if (typeof item === "string") {
-                    return item;
-                }
-                if (!item || typeof item !== "object") {
-                    return "";
-                }
-                const block = item as Record<string, unknown>;
-                if (typeof block.text === "string") {
-                    return block.text;
-                }
-                return ["image", "image_url", "input_image"].includes(String(block.type))
-                    ? "[image]"
-                    : "";
-            })
-            .filter(Boolean)
-            .join("\n\n");
+        return truncateCanonicalChatText(
+            content
+                .map((item) => {
+                    if (typeof item === "string") {
+                        return item;
+                    }
+                    if (!item || typeof item !== "object") {
+                        return "";
+                    }
+                    const block = item as Record<string, unknown>;
+                    if (typeof block.text === "string") {
+                        return block.text;
+                    }
+                    return ["image", "image_url", "input_image"].includes(
+                        String(block.type)
+                    )
+                        ? "[image]"
+                        : "";
+                })
+                .filter(Boolean)
+                .join("\n\n"),
+            MAX_CANONICAL_CHAT_TEXT_CHARACTERS
+        );
     }
     if (content && typeof content === "object") {
         const maybe = content as Record<string, unknown>;
-        return typeof maybe.text === "string" ? maybe.text : "";
+        return typeof maybe.text === "string"
+            ? truncateCanonicalChatText(maybe.text, MAX_CANONICAL_CHAT_TEXT_CHARACTERS)
+            : "";
     }
     return "";
 }

@@ -45,6 +45,15 @@ function parseJsonFieldOrValue(value: string) {
     return parsed ?? value;
 }
 
+function heartbeatRecords(value: unknown): Record<string, unknown>[] {
+    return Array.isArray(value)
+        ? value.filter(
+              (item): item is Record<string, unknown> =>
+                  item !== null && typeof item === "object" && !Array.isArray(item)
+          )
+        : [];
+}
+
 export function compactHeartbeatData(key: string, data: unknown): unknown {
     if (!data || typeof data !== "object" || Array.isArray(data)) {
         return null;
@@ -55,17 +64,14 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
             return {
                 checkedAt: value.checkedAt,
                 isOk: value.isOk,
-                latest: Array.isArray(value.latest)
-                    ? value.latest.map((snapshot) => {
-                          const item = snapshot as Record<string, unknown>;
-                          return {
-                              endTime: item.endTime,
-                              errorCount: item.errorCount,
-                              ignoredErrorCount: item.ignoredErrorCount,
-                              path: item.path,
-                          };
-                      })
-                    : [],
+                latest: heartbeatRecords(value.latest).map((item) => {
+                    return {
+                        endTime: item.endTime,
+                        errorCount: item.errorCount,
+                        ignoredErrorCount: item.ignoredErrorCount,
+                        path: item.path,
+                    };
+                }),
                 stale: value.stale,
             };
         }
@@ -114,17 +120,14 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
                     sources: attentionSources,
                 },
                 checkedAt: value.checkedAt,
-                databases: Array.isArray(value.databases)
-                    ? value.databases.map((database) => {
-                          const item = database as Record<string, unknown>;
-                          return {
-                              cacheHitRatio: item.cache_hit_ratio,
-                              name: item.datname,
-                              connections: item.numbackends,
-                              sizeBytes: item.size_bytes,
-                          };
-                      })
-                    : [],
+                databases: heartbeatRecords(value.databases).map((item) => {
+                    return {
+                        cacheHitRatio: item.cache_hit_ratio,
+                        name: item.datname,
+                        connections: item.numbackends,
+                        sizeBytes: item.size_bytes,
+                    };
+                }),
                 maintenance: overview.maintenance,
                 overview,
                 sqlite: {
@@ -158,18 +161,15 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
         case "docker.summary": {
             return {
                 checkedAt: value.checkedAt,
-                containers: Array.isArray(value.containers)
-                    ? value.containers.map((container) => {
-                          const item = container as Record<string, unknown>;
-                          return {
-                              health: item.health,
-                              name: item.name,
-                              restartCount: item.restartCount,
-                              state: item.state,
-                              status: item.status,
-                          };
-                      })
-                    : [],
+                containers: heartbeatRecords(value.containers).map((item) => {
+                    return {
+                        health: item.health,
+                        name: item.name,
+                        restartCount: item.restartCount,
+                        state: item.state,
+                        status: item.status,
+                    };
+                }),
                 updaterSummary: value.updaterSummary,
             };
         }
@@ -230,16 +230,13 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
                     runtimeShort: nodeService.runtimeShort,
                 },
                 security: {
-                    findings: Array.isArray(security.findings)
-                        ? security.findings.map((finding) => {
-                              const item = finding as Record<string, unknown>;
-                              return {
-                                  checkId: item.checkId,
-                                  severity: item.severity,
-                                  title: item.title,
-                              };
-                          })
-                        : [],
+                    findings: heartbeatRecords(security.findings).map((item) => {
+                        return {
+                            checkId: item.checkId,
+                            severity: item.severity,
+                            title: item.title,
+                        };
+                    }),
                     isOk: security.isOk,
                     summary: security.summary,
                 },

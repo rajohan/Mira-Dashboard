@@ -41,13 +41,13 @@ describe("Dashboard readiness contract", () => {
             status: "isReady",
         });
         expect(ready.checks.release).toEqual({
-            backendCommit: "aaaaaaaa",
-            frontendCommit: "aaaaaaaa",
             manifestFormatVersion: 2,
             ready: true,
             source: "manifest",
         });
         expect("commitSha" in ready.checks.release).toBe(false);
+        expect("backendCommit" in ready.checks.release).toBe(false);
+        expect("frontendCommit" in ready.checks.release).toBe(false);
         expect("schema" in ready.checks.release).toBe(false);
 
         const baseline = readySignals();

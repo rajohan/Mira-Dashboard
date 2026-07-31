@@ -375,9 +375,14 @@ describe("Mira Dashboard backend integration", () => {
         });
         expect(liveHead).toEqual({ body: undefined, status: 200 });
 
-        const ready = await unauthenticatedApi<{ status: string }>("/api/health/ready");
+        const ready = await unauthenticatedApi<{
+            checks: { release: Record<string, unknown> };
+            status: string;
+        }>("/api/health/ready");
         expect(ready.status).toBe(503);
         expect(ready.body.status).toBe("notReady");
+        expect(ready.body.checks.release).not.toHaveProperty("backendCommit");
+        expect(ready.body.checks.release).not.toHaveProperty("frontendCommit");
         const readyHead = await unauthenticatedApi<undefined>("/api/health/ready", {
             method: "HEAD",
         });

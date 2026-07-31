@@ -27,7 +27,7 @@ export function Button({
             ref={ref}
             className={cn(
                 "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors",
-                "cursor-pointer outline-none",
+                "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-primary-900",
                 {
                     "bg-accent-500 text-white hover:bg-accent-600 active:bg-accent-700 data-active:bg-accent-700 data-hover:bg-accent-600":
                         variant === "primary",

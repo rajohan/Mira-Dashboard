@@ -251,18 +251,30 @@ TARGET_SHA="$(jq --raw-output '.previous.commitSha // empty' <<<"$STATUS")"
 
 ready_for_commit() {
   local expected="${1:0:8}"
+  local current_release
+  local current_commit
   local response
   for attempt in {1..30}; do
+    current_release="$(
+      realpath --canonicalize-existing "$RELEASES_ROOT/current" 2>/dev/null || true
+    )"
+    current_commit="$(
+      jq --exit-status --raw-output \
+        '.commitSha | select(type == "string" and length == 40)' \
+        "$current_release/release-manifest.json" 2>/dev/null || true
+    )"
+    [[ "$current_commit" == "$expected"* ]] || {
+      sleep 1
+      continue
+    }
     response="$(
       curl --fail --silent --show-error \
         --connect-timeout 2 --max-time 5 \
         "http://127.0.0.1:${DASHBOARD_PORT:-3100}/api/health/ready" || true
     )"
-    if jq --exit-status --arg expected "$expected" \
+    if jq --exit-status \
       '.status == "isReady"
        and .checks.release.ready == true
-       and .checks.release.backendCommit == $expected
-       and .checks.release.frontendCommit == $expected
        and .checks.worker.ready == true' <<<"$response" >/dev/null; then
       return 0
     fi

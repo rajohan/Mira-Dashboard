@@ -3,7 +3,12 @@ import {
     extractCanonicalChatImages,
     mergeCanonicalChatImages,
 } from "../chatCanonicalMessage";
-import { stableCanonicalChatStringify } from "../chatCanonicalUtilities";
+import {
+    boundCanonicalChatToolValue,
+    MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
+    stableCanonicalChatStringify,
+    truncateCanonicalChatText,
+} from "../chatCanonicalUtilities";
 import {
     argumentDetail,
     asRecord,
@@ -67,7 +72,9 @@ export function openClawToolMessage(
         stringValue(data.toolCallId) ||
         stringValue(data.tool_call_id) ||
         stringValue(data.callId);
-    const arguments_ = data.args ?? data.arguments ?? data.input;
+    const arguments_ = boundCanonicalChatToolValue(
+        data.args ?? data.arguments ?? data.input
+    );
     const result = data.result ?? data.output ?? data.content ?? data.text ?? data.error;
     const resultRecord = asRecord(result);
     const phase = stringValue(data.phase) || "";
@@ -105,7 +112,10 @@ export function openClawToolMessage(
         runId,
         timestamp,
     });
-    const resultContent = resultMessage.text || runtimeText(result);
+    const resultContent = truncateCanonicalChatText(
+        resultMessage.text || runtimeText(result),
+        MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+    );
     const resultImages = mergeCanonicalChatImages(
         resultMessage.images?.length
             ? resultMessage.images

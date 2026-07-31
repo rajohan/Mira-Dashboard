@@ -478,14 +478,15 @@ function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
  * @returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings.
  */
 function toTimestamp(value: unknown): number | undefined {
+    let timestamp = Number.NaN;
     if (typeof value === "number" && Number.isFinite(value)) {
-        return value;
+        timestamp = value;
+    } else if (typeof value === "string" && value.trim().length > 0) {
+        timestamp = Date.parse(value);
     }
-    if (typeof value === "string" && value.trim().length > 0) {
-        const parsed = Date.parse(value);
-        return Number.isFinite(parsed) ? parsed : undefined;
-    }
-    return undefined;
+    return Number.isFinite(timestamp) && Math.abs(timestamp) <= 8_640_000_000_000_000
+        ? timestamp
+        : undefined;
 }
 
 /**
@@ -1583,7 +1584,7 @@ function applyGatewaySessionStatus(
 
     const updatedAt = toTimestamp(session.updatedAt);
     if (
-        updatedAt &&
+        updatedAt !== undefined &&
         (!status.lastActivity || updatedAt > Date.parse(status.lastActivity))
     ) {
         status.lastActivity = timestampToIso(updatedAt);

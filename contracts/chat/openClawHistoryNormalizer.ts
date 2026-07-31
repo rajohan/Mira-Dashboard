@@ -15,7 +15,11 @@ import {
     mergeCanonicalChatAttachments,
     normalizeCanonicalChatText,
 } from "../chatCanonicalMessage";
-import { canonicalIsoString } from "../chatCanonicalUtilities";
+import {
+    canonicalIsoString,
+    MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
+    truncateCanonicalChatText,
+} from "../chatCanonicalUtilities";
 
 const REMOTE_MEDIA_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -374,7 +378,10 @@ function toolResult(
     return {
         id: toolCallId,
         name: toolName,
-        content: normalizeCanonicalChatText(content),
+        content: truncateCanonicalChatText(
+            normalizeCanonicalChatText(content),
+            MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+        ),
         isError: typeof message.isError === "boolean" ? message.isError : undefined,
         images: extractCanonicalChatImages(content),
     };

@@ -33,8 +33,25 @@ function mergeWithPoolData(
     pools: DatabaseOverviewResponse["pgbouncerPools"],
     stats: DatabaseOverviewResponse["pgbouncerStats"]
 ): DatabaseRow[] {
-    const poolMap = new Map<string, DatabaseOverviewResponse["pgbouncerPools"][number]>();
-    for (const pool of pools) poolMap.set(pool.database, pool);
+    const poolMap = new Map<
+        string,
+        Pick<
+            DatabaseRow,
+            "cl_active" | "cl_waiting" | "sv_active" | "sv_idle" | "sv_used"
+        >
+    >();
+    for (const pool of pools) {
+        const previous = poolMap.get(pool.database);
+        poolMap.set(pool.database, {
+            cl_active: String(Number(previous?.cl_active ?? 0) + Number(pool.cl_active)),
+            cl_waiting: String(
+                Number(previous?.cl_waiting ?? 0) + Number(pool.cl_waiting)
+            ),
+            sv_active: String(Number(previous?.sv_active ?? 0) + Number(pool.sv_active)),
+            sv_idle: String(Number(previous?.sv_idle ?? 0) + Number(pool.sv_idle)),
+            sv_used: String(Number(previous?.sv_used ?? 0) + Number(pool.sv_used)),
+        });
+    }
 
     const statsMap = new Map<
         string,

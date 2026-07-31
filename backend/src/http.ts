@@ -264,10 +264,19 @@ export function isSecureRequest(request: Request, server: Server<unknown>): bool
     );
 }
 
+function shouldUseSecureCookies(
+    request: Request,
+    server: Server<unknown>,
+    environment = process.env.NODE_ENV
+): boolean {
+    return environment === "production" || isSecureRequest(request, server);
+}
+
 export function sessionCookie(
     request: Request,
     server: Server<unknown>,
-    sessionId: string
+    sessionId: string,
+    environment = process.env.NODE_ENV
 ): string {
     const cookieParts = [
         `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}`,
@@ -276,13 +285,17 @@ export function sessionCookie(
         "SameSite=Strict",
         `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
     ];
-    if (isSecureRequest(request, server)) {
+    if (shouldUseSecureCookies(request, server, environment)) {
         cookieParts.push("Secure");
     }
     return cookieParts.join("; ");
 }
 
-export function clearSessionCookie(request: Request, server: Server<unknown>): string {
+export function clearSessionCookie(
+    request: Request,
+    server: Server<unknown>,
+    environment = process.env.NODE_ENV
+): string {
     const cookieParts = [
         `${SESSION_COOKIE}=`,
         "Path=/",
@@ -290,7 +303,7 @@ export function clearSessionCookie(request: Request, server: Server<unknown>): s
         "SameSite=Strict",
         "Max-Age=0",
     ];
-    if (isSecureRequest(request, server)) {
+    if (shouldUseSecureCookies(request, server, environment)) {
         cookieParts.push("Secure");
     }
     return cookieParts.join("; ");
@@ -299,7 +312,8 @@ export function clearSessionCookie(request: Request, server: Server<unknown>): s
 export function pendingLoginCookie(
     request: Request,
     server: Server<unknown>,
-    pendingLogin: string
+    pendingLogin: string,
+    environment = process.env.NODE_ENV
 ): string {
     const cookieParts = [
         `${PENDING_LOGIN_COOKIE}=${encodeURIComponent(pendingLogin)}`,
@@ -308,7 +322,7 @@ export function pendingLoginCookie(
         "SameSite=Strict",
         `Max-Age=${Math.floor(PENDING_LOGIN_TTL_MS / 1000)}`,
     ];
-    if (isSecureRequest(request, server)) {
+    if (shouldUseSecureCookies(request, server, environment)) {
         cookieParts.push("Secure");
     }
     return cookieParts.join("; ");
@@ -316,7 +330,8 @@ export function pendingLoginCookie(
 
 export function clearPendingLoginCookie(
     request: Request,
-    server: Server<unknown>
+    server: Server<unknown>,
+    environment = process.env.NODE_ENV
 ): string {
     const cookieParts = [
         `${PENDING_LOGIN_COOKIE}=`,
@@ -325,7 +340,7 @@ export function clearPendingLoginCookie(
         "SameSite=Strict",
         "Max-Age=0",
     ];
-    if (isSecureRequest(request, server)) {
+    if (shouldUseSecureCookies(request, server, environment)) {
         cookieParts.push("Secure");
     }
     return cookieParts.join("; ");

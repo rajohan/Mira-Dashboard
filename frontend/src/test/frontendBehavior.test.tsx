@@ -45,6 +45,7 @@ import {
 import {
     logsCollection,
     preloadLogsCollection,
+    trimRetainedLiveLogs,
     writeLogFromWebSocket,
 } from "../collections/logs";
 import {
@@ -492,8 +493,6 @@ function dashboardDiagnostics(
             },
             frontend: { ready: true },
             release: {
-                backendCommit,
-                frontendCommit,
                 ready: true,
                 source: "manifest",
             },
@@ -3460,6 +3459,27 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
+    it("bounds the retained live log collection", async () => {
+        await logsCollection.preload();
+        const existingKeys = Array.from(logsCollection, ([key]) => key);
+        logsCollection.utils.writeDelete(existingKeys);
+        try {
+            for (let index = 0; index < 5; index += 1) {
+                writeLogFromWebSocket(`live log ${index}`, String(index));
+            }
+            trimRetainedLiveLogs(3);
+            expect(logsCollection.size).toBe(3);
+            expect(Array.from(logsCollection, ([, log]) => log.msg)).not.toContain(
+                "live log 0"
+            );
+            expect(Array.from(logsCollection, ([, log]) => log.msg)).toContain(
+                "live log 4"
+            );
+        } finally {
+            logsCollection.utils.writeDelete(Array.from(logsCollection, ([key]) => key));
+        }
+    });
+
     it("fetches log, file, job, backup, and pull request APIs through dashboard hooks", async () => {
         const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
             return Promise.try(() => {
@@ -4672,6 +4692,13 @@ describe("Mira Dashboard frontend behavior", () => {
                     return Response.json({ isOk: true });
                 }
 
+                if (
+                    url === "/api/cron/jobs/victim%2Fdelete%3F/run" &&
+                    method === "POST"
+                ) {
+                    return Response.json({ isOk: true });
+                }
+
                 if (url === "/api/cron/jobs/cron-1/delete" && method === "POST") {
                     return Response.json({ isOk: true });
                 }
@@ -4706,6 +4733,7 @@ describe("Mira Dashboard frontend behavior", () => {
 
         const runCron = renderHookWithQueryClient(() => useRunCronJobNow());
         await runCron.result.current.mutateAsync({ id: "cron-1" });
+        await runCron.result.current.mutateAsync({ id: "victim/delete?" });
 
         const deleteCron = renderHookWithQueryClient(() => useDeleteCronJob());
         await deleteCron.result.current.mutateAsync({ id: "cron-1" });
@@ -6186,7 +6214,10 @@ describe("Mira Dashboard frontend behavior", () => {
             toolResult: { id: "tool-1", name: "exec", content: "done" },
         });
         expect(messageIdentity(toolResult)).toContain("tool-result::tool-1::exec");
-        expect(messageDeleteKey(toolResult)).toContain("tool-result::tool-1::exec");
+        expect(messageDeleteKey(toolResult)).toStartWith(
+            "tool::2026-06-23T08:00:00.000Z::no-run::v2:"
+        );
+        expect(messageDeleteKey(toolResult)).not.toContain("done");
 
         const textToolMessage = chatMessage({
             role: "assistant",
@@ -6194,7 +6225,8 @@ describe("Mira Dashboard frontend behavior", () => {
             timestamp: "2026-06-23T08:00:01.000Z",
             toolCalls: [{ id: "tool-a", name: "exec" }],
         });
-        expect(messageDeleteKey(textToolMessage)).toContain("tool-a");
+        expect(messageDeleteKey(textToolMessage)).not.toContain("Checking");
+        expect(messageDeleteKey(textToolMessage)).not.toContain("tool-a");
         expect(
             messageDeleteKey({
                 ...textToolMessage,
@@ -6452,7 +6484,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
     });
 
-    it("keeps stored delete keys compatible while scoping runtime rows", () => {
+    it("stores opaque delete keys while scoping runtime rows", () => {
         const existingHistoryMessage = chatMessage({
             role: "assistant",
             runId: "run-1",
@@ -6460,15 +6492,17 @@ describe("Mira Dashboard frontend behavior", () => {
             timestamp: "2026-06-23T08:00:00.000Z",
         });
 
-        expect(messageDeleteKey(existingHistoryMessage)).toBe(
-            "assistant::2026-06-23T08:00:00.000Z::run-1::answer"
+        const historyKey = messageDeleteKey(existingHistoryMessage);
+        const runtimeKey = messageDeleteKey({
+            ...existingHistoryMessage,
+            runtimeKey: "runtime-assistant",
+        });
+        expect(historyKey).toStartWith("assistant::2026-06-23T08:00:00.000Z::run-1::v2:");
+        expect(runtimeKey).toStartWith(
+            "assistant::2026-06-23T08:00:00.000Z::run-1::runtime-assistant::v2:"
         );
-        expect(
-            messageDeleteKey({
-                ...existingHistoryMessage,
-                runtimeKey: "runtime-assistant",
-            })
-        ).toBe("assistant::2026-06-23T08:00:00.000Z::run-1::runtime-assistant::answer");
+        expect(historyKey).not.toContain("answer");
+        expect(runtimeKey).not.toContain("answer");
     });
 
     it("rejects same-origin API images outside canonical media paths", () => {
@@ -6571,13 +6605,27 @@ describe("Mira Dashboard frontend behavior", () => {
                 type: "image_url",
             })
         ).toBe("/api/media?path=%2Ftmp%2Furl-only-logo.svg&preview=image");
+        const onePixelPng =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl4sAAAAASUVORK5CYII=";
         expect(
             chatImageUrl({
-                data: "/9j/4AAQSkZJRgABAQAAAQABAAD",
-                mimeType: "image/jpeg",
+                data: onePixelPng,
+                mimeType: "image/png",
                 type: "image",
             })
-        ).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD");
+        ).toBe(`data:image/png;base64,${onePixelPng}`);
+        const oversizedPngHeader = new Uint8Array(24);
+        oversizedPngHeader.set([137, 80, 78, 71], 0);
+        oversizedPngHeader.set([0, 0, 78, 32], 16);
+        oversizedPngHeader.set([0, 0, 0, 1], 20);
+        const oversizedPngData = btoa(String.fromCodePoint(...oversizedPngHeader));
+        expect(
+            chatImageUrl({
+                data: oversizedPngData,
+                mimeType: "image/png",
+                type: "image",
+            })
+        ).toBeUndefined();
         expect(extractImages([managedImage])).toEqual([managedImage]);
         expect(normalizeText([managedImage])).toBe("[image]");
         expect(attachmentKind("image/png")).toBe("image");

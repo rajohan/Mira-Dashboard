@@ -421,20 +421,32 @@ async function queryAllUserDatabases<T extends object>(
  * @returns current torrent counts for Comet and Bitmagnet.
  */
 async function getTorrentCounts() {
-    const [cometOutput, bitmagnetOutput] = await Promise.all([
+    const [cometResult, bitmagnetResult] = await Promise.allSettled([
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet"),
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "bitmagnet"),
     ]);
-    const cometCount = stringFallback(
-        parseTable<{ count: string }>(cometOutput)[0]?.count,
-        "0"
-    );
-    const bitmagnetCount = stringFallback(
-        parseTable<{ count: string }>(bitmagnetOutput)[0]?.count,
-        "0"
-    );
+    const countFromResult = (result: PromiseSettledResult<string>) =>
+        result.status === "fulfilled"
+            ? numberFrom(
+                  stringFallback(
+                      parseTable<{ count: string }>(result.value)[0]?.count,
+                      "0"
+                  )
+              )
+            : 0;
 
-    return { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
+    return {
+        comet: countFromResult(cometResult),
+        bitmagnet: countFromResult(bitmagnetResult),
+    };
+}
+
+function isHighDeadTupleRow(table: DeadTupleRow): boolean {
+    return (
+        numberFrom(table.physical_bytes) >= HIGH_DEAD_TUPLE_MINIMUM_BYTES &&
+        numberFrom(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
+        numberFrom(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
+    );
 }
 
 /**
@@ -528,7 +540,11 @@ export async function getDatabaseOverview(): Promise<DatabaseOverviewResponse> {
         ORDER BY estimates.n_dead_tup DESC;
     `);
     const deadTupleRows = allDeadTupleRows
-        .toSorted((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
+        .toSorted(
+            (a, b) =>
+                Number(isHighDeadTupleRow(b)) - Number(isHighDeadTupleRow(a)) ||
+                numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup)
+        )
         .slice(0, 25);
 
     // Catalog statistics keep this hourly check bounded; tuple overhead and 20% headroom
@@ -639,11 +655,8 @@ export async function getDatabaseOverview(): Promise<DatabaseOverviewResponse> {
     const slowQueryCount = topQueries.filter(
         (query) => numberFrom(query.mean_exec_time) >= SLOW_QUERY_MEAN_MS
     ).length;
-    const highDeadTupleTableCount = allDeadTupleRows.filter(
-        (table) =>
-            numberFrom(table.physical_bytes) >= HIGH_DEAD_TUPLE_MINIMUM_BYTES &&
-            numberFrom(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
-            numberFrom(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
+    const highDeadTupleTableCount = allDeadTupleRows.filter((row) =>
+        isHighDeadTupleRow(row)
     ).length;
     const maintenanceHintCount =
         slowQueryCount + highDeadTupleTableCount + (requiresBloatReview ? 1 : 0);

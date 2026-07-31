@@ -11,6 +11,7 @@ import {
 } from "../../../contracts/openClawConfig.ts";
 import gateway from "../gateway.ts";
 import { json } from "../http.ts";
+import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
 import { objectFallback, stringFallback } from "../lib/values.ts";
 import {
     type ParametersRequest,
@@ -33,6 +34,8 @@ interface ConfigGetResponse {
     hash?: string;
     parsed?: Record<string, unknown>;
 }
+
+const MAX_SKILL_MANIFEST_BYTES = 256 * 1024;
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -91,8 +94,23 @@ function resolveOpenClawHome(): string | undefined {
 }
 
 async function readSkillDescription(skillPath: string): Promise<string | undefined> {
+    let file: Awaited<ReturnType<typeof openReadNoFollowNonblockingGuarded>> | undefined;
     try {
-        const content = await Bun.file(path.join(skillPath, "SKILL.md")).text();
+        file = await openReadNoFollowNonblockingGuarded(
+            guardedPath(path.join(skillPath, "SKILL.md"))
+        );
+        const stat = await file.stat();
+        if (
+            !stat.isFile() ||
+            stat.nlink !== 1 ||
+            stat.size <= 0 ||
+            stat.size > MAX_SKILL_MANIFEST_BYTES
+        ) {
+            return undefined;
+        }
+        const buffer = Buffer.alloc(stat.size);
+        const { bytesRead } = await file.read(buffer, 0, stat.size, 0);
+        const content = buffer.subarray(0, bytesRead).toString("utf8");
         const description = content.match(/^description:\s*(.+)$/m)?.[1];
         if (description) {
             return description.replaceAll(/^['"]|['"]$/g, "");
@@ -105,6 +123,23 @@ async function readSkillDescription(skillPath: string): Promise<string | undefin
             ?.trim();
     } catch {
         return undefined;
+    } finally {
+        await file?.close();
+    }
+}
+
+function isBoundedSkillManifest(skillPath: string): boolean {
+    try {
+        const stat = fs.lstatSync(path.join(skillPath, "SKILL.md"));
+        return (
+            stat.isFile() &&
+            !stat.isSymbolicLink() &&
+            stat.nlink === 1 &&
+            stat.size > 0 &&
+            stat.size <= MAX_SKILL_MANIFEST_BYTES
+        );
+    } catch {
+        return false;
     }
 }
 
@@ -114,7 +149,7 @@ function collectSkillDirectories(root: string): string[] {
             .readdirSync(root, { withFileTypes: true })
             .filter((entry) => entry.isDirectory())
             .map((entry) => path.join(root, entry.name))
-            .filter((skillPath) => fs.existsSync(path.join(skillPath, "SKILL.md")));
+            .filter((directory) => isBoundedSkillManifest(directory));
     } catch {
         return [];
     }

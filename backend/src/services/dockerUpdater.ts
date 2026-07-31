@@ -3,7 +3,6 @@ import path from "node:path";
 
 import { YAML } from "bun";
 
-import type { ScheduledJob } from "../../../contracts/jobs.ts";
 import { database, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
@@ -87,15 +86,54 @@ export function isNonblockingRegistrationFailure(step: DockerUpdaterStepResult):
 }
 
 function getDockerComposeWrapper(): string {
-    const dockerRoot = nonEmptyEnvironmentFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+    const dockerRoot = getDockerRoot();
     return nonEmptyEnvironmentFallback(
         "MIRA_DOCKER_COMPOSE_WRAPPER",
         `${dockerRoot}/bin/docker-compose-doppler`
     );
 }
 
+function getDockerRoot(): string {
+    return nonEmptyEnvironmentFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+}
+
 function getDockerAppsRoot(): string {
     return nonEmptyEnvironmentFallback("MIRA_DOCKER_APPS_ROOT", "/opt/docker/apps");
+}
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+    const relative = path.relative(rootPath, candidatePath);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function canonicalDockerRoots(): string[] {
+    return [...new Set([getDockerAppsRoot(), getDockerRoot()])]
+        .map((root) => {
+            try {
+                const canonicalRoot = fs.realpathSync(root);
+                return fs.statSync(canonicalRoot).isDirectory()
+                    ? canonicalRoot
+                    : undefined;
+            } catch {
+                return;
+            }
+        })
+        .filter((root): root is string => root !== undefined);
+}
+
+function managedComposePath(composePath: string): string {
+    const absolutePath = path.resolve(composePath);
+    const stat = fs.lstatSync(absolutePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+        throw new TypeError("Managed compose paths must be single-link regular files");
+    }
+    const canonicalPath = fs.realpathSync(absolutePath);
+    if (!canonicalDockerRoots().some((root) => isPathWithinRoot(canonicalPath, root))) {
+        throw new TypeError(
+            "Managed compose path must stay within a configured Docker root"
+        );
+    }
+    return canonicalPath;
 }
 
 type ComposeEnvironment = Record<string, string>;
@@ -530,18 +568,21 @@ function composeFileArguments(composePaths: string[]): string[] {
     return composePaths.flatMap((composePath) => ["-f", composePath]);
 }
 
-function getComposeCommand(configuredComposePath: string, serviceName: string) {
-    const dockerRoot = nonEmptyEnvironmentFallback("MIRA_DOCKER_ROOT", "/opt/docker");
+function getComposeCommand(
+    configuredComposePath: string,
+    serviceName: string,
+    verifiedComposePaths?: string[]
+) {
+    const dockerRoot = getDockerRoot();
     const wrapper = getDockerComposeWrapper();
-    const projectComposePath = composeCommandPath(configuredComposePath);
-    const isIncludeDefaultOverrides = isParentComposePath(
-        projectComposePath,
-        configuredComposePath
-    );
-    const composePaths = composeFilesForCommand(
-        projectComposePath,
-        isIncludeDefaultOverrides
-    );
+    const projectComposePath =
+        verifiedComposePaths?.[0] ?? composeCommandPath(configuredComposePath);
+    const composePaths =
+        verifiedComposePaths ??
+        composeFilesForCommand(
+            projectComposePath,
+            isParentComposePath(projectComposePath, configuredComposePath)
+        );
     const isManagedDockerPath = path
         .resolve(projectComposePath)
         .startsWith(`${path.resolve(dockerRoot)}${path.sep}`);
@@ -1643,15 +1684,12 @@ async function applyComposeUpdateUnlocked(
     }
     const composeImageField = service.compose_image_field;
     const configuredComposePath = service.compose_path;
-    const composePath = fs.realpathSync(configuredComposePath);
-    const commandComposePaths = getComposeCommandPaths(configuredComposePath);
+    const composePath = managedComposePath(configuredComposePath);
+    const commandComposePaths = getComposeCommandPaths(configuredComposePath).map(
+        (commandComposePath) => managedComposePath(commandComposePath)
+    );
     const dirtyBefore = await dirtyDockerUpdaterPaths(
-        [
-            composePath,
-            ...commandComposePaths.map((commandComposePath) =>
-                fs.realpathSync(commandComposePath)
-            ),
-        ],
+        [composePath, ...commandComposePaths],
         signal
     );
     signal?.throwIfAborted();
@@ -1687,7 +1725,7 @@ async function applyComposeUpdateUnlocked(
         );
         fs.renameSync(temporaryPath, composePath);
         for (const commandComposePath of commandComposePaths) {
-            const realCommandComposePath = fs.realpathSync(commandComposePath);
+            const realCommandComposePath = managedComposePath(commandComposePath);
             if (realCommandComposePath === composePath) continue;
             const commandImageField = composeFileServiceImageField(
                 realCommandComposePath,
@@ -1724,7 +1762,11 @@ async function applyComposeUpdateUnlocked(
             );
             fs.renameSync(commandTemporaryPath, realCommandComposePath);
         }
-        const command = getComposeCommand(configuredComposePath, service.service_name);
+        const command = getComposeCommand(
+            configuredComposePath,
+            service.service_name,
+            commandComposePaths
+        );
         isComposeStarted = true;
         const { code, stderr, stdout } = await runProcess(command.file, command.args, {
             cwd: command.cwd,
@@ -1806,7 +1848,8 @@ async function applyComposeUpdateUnlocked(
             try {
                 const command = getComposeCommand(
                     configuredComposePath,
-                    service.service_name
+                    service.service_name,
+                    commandComposePaths
                 );
                 const rollbackResult = await runProcess(command.file, command.args, {
                     cwd: command.cwd,
@@ -1846,8 +1889,15 @@ function listComposeFiles(root = getDockerAppsRoot()): string[] {
             const appRoot = path.join(root, entry.name);
             const composePath = COMPOSE_FILENAMES.map((filename) =>
                 path.join(appRoot, filename)
-            ).find((file) => fs.existsSync(file));
-            return composePath ? [composePath] : [];
+            ).find((file) => {
+                try {
+                    managedComposePath(file);
+                    return true;
+                } catch {
+                    return false;
+                }
+            });
+            return composePath ? [managedComposePath(composePath)] : [];
         });
 }
 
@@ -2744,16 +2794,6 @@ export async function runDockerUpdaterService(
     return steps;
 }
 
-function preservedTimeOfDay(
-    existing: ScheduledJob | undefined,
-    fallback: string
-): string | undefined {
-    if (!existing) {
-        return fallback;
-    }
-    return existing.timeOfDay;
-}
-
 export function registerDockerUpdaterScheduledJobs(): void {
     const job = {
         id: "docker.updater",
@@ -2816,8 +2856,8 @@ export function registerDockerUpdaterScheduledJobs(): void {
             enabled: existing?.enabled ?? true,
             scheduleType: existing?.scheduleType ?? job.scheduleType,
             intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: preservedTimeOfDay(existing, job.timeOfDay),
-            cronExpression: existing?.cronExpression ?? undefined,
+            timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
+            cronExpression: existing ? existing.cronExpression : undefined,
         });
         database.run("COMMIT");
     } catch (error) {

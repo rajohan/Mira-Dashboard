@@ -533,7 +533,7 @@ describe("shared component helpers", () => {
                     mimeType: "image/png",
                     sizeBytes: 0,
                     title: "Preview image",
-                    url: "data:image/png;base64,a",
+                    url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl4sAAAAASUVORK5CYII=",
                 }}
                 onClose={onClose}
             />
@@ -4778,7 +4778,30 @@ describe("shared component helpers", () => {
                             xact_rollback: "0",
                         },
                     ]}
-                    pools={[]}
+                    pools={[
+                        {
+                            cl_active: "2",
+                            cl_waiting: "1",
+                            database: "dashboard",
+                            maxwait: "0",
+                            pool_mode: "transaction",
+                            sv_active: "1",
+                            sv_idle: "2",
+                            sv_used: "0",
+                            user: "dashboard",
+                        },
+                        {
+                            cl_active: "3",
+                            cl_waiting: "2",
+                            database: "dashboard",
+                            maxwait: "0",
+                            pool_mode: "transaction",
+                            sv_active: "2",
+                            sv_idle: "1",
+                            sv_used: "1",
+                            user: "worker",
+                        },
+                    ]}
                     stats={[
                         {
                             avg_query_time: "1.2",
@@ -4795,6 +4818,7 @@ describe("shared component helpers", () => {
                 />
             );
             expect(screen.getAllByText("1,234,567").length).toBeGreaterThan(0);
+            expect(screen.getAllByText("5 / 3 / 3").length).toBeGreaterThan(0);
 
             rerender(<TopQueriesTable enabled={false} data={[]} />);
             expect(

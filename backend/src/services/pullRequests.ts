@@ -186,6 +186,8 @@ const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+const MAX_DASHBOARD_PULL_REQUESTS = 100;
+const MAX_PULL_REQUEST_BODY_LENGTH = 64 * 1024;
 const STACK_MERGE_POLL_INTERVAL_MS = 1000;
 const STACK_MERGE_TIMEOUT_MS = 5 * 60 * 1000;
 const STACK_MERGE_JOB_TIMEOUT_MS = STACK_MERGE_TIMEOUT_MS * 2 + 2 * 60 * 1000;
@@ -1040,6 +1042,7 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
 
     return {
         ...rest,
+        body: rest.body?.slice(0, MAX_PULL_REQUEST_BODY_LENGTH),
         reviewerApproved: isPullRequestReviewApproved(pr),
     };
 }
@@ -1921,6 +1924,7 @@ async function listDashboardPullRequestGraphqlRows(
         : "";
     const jqParts = [
         ".data.repository.pullRequests.nodes[]",
+        `| .body = ((.body // "")[0:${MAX_PULL_REQUEST_BODY_LENGTH}])`,
         "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
     ];
     if (includeStackMetadata) {
@@ -1933,24 +1937,20 @@ async function listDashboardPullRequestGraphqlRows(
         [
             "api",
             "graphql",
-            "--paginate",
             "-F",
             `owner=${repo.owner}`,
             "-F",
             `name=${repo.name}`,
+            "-F",
+            `limit=${MAX_DASHBOARD_PULL_REQUESTS}`,
             "-f",
-            `query=query($owner: String!, $name: String!, $endCursor: String) {
+            `query=query($owner: String!, $name: String!, $limit: Int!) {
             repository(owner: $owner, name: $name) {
                 pullRequests(
-                    first: 100
-                    after: $endCursor
+                    first: $limit
                     states: OPEN
                     orderBy: { field: UPDATED_AT, direction: DESC }
                 ) {
-                    pageInfo {
-                        hasNextPage
-                        endCursor
-                    }
                     nodes {
                         number
                         title
@@ -3007,9 +3007,12 @@ function releaseCutoverShellFunctions(): string[] {
         "}",
         "readiness_matches() {",
         '  expected_commit="$1"',
+        '  current_release=$(/usr/bin/realpath --canonicalize-existing "$project_root/production/releases/current" 2>/dev/null) || return 1',
+        '  current_commit=$(/usr/bin/jq --exit-status --raw-output \'.commitSha | select(type == "string" and length == 40)\' "$current_release/release-manifest.json" 2>/dev/null) || return 1',
+        '  case "$current_commit" in "$expected_commit"*) ;; *) return 1 ;; esac',
         '  dashboard_port="$(resolve_dashboard_port)"',
         '  response=$(/usr/bin/curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "http://127.0.0.1:${dashboard_port}/api/health/ready" 2>/dev/null || true)',
-        '  printf "%s" "$response" | /usr/bin/jq --exit-status --arg expected "$expected_commit" \'.status == "isReady" and .checks.release.ready == true and .checks.release.backendCommit == $expected and .checks.release.frontendCommit == $expected and .checks.worker.ready == true\' >/dev/null 2>&1',
+        '  printf "%s" "$response" | /usr/bin/jq --exit-status \'.status == "isReady" and .checks.release.ready == true and .checks.worker.ready == true\' >/dev/null 2>&1',
         "}",
         "ready_for_commit() {",
         '  expected_commit="$1"',
@@ -4265,6 +4268,7 @@ export async function approvePullRequest(
                         : getPullRequest(pullRequest.number, options.signal)
                 )
             );
+            const trustedStackAuthors = resolvePullRequestPreviewAllowedAuthors();
             for (const [index, currentPullRequest] of currentPullRequests.entries()) {
                 const stackPullRequest = stackPullRequests[index];
                 const expectedHead = expectedStackHeads[index];
@@ -4273,6 +4277,19 @@ export async function approvePullRequest(
                     throw Object.assign(
                         new Error(
                             `PR #${currentPullRequest.number} changed after the Delivery confirmation. Refresh before merging the stack`
+                        ),
+                        { statusCode: 409 }
+                    );
+                }
+                if (
+                    !isPullRequestPreviewAuthorAllowed(
+                        currentPullRequest.author?.login,
+                        trustedStackAuthors
+                    )
+                ) {
+                    throw Object.assign(
+                        new Error(
+                            `PR #${currentPullRequest.number} is not authored by a trusted stack contributor and cannot be merged through the stack endpoint`
                         ),
                         { statusCode: 409 }
                     );

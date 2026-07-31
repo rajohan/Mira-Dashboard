@@ -15,6 +15,7 @@ import {
     type ParametersRequest,
     readApiJsonOrError,
     routeErrorResponse,
+    routeFailureResponse,
 } from "../routeSupport.ts";
 import { assertJobDisableIntentIsCurrent } from "../services/jobDisableIntent.ts";
 import {
@@ -29,6 +30,33 @@ import {
 import { withCronTaskLinks } from "../services/taskAutomation.ts";
 
 const logger = createStructuredLogger("cron");
+const MAX_CRON_JOB_ID_LENGTH = 512;
+
+function hasUnsafeCronJobIdCharacter(id: string): boolean {
+    if (/[/?#\\]/u.test(id)) {
+        return true;
+    }
+    for (const character of id) {
+        const codePoint = character.codePointAt(0);
+        if (codePoint !== undefined && (codePoint <= 31 || codePoint === 127)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function cronJobId(request: ParametersRequest<"id">): string | Response {
+    const id = request.params.id.trim();
+    if (!id || id.length > MAX_CRON_JOB_ID_LENGTH || hasUnsafeCronJobIdCharacter(id)) {
+        return routeFailureResponse({
+            code: "invalid_cron_job_id",
+            context: "cron.job-id",
+            message: "Invalid cron job ID",
+            status: 400,
+        });
+    }
+    return id;
+}
 
 function cronError(error: unknown, fallback: string): Response {
     return routeErrorResponse(undefined, error, {
@@ -81,19 +109,21 @@ export const cronRoutes = {
 
     "/api/cron/jobs/:id/delete": {
         POST: async (request: ParametersRequest<"id">) => {
+            const jobId = cronJobId(request);
+            if (jobId instanceof Response) return jobId;
             let previousIntent: JobDisableIntent | undefined;
             try {
-                previousIntent = getOpenClawCronDisableIntent(request.params.id);
-                setOpenClawCronDisableIntent(request.params.id, undefined);
+                previousIntent = getOpenClawCronDisableIntent(jobId);
+                setOpenClawCronDisableIntent(jobId, undefined);
                 const payload = await runCronMutation(() =>
                     gateway.request("cron.remove", {
-                        jobId: request.params.id,
+                        jobId,
                     })
                 );
                 return json({ isOk: true, payload } satisfies CronMutationResponse);
             } catch (error) {
                 try {
-                    setOpenClawCronDisableIntent(request.params.id, previousIntent);
+                    setOpenClawCronDisableIntent(jobId, previousIntent);
                 } catch (rollbackError) {
                     logger.error("cron.deleted_metadata_restore_failed", {
                         error: rollbackError,
@@ -106,10 +136,12 @@ export const cronRoutes = {
 
     "/api/cron/jobs/:id/run": {
         POST: async (request: ParametersRequest<"id">) => {
+            const jobId = cronJobId(request);
+            if (jobId instanceof Response) return jobId;
             try {
                 const payload = await runCronMutation(() =>
                     gateway.request("cron.run", {
-                        jobId: request.params.id,
+                        jobId,
                     })
                 );
                 return json({ isOk: true, payload } satisfies CronMutationResponse);
@@ -121,6 +153,8 @@ export const cronRoutes = {
 
     "/api/cron/jobs/:id/toggle": {
         POST: async (request: ParametersRequest<"id">) => {
+            const jobId = cronJobId(request);
+            if (jobId instanceof Response) return jobId;
             try {
                 const body = await readApiJsonOrError(request, parseCronToggleRequest, {
                     code: "invalid_cron_toggle",
@@ -132,7 +166,7 @@ export const cronRoutes = {
                 if (disableIntent) assertJobDisableIntentIsCurrent(disableIntent);
                 await runCronMutation(() =>
                     updateCronWithDisableIntent(
-                        request.params.id,
+                        jobId,
                         { enabled: body.enabled },
                         disableIntent
                     )
@@ -146,6 +180,8 @@ export const cronRoutes = {
 
     "/api/cron/jobs/:id/update": {
         POST: async (request: ParametersRequest<"id">) => {
+            const jobId = cronJobId(request);
+            if (jobId instanceof Response) return jobId;
             try {
                 const body = await readApiJsonOrError(request, parseCronUpdateRequest, {
                     code: "invalid_cron_update",
@@ -156,10 +192,10 @@ export const cronRoutes = {
                 const cronPatch = body.patch;
                 await runCronMutation(
                     cronPatch.enabled === true
-                        ? () => updateCronWithDisableIntent(request.params.id, cronPatch)
+                        ? () => updateCronWithDisableIntent(jobId, cronPatch)
                         : () =>
                               gateway.request("cron.update", {
-                                  jobId: request.params.id,
+                                  jobId,
                                   patch: cronPatch,
                               })
                 );

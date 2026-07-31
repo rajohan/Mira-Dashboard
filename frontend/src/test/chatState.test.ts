@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
+import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../../contracts/chatCanonicalUtilities";
 import {
     acknowledgeChatRun,
     addOptimisticChatRun,
@@ -7,6 +8,7 @@ import {
     clearChatRun,
     clearCompletedChatRuns,
     createChatRuntimeState,
+    MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN,
     reduceChatRuntime,
 } from "../components/features/chat/domain/chatState";
 
@@ -813,6 +815,56 @@ describe("chat runtime state", () => {
             diagnostics?.map((entry) => entry.message.toolCalls?.[0]?.toolResult?.content)
         ).toEqual(["first", "second"]);
         expect(new Set(diagnostics?.map((entry) => entry.key)).size).toBe(2);
+    });
+
+    it("bounds retained runtime diagnostics and provider-controlled tool values", () => {
+        const events = Array.from(
+            { length: MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN + 5 },
+            (_, index) =>
+                event(index + 1, {
+                    kind: "tool",
+                    message: {
+                        content: "",
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                arguments: {
+                                    input:
+                                        index === MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN + 4
+                                            ? "x".repeat(300_000)
+                                            : String(index),
+                                },
+                                id: `tool-${index}`,
+                                name: "exec",
+                                toolResult: {
+                                    content:
+                                        index === MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN + 4
+                                            ? "x".repeat(
+                                                  MAX_CANONICAL_TOOL_RESULT_CHARACTERS +
+                                                      100
+                                              )
+                                            : "done",
+                                    id: `tool-${index}`,
+                                    name: "exec",
+                                },
+                            },
+                        ],
+                    },
+                    runId: "bounded-run",
+                    toolKey: `tool:tool-${index}`,
+                })
+        );
+
+        const state = reduceChatRuntime(createChatRuntimeState(), events);
+        const diagnostics = state.sessions[SESSION]?.runs["bounded-run"]?.diagnostics;
+        expect(diagnostics).toHaveLength(MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN);
+        expect(diagnostics?.[0]?.key).toBe("tool:tool-5");
+        const lastCall = diagnostics?.at(-1)?.message.toolCalls?.[0];
+        expect(lastCall?.toolResult?.content.length).toBe(
+            MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+        );
+        expect(JSON.stringify(lastCall?.arguments).length).toBeLessThan(300_000);
     });
 
     it("keeps concurrent runtime evidence but clears completed replay for a local run", () => {

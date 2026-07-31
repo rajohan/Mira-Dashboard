@@ -624,16 +624,19 @@ function secureHandler(
                         persistAuditEvent
                     );
                 }
-                const isAuditedMutationRequest = isAuditedMutation(
+                const isAuditedMutationCandidate = isAuditedMutation(
                     isApi,
                     request,
                     automationScope
                 );
                 const session =
                     !automationPrincipal &&
-                    (requiresAuthentication || isAuditedMutationRequest)
+                    (requiresAuthentication || isAuditedMutationCandidate)
                         ? authSession(request)
                         : undefined;
+                const isAuditedMutationRequest =
+                    isAuditedMutationCandidate &&
+                    (!isPublicApiRoute(request) || session !== undefined);
                 correlatedSessionId = session
                     ? hashedLogCorrelation("dashboard-session", session.sessionId)
                     : undefined;

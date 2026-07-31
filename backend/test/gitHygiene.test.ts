@@ -101,6 +101,15 @@ describe("git hygiene automation", () => {
         });
         expect(protectFromCancellation).toHaveBeenCalledTimes(1);
         expect(mutationEvents).toEqual(["protect", "commit", "push"]);
+        expect(
+            runProcessSpy.mock.calls.every(
+                ([file, , options]) =>
+                    file === "git" &&
+                    options?.env?.GIT_CONFIG_COUNT === "1" &&
+                    options.env.GIT_CONFIG_KEY_0 === "core.hooksPath" &&
+                    options.env.GIT_CONFIG_VALUE_0 === "/dev/null"
+            )
+        ).toBe(true);
         expect(calls).toEqual(
             expect.arrayContaining([
                 [

@@ -10,6 +10,8 @@ export interface LogLineEntry {
     lineId: string;
 }
 
+const MAX_CONSECUTIVE_BLANK_LOG_LINES = 2;
+
 function isParseableJsonLine(line: string): boolean {
     try {
         JSON.parse(line);
@@ -82,7 +84,7 @@ export function lineEntriesFromLogRead(
         firstSelectedIndex = nonEmptyLineIndexes[nonEmptyLineIndexes.length - lines]!;
     }
 
-    return rawLines
+    const entries = rawLines
         .slice(firstSelectedIndex)
         .map((line, index) => ({
             line,
@@ -100,4 +102,18 @@ export function lineEntriesFromLogRead(
                 )
         )
         .map((entry) => ({ line: entry.line, lineId: entry.lineId }));
+
+    if (!options.includeBlankLines) {
+        return entries;
+    }
+
+    let blankRunLength = 0;
+    return entries.filter((entry) => {
+        if (entry.line.trim()) {
+            blankRunLength = 0;
+            return true;
+        }
+        blankRunLength += 1;
+        return blankRunLength <= MAX_CONSECUTIVE_BLANK_LOG_LINES;
+    });
 }

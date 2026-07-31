@@ -67,6 +67,7 @@ export {
     useProductionCheckout,
     usePullRequestPreview,
     usePullRequests,
+    useReconcilePullRequestPreview,
     useRejectPullRequest,
     useRollbackDashboard,
     useStartPullRequestPreview,

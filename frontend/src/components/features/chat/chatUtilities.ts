@@ -782,7 +782,7 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
     if (message.runtimeKey) {
         keyParts.push(message.runtimeKey);
     }
-    keyParts.push(contentIdentity);
+    keyParts.push(`v2:${chatContentFingerprint(contentIdentity)}`);
     return keyParts.join("::");
 }
 

@@ -46,10 +46,14 @@ export function useToggleCronJob() {
             enabled: boolean;
             disableIntent?: JobDisableIntent;
         }) =>
-            apiPostParsed(`/cron/jobs/${id}/toggle`, parseCronMutationResponse, {
-                enabled,
-                disableIntent,
-            } satisfies CronToggleRequest),
+            apiPostParsed(
+                `/cron/jobs/${encodeURIComponent(id)}/toggle`,
+                parseCronMutationResponse,
+                {
+                    enabled,
+                    disableIntent,
+                } satisfies CronToggleRequest
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
             void queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -66,9 +70,13 @@ export function useUpdateCronJob() {
 
     return useMutation({
         mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
-            apiPostParsed(`/cron/jobs/${id}/update`, parseCronMutationResponse, {
-                patch,
-            } satisfies CronUpdateRequest),
+            apiPostParsed(
+                `/cron/jobs/${encodeURIComponent(id)}/update`,
+                parseCronMutationResponse,
+                {
+                    patch,
+                } satisfies CronUpdateRequest
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -84,7 +92,10 @@ export function useDeleteCronJob() {
 
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPostParsed(`/cron/jobs/${id}/delete`, parseCronMutationResponse),
+            apiPostParsed(
+                `/cron/jobs/${encodeURIComponent(id)}/delete`,
+                parseCronMutationResponse
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -100,7 +111,10 @@ export function useRunCronJobNow() {
 
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPostParsed(`/cron/jobs/${id}/run`, parseCronMutationResponse),
+            apiPostParsed(
+                `/cron/jobs/${encodeURIComponent(id)}/run`,
+                parseCronMutationResponse
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },

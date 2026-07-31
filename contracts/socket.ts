@@ -11,13 +11,16 @@ import {
 import { sessionSchema, type Session } from "./sessions";
 
 const nonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
+export const MAX_DASHBOARD_SOCKET_REQUEST_TIMEOUT_MS = 5 * 60_000;
 
 export const dashboardSocketRequestSchema = strictJsonObjectSchema({
     channel: v.optional(nonEmptyStringSchema),
     id: v.optional(nonEmptyStringSchema),
     method: v.optional(nonEmptyStringSchema),
     params: v.optional(jsonObjectSchema),
-    timeoutMs: v.optional(positiveIntegerSchema),
+    timeoutMs: v.optional(
+        v.pipe(positiveIntegerSchema, v.maxValue(MAX_DASHBOARD_SOCKET_REQUEST_TIMEOUT_MS))
+    ),
     type: v.optional(nonEmptyStringSchema),
     userActivity: v.optional(v.boolean()),
 });

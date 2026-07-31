@@ -78,12 +78,7 @@ const pullRequestListSnapshot = new CoalescedSnapshot<
     Awaited<ReturnType<typeof listDashboardPullRequests>>
 >({
     freshForMs: 15_000,
-    load: async () => {
-        const pullRequests = await listDashboardPullRequests();
-        await reconcileClosedPullRequestPreview(pullRequests);
-        pullRequestPreviewSnapshot.invalidate();
-        return pullRequests;
-    },
+    load: listDashboardPullRequests,
     name: "github.pull-requests",
     staleForMs: 120_000,
 });
@@ -262,6 +257,22 @@ export const pullRequestRoutes = {
                 }
             } catch (error) {
                 return routeError(error, "PR preview startup failed");
+            }
+        },
+    },
+    "/api/pull-requests/preview/reconcile": {
+        POST: async () => {
+            try {
+                const pullRequests = await listDashboardPullRequests();
+                await reconcileClosedPullRequestPreview(pullRequests);
+                pullRequestListSnapshot.invalidate();
+                pullRequestPreviewSnapshot.invalidate();
+                return json({
+                    isOk: true,
+                    message: "Closed pull request preview state reconciled",
+                } satisfies PullRequestActionResponse);
+            } catch (error) {
+                return routeError(error, "Pull request preview reconciliation failed");
             }
         },
     },

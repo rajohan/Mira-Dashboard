@@ -6,6 +6,7 @@ import {
     type FileEntry,
     parseFilesResponse,
 } from "../../../contracts/files";
+import { MAX_PREVIEW_SIZE } from "../components/features/files/fileConstants";
 import { messageFromError } from "../lib/errorMessage";
 import { getFileExtension, isJsonFile } from "../utils/fileUtilities";
 import { validateJsonString } from "../utils/json";
@@ -17,9 +18,6 @@ import {
     useRevealFile,
     useSaveFile,
 } from "./useFiles";
-
-/** Defines max preview size. */
-export const MAX_PREVIEW_SIZE = 100_000;
 
 export interface FileNode extends FileEntry {
     children?: FileNode[];

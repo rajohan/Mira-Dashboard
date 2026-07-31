@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, jest } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -243,6 +250,48 @@ describe("Docker updater tag patterns", () => {
                 )
                 .get()
         ).toEqual({ enabled: 1, time_of_day: "04:10" });
+    });
+
+    it("refuses compose symlinks that escape the configured Docker roots", () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_ROOT");
+        const root = createTemporaryRoot("mira-docker-updater-symlink-");
+        const appsRoot = path.join(root, "apps");
+        const appRoot = path.join(appsRoot, "unit-symlink-app");
+        const outsideRoot = path.join(root, "outside");
+        const outsideCompose = path.join(outsideRoot, "compose.yaml");
+        mkdirSync(appRoot, { recursive: true });
+        mkdirSync(outsideRoot, { recursive: true });
+        writeFileSync(
+            outsideCompose,
+            [
+                "services:",
+                "  web:",
+                "    image: nginx:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'true'",
+                "",
+            ].join("\n")
+        );
+        symlinkSync(outsideCompose, path.join(appRoot, "compose.yaml"));
+        process.env.MIRA_DOCKER_ROOT = path.join(root, "docker-root");
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+
+        const registered = registerDockerUpdaterServices();
+
+        expect(registered).toMatchObject({ isOk: true, step: "register-services" });
+        expect(JSON.parse(registered.stdout)).toMatchObject({
+            summary: { composeFiles: 0, registeredServices: 0 },
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT COUNT(*) AS count FROM docker_managed_services WHERE app_slug = 'unit-symlink-app'"
+                )
+                .get()
+        ).toEqual({ count: 0 });
+        expect(readFileSync(outsideCompose, "utf8")).toContain("nginx:1.0.0");
     });
 
     it("blocks global updater runs when service discovery cannot read the apps root", () => {

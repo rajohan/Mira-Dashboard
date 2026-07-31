@@ -2,6 +2,11 @@ import type {
     CanonicalChatEvent,
     CanonicalChatProviderMetadata,
 } from "../../../../../../contracts/chatCanonical";
+import {
+    boundCanonicalChatToolValue,
+    MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
+    truncateCanonicalChatText,
+} from "../../../../../../contracts/chatCanonicalUtilities";
 import { currentIsoString } from "../../../../utils/date";
 import {
     type ChatHistoryMessage,
@@ -21,6 +26,7 @@ export type ChatOperationPhase = "active" | "complete" | "inactive" | "retrying"
 type ChatRunContentKind = "assistant" | "thinking" | "tool" | "user";
 
 const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
+export const MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN = 200;
 
 export interface ChatRuntimeMessageEntry {
     key: string;
@@ -745,7 +751,51 @@ function mergeDiagnosticEntry(
     } else {
         next[index] = entry;
     }
-    return next;
+    return next.length <= MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN
+        ? next
+        : next.slice(-MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN);
+}
+
+function boundedDiagnosticToolResult(
+    result: ChatToolResultDisplay | undefined
+): ChatToolResultDisplay | undefined {
+    return result
+        ? {
+              ...result,
+              content: truncateCanonicalChatText(
+                  result.content,
+                  MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+              ),
+              images: mergeChatImages([], result.images),
+          }
+        : undefined;
+}
+
+function boundedRuntimeDiagnosticMessage(
+    message: ChatHistoryMessage
+): ChatHistoryMessage {
+    return {
+        ...message,
+        content: boundCanonicalChatToolValue(message.content),
+        images: mergeChatImages([], message.images),
+        text: truncateCanonicalChatText(
+            message.text,
+            MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+        ),
+        thinking: message.thinking?.slice(0, 100).map((block) => ({
+            ...block,
+            text: truncateCanonicalChatText(
+                block.text,
+                MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+            ),
+        })),
+        toolCalls: message.toolCalls?.slice(0, 100).map((call) => ({
+            ...call,
+            arguments: boundCanonicalChatToolValue(call.arguments),
+            toolResult: boundedDiagnosticToolResult(call.toolResult),
+        })),
+        toolResult: boundedDiagnosticToolResult(message.toolResult),
+    };
 }
 
 function applyDiagnosticEvent(
@@ -759,10 +809,10 @@ function applyDiagnosticEvent(
             run.diagnostics,
             key,
             event.kind,
-            {
+            boundedRuntimeDiagnosticMessage({
                 ...withRuntimeMessageProvenance(event.message, event),
                 timestamp: event.message.timestamp || event.timestamp,
-            },
+            }),
             event.sequence,
             event.sequence
         ),

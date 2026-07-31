@@ -1,8 +1,11 @@
 import type { CanonicalChatMessage } from "../chatCanonical";
 import { normalizeCanonicalChatText } from "../chatCanonicalMessage";
 import {
+    boundCanonicalChatToolValue,
     canonicalIsoString,
+    MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
     serializeCanonicalChatValue,
+    truncateCanonicalChatText,
     uniqueCanonicalChatIds,
 } from "../chatCanonicalUtilities";
 import {
@@ -48,21 +51,27 @@ export function rawString(value: unknown): string | undefined {
 
 export function runtimeText(value?: unknown): string {
     if (typeof value === "string") {
-        return value;
+        return truncateCanonicalChatText(value, MAX_CANONICAL_TOOL_RESULT_CHARACTERS);
     }
     if (Array.isArray(value)) {
         const normalized = normalizeCanonicalChatText(value);
         if (normalized) {
-            return normalized;
+            return truncateCanonicalChatText(
+                normalized,
+                MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+            );
         }
     }
     if (value === undefined || value === null) {
         return "";
     }
-    return serializeCanonicalChatValue(
-        value,
-        "[Runtime value could not be serialized]",
-        2
+    return truncateCanonicalChatText(
+        serializeCanonicalChatValue(
+            boundCanonicalChatToolValue(value),
+            "[Runtime value could not be serialized]",
+            2
+        ),
+        MAX_CANONICAL_TOOL_RESULT_CHARACTERS
     );
 }
 
