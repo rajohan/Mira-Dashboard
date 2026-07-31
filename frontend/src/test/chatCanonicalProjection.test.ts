@@ -456,6 +456,53 @@ describe("canonical chat turn projection", () => {
         ]);
     });
 
+    it("preserves a thinking-only runless steer through production structuring", () => {
+        const result = projectChatWithCanonicalShadow(
+            [
+                {
+                    content: "initial question",
+                    role: "user",
+                    text: "initial question",
+                },
+                {
+                    content: [{ text: "working through it", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working through it" }],
+                },
+                {
+                    content: "steer",
+                    role: "user",
+                    text: "steer",
+                },
+                {
+                    content: "done",
+                    isFinal: true,
+                    role: "assistant",
+                    text: "done",
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(result.comparison.matches).toBe(true);
+        expect(
+            result.canonical?.turns.flatMap((turn) =>
+                turn.entries.map((entry) => entry.kind)
+            )
+        ).toEqual(["user", "user", "thinking", "assistant"]);
+        expect(result.canonical?.projection.rows.map((row) => row.message.text)).toEqual([
+            "initial question",
+            "steer",
+            "",
+            "done",
+        ]);
+    });
+
     it("keeps a runless steer with tool-use commentary", () => {
         const turns = assembleCanonicalChatTurns(
             [

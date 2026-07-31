@@ -261,8 +261,11 @@ function completedResponseStart(
         if (hasPriorAnswer && !isGatewayRestartContinuation) {
             return groupStart;
         }
-        const hasContinuationEvidence = interveningMessages.some((candidate) =>
-            hasToolDetails(candidate)
+        const hasContinuationEvidence = interveningMessages.some(
+            (candidate) =>
+                hasToolDetails(candidate) ||
+                isThinkingOnlyMessage(candidate) ||
+                candidate.isToolUse === true
         );
         if (!hasContinuationEvidence) {
             return groupStart;
