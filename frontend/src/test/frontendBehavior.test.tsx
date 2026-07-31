@@ -6219,6 +6219,56 @@ describe("Mira Dashboard frontend behavior", () => {
         ]);
         expect(intentionalRepeatedUserMessages).toHaveLength(2);
 
+        const duplicatePersistedUserEvent = dedupeMessages([
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:00.000Z",
+            }),
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:00.000Z",
+            }),
+        ]);
+        expect(duplicatePersistedUserEvent).toHaveLength(1);
+
+        const duplicateRuntimeUserEvent = dedupeMessages([
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                runtimeKey: "user:before-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:00.000Z",
+            }),
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                runtimeKey: "user:after-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:00.000Z",
+            }),
+        ]);
+        expect(duplicateRuntimeUserEvent).toHaveLength(1);
+
+        const repeatedPersistedUserTurns = dedupeMessages([
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:00.000Z",
+            }),
+            chatMessage({
+                role: "user",
+                runId: "run-restart",
+                text: "same question",
+                timestamp: "2026-07-30T09:00:01.000Z",
+            }),
+        ]);
+        expect(repeatedPersistedUserTurns).toHaveLength(2);
+
         const oneOptimisticCopyOfRepeatedUserMessages = dedupeMessages([
             chatMessage({ role: "user", text: "same question" }),
             chatMessage({ role: "user", text: "same question" }),

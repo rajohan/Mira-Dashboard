@@ -1,0 +1,195 @@
+{
+    "deliveryFormat": "codex-separated-runtime-events",
+    "expected": {
+        "activeRunCount": 0,
+        "rows": [
+            {
+                "role": "user",
+                "text": "Investigate replay",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "user"
+            },
+            {
+                "role": "user",
+                "text": "[System] Your previous turn was interrupted by a gateway restart. Continue the previous task.",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "user"
+            },
+            {
+                "role": "user",
+                "text": "Steer after restart",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "user"
+            },
+            {
+                "role": "assistant",
+                "text": "",
+                "thinkingText": "Inspect replay state.Resume after restart.",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "thinking"
+            },
+            {
+                "role": "assistant",
+                "text": "Replay recovered.",
+                "thinkingText": "",
+                "toolNames": [],
+                "toolResults": [],
+                "type": "assistant"
+            }
+        ],
+        "runCount": 1
+    },
+    "history": [
+        {
+            "content": "Investigate replay",
+            "role": "user",
+            "runId": "codex-duplicate-before-restart",
+            "timestamp": "2026-07-30T09:30:00.100Z"
+        },
+        {
+            "content": "Investigate replay",
+            "role": "user",
+            "runId": "codex-duplicate-before-restart",
+            "timestamp": "2026-07-30T09:30:00.100Z"
+        },
+        {
+            "content": "[System] Your previous turn was interrupted by a gateway restart. Continue the previous task.",
+            "role": "user",
+            "runId": "codex-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.300Z"
+        },
+        {
+            "content": "Steer after restart",
+            "role": "user",
+            "runId": "codex-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.400Z"
+        },
+        {
+            "content": "Steer after restart",
+            "role": "user",
+            "runId": "codex-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.400Z"
+        },
+        {
+            "content": "Replay recovered.",
+            "isFinal": true,
+            "role": "assistant",
+            "runId": "codex-duplicate-after-restart",
+            "timestamp": "2026-07-30T09:30:00.600Z"
+        }
+    ],
+    "id": "codex-gpt-duplicate-user-restart",
+    "providerFormat": "codex-gpt",
+    "redaction": "synthetic",
+    "runtimeSnapshot": {
+        "completed": true,
+        "events": [
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": "Investigate replay",
+                        "role": "user"
+                    },
+                    "runId": "codex-duplicate-before-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800100
+                },
+                "runtimeRecordedAt": 1785403800100,
+                "runtimeSequence": 30,
+                "type": "event"
+            },
+            {
+                "event": "agent",
+                "payload": {
+                    "data": {
+                        "delta": "Inspect replay state."
+                    },
+                    "runId": "codex-duplicate-before-restart",
+                    "sessionKey": "agent:main:main",
+                    "stream": "reasoning",
+                    "ts": 1785403800200
+                },
+                "runtimeRecordedAt": 1785403800200,
+                "runtimeSequence": 31,
+                "type": "event"
+            },
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": "[System] Your previous turn was interrupted by a gateway restart. Continue the previous task.",
+                        "role": "user"
+                    },
+                    "runId": "codex-duplicate-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800300
+                },
+                "runtimeRecordedAt": 1785403800300,
+                "runtimeRunAliases": ["codex-duplicate-before-restart"],
+                "runtimeSequence": 32,
+                "type": "event"
+            },
+            {
+                "event": "session.message",
+                "payload": {
+                    "message": {
+                        "content": "Steer after restart",
+                        "role": "user"
+                    },
+                    "runId": "codex-duplicate-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "ts": 1785403800400
+                },
+                "runtimeRecordedAt": 1785403800400,
+                "runtimeRunAliases": ["codex-duplicate-before-restart"],
+                "runtimeSequence": 33,
+                "type": "event"
+            },
+            {
+                "event": "agent",
+                "payload": {
+                    "data": {
+                        "delta": "Resume after restart."
+                    },
+                    "runId": "codex-duplicate-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "stream": "reasoning",
+                    "ts": 1785403800500
+                },
+                "runtimeRecordedAt": 1785403800500,
+                "runtimeRunAliases": ["codex-duplicate-before-restart"],
+                "runtimeSequence": 34,
+                "type": "event"
+            },
+            {
+                "event": "chat",
+                "payload": {
+                    "message": {
+                        "content": "Replay recovered.",
+                        "role": "assistant"
+                    },
+                    "runId": "codex-duplicate-after-restart",
+                    "sessionKey": "agent:main:main",
+                    "state": "final",
+                    "ts": 1785403800600
+                },
+                "runtimeRecordedAt": 1785403800600,
+                "runtimeRunAliases": ["codex-duplicate-before-restart"],
+                "runtimeSequence": 35,
+                "type": "event"
+            }
+        ],
+        "schemaVersion": 1,
+        "throughSequence": 35
+    },
+    "schemaVersion": 1,
+    "sessionKey": "agent:main:main"
+}

@@ -821,6 +821,7 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         string,
         Array<{ isLocal: boolean; runId: string | undefined }>
     >();
+    const seenExactUserEvents = new Set<string>();
     const deduped: ChatHistoryMessage[] = [];
     let hasCrossedResponseMessages = false;
     let nextUserIdentity: string | undefined;
@@ -833,6 +834,16 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
 
         const identity = messageIdentity(message);
         const role = message.role.toLowerCase();
+        const exactUserEvent =
+            role === "user" && message.runId && message.timestamp
+                ? messageDeleteKey({ ...message, runtimeKey: undefined })
+                : undefined;
+        if (exactUserEvent && seenExactUserEvents.has(exactUserEvent)) {
+            continue;
+        }
+        if (exactUserEvent) {
+            seenExactUserEvents.add(exactUserEvent);
+        }
         if (role === "user") {
             if (
                 hasCrossedResponseMessages ||

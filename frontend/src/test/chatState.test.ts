@@ -132,6 +132,37 @@ describe("chat runtime state", () => {
         expect(runs["run-after-restart"]?.diagnostics).toHaveLength(2);
     });
 
+    it("ignores stale restart aliases before they can reverse canonical identity", () => {
+        const canonical = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "identity",
+                runId: "run-before-restart",
+            }),
+            event(32, {
+                kind: "identity",
+                runAliases: ["run-before-restart"],
+                runId: "run-after-first-restart",
+            }),
+            event(48, {
+                kind: "identity",
+                runAliases: ["run-after-first-restart"],
+                runId: "run-after-second-restart",
+            }),
+        ]);
+        const withStaleReplay = reduceChatRuntime(canonical, [
+            event(32, {
+                kind: "identity",
+                runAliases: ["run-before-restart"],
+                runId: "run-after-first-restart",
+            }),
+        ]);
+
+        expect(withStaleReplay).toEqual(canonical);
+        expect(Object.keys(withStaleReplay.sessions[SESSION]?.runs || {})).toEqual([
+            "run-after-second-restart",
+        ]);
+    });
+
     it("promotes optimistic aliases and clears a failed send by either id", () => {
         const optimistic = addOptimisticChatRun(
             createChatRuntimeState(),

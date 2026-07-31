@@ -990,6 +990,10 @@ export function reduceChatRuntime(
         (left, right) => left.sequence - right.sequence
     );
     for (const event of orderedEvents) {
+        const currentSession = matchingSessionEntry(nextState, event.sessionKey)?.[1];
+        if (currentSession && event.sequence <= currentSession.lastSequence) {
+            continue;
+        }
         if (event.runId) {
             const runAliases = uniqueChatRunIds(event.runAliases || []);
             for (const alias of runAliases) {
@@ -1011,9 +1015,6 @@ export function reduceChatRuntime(
             : event.sessionKey;
         const normalizedEvent =
             event.sessionKey === sessionKey ? event : { ...event, sessionKey };
-        if (previousSession && normalizedEvent.sequence <= previousSession.lastSequence) {
-            continue;
-        }
 
         const session: ChatSessionRuntimeState = previousSession
             ? {
