@@ -1187,6 +1187,15 @@ async function withPreparedReleaseTransition<T>(
     }
 }
 
+async function ensureManagedLauncherExecutable(
+    release: ManagedDashboardRelease
+): Promise<void> {
+    await fsp.chmod(
+        path.join(release.path, MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT),
+        0o755
+    );
+}
+
 /**
  * Copies a verified build into the immutable release store while excluding
  * activation, rollback, pruning, and another publisher from its staging path.
@@ -1228,13 +1237,7 @@ export async function publishVerifiedDashboardRelease(
                 }
             }
             if (existingRelease) {
-                await fsp.chmod(
-                    path.join(
-                        existingRelease.path,
-                        MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT
-                    ),
-                    0o755
-                );
+                await ensureManagedLauncherExecutable(existingRelease);
                 return existingRelease;
             }
 
@@ -1302,6 +1305,7 @@ export async function publishVerifiedDashboardRelease(
                         layout,
                         commitSha
                     );
+                    await ensureManagedLauncherExecutable(concurrentlyPublished);
                     await fsp.rm(stagingPath, { recursive: true });
                     await syncDirectory(layout.releasesPath);
                     return concurrentlyPublished;

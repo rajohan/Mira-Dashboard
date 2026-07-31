@@ -525,7 +525,6 @@ describe("managed pull request preview", () => {
 
     it("starts, reuses, updates, reports, and stops one trusted preview slot", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
-        process.env.OPENCLAW_GATEWAY_TOKEN = "environment-gateway-token";
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-lifecycle-"));
         const config = {
             ...previewConfig(root),
@@ -732,6 +731,7 @@ describe("managed pull request preview", () => {
         const protectFromCancellation = jest.fn();
 
         try {
+            process.env.OPENCLAW_GATEWAY_TOKEN = "environment-gateway-token";
             const candidate = {
                 authorLogins: ["mira-2026"],
                 commitSha: COMMIT,

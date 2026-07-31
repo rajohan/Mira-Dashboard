@@ -388,6 +388,47 @@ describe("Dashboard immutable release manager", () => {
         expect(statSync(launcherPath).mode & 0o777).toBe(0o755);
     });
 
+    it("repairs launcher permissions after a concurrent publication wins", async () => {
+        const releasesRoot = temporaryReleasesRoot();
+        const buildRoot = temporaryReleasesRoot();
+        await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        const finalPath = managedReleasePath(releasesRoot, FIRST_COMMIT);
+        const launcherPath = path.join(
+            finalPath,
+            "scripts",
+            "runManagedDashboardRelease.sh"
+        );
+        const originalRename = fsp.rename.bind(fsp);
+        const rename = spyOn(fsp, "rename").mockImplementation(
+            async (oldPath, newPath) => {
+                if (
+                    typeof oldPath === "string" &&
+                    oldPath.includes(`.staging-${FIRST_COMMIT}-`) &&
+                    newPath === finalPath
+                ) {
+                    await createReleaseFixture(finalPath, FIRST_COMMIT);
+                    chmodSync(launcherPath, 0o644);
+                    throw Object.assign(new Error("concurrent publication won"), {
+                        code: "EEXIST",
+                    });
+                }
+                return originalRename(oldPath, newPath);
+            }
+        );
+
+        try {
+            const published = await publishVerifiedDashboardRelease(
+                buildRoot,
+                FIRST_COMMIT,
+                releasesRoot
+            );
+            expect(published.path).toBe(finalPath);
+            expect(statSync(launcherPath).mode & 0o777).toBe(0o755);
+        } finally {
+            rename.mockRestore();
+        }
+    });
+
     it("activates and rolls back verified releases through relative atomic links", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
