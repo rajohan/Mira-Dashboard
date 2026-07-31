@@ -1,11 +1,14 @@
-import type { ChatHistoryMessage, ChatToolCallDisplay } from "../chatTypes";
-import { stableChatStringify } from "../chatUtilities";
 import {
-    type ChatRunPhase,
-    type ChatRuntimeEvent,
-    type ChatTextSource,
-    uniqueChatRunIds,
-} from "../domain/chatState";
+    CANONICAL_CHAT_EVENT_SCHEMA_VERSION,
+    type CanonicalChatEvent,
+    type CanonicalChatLifecycle,
+    type CanonicalChatMessage,
+    type CanonicalChatToolCall,
+} from "../chatCanonical";
+import {
+    stableCanonicalChatStringify,
+    uniqueCanonicalChatIds,
+} from "../chatCanonicalUtilities";
 import {
     asRecord,
     isNonWorkTool,
@@ -27,14 +30,39 @@ import {
     openClawToolMessage,
 } from "./openClawToolAdapter";
 
-type WithoutSequence<Event> = Event extends unknown ? Omit<Event, "sequence"> : never;
-type ChatRuntimeEventDraft = WithoutSequence<ChatRuntimeEvent>;
+type WithoutCanonicalMetadata<Event> = Event extends unknown
+    ? Omit<
+          Event,
+          "id" | "lifecycle" | "origin" | "provider" | "schemaVersion" | "sequence"
+      >
+    : never;
+type CanonicalChatEventDraft = WithoutCanonicalMetadata<CanonicalChatEvent>;
+type CanonicalChatTextSource = Extract<
+    CanonicalChatEvent,
+    { kind: "assistant" }
+>["source"];
 interface RuntimeDraftLimitContext {
     eventName: string;
     runId?: string;
     runtimeSequence: number;
     sessionKey: string;
 }
+
+export interface OpenClawRuntimeEnvelopeInput {
+    event: unknown;
+    payload: unknown;
+    runtimeRecordedAt: number;
+    runtimeRunAliases?: string[];
+    runtimeSequence: number;
+    type: "event";
+}
+
+export type CanonicalizedOpenClawRuntimeEnvelope<
+    Envelope extends OpenClawRuntimeEnvelopeInput = OpenClawRuntimeEnvelopeInput,
+> = Envelope & {
+    canonicalEvents: CanonicalChatEvent[];
+};
+
 const MAX_DRAFTS_PER_ENVELOPE = 15;
 
 function isToolFailureError(value: string | undefined): boolean {
@@ -54,7 +82,7 @@ function chatEventDrafts(
         sessionKey: string;
         timestamp: string;
     }
-): ChatRuntimeEventDraft[] {
+): CanonicalChatEventDraft[] {
     if (state === "delta") {
         const message = normalizeAssistant(
             payload.message ??
@@ -68,7 +96,11 @@ function chatEventDrafts(
             {
                 ...common,
                 kind: "assistant",
-                message: { ...message, timestamp: common.timestamp },
+                message: {
+                    ...message,
+                    content: "",
+                    timestamp: common.timestamp,
+                },
                 mode: payload.replace === true ? "replace" : "merge",
                 source: "chat",
             },
@@ -98,7 +130,7 @@ function chatEventDrafts(
         message &&
         (message.text.trim() === error?.trim() || isToolFailureError(message.text))
     );
-    let outcome: Exclude<ChatRunPhase, "active"> = "error";
+    let outcome: Exclude<CanonicalChatLifecycle, "active"> = "error";
     if (state === "aborted") {
         outcome = "aborted";
     }
@@ -115,6 +147,7 @@ function chatEventDrafts(
                 message && !isDuplicateToolFailureMessage
                     ? {
                           ...message,
+                          content: "",
                           role: isCommand ? "system" : message.role,
                           local: isCommand || undefined,
                           timestamp: common.timestamp,
@@ -134,7 +167,7 @@ function runtimeStreamDrafts(
         sessionKey: string;
         timestamp: string;
     }
-): ChatRuntimeEventDraft[] {
+): CanonicalChatEventDraft[] {
     const streamRaw =
         stringValue(data.stream) ||
         (eventName === "session.compaction" ? "compaction" : "");
@@ -147,7 +180,7 @@ function runtimeStreamDrafts(
         return [];
     }
 
-    const drafts: ChatRuntimeEventDraft[] = [];
+    const drafts: CanonicalChatEventDraft[] = [];
     const progress = openClawProgress(eventName, stream, phase, data);
     if (progress.text || progress.operation || progress.operationPhase) {
         drafts.push({
@@ -171,9 +204,12 @@ function runtimeStreamDrafts(
             drafts.push({
                 ...common,
                 kind: "assistant",
-                message: normalizeAssistant(text, common.runId),
+                message: {
+                    ...normalizeAssistant(text, common.runId),
+                    content: "",
+                },
                 mode: rawString(data.delta) ? "append" : "merge",
-                source: "runtime" as ChatTextSource,
+                source: "runtime" as CanonicalChatTextSource,
             });
         }
     } else if (stream === "thinking" || stream === "reasoning") {
@@ -217,7 +253,9 @@ function runtimeStreamDrafts(
             phase === "error" ||
             status === "error" ||
             status === "failed";
-        let outcome: Exclude<ChatRunPhase, "active"> = isError ? "error" : "completed";
+        let outcome: Exclude<CanonicalChatLifecycle, "active"> = isError
+            ? "error"
+            : "completed";
         if (isAborted) {
             outcome = "aborted";
         }
@@ -241,7 +279,7 @@ function runtimeStreamDrafts(
 }
 
 function appendThinkingDraft(
-    drafts: ChatRuntimeEventDraft[],
+    drafts: CanonicalChatEventDraft[],
     data: Record<string, unknown>,
     common: { runId?: string; sessionKey: string; timestamp: string }
 ): void {
@@ -261,7 +299,7 @@ function appendThinkingDraft(
         kind: "thinking",
         message: {
             role: "assistant",
-            content: [{ text, type: "thinking" }],
+            content: "",
             text: "",
             thinking: [{ snapshot: delta === undefined, text }],
             timestamp: common.timestamp,
@@ -271,7 +309,7 @@ function appendThinkingDraft(
 }
 
 function appendItemThinkingDraft(
-    drafts: ChatRuntimeEventDraft[],
+    drafts: CanonicalChatEventDraft[],
     data: Record<string, unknown>,
     common: { runId?: string; sessionKey: string; timestamp: string }
 ): void {
@@ -287,7 +325,7 @@ function appendItemThinkingDraft(
         kind: "thinking",
         message: {
             role: "assistant",
-            content: [{ text, type: "thinking" }],
+            content: "",
             text: "",
             thinking: [
                 {
@@ -302,6 +340,80 @@ function appendItemThinkingDraft(
     });
 }
 
+function canonicalOpenClawOrigin(eventName: string): CanonicalChatEvent["origin"] {
+    if (eventName === "chat") {
+        return "openclaw-chat";
+    }
+    if (eventName.startsWith("session.")) {
+        return "openclaw-session";
+    }
+    return "openclaw-runtime";
+}
+
+function canonicalOpenClawFormat(
+    eventName: string
+): CanonicalChatEvent["provider"]["format"] {
+    if (eventName === "chat") {
+        return "openclaw-chat";
+    }
+    if (eventName === "session.message") {
+        return "openclaw-session-message";
+    }
+    if (eventName === "session.tool") {
+        return "openclaw-session-tool";
+    }
+    return eventName === "agent" ? "openclaw-agent" : "openclaw-runtime";
+}
+
+function canonicalOpenClawLifecycle(
+    draft: CanonicalChatEventDraft
+): CanonicalChatLifecycle {
+    if (draft.kind === "finish") {
+        return draft.outcome;
+    }
+    if (draft.kind !== "status" || !draft.operation) {
+        return "active";
+    }
+    if (draft.operationPhase === "complete") {
+        return "completed";
+    }
+    return draft.operationPhase === "inactive" ? "aborted" : "active";
+}
+
+function canonicalOpenClawProvider(
+    eventName: string,
+    payload: Record<string, unknown>
+): CanonicalChatEvent["provider"] {
+    const message = asRecord(payload.message);
+    const messageRole = (
+        stringValue(message?.role) || stringValue(payload.role)
+    )?.toLowerCase();
+    const canUseSessionMetadata =
+        eventName !== "session.message" || messageRole !== "user";
+    return {
+        eventName,
+        format: canonicalOpenClawFormat(eventName),
+        model:
+            stringValue(message?.model) ||
+            (canUseSessionMetadata ? stringValue(payload.model) : undefined),
+        provider:
+            stringValue(message?.provider) ||
+            (canUseSessionMetadata
+                ? stringValue(payload.provider) || stringValue(payload.modelProvider)
+                : undefined),
+        state: stringValue(payload.state),
+        stream: stringValue(payload.stream),
+    };
+}
+
+function canonicalOpenClawEventId(
+    sessionKey: string,
+    sequence: number,
+    kind: CanonicalChatEvent["kind"]
+): string {
+    return `openclaw:${encodeURIComponent(sessionKey)}:${sequence}:${kind}`;
+}
+
 /**
  * Converts one raw OpenClaw envelope into provider-independent events.
  * @param raw Raw value.
@@ -311,7 +423,7 @@ function appendItemThinkingDraft(
 export function adaptOpenClawRuntimeEvent(
     raw: unknown,
     fallbackSequence: number
-): ChatRuntimeEvent[] {
+): CanonicalChatEvent[] {
     const context = openClawEventContext(raw);
     if (!context) {
         return [];
@@ -323,7 +435,7 @@ export function adaptOpenClawRuntimeEvent(
     const common = { runId, sessionKey, timestamp };
     const eventPayload = openClawPayloadView(payload);
     const rawRuntimeRunAliases = asRecord(raw)?.runtimeRunAliases;
-    const runtimeRunAliases = uniqueChatRunIds(
+    const runtimeRunAliases = uniqueCanonicalChatIds(
         Array.isArray(rawRuntimeRunAliases)
             ? rawRuntimeRunAliases.map((alias) => stringValue(alias))
             : []
@@ -343,21 +455,91 @@ export function adaptOpenClawRuntimeEvent(
         runtimeSequence,
         sessionKey,
     });
-    const normalizedDrafts: ChatRuntimeEventDraft[] =
+    const normalizedDrafts: CanonicalChatEventDraft[] =
         runId && runtimeRunAliases.length > 0 && boundedDrafts.length === 0
             ? [{ ...common, kind: "identity" }]
             : boundedDrafts;
-    return normalizedDrafts.map((draft, index) => ({
-        ...draft,
-        ...(runtimeRunAliases.length > 0 && { runAliases: runtimeRunAliases }),
-        sequence: sequence + index,
-    }));
+    const origin = canonicalOpenClawOrigin(eventName);
+    const provider = canonicalOpenClawProvider(eventName, eventPayload);
+    return normalizedDrafts.map((draft, index) => {
+        const canonicalSequence = sequence + index;
+        return {
+            ...draft,
+            id: canonicalOpenClawEventId(sessionKey, canonicalSequence, draft.kind),
+            lifecycle: canonicalOpenClawLifecycle(draft),
+            origin,
+            provider,
+            ...(runtimeRunAliases.length > 0 && {
+                runAliases: runtimeRunAliases,
+            }),
+            schemaVersion: CANONICAL_CHAT_EVENT_SCHEMA_VERSION,
+            sequence: canonicalSequence,
+        };
+    });
+}
+
+/**
+ * Rebuilds canonical events after any backend mutation of a provider envelope.
+ * @param envelope Sequenced OpenClaw provider envelope.
+ * @returns Envelope carrying canonical events derived from its current payload.
+ */
+export function withCanonicalOpenClawEvents<
+    Envelope extends OpenClawRuntimeEnvelopeInput,
+>(envelope: Envelope): CanonicalizedOpenClawRuntimeEnvelope<Envelope> {
+    return {
+        ...envelope,
+        canonicalEvents: adaptOpenClawRuntimeEvent(envelope, envelope.runtimeSequence),
+    };
+}
+
+/**
+ * Preserves canonical content while applying rewritten provider run/session identity.
+ * @param envelope Canonical envelope whose provider identity changed.
+ * @returns Envelope with identity-consistent canonical events.
+ */
+export function withCurrentCanonicalOpenClawIdentity<
+    Envelope extends CanonicalizedOpenClawRuntimeEnvelope,
+>(envelope: Envelope): Envelope {
+    const context = openClawEventContext(envelope);
+    if (!context) {
+        return envelope;
+    }
+    const rawRuntimeRunAliases = asRecord(envelope)?.runtimeRunAliases;
+    const runAliases = uniqueCanonicalChatIds(
+        Array.isArray(rawRuntimeRunAliases)
+            ? rawRuntimeRunAliases.map((alias) => stringValue(alias))
+            : []
+    );
+    return {
+        ...envelope,
+        canonicalEvents: envelope.canonicalEvents.map((event) => ({
+            ...event,
+            id: canonicalOpenClawEventId(context.sessionKey, event.sequence, event.kind),
+            ...(event.kind === "finish" &&
+                event.settlesCompactionRunId && {
+                    settlesCompactionRunId: openClawCompactionRunId(
+                        context.sessionKey,
+                        context.runId
+                    ),
+                }),
+            ...("message" in event &&
+                event.message && {
+                    message: {
+                        ...event.message,
+                        runId: context.runId,
+                    },
+                }),
+            runAliases: runAliases.length > 0 ? runAliases : undefined,
+            runId: context.runId,
+            sessionKey: context.sessionKey,
+        })),
+    };
 }
 
 function boundedRuntimeDrafts(
-    drafts: ChatRuntimeEventDraft[],
+    drafts: CanonicalChatEventDraft[],
     context: RuntimeDraftLimitContext
-): ChatRuntimeEventDraft[] {
+): CanonicalChatEventDraft[] {
     if (drafts.length <= MAX_DRAFTS_PER_ENVELOPE) {
         return drafts;
     }
@@ -388,7 +570,7 @@ function sessionMessageDrafts(
     data: Record<string, unknown>,
     common: { runId?: string; sessionKey: string; timestamp: string },
     sequence: number
-): ChatRuntimeEventDraft[] {
+): CanonicalChatEventDraft[] {
     const nestedMessage = asRecord(data.message);
     const stopReason =
         stringValue(nestedMessage?.stopReason) || stringValue(data.stopReason);
@@ -425,7 +607,7 @@ function sessionMessageDrafts(
                 kind: "assistant",
                 message: {
                     ...message,
-                    content: message.text,
+                    content: "",
                     text: message.text,
                     thinking: undefined,
                     toolCalls: undefined,
@@ -450,7 +632,11 @@ function sessionMessageDrafts(
             {
                 ...common,
                 kind: "user",
-                message: { ...message, timestamp: common.timestamp },
+                message: {
+                    ...message,
+                    content: "",
+                    timestamp: common.timestamp,
+                },
             },
         ];
     }
@@ -461,6 +647,7 @@ function sessionMessageDrafts(
                 kind: "tool",
                 message: {
                     ...message,
+                    content: "",
                     timestamp: common.timestamp,
                 },
                 toolKey: sessionToolKey(
@@ -480,16 +667,16 @@ function sessionToolKey(
 ): string {
     return id
         ? `tool:${id}`
-        : `tool:${name}:${stableChatStringify(arguments_ ?? undefined)}`;
+        : `tool:${name}:${stableCanonicalChatStringify(arguments_ ?? undefined)}`;
 }
 
 function sessionAssistantDiagnosticDrafts(
-    message: ChatHistoryMessage,
+    message: CanonicalChatMessage,
     common: { runId?: string; sessionKey: string; timestamp: string },
     sequence: number,
     shouldCarryPrimaryMedia = false
-): ChatRuntimeEventDraft[] {
-    const drafts: ChatRuntimeEventDraft[] = [];
+): CanonicalChatEventDraft[] {
+    const drafts: CanonicalChatEventDraft[] = [];
     if (message.thinking?.length) {
         const thinking = message.thinking.map((block, index) => ({
             ...block,
@@ -500,11 +687,7 @@ function sessionAssistantDiagnosticDrafts(
             kind: "thinking",
             message: {
                 role: "assistant",
-                content: thinking.map((block) => ({
-                    id: block.id,
-                    text: block.text,
-                    type: "thinking",
-                })),
+                content: "",
                 text: "",
                 thinking,
                 timestamp: common.timestamp,
@@ -549,10 +732,10 @@ function sessionAssistantDiagnosticDrafts(
 }
 
 function sessionToolCallDraft(
-    toolCall: ChatToolCallDisplay,
+    toolCall: CanonicalChatToolCall,
     common: { runId?: string; sessionKey: string; timestamp: string },
-    primaryMedia?: ChatHistoryMessage
-): ChatRuntimeEventDraft {
+    primaryMedia?: CanonicalChatMessage
+): CanonicalChatEventDraft {
     return {
         ...common,
         kind: "tool",

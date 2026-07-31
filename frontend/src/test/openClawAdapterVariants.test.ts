@@ -1,15 +1,5 @@
 import { describe, expect, it, jest } from "bun:test";
 
-import { messageDeleteKey } from "../components/features/chat/chatUtilities";
-import {
-    createChatVisibility,
-    presentChatMessages,
-} from "../components/features/chat/domain/chatPresentation";
-import { projectChat } from "../components/features/chat/domain/chatProjection";
-import {
-    createChatRuntimeState,
-    reduceChatRuntime,
-} from "../components/features/chat/domain/chatState";
 import {
     argumentDetail,
     asRecord,
@@ -22,7 +12,21 @@ import {
     rawString,
     runtimeText,
     stringValue,
-} from "../components/features/chat/transport/openClawAdapterValues";
+} from "../../../contracts/chat/openClawAdapterValues";
+import {
+    withCanonicalOpenClawEvents,
+    withCurrentCanonicalOpenClawIdentity,
+} from "../../../contracts/chat/openClawRuntimeAdapter";
+import { messageDeleteKey } from "../components/features/chat/chatUtilities";
+import {
+    createChatVisibility,
+    presentChatMessages,
+} from "../components/features/chat/domain/chatPresentation";
+import { projectChat } from "../components/features/chat/domain/chatProjection";
+import {
+    createChatRuntimeState,
+    reduceChatRuntime,
+} from "../components/features/chat/domain/chatState";
 import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
 
 const SESSION = "agent:main:main";
@@ -32,7 +36,7 @@ function envelope(
     payload: Record<string, unknown>,
     runtimeSequence: number
 ) {
-    return {
+    return withCanonicalOpenClawEvents({
         event,
         payload: {
             runId: "run-variants",
@@ -40,12 +44,64 @@ function envelope(
             ts: 1_752_664_800_000,
             ...payload,
         },
+        runtimeRecordedAt: 1_752_664_800_000,
         runtimeSequence,
         type: "event",
-    };
+    });
 }
 
 describe("OpenClaw adapter variants", () => {
+    it("sanitizes item thinking identity and rewrites compaction settlement identity", () => {
+        const adapter = new OpenClawChatAdapter();
+        const thinkingEvents = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        item: {
+                            itemId: "   ",
+                            text: "Inspecting the repository",
+                            type: "reasoning",
+                        },
+                    },
+                    stream: "item",
+                },
+                1
+            )
+        );
+        expect(thinkingEvents[0]).toMatchObject({
+            kind: "thinking",
+            message: {
+                thinking: [{ id: undefined, text: "Inspecting the repository" }],
+            },
+        });
+
+        const original = envelope(
+            "agent",
+            {
+                data: { phase: "end" },
+                runId: "provisional-run",
+                sessionKey: "agent:main:provisional",
+                stream: "lifecycle",
+            },
+            2
+        );
+        const rewritten = withCurrentCanonicalOpenClawIdentity({
+            ...original,
+            payload: {
+                ...original.payload,
+                runId: "provider-run",
+                sessionKey: SESSION,
+            },
+        });
+        expect(rewritten.canonicalEvents.at(-1)).toMatchObject({
+            kind: "finish",
+            runId: "provider-run",
+            sessionKey: SESSION,
+            settlesCompactionRunId: "compaction:provider-run",
+        });
+    });
+
     it("groups heartbeat-style thinking around preamble tool steps", () => {
         const adapter = new OpenClawChatAdapter();
         const history = adapter.history([

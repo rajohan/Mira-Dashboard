@@ -5,6 +5,7 @@ import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeSnapshot,
 } from "../../contracts/chat.ts";
+import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 import { database, enableRequiredWalJournalMode } from "../src/database.ts";
@@ -13,7 +14,7 @@ function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnaps
     return {
         completed: false,
         events: [
-            {
+            withCanonicalOpenClawEvents({
                 event: "agent",
                 payload: {
                     runId: `run-${sequence}`,
@@ -23,7 +24,7 @@ function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnaps
                 runtimeRecordedAt: Date.now(),
                 runtimeSequence: sequence,
                 type: "event",
-            },
+            }),
         ],
         schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
         throughSequence: sequence,
@@ -180,7 +181,7 @@ describe("OpenClaw chat snapshot store", () => {
         const snapshot: OpenClawRuntimeSnapshot = {
             completed: false,
             events: [
-                {
+                withCanonicalOpenClawEvents({
                     event: "agent",
                     payload: {
                         runId: "persisted-run",
@@ -190,7 +191,7 @@ describe("OpenClaw chat snapshot store", () => {
                     runtimeRecordedAt: Date.now(),
                     runtimeSequence: 7,
                     type: "event",
-                },
+                }),
             ],
             firstSequenceByRun: {
                 "persisted-run": 3,
@@ -392,6 +393,41 @@ describe("OpenClaw chat snapshot store", () => {
         }
     });
 
+    it("deletes v2 snapshots whose event row lacks the canonical contract", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+
+        try {
+            store.save(sessionKey, snapshotFor(sessionKey, 29));
+            const row = database
+                .prepare(
+                    `SELECT envelope_json
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { envelope_json: string };
+            const invalidEnvelope = JSON.parse(row.envelope_json) as Record<
+                string,
+                unknown
+            >;
+            Reflect.deleteProperty(invalidEnvelope, "canonicalEvents");
+            database
+                .prepare(
+                    `UPDATE chat_runtime_snapshot_events
+                     SET envelope_json = ?
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .run(JSON.stringify(invalidEnvelope), gatewayScope, sessionKey);
+
+            expect(store.load(sessionKey)).toBeUndefined();
+            expect(store.maximumSequence()).toBe(0);
+            expect(store.keys()).not.toContain(sessionKey);
+        } finally {
+            store.clear();
+        }
+    });
+
     it("replaces stale event rows after replay coalescing changes the prefix", () => {
         const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
         const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
@@ -400,7 +436,7 @@ describe("OpenClaw chat snapshot store", () => {
         const coalescedSnapshot: OpenClawRuntimeSnapshot = {
             completed: false,
             events: [
-                {
+                withCanonicalOpenClawEvents({
                     ...firstSnapshot.events[0]!,
                     payload: {
                         runId: "run-1",
@@ -409,7 +445,7 @@ describe("OpenClaw chat snapshot store", () => {
                         text: "coalesced update",
                     },
                     runtimeSequence: 2,
-                },
+                }),
             ],
             schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 2,
@@ -446,13 +482,13 @@ describe("OpenClaw chat snapshot store", () => {
         const rewrittenSnapshot: OpenClawRuntimeSnapshot = {
             ...firstSnapshot,
             events: [
-                {
+                withCanonicalOpenClawEvents({
                     ...firstSnapshot.events[0]!,
                     payload: {
                         ...(firstSnapshot.events[0]!.payload as Record<string, unknown>),
                         text: "rewritten",
                     },
-                },
+                }),
             ],
         };
 
@@ -553,13 +589,13 @@ describe("OpenClaw chat snapshot store", () => {
         const snapshot = (runId: string): OpenClawRuntimeSnapshot => ({
             completed: false,
             events: [
-                {
+                withCanonicalOpenClawEvents({
                     event: "agent",
                     payload: { runId, sessionKey, stream: "thinking" },
                     runtimeRecordedAt: Date.now(),
                     runtimeSequence: 1,
                     type: "event",
-                },
+                }),
             ],
             schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: 1,
@@ -596,7 +632,7 @@ describe("OpenClaw chat snapshot store", () => {
                 store.save(sessionKey, {
                     completed: false,
                     events: [
-                        {
+                        withCanonicalOpenClawEvents({
                             event: "agent",
                             payload: {
                                 runId: `run-${index}`,
@@ -606,7 +642,7 @@ describe("OpenClaw chat snapshot store", () => {
                             runtimeRecordedAt: Date.now(),
                             runtimeSequence: index + 1,
                             type: "event",
-                        },
+                        }),
                     ],
                     schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
                     throughSequence: index + 1,

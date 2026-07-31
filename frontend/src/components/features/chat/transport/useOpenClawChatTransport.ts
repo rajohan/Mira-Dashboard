@@ -6,10 +6,14 @@ import {
     parseChatSendResponse,
     parseOpenClawRuntimeSnapshot,
 } from "../../../../../../contracts/chat";
+import {
+    asRecord,
+    openClawThroughSequence,
+    stringValue,
+} from "../../../../../../contracts/chat/openClawAdapterValues";
 import { useOpenClawSocket } from "../../../../hooks/useOpenClawSocket";
 import type { ChatModelOption } from "../chatUtilities";
 import type { ChatRuntimeSnapshot, ChatTransport } from "./chatTransport";
-import { asRecord, openClawThroughSequence, stringValue } from "./openClawAdapterValues";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 import { OpenClawHistoryLoader } from "./openClawHistoryLoader";
 
@@ -28,9 +32,8 @@ export function useOpenClawChatTransport(): ChatTransport {
     );
 
     useEffect(() => {
-        adapter.reset();
         historyLoader.reset();
-    }, [adapter, historyLoader, socket.connectionId]);
+    }, [historyLoader, socket.connectionId]);
 
     const history = (sessionKey: string, limit: number) =>
         historyLoader.history(sessionKey, limit);

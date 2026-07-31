@@ -1,7 +1,10 @@
-import { serializeForDisplay } from "../../../../lib/displayValue";
-import { currentIsoString, isoStringFromDate } from "../../../../utils/date";
-import { type ChatHistoryMessage, normalizeText } from "../chatTypes";
-import { uniqueChatRunIds } from "../domain/chatState";
+import type { CanonicalChatMessage } from "../chatCanonical";
+import { normalizeCanonicalChatText } from "../chatCanonicalMessage";
+import {
+    canonicalIsoString,
+    serializeCanonicalChatValue,
+    uniqueCanonicalChatIds,
+} from "../chatCanonicalUtilities";
 import {
     normalizeOpenClawHistoryMessage,
     type RawOpenClawHistoryMessage,
@@ -48,7 +51,7 @@ export function runtimeText(value?: unknown): string {
         return value;
     }
     if (Array.isArray(value)) {
-        const normalized = normalizeText(value);
+        const normalized = normalizeCanonicalChatText(value);
         if (normalized) {
             return normalized;
         }
@@ -56,10 +59,11 @@ export function runtimeText(value?: unknown): string {
     if (value === undefined || value === null) {
         return "";
     }
-    return serializeForDisplay(value, {
-        fallback: "[Runtime value could not be serialized]",
-        indentation: 2,
-    });
+    return serializeCanonicalChatValue(
+        value,
+        "[Runtime value could not be serialized]",
+        2
+    );
 }
 
 export function formatToolName(value: string): string {
@@ -124,8 +128,8 @@ export function nestedItem(data: Record<string, unknown>): Record<string, unknow
 export function itemStrings(data: Record<string, unknown>, keys: string[]): string[] {
     const item = nestedItem(data);
     const sources = item === data ? [data] : [data, item];
-    return uniqueChatRunIds(
-        sources.flatMap((source) => keys.map((key) => rawString(source[key])))
+    return uniqueCanonicalChatIds(
+        sources.flatMap((source) => keys.map((key) => stringValue(source[key])))
     );
 }
 
@@ -136,13 +140,15 @@ export function itemTexts(data: Record<string, unknown>, keys: string[]): string
     for (const source of sources) {
         for (const key of keys) {
             const raw = source[key];
-            const text = rawString(raw) || (Array.isArray(raw) ? normalizeText(raw) : "");
+            const text =
+                rawString(raw) ||
+                (Array.isArray(raw) ? normalizeCanonicalChatText(raw) : "");
             if (text) {
                 values.push(text);
             }
         }
     }
-    return uniqueChatRunIds(values);
+    return uniqueCanonicalChatIds(values);
 }
 
 export function itemType(data: Record<string, unknown>): string {
@@ -188,12 +194,14 @@ export function isThinkingItem(data: Record<string, unknown>): boolean {
     );
 }
 
-export function normalizeAssistant(value: unknown, runId?: string): ChatHistoryMessage {
+export function normalizeAssistant(value: unknown, runId?: string): CanonicalChatMessage {
     const raw =
         value && typeof value === "object" && !Array.isArray(value)
             ? ({
                   ...(value as RawOpenClawHistoryMessage),
-                  role: (value as RawOpenClawHistoryMessage).role || "assistant",
+                  role:
+                      stringValue((value as RawOpenClawHistoryMessage).role) ||
+                      "assistant",
               } satisfies RawOpenClawHistoryMessage)
             : ({
                   role: "assistant",
@@ -221,10 +229,10 @@ function timestampFor(
             Number.isFinite(timestampMs) &&
             !Number.isNaN(new Date(timestampMs).getTime())
         ) {
-            return isoStringFromDate(timestampMs);
+            return canonicalIsoString(timestampMs);
         }
     }
-    return currentIsoString();
+    return new Date().toISOString();
 }
 
 export interface OpenClawEventContext {

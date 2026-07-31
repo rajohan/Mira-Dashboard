@@ -1,18 +1,12 @@
+import { asRecord } from "../../../../../../contracts/chat/openClawAdapterValues";
+import type { RawOpenClawHistoryMessage } from "../../../../../../contracts/chat/openClawHistoryNormalizer";
+import { parseCanonicalChatEvents } from "../../../../../../contracts/chatCanonical";
 import type { ChatHistoryMessage } from "../chatTypes";
 import type { ChatRuntimeEvent } from "../domain/chatState";
-import { asRecord, openClawSequence } from "./openClawAdapterValues";
 import { adaptOpenClawHistory } from "./openClawHistoryAdapter";
-import type { RawOpenClawHistoryMessage } from "./openClawHistoryNormalizer";
-import { adaptOpenClawRuntimeEvent } from "./openClawRuntimeAdapter";
 
 /** The single provider boundary used by the frontend chat system. */
 export class OpenClawChatAdapter {
-    #fallbackSequence = 0;
-
-    reset(): void {
-        this.#fallbackSequence = 0;
-    }
-
     history(messages: unknown): ChatHistoryMessage[] {
         const rows = Array.isArray(messages)
             ? messages.filter(
@@ -24,12 +18,14 @@ export class OpenClawChatAdapter {
     }
 
     event(raw: unknown): ChatRuntimeEvent[] {
-        const nextFallback = this.#fallbackSequence + 1;
-        this.#fallbackSequence = Math.max(
-            nextFallback,
-            openClawSequence(raw, nextFallback)
+        const envelope = asRecord(raw);
+        if (!envelope || envelope.type !== "event") {
+            return [];
+        }
+        return parseCanonicalChatEvents(
+            envelope.canonicalEvents,
+            "chat.runtimeEvent.canonicalEvents"
         );
-        return adaptOpenClawRuntimeEvent(raw, this.#fallbackSequence);
     }
 
     snapshot(snapshot: unknown): ChatRuntimeEvent[] {

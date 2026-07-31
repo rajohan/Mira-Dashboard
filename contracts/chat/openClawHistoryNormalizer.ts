@@ -1,18 +1,21 @@
-import { isoStringFromDate } from "../../../../utils/date";
 import {
-    attachmentKind,
-    type ChatAttachmentDisplay,
-    type ChatHistoryMessage,
-    type ChatImageBlock,
-    chatImageDisplayUrl,
-    chatLocalMediaPathFromUrl,
-    type ChatToolResultDisplay,
-    extractImages,
-    extractThinkingBlocks,
-    extractToolCalls,
-    mergeChatAttachments,
-    normalizeText,
-} from "../chatTypes";
+    type CanonicalChatAttachment,
+    type CanonicalChatImage,
+    type CanonicalChatMessage,
+    type CanonicalChatToolResult,
+} from "../chatCanonical";
+import {
+    canonicalChatAttachmentKind,
+    canonicalChatImageDisplayUrl,
+    canonicalChatLocalMediaPathFromUrl,
+    canonicalChatPortableDashboardMediaUrl,
+    extractCanonicalChatImages,
+    extractCanonicalChatThinking,
+    extractCanonicalChatToolCalls,
+    mergeCanonicalChatAttachments,
+    normalizeCanonicalChatText,
+} from "../chatCanonicalMessage";
+import { canonicalIsoString } from "../chatCanonicalUtilities";
 
 const REMOTE_MEDIA_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -82,7 +85,7 @@ function fileNameFromPath(path: string): string {
 }
 
 function pathFromMediaRef(reference: string): string {
-    const localMediaPath = chatLocalMediaPathFromUrl(reference);
+    const localMediaPath = canonicalChatLocalMediaPathFromUrl(reference);
     if (localMediaPath) {
         return localMediaPath;
     }
@@ -157,6 +160,10 @@ function displayUrlFromMediaRef(value: unknown): string | undefined {
     }
     try {
         const url = new URL(candidate);
+        const dashboardMediaUrl = canonicalChatPortableDashboardMediaUrl(candidate);
+        if (dashboardMediaUrl) {
+            return dashboardMediaUrl;
+        }
         if (REMOTE_MEDIA_PROTOCOLS.has(url.protocol)) {
             return candidate;
         }
@@ -176,6 +183,10 @@ function stringValues(plural: unknown, singular: unknown): string[] {
     return typeof singular === "string" ? [singular] : [];
 }
 
+function stringValue(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function normalizedTimestamp(value: unknown): string | undefined {
     let timestamp: number;
     if (typeof value === "number") {
@@ -186,26 +197,26 @@ function normalizedTimestamp(value: unknown): string | undefined {
         return undefined;
     }
     return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime())
-        ? isoStringFromDate(timestamp)
+        ? canonicalIsoString(timestamp)
         : undefined;
 }
 
-function mediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
-    const attachments: ChatAttachmentDisplay[] = [];
+function mediaDirectiveAttachments(text: string): CanonicalChatAttachment[] {
+    const attachments: CanonicalChatAttachment[] = [];
     for (const match of text.matchAll(/^MEDIA:(.+)$/gm)) {
         const mediaPath = match[1]?.trim();
         if (!mediaPath) {
             continue;
         }
         const mimeType = mimeTypeFromPath(mediaPath);
-        const kind = attachmentKind(mimeType);
+        const kind = canonicalChatAttachmentKind(mimeType);
         attachments.push({
             id: `media-${mediaPath}-${attachments.length}`,
             fileName: fileNameFromPath(mediaPath),
             mimeType,
             dataUrl:
                 kind === "image"
-                    ? chatImageDisplayUrl(mediaUrlFromPath(mediaPath), mimeType)
+                    ? canonicalChatImageDisplayUrl(mediaUrlFromPath(mediaPath), mimeType)
                     : undefined,
             url: mediaUrlFromPath(mediaPath),
             kind,
@@ -214,9 +225,9 @@ function mediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
     return attachments;
 }
 
-function inlineFileAttachments(text: string): ChatAttachmentDisplay[] {
+function inlineFileAttachments(text: string): CanonicalChatAttachment[] {
     const pattern = /<file\s+name="([^"]+)"\s+mime="([^"]+)">([\s\S]*?)<\/file>/g;
-    const attachments: ChatAttachmentDisplay[] = [];
+    const attachments: CanonicalChatAttachment[] = [];
     for (const match of text.matchAll(pattern)) {
         const [
             ,
@@ -224,16 +235,17 @@ function inlineFileAttachments(text: string): ChatAttachmentDisplay[] {
             mimeType = "application/octet-stream",
             body = "",
         ] = match;
+        const normalizedFileName = fileName.trim() || "attachment";
         const external = body.match(
             /<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>[\s\S]*?\n---\n([\s\S]*?)<<<END_EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>/
         );
         const content = (external?.[1] ?? body).trim();
         const bytes = new TextEncoder().encode(content);
         const contentBase64 = bytes.toBase64();
-        const kind = attachmentKind(mimeType);
+        const kind = canonicalChatAttachmentKind(mimeType);
         attachments.push({
-            id: `inline-${fileName}-${attachments.length}`,
-            fileName,
+            id: `inline-${normalizedFileName}-${attachments.length}`,
+            fileName: normalizedFileName,
             mimeType,
             sizeBytes: bytes.byteLength,
             contentBase64,
@@ -247,31 +259,37 @@ function inlineFileAttachments(text: string): ChatAttachmentDisplay[] {
 
 function mediaReferenceAttachments(
     message: RawOpenClawHistoryMessage
-): ChatAttachmentDisplay[] {
+): CanonicalChatAttachment[] {
     const paths = stringValues(message.MediaPaths, message.MediaPath);
     const types = stringValues(message.MediaTypes, message.MediaType);
-    return paths.map((path, index) => {
-        const mimeType = types[index] || mimeTypeFromPath(path);
-        const kind = attachmentKind(mimeType);
-        return {
-            id: `${path}-${index}`,
-            fileName: fileNameFromPath(path),
-            mimeType,
-            dataUrl:
-                kind === "image"
-                    ? chatImageDisplayUrl(mediaUrlFromPath(path), mimeType)
-                    : undefined,
-            url: mediaUrlFromPath(path),
-            kind,
-        };
+    return paths.flatMap((rawPath, index) => {
+        const path = rawPath.trim();
+        if (!path) {
+            return [];
+        }
+        const mimeType = stringValue(types[index]) || mimeTypeFromPath(path);
+        const kind = canonicalChatAttachmentKind(mimeType);
+        return [
+            {
+                id: `${path}-${index}`,
+                fileName: fileNameFromPath(path),
+                mimeType,
+                dataUrl:
+                    kind === "image"
+                        ? canonicalChatImageDisplayUrl(mediaUrlFromPath(path), mimeType)
+                        : undefined,
+                url: mediaUrlFromPath(path),
+                kind,
+            },
+        ];
     });
 }
 
-function contentBlockAttachments(content: unknown): ChatAttachmentDisplay[] {
+function contentBlockAttachments(content: unknown): CanonicalChatAttachment[] {
     if (!Array.isArray(content)) {
         return [];
     }
-    const attachments: ChatAttachmentDisplay[] = [];
+    const attachments: CanonicalChatAttachment[] = [];
     for (const block of content) {
         if (!block || typeof block !== "object" || Array.isArray(block)) {
             continue;
@@ -303,12 +321,15 @@ function contentBlockAttachments(content: unknown): ChatAttachmentDisplay[] {
         } else if (labelMimeType === "application/octet-stream") {
             mimeType = mimeTypeFromPath(attachmentPath);
         }
-        const kind = attachmentKind(mimeType);
+        const kind = canonicalChatAttachmentKind(mimeType);
         attachments.push({
             id: `content-${url}-${attachments.length}`,
             fileName: label || "attachment",
             mimeType,
-            dataUrl: kind === "image" ? chatImageDisplayUrl(url, mimeType) : undefined,
+            dataUrl:
+                kind === "image"
+                    ? canonicalChatImageDisplayUrl(url, mimeType)
+                    : undefined,
             url,
             kind,
         });
@@ -340,36 +361,27 @@ function primaryContent(content: unknown): unknown {
 function toolResult(
     message: RawOpenClawHistoryMessage,
     content: unknown
-): ChatToolResultDisplay | undefined {
+): CanonicalChatToolResult | undefined {
     const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
     if (!role.startsWith("tool")) {
         return undefined;
     }
-    let toolCallId: string | undefined;
-    if (typeof message.toolCallId === "string") {
-        toolCallId = message.toolCallId;
-    } else if (typeof message.tool_call_id === "string") {
-        toolCallId = message.tool_call_id;
-    }
-    let toolName: string | undefined;
-    if (typeof message.toolName === "string") {
-        toolName = message.toolName;
-    } else if (typeof message.tool_name === "string") {
-        toolName = message.tool_name;
-    }
+    const toolCallId =
+        stringValue(message.toolCallId) || stringValue(message.tool_call_id);
+    const toolName = stringValue(message.toolName) || stringValue(message.tool_name);
     return {
         id: toolCallId,
         name: toolName,
-        content: normalizeText(content),
+        content: normalizeCanonicalChatText(content),
         isError: typeof message.isError === "boolean" ? message.isError : undefined,
-        images: extractImages(content),
+        images: extractCanonicalChatImages(content),
     };
 }
 
 function stripGeneratedImagePlaceholder(
     text: string,
-    images: ChatImageBlock[],
-    attachments: ChatAttachmentDisplay[]
+    images: CanonicalChatImage[],
+    attachments: CanonicalChatAttachment[]
 ): string {
     if (images.length === 0 && attachments.length === 0) {
         return text;
@@ -387,15 +399,18 @@ function stripGeneratedImagePlaceholder(
  */
 export function normalizeOpenClawHistoryMessage(
     message: RawOpenClawHistoryMessage
-): ChatHistoryMessage {
+): CanonicalChatMessage {
     const content = message.content ?? message.text ?? "";
-    const primaryText = normalizeText(primaryContent(content));
-    const images = extractImages(content);
-    const attachments = mergeChatAttachments(mediaReferenceAttachments(message), [
-        ...mediaDirectiveAttachments(primaryText),
-        ...inlineFileAttachments(primaryText),
-        ...contentBlockAttachments(content),
-    ]);
+    const primaryText = normalizeCanonicalChatText(primaryContent(content));
+    const images = extractCanonicalChatImages(content);
+    const attachments = mergeCanonicalChatAttachments(
+        mediaReferenceAttachments(message),
+        [
+            ...mediaDirectiveAttachments(primaryText),
+            ...inlineFileAttachments(primaryText),
+            ...contentBlockAttachments(content),
+        ]
+    );
     const text = stripGeneratedImagePlaceholder(
         stripAttachmentMarkup(primaryText),
         images,
@@ -409,8 +424,8 @@ export function normalizeOpenClawHistoryMessage(
         attachments,
         isFinal: normalizedIsFinal(message),
         isToolUse: normalizedIsToolUse(message),
-        thinking: extractThinkingBlocks(content),
-        toolCalls: extractToolCalls(content),
+        thinking: extractCanonicalChatThinking(content),
+        toolCalls: extractCanonicalChatToolCalls(content),
         toolResult: toolResult(message, content),
         runId: normalizedRunId(message),
         timestamp: normalizedTimestamp(message.timestamp),

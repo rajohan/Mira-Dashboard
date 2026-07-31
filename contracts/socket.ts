@@ -1,5 +1,6 @@
 import * as v from "valibot";
 
+import { canonicalChatEventSchema } from "./chatCanonical";
 import {
     finiteNumberSchema,
     jsonObjectSchema,
@@ -22,6 +23,7 @@ export const dashboardSocketRequestSchema = strictJsonObjectSchema({
 });
 
 export const socketEnvelopeSchema = v.object({
+    canonicalEvents: v.optional(v.array(canonicalChatEventSchema)),
     code: v.optional(v.string()),
     error: v.optional(v.unknown()),
     event: v.optional(v.string()),

@@ -85,8 +85,9 @@ the adapter boundary:
 
 ```text
 OpenClaw Gateway
-  -> backend OpenClawChatBridge (bounded replay journal)
-  -> frontend OpenClaw transport + adapter (raw shapes -> canonical events)
+  -> backend OpenClawChatBridge + shared provider adapter
+       (raw shapes -> versioned canonical events + bounded replay journal)
+  -> frontend OpenClaw transport (validates canonical events)
   -> chat reducer (session/run state machine)
   -> reconciliation + visibility projection
   -> existing Chat UI components
@@ -256,7 +257,16 @@ SQLite uses two related tables:
 - `chat_runtime_snapshot_events` stores one serialized replay event per runtime
   sequence.
 
-The current Dashboard-owned snapshot contract is `schemaVersion: 1`. Its
+The current Dashboard-owned snapshot contract is `schemaVersion: 2`. Every
+runtime envelope contains `canonicalEvents` using canonical event schema v1.
+Each canonical event carries a stable event ID, session-scoped run identity and
+aliases, Gateway sequence, lifecycle, origin, and explicit provider-format
+metadata. The shared OpenClaw provider adapter runs in the backend before live
+delivery or persistence; the frontend validates and reduces these events
+without parsing the provider payload again. Codex/GPT and Synthetic therefore
+keep their distinct source metadata while reaching the same reducer contract.
+
+The snapshot's
 `rows-v2` metadata stores a SHA-256 fingerprint for every retained event, the
 original first sequence for every retained run, pending `chat.send` boundaries
 keyed by request ID, and the latest settled new-turn boundary when one exists.
@@ -268,6 +278,16 @@ coalesces over the run's first retained envelope. An unchanged prefix only
 appends new event rows; coalescing, trimming, or a same-sequence content change
 replaces stale rows. Older inline and `rows-v1` cache layouts are intentionally
 unsupported and are rebuilt from OpenClaw history and new runtime events.
+Snapshot v1 is likewise invalidated rather than migrated because replay is
+noncritical cache data.
+
+Canonical events avoid repeating provider message content in their internal
+`content` field. If raw provider metadata plus the canonical event would exceed
+the existing per-event byte limit, the bridge retains the canonical content and
+compacts the raw payload to identity/lifecycle metadata. If a terminal canonical
+message alone exceeds the limit, the bridge keeps a message-free canonical
+finish marker so replay still settles the run. The byte limits themselves are
+unchanged.
 
 Replay limits are:
 
@@ -305,9 +325,10 @@ restart. Recovery does not require a lifecycle-start:
 the first non-user, non-compaction provider event can establish the continuation,
 which covers Codex preamble and tool events emitted first after startup. The
 live envelope carries every replaced run ID. If that provider event has no
-visible chat draft, the frontend adapter emits an internal identity event so the
-live reducer still performs the replacement; the control event never projects a
-row. This keeps live state identical to the already-repaired persisted replay.
+visible chat draft, the backend provider adapter emits an internal canonical
+identity event so the live reducer still performs the replacement; the control
+event never projects a row. This keeps live state identical to the
+already-repaired persisted replay.
 Promotion is allowed only for one unambiguous logical active conversation,
 inside the bounded restart window, and only when no newer `chat.send` request
 boundary exists. Each outgoing request records
@@ -417,9 +438,12 @@ thinking after the canonical tools but before the final answer.
 OpenClaw providers do not all emit the same live assistant shape. Codex/GPT can
 deliver reasoning, tool progress/results, and the final answer across separate
 `agent`, `session.tool`, and `chat` envelopes. Synthetic can place thinking, a
-tool call, and assistant text inside one `session.message`. The OpenClaw adapter
-keeps these provider formats at its boundary and emits provider-independent
-events before they reach the reducer. A Synthetic assistant message with
+tool call, and assistant text inside one `session.message`. The shared OpenClaw
+adapter keeps these provider formats at the backend boundary and emits
+provider-independent events before live delivery or snapshot persistence. The
+frontend consumes only that canonical runtime contract. Raw, redacted incident
+fixtures retain their provider shape and are canonicalized through the same
+shared adapter during tests. A Synthetic assistant message with
 `stopReason: "toolUse"` remains nonterminal;
 `stopReason: "stop"` completes the run in both the frontend adapter and backend
 replay bridge. History normalization carries that same explicit stop evidence

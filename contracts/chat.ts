@@ -1,5 +1,6 @@
 import * as v from "valibot";
 
+import { canonicalChatEventSchema } from "./chatCanonical";
 import {
     nonNegativeIntegerSchema,
     parseContract,
@@ -9,7 +10,7 @@ import {
 const nonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
 
 /** Current Dashboard-owned format for bounded OpenClaw runtime replay snapshots. */
-export const OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION = 1;
+export const OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION = 2;
 
 export const chatTransportAttachmentSchema = v.strictObject({
     content: v.string(),
@@ -47,6 +48,7 @@ export const chatSessionPatchRequestSchema = strictJsonObjectSchema({
 });
 
 export const openClawRuntimeEnvelopeSchema = v.strictObject({
+    canonicalEvents: v.array(canonicalChatEventSchema),
     event: v.unknown(),
     payload: v.unknown(),
     runtimeRecordedAt: nonNegativeIntegerSchema,
@@ -73,6 +75,7 @@ export const openClawRuntimeSnapshotSchema = v.strictObject({
 
 /** A sequenced OpenClaw runtime event retained and forwarded by the Dashboard. */
 export type OpenClawRuntimeEnvelope = v.InferOutput<typeof openClawRuntimeEnvelopeSchema>;
+export type { CanonicalChatEvent } from "./chatCanonical";
 
 export type OpenClawRuntimeSnapshot = v.InferOutput<typeof openClawRuntimeSnapshotSchema>;
 export type ChatTransportAttachment = v.InferOutput<typeof chatTransportAttachmentSchema>;

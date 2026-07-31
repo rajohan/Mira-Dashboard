@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import type {
@@ -449,17 +450,19 @@ describe("gateway behavior", () => {
         captureBoundary.mockReturnValue(0);
         const handleSuccessfulRequest = jest
             .spyOn(OpenClawChatBridge.prototype, "handleSuccessfulRequest")
-            .mockReturnValueOnce({
-                event: "chat.runtimeIdentity",
-                payload: {
-                    runId: "provider-after-restart",
-                    sessionKey: "agent:main:main",
-                },
-                runtimeRecordedAt: Date.now(),
-                runtimeRunAliases: ["provider-before-restart"],
-                runtimeSequence: 0,
-                type: "event",
-            });
+            .mockReturnValueOnce(
+                withCanonicalOpenClawEvents({
+                    event: "chat.runtimeIdentity",
+                    payload: {
+                        runId: "provider-after-restart",
+                        sessionKey: "agent:main:main",
+                    },
+                    runtimeRecordedAt: Date.now(),
+                    runtimeRunAliases: ["provider-before-restart"],
+                    runtimeSequence: 0,
+                    type: "event",
+                })
+            );
         cleanupCallbacks.push(() => handleSuccessfulRequest.mockRestore());
         expect(
             gateway.request("chat.send", {

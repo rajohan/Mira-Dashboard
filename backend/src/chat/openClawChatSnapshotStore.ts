@@ -1,5 +1,6 @@
 import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    parseOpenClawRuntimeEnvelope,
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
 } from "../../../contracts/chat.ts";
@@ -100,16 +101,12 @@ function normalizedSessionKey(sessionKey: string): string {
 }
 
 function isRuntimeEnvelope(value: unknown): value is OpenClawRuntimeEnvelope {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    try {
+        parseOpenClawRuntimeEnvelope(value, "storedRuntimeEvent");
+        return true;
+    } catch {
         return false;
     }
-    const envelope = value as Record<string, unknown>;
-    return (
-        envelope.type === "event" &&
-        Number.isFinite(envelope.runtimeRecordedAt) &&
-        Number.isSafeInteger(envelope.runtimeSequence) &&
-        (envelope.runtimeSequence as number) >= 0
-    );
 }
 
 function eventFingerprint(envelopeJson: string): string {

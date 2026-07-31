@@ -1,8 +1,11 @@
+import {
+    asRecord,
+    stringValue,
+} from "../../../../../../contracts/chat/openClawAdapterValues";
+import type { RawOpenClawHistoryMessage } from "../../../../../../contracts/chat/openClawHistoryNormalizer";
 import type { ChatHistoryMessage } from "../chatTypes";
-import { asRecord, stringValue } from "./openClawAdapterValues";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 import { appendOpenClawHistory } from "./openClawHistoryAdapter";
-import type { RawOpenClawHistoryMessage } from "./openClawHistoryNormalizer";
 
 export interface OpenClawHistoryPageRequest extends Record<string, unknown> {
     limit: number;
