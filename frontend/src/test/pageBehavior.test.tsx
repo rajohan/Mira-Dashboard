@@ -21,6 +21,7 @@ import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 
 import type { CacheEnvelope } from "../../../contracts/cache";
+import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openClawHistoryPageAdapter";
 import type { Metrics } from "../../../contracts/metrics";
 import type { Session } from "../../../contracts/sessions";
 import { requestBodyText, requestUrl } from "../../../test/support/fetch";
@@ -285,6 +286,32 @@ async function respondToSocketRequest(
         throw new Error(`No socket request found for ${method}`);
     }
     socket.respondedRequestIds.add(request.id);
+    let responsePayload = payload;
+    if (method === "chat.history") {
+        const requestParameters =
+            typeof request.params === "object" && request.params !== null
+                ? request.params
+                : {};
+        const offset =
+            "offset" in requestParameters && typeof requestParameters.offset === "number"
+                ? requestParameters.offset
+                : 0;
+        const rawPage =
+            typeof payload === "object" && payload !== null && !Array.isArray(payload)
+                ? {
+                      ...payload,
+                      ...(!("offset" in payload) && { offset }),
+                  }
+                : payload;
+        responsePayload = canonicalizeOpenClawHistoryPage(rawPage, {
+            offset,
+            sessionKey:
+                "sessionKey" in requestParameters &&
+                typeof requestParameters.sessionKey === "string"
+                    ? requestParameters.sessionKey
+                    : "agent:main:main",
+        });
+    }
 
     await act(async () => {
         socket.emit("message", {
@@ -292,7 +319,7 @@ async function respondToSocketRequest(
                 type: "response",
                 id: request.id,
                 isOk,
-                payload,
+                payload: responsePayload,
             }),
         });
         await Promise.resolve();

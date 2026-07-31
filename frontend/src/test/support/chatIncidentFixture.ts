@@ -17,6 +17,7 @@ import {
     reduceChatRuntime,
 } from "../../components/features/chat/domain/chatState";
 import { OpenClawChatAdapter } from "../../components/features/chat/transport/openClawChatAdapter";
+import { canonicalHistoryRows } from "./canonicalChatHistory";
 
 export const CHAT_INCIDENT_FIXTURE_SCHEMA_VERSION = 1;
 
@@ -132,7 +133,9 @@ export function replayChatIncidentFixture(
     fixture: ChatIncidentFixture
 ): ChatIncidentFixtureResult {
     const adapter = new OpenClawChatAdapter();
-    const history = adapter.history(fixture.history);
+    const history = adapter.history(
+        canonicalHistoryRows(fixture.history, fixture.sessionKey)
+    );
     const events = adapter.snapshot({
         ...fixture.runtimeSnapshot,
         events: fixture.runtimeSnapshot.events.map((event) =>

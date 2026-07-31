@@ -83,11 +83,12 @@ export const canonicalChatMessageSchema = v.strictObject({
     toolResult: v.optional(canonicalChatToolResultSchema),
 });
 
-const canonicalProviderMetadataSchema = v.strictObject({
+export const canonicalChatProviderMetadataSchema = v.strictObject({
     eventName: nonEmptyStringSchema,
     format: v.picklist([
         "openclaw-agent",
         "openclaw-chat",
+        "openclaw-history",
         "openclaw-runtime",
         "openclaw-session-message",
         "openclaw-session-tool",
@@ -102,7 +103,7 @@ const canonicalEventBase = {
     id: nonEmptyStringSchema,
     lifecycle: v.picklist(["aborted", "active", "completed", "error"]),
     origin: v.picklist(["openclaw-chat", "openclaw-runtime", "openclaw-session"]),
-    provider: canonicalProviderMetadataSchema,
+    provider: canonicalChatProviderMetadataSchema,
     runAliases: v.optional(v.array(nonEmptyStringSchema)),
     runId: v.optional(nonEmptyStringSchema),
     schemaVersion: v.literal(CANONICAL_CHAT_EVENT_SCHEMA_VERSION),
@@ -166,6 +167,9 @@ export type CanonicalChatThinking = v.InferOutput<typeof canonicalChatThinkingSc
 export type CanonicalChatToolResult = v.InferOutput<typeof canonicalChatToolResultSchema>;
 export type CanonicalChatToolCall = v.InferOutput<typeof canonicalChatToolCallSchema>;
 export type CanonicalChatMessage = v.InferOutput<typeof canonicalChatMessageSchema>;
+export type CanonicalChatProviderMetadata = v.InferOutput<
+    typeof canonicalChatProviderMetadataSchema
+>;
 export type CanonicalChatEvent = v.InferOutput<typeof canonicalChatEventSchema>;
 export type CanonicalChatLifecycle = CanonicalChatEvent["lifecycle"];
 export type CanonicalChatOperationPhase = Extract<

@@ -188,20 +188,37 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 return { runId: "acknowledged-run" };
             }
             if (method === "chat.history") {
-                return {
+                const response = {
+                    hasMore: false,
                     messages: [
                         {
+                            __openclaw: {
+                                id: "history-message-1",
+                                seq: 1,
+                            },
                             content: [
                                 { text: "see image", type: "text" },
                                 { source: { omitted: true }, type: "image" },
                             ],
+                            model: "gpt-test",
+                            provider: "openai",
                             role: "assistant",
                             timestamp: 1_782_345_600_000,
                         },
                     ],
+                    offset: 0,
                     sessionId: "sess1",
                     sessionKey: "agent:main:main",
+                    totalMessages: 1,
                 };
+                if (
+                    requestParameters.messageId === "history-message-1" ||
+                    requestParameters.offset === undefined
+                ) {
+                    const { offset: _offset, ...anchoredResponse } = response;
+                    return anchoredResponse;
+                }
+                return response;
             }
             if (method === "demo.fail") {
                 throw new Error("gateway rejected");
@@ -1236,24 +1253,80 @@ describe("gateway behavior", () => {
                     (raw) =>
                         JSON.parse(raw) as {
                             id?: string;
-                            payload?: { messages?: Array<{ content?: unknown[] }> };
+                            payload?: {
+                                messages?: Array<{
+                                    message?: { content?: unknown[] };
+                                }>;
+                            };
                         }
                 )
                 .find((message) => message.id === "history-1")
         ).toMatchObject({
             payload: {
+                hasMore: false,
                 messages: [
                     {
-                        content: [
-                            { text: "see image", type: "text" },
-                            {
-                                data: "base64-image",
-                                mimeType: "image/png",
-                                type: "image",
-                            },
-                        ],
+                        id: "openclaw-history:agent%3Amain%3Amain:history-message-1",
+                        message: {
+                            content: [
+                                { text: "see image", type: "text" },
+                                {
+                                    data: "base64-image",
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            role: "assistant",
+                            text: "see image",
+                        },
+                        provider: {
+                            eventName: "chat.history",
+                            format: "openclaw-history",
+                            model: "gpt-test",
+                            provider: "openai",
+                        },
+                        schemaVersion: 1,
+                        sequence: 1,
+                        sessionKey: "agent:main:main",
+                        source: "openclaw-history",
                     },
                 ],
+                offset: 0,
+                schemaVersion: 1,
+                sessionId: "sess1",
+                sessionKey: "agent:main:main",
+                totalMessages: 1,
+            },
+        });
+
+        socket.emitMessage({
+            id: "history-anchor",
+            method: "chat.history",
+            params: {
+                messageId: "history-message-1",
+                sessionKey: "agent:main:main",
+            },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"history-anchor"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            isOk?: boolean;
+                            payload?: { messages?: unknown[]; offset?: number };
+                        }
+                )
+                .find((message) => message.id === "history-anchor")
+        ).toMatchObject({
+            isOk: true,
+            payload: {
+                messages: [expect.objectContaining({ sequence: 1 })],
+                offset: 0,
             },
         });
 

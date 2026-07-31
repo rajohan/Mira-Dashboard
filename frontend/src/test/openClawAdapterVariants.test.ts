@@ -27,9 +27,10 @@ import {
     createChatRuntimeState,
     reduceChatRuntime,
 } from "../components/features/chat/domain/chatState";
-import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
-
-const SESSION = "agent:main:main";
+import {
+    TestOpenClawChatAdapter as OpenClawChatAdapter,
+    TEST_OPENCLAW_SESSION_KEY as SESSION,
+} from "./support/canonicalChatHistory";
 
 function envelope(
     event: string,

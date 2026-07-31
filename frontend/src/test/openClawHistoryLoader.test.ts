@@ -1,9 +1,24 @@
 import { describe, expect, it } from "bun:test";
 
 import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
-import { OpenClawHistoryLoader } from "../components/features/chat/transport/openClawHistoryLoader";
+import {
+    OpenClawHistoryLoader as CanonicalOpenClawHistoryLoader,
+    type OpenClawHistoryPageRequest,
+} from "../components/features/chat/transport/openClawHistoryLoader";
+import { canonicalHistoryPage } from "./support/canonicalChatHistory";
 
 const SESSION = "agent:main:main";
+
+class OpenClawHistoryLoader extends CanonicalOpenClawHistoryLoader {
+    constructor(
+        adapter: OpenClawChatAdapter,
+        requestPage: (request: OpenClawHistoryPageRequest) => unknown
+    ) {
+        super(adapter, async (request) =>
+            canonicalHistoryPage(await requestPage(request), request)
+        );
+    }
+}
 
 function rawMessage(
     sequence: number,
@@ -161,6 +176,449 @@ describe("OpenClaw history loader", () => {
 
         expect(requests).toEqual([0, 1, 0]);
         expect(initial[0]?.toolCalls?.[0]?.toolResult?.content).toBe("stale output");
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
+    it("caches same-sequence sibling rows without collapsing rewritten rows", async () => {
+        let output = "stale output";
+        const requests: number[] = [];
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), (request) => {
+            return Promise.try(() => {
+                requests.push(request.offset);
+                return {
+                    hasMore: false,
+                    messages: [
+                        rawMessage(
+                            1,
+                            "assistant",
+                            [
+                                {
+                                    id: "call-1",
+                                    name: "bash",
+                                    type: "toolCall",
+                                },
+                            ],
+                            {
+                                __openclaw: {
+                                    id: "tool-call-message",
+                                    seq: 1,
+                                },
+                            }
+                        ),
+                        rawMessage(1, "tool", output, {
+                            __openclaw: {
+                                id: "tool-result-message",
+                                seq: 1,
+                            },
+                            toolCallId: "call-1",
+                            toolName: "bash",
+                        }),
+                    ],
+                    offset: 0,
+                    sessionId: "session-1",
+                    totalMessages: 2,
+                };
+            });
+        });
+
+        const initial = await loader.history(SESSION, 2);
+        const cached = await loader.history(SESSION, 2);
+        output = "current output";
+        const refreshed = await loader.history(SESSION, 2);
+
+        expect(requests).toEqual([0, 0, 0]);
+        expect(cached).toBe(initial);
+        expect(initial[0]?.toolCalls?.[0]?.toolResult?.content).toBe("stale output");
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
+    it("loads a cached same-sequence sibling beyond the refresh boundary", async () => {
+        let includeResult = false;
+        const requests: number[] = [];
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), (request) => {
+            requests.push(request.offset);
+            const call = rawMessage(
+                1,
+                "assistant",
+                [{ id: "call-1", name: "bash", type: "toolCall" }],
+                {
+                    __openclaw: {
+                        id: "tool-call-message",
+                        seq: 1,
+                    },
+                }
+            );
+            if (!includeResult) {
+                return {
+                    hasMore: false,
+                    messages: [call],
+                    offset: 0,
+                    sessionId: "session-1",
+                    totalMessages: 1,
+                };
+            }
+            return request.offset === 0
+                ? {
+                      hasMore: true,
+                      messages: [
+                          rawMessage(1, "tool", "current output", {
+                              __openclaw: {
+                                  id: "tool-result-message",
+                                  seq: 1,
+                              },
+                              toolCallId: "call-1",
+                              toolName: "bash",
+                          }),
+                      ],
+                      nextOffset: 1,
+                      offset: 0,
+                      sessionId: "session-1",
+                      totalMessages: 2,
+                  }
+                : {
+                      hasMore: false,
+                      messages: [call],
+                      offset: 1,
+                      sessionId: "session-1",
+                      totalMessages: 2,
+                  };
+        });
+
+        const initial = await loader.history(SESSION, 1);
+        includeResult = true;
+        const refreshed = await loader.history(SESSION, 1);
+
+        expect(requests).toEqual([0, 0, 1]);
+        expect(initial[0]?.toolCalls?.[0]?.toolResult).toBeUndefined();
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
+    it("replaces a rewritten seq-only row instead of retaining stale content", async () => {
+        let content = "stale answer";
+        const requests: number[] = [];
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), (request) => {
+            requests.push(request.offset);
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(1, "assistant", content, {
+                        __openclaw: { seq: 1 },
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 1,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        content = "current answer";
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(requests).toEqual([0, 0]);
+        expect(initial.map((message) => message.text)).toEqual(["stale answer"]);
+        expect(refreshed.map((message) => message.text)).toEqual(["current answer"]);
+    });
+
+    it("updates provider rows beside a rewritten seq-only sibling", async () => {
+        let fingerprintContent = "stale fingerprint";
+        let providerContent = "stale provider";
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(1, "assistant", fingerprintContent, {
+                        __openclaw: { seq: 1 },
+                    }),
+                    rawMessage(1, "assistant", providerContent, {
+                        __openclaw: { id: "provider-message", seq: 1 },
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 2,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        fingerprintContent = "current fingerprint";
+        providerContent = "current provider";
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial.map((message) => message.text)).toEqual([
+            "stale fingerprint",
+            "stale provider",
+        ]);
+        expect(refreshed.map((message) => message.text).toSorted()).toEqual([
+            "current fingerprint",
+            "current provider",
+        ]);
+    });
+
+    it("preserves fresh same-sequence order when a fingerprint row is rewritten", async () => {
+        let command = "echo stale";
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(
+                        1,
+                        "assistant",
+                        [
+                            {
+                                arguments: { command },
+                                id: "call-1",
+                                name: "bash",
+                                type: "toolCall",
+                            },
+                        ],
+                        { __openclaw: { seq: 1 } }
+                    ),
+                    rawMessage(1, "tool", "completed", {
+                        __openclaw: {
+                            id: "provider-result",
+                            seq: 1,
+                        },
+                        toolCallId: "call-1",
+                        toolName: "bash",
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 2,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        command = "echo current";
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial).toHaveLength(1);
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0]?.toolCalls?.[0]?.arguments).toEqual({
+            command: "echo current",
+        });
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("completed");
+    });
+
+    it("preserves seq-only siblings while replacing a rewritten member", async () => {
+        let output = "stale output";
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(
+                        1,
+                        "assistant",
+                        [{ id: "call-1", name: "bash", type: "toolCall" }],
+                        { __openclaw: { seq: 1 } }
+                    ),
+                    rawMessage(1, "tool", output, {
+                        __openclaw: { seq: 1 },
+                        toolCallId: "call-1",
+                        toolName: "bash",
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 2,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        output = "current output";
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial).toHaveLength(1);
+        expect(initial[0]?.toolCalls?.[0]?.toolResult?.content).toBe("stale output");
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
+    it("evicts seq-only siblings missing from a refreshed sequence", async () => {
+        let includeSecond = true;
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(1, "assistant", "first", {
+                        __openclaw: { seq: 1 },
+                    }),
+                    ...(includeSecond
+                        ? [
+                              rawMessage(1, "assistant", "second", {
+                                  __openclaw: { seq: 1 },
+                              }),
+                          ]
+                        : []),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 2,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        includeSecond = false;
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial.map((message) => message.text)).toEqual(["first", "second"]);
+        expect(refreshed.map((message) => message.text)).toEqual(["first"]);
+    });
+
+    it("evicts a seq-only row when the refreshed row gains provider identity", async () => {
+        let hasProviderIdentity = false;
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(
+                        1,
+                        "assistant",
+                        hasProviderIdentity ? "current answer" : "stale answer",
+                        {
+                            __openclaw: {
+                                ...(hasProviderIdentity ? { id: "provider-answer" } : {}),
+                                seq: 1,
+                            },
+                        }
+                    ),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 1,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        hasProviderIdentity = true;
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial.map((message) => message.text)).toEqual(["stale answer"]);
+        expect(refreshed.map((message) => message.text)).toEqual(["current answer"]);
+    });
+
+    it("evicts a provider row replaced by a new provider identity", async () => {
+        let providerId = "stale-provider-answer";
+        let content = "stale answer";
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(1, "assistant", content, {
+                        __openclaw: { id: providerId, seq: 1 },
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 1,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        providerId = "current-provider-answer";
+        content = "current answer";
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial.map((message) => message.text)).toEqual(["stale answer"]);
+        expect(refreshed.map((message) => message.text)).toEqual(["current answer"]);
+    });
+
+    it("preserves fresh order when a provider row is added to a cached sequence", async () => {
+        let includeCall = false;
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    ...(includeCall
+                        ? [
+                              rawMessage(
+                                  1,
+                                  "assistant",
+                                  [{ id: "call-1", name: "bash", type: "toolCall" }],
+                                  {
+                                      __openclaw: {
+                                          id: "tool-call-message",
+                                          seq: 1,
+                                      },
+                                  }
+                              ),
+                          ]
+                        : []),
+                    rawMessage(1, "tool", "current output", {
+                        __openclaw: {
+                            id: "tool-result-message",
+                            seq: 1,
+                        },
+                        toolCallId: "call-1",
+                        toolName: "bash",
+                    }),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: includeCall ? 2 : 1,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        includeCall = true;
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial[0]?.toolResult?.content).toBe("current output");
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
+    it("rebuilds cached history when a new row shares a cached sequence", async () => {
+        let includeResult = false;
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return Promise.resolve({
+                hasMore: false,
+                messages: [
+                    rawMessage(
+                        1,
+                        "assistant",
+                        [
+                            {
+                                id: "call-1",
+                                name: "bash",
+                                type: "toolCall",
+                            },
+                        ],
+                        {
+                            __openclaw: {
+                                id: "tool-call-message",
+                                seq: 1,
+                            },
+                        }
+                    ),
+                    ...(includeResult
+                        ? [
+                              rawMessage(1, "tool", "current output", {
+                                  __openclaw: {
+                                      id: "tool-result-message",
+                                      seq: 1,
+                                  },
+                                  toolCallId: "call-1",
+                                  toolName: "bash",
+                              }),
+                          ]
+                        : []),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: includeResult ? 2 : 1,
+            });
+        });
+
+        const initial = await loader.history(SESSION, 2);
+        includeResult = true;
+        const refreshed = await loader.history(SESSION, 2);
+
+        expect(initial[0]?.toolCalls?.[0]?.toolResult).toBeUndefined();
+        expect(refreshed).toHaveLength(1);
         expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
     });
 

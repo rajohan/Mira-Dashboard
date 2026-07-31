@@ -1,7 +1,4 @@
-import {
-    normalizeOpenClawHistoryMessage,
-    type RawOpenClawHistoryMessage,
-} from "../../../../../../contracts/chat/openClawHistoryNormalizer";
+import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chatCanonicalHistory";
 import { type ChatHistoryMessage, mergeChatAttachments } from "../chatTypes";
 
 function matchingToolCallIndex(
@@ -32,16 +29,14 @@ function matchingToolCallIndex(
 /**
  * Folds OpenClaw tool-result rows into their canonical assistant call.
  * @param existing Existing value.
- * @param messages Messages value.
+ * @param rows Canonical history rows.
  * @returns Append open claw history result.
  */
 export function appendOpenClawHistory(
     existing: ChatHistoryMessage[],
-    messages: RawOpenClawHistoryMessage[] | undefined
+    rows: CanonicalChatHistoryRow[] | undefined
 ): ChatHistoryMessage[] {
-    const normalized = (messages || []).map((message) =>
-        normalizeOpenClawHistoryMessage(message)
-    );
+    const normalized = (rows || []).map((row) => row.message);
     const result: ChatHistoryMessage[] = [...existing];
     for (const message of normalized) {
         if (!message.toolResult || !message.role.toLowerCase().startsWith("tool")) {
@@ -83,11 +78,11 @@ export function appendOpenClawHistory(
 
 /**
  * Folds OpenClaw tool-result rows into their canonical assistant call.
- * @param messages Messages value.
+ * @param rows Canonical history rows.
  * @returns Adapt open claw history result.
  */
 export function adaptOpenClawHistory(
-    messages: RawOpenClawHistoryMessage[] | undefined
+    rows: CanonicalChatHistoryRow[] | undefined
 ): ChatHistoryMessage[] {
-    return appendOpenClawHistory([], messages);
+    return appendOpenClawHistory([], rows);
 }
