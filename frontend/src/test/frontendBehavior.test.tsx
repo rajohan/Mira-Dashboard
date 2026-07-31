@@ -397,16 +397,6 @@ function appObservabilityMetrics(): AppObservabilityMetrics {
                 writes: 4,
                 writesPerMinute: 2,
             },
-            projectionShadow: {
-                activeRunMismatches: 0,
-                canonicalErrors: 0,
-                compactionStatusMismatches: 0,
-                lastObservedAt: "2026-07-30T10:00:00.000Z",
-                matches: 8,
-                mismatches: 0,
-                observations: 8,
-                rowMismatches: 0,
-            },
             replay: {
                 currentBytes: 2048,
                 events: 12,

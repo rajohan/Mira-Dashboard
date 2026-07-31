@@ -30,7 +30,6 @@ function fakeRuntime(): ChatRuntimeController {
         clearRun: jest.fn(),
         clearSession: jest.fn(),
         failRun: jest.fn(),
-        hasSettledSelectedSessionReplay: true,
         state: createChatRuntimeState(),
     };
 }

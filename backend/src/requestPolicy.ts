@@ -104,9 +104,6 @@ const buckets = new Map<string, RateLimitBucket>();
 const BUCKET_CLEANUP_INTERVAL_MS = 60_000;
 const BUCKET_STALE_MS = Math.max(apiRule.windowMs, authRule.windowMs) * 2;
 const SAFE_REQUEST_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const UNAUDITED_API_METHODS = new Map<string, ReadonlySet<string>>([
-    ["/api/metrics/chat-projection-shadow", new Set(["POST"])],
-]);
 const PUBLIC_API_METHODS = new Map<string, ReadonlySet<string>>([
     ["/api/health/live", new Set(["GET", "HEAD"])],
     ["/api/health/ready", new Set(["GET", "HEAD"])],
@@ -369,15 +366,12 @@ function auditOutcomeForStatus(status: number): AuditOutcome {
 
 function isAuditedMutation(
     isApi: boolean,
-    routePath: string,
     request: Request,
     automationScope?: AutomationScope
 ): boolean {
     if (!isApi) return false;
-    const method = request.method.toUpperCase();
     return (
-        (!SAFE_REQUEST_METHODS.has(method) &&
-            UNAUDITED_API_METHODS.get(routePath)?.has(method) !== true) ||
+        !SAFE_REQUEST_METHODS.has(request.method.toUpperCase()) ||
         automationScope?.endsWith(":write") === true
     );
 }
@@ -632,7 +626,6 @@ function secureHandler(
                 }
                 const isAuditedMutationRequest = isAuditedMutation(
                     isApi,
-                    routePath,
                     request,
                     automationScope
                 );

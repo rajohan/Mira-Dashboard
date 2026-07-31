@@ -5,14 +5,13 @@ import {
     messageDeleteKey,
     stableChatStringify,
 } from "../components/features/chat/chatUtilities";
-import { projectChatWithCanonicalShadow } from "../components/features/chat/domain/chatCanonicalProjection";
+import { projectCanonicalChat } from "../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,
     presentChatMessages,
 } from "../components/features/chat/domain/chatPresentation";
 import {
     type ChatProjection,
-    projectChat as projectLegacyChat,
     reconcileChatMessages,
 } from "../components/features/chat/domain/chatProjection";
 import {
@@ -34,16 +33,9 @@ type EventDraft = ChatRuntimeEvent extends infer Event
     : never;
 
 function projectChat(
-    ...parameters: Parameters<typeof projectLegacyChat>
+    ...parameters: Parameters<typeof projectCanonicalChat>
 ): ChatProjection {
-    const shadow = projectChatWithCanonicalShadow(...parameters);
-    expect(shadow.comparison).toMatchObject({
-        differenceKinds: [],
-        matches: true,
-        schemaVersion: 1,
-    });
-    expect(shadow.canonical?.turns).toBeDefined();
-    return shadow.legacy;
+    return projectCanonicalChat(...parameters).projection;
 }
 
 function projectedRowKind(row: ChatProjection["rows"][number]): string {
@@ -780,8 +772,8 @@ describe("chat projection", () => {
         expect(rows.find((row) => row.message.role === "assistant")?.kind).toBe("stream");
 
         const recoveredHistoryMessage = {
-            ...message("user", "steer"),
-            timestamp: NOW,
+            ...message("user", "steer", "dashboard-chat-steer"),
+            timestamp: "2026-07-16T12:00:03.000Z",
         };
         expect(
             projectChat(
@@ -790,9 +782,68 @@ describe("chat projection", () => {
                 SESSION,
                 createChatVisibility(true, true),
                 true,
-                new Set([optimisticUserRow.key])
+                new Set(optimisticUserRow.deleteKeys)
             ).rows
         ).toEqual([]);
+    });
+
+    it("scopes an optimistic user deletion through acknowledged run aliases", () => {
+        const optimisticRunId = "dashboard-chat-delete";
+        const providerRunId = "provider-delete";
+        const optimisticMessage = {
+            ...message("user", "repeatable prompt", optimisticRunId),
+            local: true,
+            timestamp: NOW,
+        };
+        const optimisticRow = projectChat(
+            [optimisticMessage],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows[0]!;
+        const acknowledged = acknowledgeChatRun(
+            addOptimisticChatRun(createChatRuntimeState(), SESSION, optimisticRunId),
+            SESSION,
+            optimisticRunId,
+            providerRunId
+        );
+        const recovered = projectChat(
+            [
+                {
+                    ...message("user", "repeatable prompt", providerRunId),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            acknowledged,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(optimisticRow.deleteKeys)
+        );
+        const laterUnrelated = projectChat(
+            [
+                {
+                    ...message("user", "repeatable prompt", "provider-later"),
+                    timestamp: "2026-07-16T13:00:00.000Z",
+                },
+            ],
+            acknowledged,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(optimisticRow.deleteKeys)
+        );
+
+        expect(
+            recovered.rows.some((row) => row.message.role.toLowerCase() === "user")
+        ).toBe(false);
+        expect(
+            laterUnrelated.rows
+                .filter((row) => row.message.role.toLowerCase() === "user")
+                .map((row) => row.message.text)
+        ).toEqual(["repeatable prompt"]);
     });
 
     it("keeps a thinking row anchored while runtime output recovers into history", () => {

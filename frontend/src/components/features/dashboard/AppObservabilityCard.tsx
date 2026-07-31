@@ -277,22 +277,6 @@ export function AppObservabilityCard({ metrics }: AppObservabilityCardProperties
                         label="Store writes / minute"
                         value={chat.persistence.writesPerMinute}
                     />
-                    <MetricRow
-                        label="Shadow matches / observations"
-                        value={`${chat.projectionShadow.matches} / ${chat.projectionShadow.observations}`}
-                    />
-                    <MetricRow
-                        label="Shadow mismatches / errors"
-                        value={`${chat.projectionShadow.mismatches} / ${chat.projectionShadow.canonicalErrors}`}
-                    />
-                    <MetricRow
-                        label="Run / compaction / row diffs"
-                        value={`${chat.projectionShadow.activeRunMismatches} / ${chat.projectionShadow.compactionStatusMismatches} / ${chat.projectionShadow.rowMismatches}`}
-                    />
-                    <MetricRow
-                        label="Last shadow observation"
-                        value={formatTimestamp(chat.projectionShadow.lastObservedAt)}
-                    />
                 </MetricGroup>
 
                 <MetricGroup

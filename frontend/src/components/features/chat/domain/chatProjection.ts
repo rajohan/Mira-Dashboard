@@ -1,5 +1,7 @@
+import { canonicalChatContentFingerprint } from "../../../../../../contracts/chatCanonicalMessage";
 import {
     type ChatHistoryMessage,
+    type ChatMessageSourceReference,
     type ChatRow,
     type ChatVisibilitySettings,
     mergeChatImages,
@@ -138,6 +140,77 @@ function historyMessageDeleteKey(message: ChatHistoryMessage): string {
     });
 }
 
+/**
+ * Gives an optimistic prompt and its history echo one bounded run-independent alias.
+ * Two overlapping buckets cover the runtime echo window without hiding the same
+ * prompt sent much later. Local rows also carry the no-time alias because Gateway
+ * history may omit the provider timestamp together with the run identity.
+ * @returns Bounded run-independent aliases for recovered user history.
+ */
+function unscopedUserRecoveryDeleteKeys(message: ChatHistoryMessage): string[] {
+    const contentIdentity = canonicalChatContentFingerprint(
+        messageDeleteKey({
+            ...message,
+            runId: undefined,
+            runtimeKey: undefined,
+            timestamp: undefined,
+        })
+    );
+    const timestamp = messageTimestamp(message);
+    const scopes = new Set<string>();
+    if (timestamp === undefined || message.local === true) {
+        scopes.add("no-time");
+    }
+    if (timestamp !== undefined) {
+        const bucketWidth = RUNTIME_USER_ECHO_WINDOW_MS * 2;
+        scopes.add(`time-${Math.floor(timestamp / bucketWidth)}`);
+        scopes.add(
+            `time-${Math.floor((timestamp + RUNTIME_USER_ECHO_WINDOW_MS) / bucketWidth)}`
+        );
+    }
+    return [...scopes].map(
+        (scope) => `chat-user-recovery:v1:${scope}:${contentIdentity}`
+    );
+}
+
+function scopedUserRecoveryDeleteKeys(
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
+): string[] {
+    const runId = message.runId?.trim();
+    const unscopedKeys = unscopedUserRecoveryDeleteKeys(message);
+    if (!runId) {
+        return unscopedKeys;
+    }
+    const matchingRun = runs.find((run) => isRunMatchingMessage(run, message));
+    const runIds = matchingRun ? [matchingRun.runId, ...matchingRun.aliases] : [runId];
+    return [
+        ...new Set([
+            ...runIds.map((candidateRunId) =>
+                messageDeleteKey({
+                    ...message,
+                    runId: candidateRunId,
+                    runtimeKey: undefined,
+                    timestamp: undefined,
+                })
+            ),
+            ...unscopedKeys,
+        ]),
+    ];
+}
+
+function userMessageDeleteKeys(
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
+): string[] {
+    const historyKey = historyMessageDeleteKey(message);
+    const recoveryKeys = scopedUserRecoveryDeleteKeys(message, runs);
+    return [
+        historyKey,
+        ...recoveryKeys.filter((recoveryKey) => recoveryKey !== historyKey),
+    ];
+}
+
 function projectedMessageRowKey(message: ChatHistoryMessage): string {
     if (isUserMessage(message)) {
         return historyMessageDeleteKey(message);
@@ -150,19 +223,128 @@ function projectedMessageRowKey(message: ChatHistoryMessage): string {
     );
 }
 
+function projectedMessageSourceFacet(message: ChatHistoryMessage): string {
+    const role = message.role.toLowerCase();
+    if (role === "user") {
+        return "user";
+    }
+    if (
+        message.thinking?.length &&
+        !message.toolCalls?.length &&
+        !message.toolResult &&
+        !hasPrimaryAnswerContent(message)
+    ) {
+        return "thinking";
+    }
+    if (message.toolCalls?.length || message.toolResult || message.isToolUse) {
+        return "tool";
+    }
+    return "assistant";
+}
+
+function projectedMessageSources(
+    message: ChatHistoryMessage
+): ChatMessageSourceReference[] {
+    const provenance = message.provenance;
+    if (!provenance) {
+        return [];
+    }
+    const { relatedSources = [], ...primarySource } = provenance;
+    return [primarySource, ...relatedSources];
+}
+
+function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[] {
+    const sourcesByIdentity = new Map<string, ChatMessageSourceReference>();
+    for (const source of projectedMessageSources(message)) {
+        const identity = stableChatStringify({
+            id: source.id,
+            sequence: source.sequence,
+            source: source.source,
+        });
+        if (!sourcesByIdentity.has(identity)) {
+            sourcesByIdentity.set(identity, source);
+        }
+    }
+    const facet = projectedMessageSourceFacet(message);
+    return sourcesByIdentity
+        .entries()
+        .toArray()
+        .toSorted(([, left], [, right]) => {
+            const sequenceDifference =
+                (left.sequence ?? Number.MAX_SAFE_INTEGER) -
+                (right.sequence ?? Number.MAX_SAFE_INTEGER);
+            return (
+                sequenceDifference ||
+                left.source.localeCompare(right.source) ||
+                left.id.localeCompare(right.id)
+            );
+        })
+        .map(
+            ([sourceIdentity]) =>
+                `chat-message-source:v1:${canonicalChatContentFingerprint(
+                    stableChatStringify({ facet, sourceIdentity })
+                )}`
+        );
+}
+
+function hasPositionFallbackHistorySource(message: ChatHistoryMessage): boolean {
+    return projectedMessageSources(message).some(
+        (source) =>
+            source.source === "openclaw-history" &&
+            source.sequence === undefined &&
+            /^openclaw-history:[^:]+:position%3A/iu.test(source.id)
+    );
+}
+
 /**
  * Keeps persisted delete keys valid when runtime reconciliation adds a run id.
  * @returns Projected message delete keys result.
  */
-function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
+interface ProjectedMessageDeleteIdentity {
+    baseKeys: string[];
+    persistedKeyCount: number;
+}
+
+function projectedMessageDeleteIdentity(
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
+): ProjectedMessageDeleteIdentity {
+    const sourceKeys = projectedMessageSourceDeleteKeys(message);
+    const userKeys = isUserMessage(message) ? userMessageDeleteKeys(message, runs) : [];
+    if (sourceKeys.length > 0) {
+        const stableFallbackKey = hasPositionFallbackHistorySource(message)
+            ? projectedMessageRowKey(message)
+            : undefined;
+        const persistedKeys = stableFallbackKey
+            ? [
+                  stableFallbackKey,
+                  ...sourceKeys.filter((key) => key !== stableFallbackKey),
+              ]
+            : sourceKeys;
+        const baseKeys = [
+            ...persistedKeys,
+            ...userKeys.filter((key) => !persistedKeys.includes(key)),
+        ];
+        return {
+            baseKeys,
+            persistedKeyCount: persistedKeys.length,
+        };
+    }
+    if (userKeys.length > 0) {
+        const persistedKeyCount =
+            !message.runId && message.local !== true ? 1 : userKeys.length;
+        return { baseKeys: userKeys, persistedKeyCount };
+    }
     const currentKey = projectedMessageRowKey(message);
     if (!message.runId || message.local === true) {
-        return [currentKey];
+        return { baseKeys: [currentKey], persistedKeyCount: 1 };
     }
     const persistedHistoryKey = historyMessageDeleteKey(message);
-    return currentKey === persistedHistoryKey
-        ? [currentKey]
-        : [currentKey, persistedHistoryKey];
+    const baseKeys =
+        currentKey === persistedHistoryKey
+            ? [currentKey]
+            : [currentKey, persistedHistoryKey];
+    return { baseKeys, persistedKeyCount: baseKeys.length };
 }
 
 function asAssistantToolResultMessage(message: ChatHistoryMessage): ChatHistoryMessage {
@@ -1821,20 +2003,49 @@ export function presentChatProjectionContext(
  * Converts presented messages into the unchanged UI row contract.
  * @param messages Presented canonical messages.
  * @param deletedMessageKeys Persisted message deletion identities.
+ * @param runs Canonical runtime runs carrying acknowledged identity aliases.
  * @returns Message and stream rows in presentation order.
  */
 export function renderChatProjectionRows(
     messages: ChatHistoryMessage[],
-    deletedMessageKeys: ReadonlySet<string>
+    deletedMessageKeys: ReadonlySet<string>,
+    runs: ChatRunState[]
 ): ChatRow[] {
-    return messages.flatMap((message) => {
-        const deleteKeys = projectedMessageDeleteKeys(message);
-        return deleteKeys.some((key) => deletedMessageKeys.has(key))
+    const deleteKeyOccurrences = new Map<string, number>();
+    const messageDeleteIdentities = messages.map((message) =>
+        projectedMessageDeleteIdentity(message, runs)
+    );
+    const naturalDeleteKeys = new Set(
+        messageDeleteIdentities.flatMap((identity) => identity.baseKeys)
+    );
+    const generatedDeleteKeys = new Set<string>();
+    return messages.flatMap((message, messageIndex) => {
+        const identity = messageDeleteIdentities[messageIndex]!;
+        const matchDeleteKeys = identity.baseKeys.map((baseKey) => {
+            const occurrence = deleteKeyOccurrences.get(baseKey) ?? 0;
+            deleteKeyOccurrences.set(baseKey, occurrence + 1);
+            if (occurrence === 0) {
+                return baseKey;
+            }
+            const key = unusedChatProjectionRowOccurrenceKey(
+                baseKey,
+                occurrence,
+                naturalDeleteKeys,
+                generatedDeleteKeys
+            );
+            generatedDeleteKeys.add(key);
+            return key;
+        });
+        const deleteKeys = matchDeleteKeys.slice(0, identity.persistedKeyCount);
+        return matchDeleteKeys.some((key) => deletedMessageKeys.has(key))
             ? []
             : [
                   {
                       deleteKeys,
-                      key: projectedMessageRowKey(message),
+                      key:
+                          deleteKeys[0] ??
+                          matchDeleteKeys[0] ??
+                          projectedMessageRowKey(message),
                       kind:
                           message.local === true &&
                           message.runId &&
@@ -1893,6 +2104,58 @@ export function appendChatProjectionStatus(
     return typing ? [...rows, typing] : rows;
 }
 
+function chatProjectionRowOccurrenceKey(
+    baseKey: string,
+    occurrence: number,
+    collision: number
+): string {
+    return [
+        "chat-row-occurrence",
+        "v1",
+        occurrence,
+        collision,
+        canonicalChatContentFingerprint(baseKey),
+    ].join(":");
+}
+
+function unusedChatProjectionRowOccurrenceKey(
+    baseKey: string,
+    occurrence: number,
+    reservedKeys: ReadonlySet<string>,
+    usedKeys: ReadonlySet<string>
+): string {
+    let collision = 0;
+    let key = chatProjectionRowOccurrenceKey(baseKey, occurrence, collision);
+    while (reservedKeys.has(key) || usedKeys.has(key)) {
+        collision += 1;
+        key = chatProjectionRowOccurrenceKey(baseKey, occurrence, collision);
+    }
+    return key;
+}
+
+function uniqueChatProjectionRowKeys(rows: ChatRow[]): ChatRow[] {
+    const reservedKeys = new Set(rows.map((row) => row.key));
+    const usedKeys = new Set<string>();
+    const occurrences = new Map<string, number>();
+    return rows.map((row) => {
+        const baseKey = row.key;
+        let occurrence = occurrences.get(baseKey) ?? 0;
+        let key = baseKey;
+        if (usedKeys.has(key)) {
+            occurrence += 1;
+            key = unusedChatProjectionRowOccurrenceKey(
+                baseKey,
+                occurrence,
+                reservedKeys,
+                usedKeys
+            );
+        }
+        occurrences.set(baseKey, occurrence);
+        usedKeys.add(key);
+        return key === baseKey ? row : { ...row, key };
+    });
+}
+
 /**
  * Selects the latest visible context-compaction lifecycle.
  * @param runs Ordered session runs.
@@ -1916,42 +2179,14 @@ export function finalizeChatProjection(
 ): ChatProjection {
     const { context } = presentation.structure.reconciliation;
     const activeRuns = selectActiveChatProjectionRuns(context);
+    const rows = appendChatProjectionStatus(
+        renderChatProjectionRows(presentation.messages, deletedMessageKeys, context.runs),
+        presentation.messages,
+        activeRuns
+    );
     return {
         activeRuns,
         compactionStatus: selectChatCompactionStatus(context.runs),
-        rows: appendChatProjectionStatus(
-            renderChatProjectionRows(presentation.messages, deletedMessageKeys),
-            presentation.messages,
-            activeRuns
-        ),
+        rows: uniqueChatProjectionRowKeys(rows),
     };
-}
-
-/**
- * Builds the exact rows consumed by the unchanged chat message UI.
- * @param history History value.
- * @param runtime Runtime value.
- * @param sessionKey Session key value.
- * @param visibility Visibility value.
- * @param shouldKeepThinkingAfterFinal Whether should keep thinking after final.
- * @param deletedMessageKeys Deleted message keys value.
- * @returns Built the exact rows consumed by the unchanged chat message UI.
- */
-export function projectChat(
-    history: ChatHistoryMessage[],
-    runtime: ChatRuntimeState,
-    sessionKey: string,
-    visibility: ChatVisibilitySettings,
-    shouldKeepThinkingAfterFinal: boolean,
-    deletedMessageKeys: ReadonlySet<string>
-): ChatProjection {
-    const context = selectChatProjectionContext(history, runtime, sessionKey);
-    const reconciliation = reconcileChatProjectionContext(context);
-    const structure = structureChatProjectionContext(reconciliation);
-    const presentation = presentChatProjectionContext(
-        structure,
-        visibility,
-        shouldKeepThinkingAfterFinal
-    );
-    return finalizeChatProjection(presentation, deletedMessageKeys);
 }

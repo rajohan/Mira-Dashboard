@@ -45,12 +45,6 @@ interface RuntimeIdentity {
     replayScope?: string;
 }
 
-interface RuntimeReplayScope {
-    connectionGeneration: number;
-    isConnected: boolean;
-    sessionKey: string;
-}
-
 function replayIdentityTransition(
     previous: RuntimeIdentity,
     snapshot: Pick<ChatRuntimeSnapshot, "replayScope" | "runtimeGeneration">,
@@ -179,7 +173,6 @@ export interface ChatRuntimeController {
     clearRun: (sessionKey: string, runId: string) => void;
     clearSession: (sessionKey: string) => void;
     failRun: (sessionKey: string, runId: string) => void;
-    hasSettledSelectedSessionReplay: boolean;
     state: ChatRuntimeState;
 }
 
@@ -196,25 +189,6 @@ export function useChatRuntime({
     const [state, setState] = useState(() =>
         createChatRuntimeState(transport.connectionGeneration)
     );
-    const [replayScope, setReplayScope] = useState<RuntimeReplayScope>(() => ({
-        connectionGeneration: transport.connectionGeneration,
-        isConnected: transport.isConnected,
-        sessionKey: selectedSessionKey,
-    }));
-    if (
-        replayScope.connectionGeneration !== transport.connectionGeneration ||
-        replayScope.isConnected !== transport.isConnected ||
-        replayScope.sessionKey !== selectedSessionKey
-    ) {
-        // React rerenders this component before committing, so settlement from
-        // the previous session or connection cannot become observable.
-        setReplayScope({
-            connectionGeneration: transport.connectionGeneration,
-            isConnected: transport.isConnected,
-            sessionKey: selectedSessionKey,
-        });
-    }
-    const [settledReplayScope, setSettledReplayScope] = useState<RuntimeReplayScope>();
     // Gateway adapters may emit several events before React renders. This mirror
     // keeps every reduction based on the latest committed runtime value.
     const stateRef = useRef(state);
@@ -516,7 +490,6 @@ export function useChatRuntime({
                 for (const finish of replayReduction.finishes) {
                     handleFinishSideEffects(finish.event, finish.state);
                 }
-                setSettledReplayScope(replayScope);
             } catch {
                 if (isCancelled || gateRef.current?.token !== token) {
                     return;
@@ -549,15 +522,7 @@ export function useChatRuntime({
                 }
             }
         };
-    }, [
-        replayScope,
-        selectedSessionKey,
-        transport.connectionGeneration,
-        transport.isConnected,
-    ]);
-
-    const hasSettledSelectedSessionReplay =
-        replayScope.isConnected && settledReplayScope === replayScope;
+    }, [selectedSessionKey, transport.connectionGeneration, transport.isConnected]);
 
     useEffect(() => () => handledFinishSequencesRef.current.clear(), []);
 
@@ -690,7 +655,6 @@ export function useChatRuntime({
         clearRun,
         clearSession,
         failRun,
-        hasSettledSelectedSessionReplay,
         state,
     };
 }

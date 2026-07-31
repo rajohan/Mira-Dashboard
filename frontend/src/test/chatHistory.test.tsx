@@ -47,7 +47,7 @@ function transportWithHistory(history: ChatTransport["history"]): ChatTransport 
 }
 
 describe("chat history controller", () => {
-    it("marks history successful only after a selected-session load succeeds", async () => {
+    it("recovers selected history after an initial load failure", async () => {
         const history = jest
             .fn<ChatTransport["history"]>()
             .mockRejectedValueOnce(new Error("history unavailable"))
@@ -71,7 +71,6 @@ describe("chat history controller", () => {
         );
 
         await waitFor(() => expect(result.current.isLoadingHistory).toBe(false));
-        expect(result.current.hasSuccessfulHistoryLoad).toBe(false);
 
         act(() => result.current.refreshSoon(SESSION, 0));
         await waitFor(() =>
@@ -79,7 +78,6 @@ describe("chat history controller", () => {
                 "recovered",
             ])
         );
-        expect(result.current.hasSuccessfulHistoryLoad).toBe(true);
     });
 
     it("preserves an optimistic send while the first history request is pending", async () => {
@@ -222,6 +220,58 @@ describe("chat history controller", () => {
             await olderRefresh.promise;
         });
         expect(result.current.messages[0]?.text).toBe("newer");
+    });
+
+    it("does not stamp an old refresh with a newer connection generation", async () => {
+        const oldGenerationRefresh = Promise.withResolvers<ChatHistoryMessage[]>();
+        const newGenerationLoad = Promise.withResolvers<ChatHistoryMessage[]>();
+        const history = jest
+            .fn<ChatTransport["history"]>()
+            .mockResolvedValueOnce([message("initial")])
+            .mockImplementationOnce(() => oldGenerationRefresh.promise)
+            .mockImplementationOnce(() => newGenerationLoad.promise);
+        const baseTransport = transportWithHistory(history);
+        const selectedSessionKeyRef = {
+            current: SESSION,
+        } as RefObject<string>;
+        const stickToBottomRef = {
+            current: true,
+        } as RefObject<boolean>;
+        const { result, rerender } = renderHook(
+            ({ generation }: { generation: number }) =>
+                useChatHistory({
+                    isConnected: true,
+                    onError: jest.fn(),
+                    selectedSessionKey: SESSION,
+                    selectedSessionKeyRef,
+                    setIsAtBottom: jest.fn(),
+                    shouldStickToBottomRef: stickToBottomRef,
+                    transport: {
+                        ...baseTransport,
+                        connectionGeneration: generation,
+                    },
+                }),
+            { initialProps: { generation: 1 } }
+        );
+
+        await waitFor(() => expect(result.current.isLoadingHistory).toBe(false));
+        act(() => result.current.refreshSoon(SESSION, 0));
+        await waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+        rerender({ generation: 2 });
+        await waitFor(() => expect(history).toHaveBeenCalledTimes(3));
+
+        await act(async () => {
+            oldGenerationRefresh.resolve([message("old generation")]);
+            await oldGenerationRefresh.promise;
+        });
+        expect(result.current.isLoadingHistory).toBe(true);
+
+        await act(async () => {
+            newGenerationLoad.resolve([message("new generation")]);
+            await newGenerationLoad.promise;
+        });
+        await waitFor(() => expect(result.current.isLoadingHistory).toBe(false));
+        expect(result.current.messages[0]?.text).toBe("new generation");
     });
 
     it("does not merge the previous session into a refresh that wins first load", async () => {

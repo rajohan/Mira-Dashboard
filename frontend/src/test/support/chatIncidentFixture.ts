@@ -6,7 +6,7 @@ import type {
     ChatHistoryMessage,
     ChatRow,
 } from "../../components/features/chat/chatTypes";
-import { projectChatWithCanonicalShadow } from "../../components/features/chat/domain/chatCanonicalProjection";
+import { projectCanonicalChat } from "../../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,
     hasPrimaryAnswerContent,
@@ -72,7 +72,6 @@ export interface ChatIncidentFixtureResult {
     rowKeys: string[];
     rows: CanonicalChatIncidentRow[];
     runCount: number;
-    shadowMatches: boolean;
     turnCount: number;
 }
 
@@ -145,7 +144,7 @@ export function replayChatIncidentFixture(
         ),
     });
     const runtime = reduceChatRuntime(createChatRuntimeState(), events);
-    const shadow = projectChatWithCanonicalShadow(
+    const canonical = projectCanonicalChat(
         history,
         runtime,
         fixture.sessionKey,
@@ -153,7 +152,7 @@ export function replayChatIncidentFixture(
         true,
         new Set()
     );
-    const projection = shadow.legacy;
+    const { projection } = canonical;
     const session = findChatSessionRuntimeState(runtime, fixture.sessionKey);
     return {
         activeRunCount: projection.activeRuns.length,
@@ -161,7 +160,6 @@ export function replayChatIncidentFixture(
         rowKeys: projection.rows.map((row) => row.key),
         rows: canonicalRows(projection.rows),
         runCount: Object.keys(session?.runs || {}).length,
-        shadowMatches: shadow.comparison.matches,
-        turnCount: shadow.comparison.turnCount ?? 0,
+        turnCount: canonical.turns.length,
     };
 }

@@ -34,10 +34,7 @@ import {
     isTerminalEvent,
     runtimeSessionBoundary,
 } from "./openClawChatLifecycle.ts";
-import {
-    getChatProjectionShadowMetrics,
-    OpenClawChatRuntimeMetricsRecorder,
-} from "./openClawChatMetrics.ts";
+import { OpenClawChatRuntimeMetricsRecorder } from "./openClawChatMetrics.ts";
 import {
     MAX_CHAT_RUNTIME_SESSIONS,
     OpenClawChatPersistenceCoordinator,
@@ -1697,7 +1694,7 @@ export class OpenClawChatBridge {
     }
 
     /**
-     * Returns content-free replay, persistence, and projection shadow metrics.
+     * Returns content-free replay and persistence metrics.
      * @returns Current chat runtime metrics.
      */
     getMetrics(): ChatRuntimeMetrics {
@@ -1709,16 +1706,13 @@ export class OpenClawChatBridge {
                 events += run.events.length;
             }
         }
-        return {
-            ...this.#metrics.snapshot({
-                currentBytes: this.#totalReplayBytes,
-                events,
-                maxBytes: this.#maxReplayBytes,
-                runs,
-                sessions: this.#runsBySession.size,
-            }),
-            projectionShadow: getChatProjectionShadowMetrics(),
-        };
+        return this.#metrics.snapshot({
+            currentBytes: this.#totalReplayBytes,
+            events,
+            maxBytes: this.#maxReplayBytes,
+            runs,
+            sessions: this.#runsBySession.size,
+        });
     }
 
     /**

@@ -14,11 +14,6 @@ import {
 } from "../../../../../../contracts/chatCanonicalTurn";
 import { stableCanonicalChatStringify } from "../../../../../../contracts/chatCanonicalUtilities";
 import {
-    CHAT_PROJECTION_SHADOW_SCHEMA_VERSION,
-    type ChatProjectionCompactionPhase,
-    type ChatProjectionShadowDifference,
-} from "../../../../../../contracts/chatProjectionTelemetry";
-import {
     type ChatHistoryMessage,
     type ChatVisibilitySettings,
     isRenderableChatHistoryMessage,
@@ -39,59 +34,14 @@ import {
 } from "./chatProjection";
 import { isSameChatSession, type ChatRunState, type ChatRuntimeState } from "./chatState";
 
-export { CHAT_PROJECTION_SHADOW_SCHEMA_VERSION } from "../../../../../../contracts/chatProjectionTelemetry";
-export type { ChatProjectionShadowDifference } from "../../../../../../contracts/chatProjectionTelemetry";
-
-export interface ChatProjectionShadowComparison {
-    canonicalError?: {
-        message: string;
-        name: string;
-    };
-    canonicalActiveRunCount?: number;
-    canonicalCompactionPhase?: ChatProjectionCompactionPhase;
-    canonicalFingerprint?: string;
-    canonicalRowCount?: number;
-    differenceKinds: ChatProjectionShadowDifference[];
-    legacyActiveRunCount: number;
-    legacyCompactionPhase: ChatProjectionCompactionPhase;
-    legacyFingerprint: string;
-    legacyRowCount: number;
-    matches: boolean;
-    schemaVersion: typeof CHAT_PROJECTION_SHADOW_SCHEMA_VERSION;
-    turnCount?: number;
-}
-
 export interface CanonicalChatProjection {
     projection: ChatProjection;
     turns: CanonicalChatTurn[];
 }
 
-export interface ChatProjectionShadowResult {
-    canonical?: CanonicalChatProjection;
-    comparison: ChatProjectionShadowComparison;
-    legacy: ChatProjection;
-}
-
 interface CanonicalTurnDraft {
     entries: CanonicalChatTurnEntry[];
     run?: ChatRunState;
-}
-
-function canonicalProjectionErrorMetadata(error: unknown): {
-    message: string;
-    name: string;
-} {
-    const name =
-        error instanceof Error && /^[A-Za-z][A-Za-z0-9._ -]{0,79}$/.test(error.name)
-            ? error.name
-            : "UnknownError";
-    const message =
-        error instanceof Error &&
-        (error.message.startsWith("Canonical chat projection invariant failed:") ||
-            error.message.startsWith("Canonical chat turn invariant failed:"))
-            ? error.message
-            : "Unexpected canonical projection failure";
-    return { message, name };
 }
 
 function assertCanonicalProjectionContext(context: ChatProjectionContext): void {
@@ -187,10 +137,6 @@ function assertCanonicalFinalProjection(projection: ChatProjection): void {
 function canonicalMessage(message: ChatHistoryMessage): CanonicalChatMessage {
     const { provenance: _provenance, ...canonical } = message;
     return canonical;
-}
-
-function fingerprintMessage(message: ChatHistoryMessage): unknown {
-    return summarizeCanonicalChatValueForFingerprint(canonicalMessage(message));
 }
 
 function canonicalEntryKind(message: ChatHistoryMessage): CanonicalChatTurnEntry["kind"] {
@@ -404,11 +350,13 @@ function canonicalTurn(
 }
 
 function semanticMessage(message: ChatHistoryMessage): string {
-    return stableCanonicalChatStringify(fingerprintMessage(message));
+    return stableCanonicalChatStringify(
+        summarizeCanonicalChatValueForFingerprint(canonicalMessage(message))
+    );
 }
 
 /**
- * Enforces invariants required before canonical turns can participate in shadow mode.
+ * Enforces invariants required before canonical turns can drive the chat UI.
  * @param turns Canonical turns to validate.
  * @param sessionKey Selected session identity.
  * @param expectedMessages Structured messages represented by the turns.
@@ -565,164 +513,66 @@ function structureFromTurns(
     structure: StructuredChatProjection,
     turns: CanonicalChatTurn[]
 ): StructuredChatProjection {
+    let messageIndex = 0;
+    const messages = turns.flatMap((turn) =>
+        turn.entries.map((entry) => {
+            const sourceMessage = structure.messages[messageIndex];
+            messageIndex += 1;
+            return sourceMessage?.provenance
+                ? { ...entry.message, provenance: sourceMessage.provenance }
+                : entry.message;
+        })
+    );
+    if (messageIndex !== structure.messages.length) {
+        throw new Error("Canonical chat projection invariant failed: turn coverage");
+    }
     return {
         ...structure,
-        messages: turns.flatMap((turn) => turn.entries.map((entry) => entry.message)),
-    };
-}
-
-function semanticRun(run: ChatRunState): unknown {
-    return {
-        ...run,
-        assistant: run.assistant ? fingerprintMessage(run.assistant) : undefined,
-        diagnostics: run.diagnostics.map((entry) => ({
-            ...entry,
-            message: fingerprintMessage(entry.message),
-        })),
-        userMessages: run.userMessages.map((entry) => ({
-            ...entry,
-            message: fingerprintMessage(entry.message),
-        })),
-    };
-}
-
-function projectionSections(projection: ChatProjection): Record<string, unknown> {
-    return {
-        "active-runs": projection.activeRuns.map(semanticRun),
-        "compaction-status": projection.compactionStatus,
-        rows: projection.rows.map((row) => ({
-            ...row,
-            message: fingerprintMessage(row.message),
-        })),
-    };
-}
-
-function projectionFingerprint(sections: Record<string, unknown>): string {
-    return canonicalChatContentFingerprint(stableCanonicalChatStringify(sections));
-}
-
-function projectionCompactionPhase(
-    projection: ChatProjection
-): ChatProjectionCompactionPhase {
-    return projection.compactionStatus?.phase ?? "none";
-}
-
-/**
- * Compares legacy and canonical-turn projection without exposing transcript content.
- * @param legacy Existing projection.
- * @param canonical Canonical-turn projection.
- * @param turnCount Number of canonical turns.
- * @returns Versioned parity summary.
- */
-export function compareChatProjectionShadow(
-    legacy: ChatProjection,
-    canonical: ChatProjection,
-    turnCount: number
-): ChatProjectionShadowComparison {
-    const legacySections = projectionSections(legacy);
-    const canonicalSections = projectionSections(canonical);
-    const differenceKinds = (
-        ["active-runs", "compaction-status", "rows"] as const
-    ).filter(
-        (section) =>
-            stableCanonicalChatStringify(legacySections[section]) !==
-            stableCanonicalChatStringify(canonicalSections[section])
-    );
-    return {
-        canonicalActiveRunCount: canonical.activeRuns.length,
-        canonicalCompactionPhase: projectionCompactionPhase(canonical),
-        canonicalFingerprint: projectionFingerprint(canonicalSections),
-        canonicalRowCount: canonical.rows.length,
-        differenceKinds,
-        legacyActiveRunCount: legacy.activeRuns.length,
-        legacyCompactionPhase: projectionCompactionPhase(legacy),
-        legacyFingerprint: projectionFingerprint(legacySections),
-        legacyRowCount: legacy.rows.length,
-        matches: differenceKinds.length === 0,
-        schemaVersion: CHAT_PROJECTION_SHADOW_SCHEMA_VERSION,
-        turnCount,
+        messages,
     };
 }
 
 /**
- * Runs canonical turns beside the existing projection and returns legacy output.
- * Canonical failures fail open so shadow mode cannot break the current chat UI.
+ * Projects canonical turns into the stable row contract consumed by the chat UI.
  * @param history Canonical history messages.
  * @param runtime Canonical runtime state.
  * @param sessionKey Selected session identity.
  * @param visibility Visibility policy.
  * @param shouldKeepThinkingAfterFinal Whether settled thinking remains visible.
  * @param deletedMessageKeys Persisted message deletion identities.
- * @returns Legacy projection plus bounded, content-free shadow parity metadata.
+ * @returns Validated canonical turns and their UI projection.
  */
-export function projectChatWithCanonicalShadow(
+export function projectCanonicalChat(
     history: ChatHistoryMessage[],
     runtime: ChatRuntimeState,
     sessionKey: string,
     visibility: ChatVisibilitySettings,
     shouldKeepThinkingAfterFinal: boolean,
     deletedMessageKeys: ReadonlySet<string>
-): ChatProjectionShadowResult {
+): CanonicalChatProjection {
     const context = selectChatProjectionContext(history, runtime, sessionKey);
+    assertCanonicalProjectionContext(context);
     const reconciliation = reconcileChatProjectionContext(context);
+    assertCanonicalReconciliation(reconciliation, context);
     const structure = structureChatProjectionContext(reconciliation);
-    const presentation = presentChatProjectionContext(
-        structure,
+    assertCanonicalStructure(structure, reconciliation);
+    const reconciliationContinuations = continuedUserOrdinalsFromDrafts(
+        draftCanonicalChatTurns(reconciliation.messages, context.runs, new Set<number>())
+    );
+    const turns = assembleCanonicalChatTurnsWithContinuations(
+        structure.messages,
+        context.runs,
+        sessionKey,
+        reconciliationContinuations
+    );
+    const canonicalStructure = structureFromTurns(structure, turns);
+    const canonicalPresentation = presentChatProjectionContext(
+        canonicalStructure,
         visibility,
         shouldKeepThinkingAfterFinal
     );
-    const legacy = finalizeChatProjection(presentation, deletedMessageKeys);
-    try {
-        assertCanonicalProjectionContext(context);
-        assertCanonicalReconciliation(reconciliation, context);
-        assertCanonicalStructure(structure, reconciliation);
-        const reconciliationContinuations = continuedUserOrdinalsFromDrafts(
-            draftCanonicalChatTurns(
-                reconciliation.messages,
-                context.runs,
-                new Set<number>()
-            )
-        );
-        const turns = assembleCanonicalChatTurnsWithContinuations(
-            structure.messages,
-            context.runs,
-            sessionKey,
-            reconciliationContinuations
-        );
-        const canonicalStructure = structureFromTurns(structure, turns);
-        const canonicalPresentation = presentChatProjectionContext(
-            canonicalStructure,
-            visibility,
-            shouldKeepThinkingAfterFinal
-        );
-        assertCanonicalPresentation(
-            canonicalPresentation,
-            canonicalStructure,
-            visibility
-        );
-        const projection = finalizeChatProjection(
-            canonicalPresentation,
-            deletedMessageKeys
-        );
-        assertCanonicalFinalProjection(projection);
-        return {
-            canonical: { projection, turns },
-            comparison: compareChatProjectionShadow(legacy, projection, turns.length),
-            legacy,
-        };
-    } catch (error) {
-        return {
-            comparison: {
-                canonicalError: canonicalProjectionErrorMetadata(error),
-                differenceKinds: ["canonical-error"],
-                legacyActiveRunCount: legacy.activeRuns.length,
-                legacyCompactionPhase: projectionCompactionPhase(legacy),
-                legacyFingerprint: projectionFingerprint(projectionSections(legacy)),
-                legacyRowCount: legacy.rows.length,
-                matches: false,
-                schemaVersion: CHAT_PROJECTION_SHADOW_SCHEMA_VERSION,
-            },
-            legacy,
-        };
-    }
+    assertCanonicalPresentation(canonicalPresentation, canonicalStructure, visibility);
+    const projection = finalizeChatProjection(canonicalPresentation, deletedMessageKeys);
+    assertCanonicalFinalProjection(projection);
+    return { projection, turns };
 }

@@ -2,10 +2,7 @@ import { readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { ChatProjectionShadowObservationResponse } from "../../../contracts/chatProjectionTelemetry.ts";
-import { parseChatProjectionShadowObservation } from "../../../contracts/chatProjectionTelemetry.ts";
 import type { Metrics } from "../../../contracts/metrics.ts";
-import { recordChatProjectionShadowObservation } from "../chat/openClawChatMetrics.ts";
 import gateway from "../gateway.ts";
 import { json } from "../http.ts";
 import {
@@ -17,7 +14,7 @@ import { runProcess } from "../lib/processes.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { stringFallback } from "../lib/values.ts";
 import { getAppObservabilityMetrics } from "../observability.ts";
-import { readApiJsonOrError, routeErrorResponse } from "../routeSupport.ts";
+import { routeErrorResponse } from "../routeSupport.ts";
 
 interface NetworkMetrics {
     downloadMbps: number;
@@ -321,25 +318,6 @@ export const metricsRoutes = {
                     message: "Failed to fetch metrics",
                 });
             }
-        },
-    },
-    "/api/metrics/chat-projection-shadow": {
-        POST: async (request: Request) => {
-            const observation = await readApiJsonOrError(
-                request,
-                parseChatProjectionShadowObservation,
-                {
-                    code: "invalid_chat_projection_shadow_observation",
-                    context: "metrics.chat_projection_shadow",
-                    maxBytes: 2048,
-                    message: "Invalid chat projection shadow observation",
-                }
-            );
-            if (observation instanceof Response) return observation;
-            recordChatProjectionShadowObservation(observation);
-            return json({
-                isOk: true,
-            } satisfies ChatProjectionShadowObservationResponse);
         },
     },
 } as const;
