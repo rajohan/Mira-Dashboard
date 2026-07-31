@@ -3604,6 +3604,28 @@ printf 'scheduled\n'
             );
             expect(restartCommand).toContain("--connect-timeout 2 --max-time 5");
             expect(restartCommand).toContain("for attempt in {1..30}");
+            expect(restartCommand).toContain("dashboard_listener_identity");
+            expect(restartCommand).toContain(
+                "--property=ControlGroup --property=ExecMainStartTimestampMonotonic"
+            );
+            expect(restartCommand).toContain(
+                '/usr/bin/ss -H -ltnp "sport = :$dashboard_port"'
+            );
+            expect(restartCommand).toContain(
+                "listener_cgroup=$(/usr/bin/sed -n 's/^0:://p' \"/proc/$listener_pid/cgroup\""
+            );
+            expect(restartCommand).toContain(
+                'listener_backend=$(/usr/bin/readlink --canonicalize-existing "/proc/$listener_pid/cwd"'
+            );
+            expect(restartCommand).toContain(
+                '[ "$listener_backend" = "$current_backend" ]'
+            );
+            expect(restartCommand).toContain(
+                '[ "$dashboard_identity_after" = "$dashboard_identity_before" ]'
+            );
+            expect(restartCommand).toContain(
+                '[ "$current_dashboard_identity" = "$initial_dashboard_identity" ]'
+            );
             expect(restartCommand).toContain("worker_identity");
             expect(restartCommand).toContain("ExecMainStartTimestampMonotonic");
             expect(restartCommand).toContain("sleep 31");
