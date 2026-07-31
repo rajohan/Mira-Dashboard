@@ -402,6 +402,14 @@ describe("canonical chat history contract", () => {
                 { offset: 0, sessionKey: SESSION }
             )
         ).toThrow("requested 0, received 1");
+        for (const offset of [-1, 1.5, "0"]) {
+            expect(() =>
+                canonicalizeOpenClawHistoryPage(
+                    { messages: [], offset },
+                    { offset: 0, sessionKey: SESSION }
+                )
+            ).toThrow("offset is invalid");
+        }
     });
 
     it("invalidates raw provider pages at the frontend contract boundary", () => {

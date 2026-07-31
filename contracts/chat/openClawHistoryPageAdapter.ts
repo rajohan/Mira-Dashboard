@@ -117,7 +117,11 @@ export function canonicalizeOpenClawHistoryPage(
     if (!sessionKey) {
         throw new Error("OpenClaw chat history session key is required");
     }
+    const hasResponseOffset = Boolean(page && Object.hasOwn(page, "offset"));
     const responseOffset = nonNegativeInteger(page?.offset);
+    if (hasResponseOffset && responseOffset === undefined) {
+        throw new Error("OpenClaw chat history offset is invalid");
+    }
     const isAnchoredWindow = Boolean(options.messageId?.trim());
     const isFirstPage = options.offset === 0;
     const isCompleteSnapshot =

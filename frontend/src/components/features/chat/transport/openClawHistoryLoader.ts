@@ -114,6 +114,12 @@ function mergeCachedHistoryRows(
     const freshRowOrder = new Map(
         freshRows.map((row, index) => [historyMessageId(row), index])
     );
+    const refreshedSequences = new Set(
+        freshRows.flatMap((row) => {
+            const sequence = historySequence(row);
+            return sequence === undefined || sequence > throughSequence ? [] : [sequence];
+        })
+    );
     const cachedById = new Map(
         cached.rows.flatMap((row) => {
             const sequence = historySequence(row);
@@ -152,11 +158,11 @@ function mergeCachedHistoryRows(
     }
     for (const [sequence, rows] of freshFingerprintRows) {
         const cachedIds = sequenceFingerprintIds.get(sequence);
-        if (
-            sequence > cached.throughSequence ||
-            !cachedIds ||
-            rows.every((row) => cachedIds.has(historyMessageId(row)))
-        ) {
+        const freshIds = new Set(rows.map((row) => historyMessageId(row)));
+        const hasSameIds =
+            cachedIds?.size === freshIds.size &&
+            [...freshIds].every((id) => cachedIds.has(id));
+        if (sequence > cached.throughSequence || !cachedIds || hasSameIds) {
             continue;
         }
         for (const staleId of cachedIds) {
@@ -202,10 +208,7 @@ function mergeCachedHistoryRows(
                 const leftSequence = historySequence(left) ?? 0;
                 const rightSequence = historySequence(right) ?? 0;
                 const sequenceOrder = leftSequence - rightSequence;
-                if (
-                    sequenceOrder !== 0 ||
-                    !replacedFingerprintSequences.has(leftSequence)
-                ) {
+                if (sequenceOrder !== 0 || !refreshedSequences.has(leftSequence)) {
                     return sequenceOrder;
                 }
                 return (
