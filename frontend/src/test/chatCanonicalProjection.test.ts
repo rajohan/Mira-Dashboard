@@ -968,11 +968,13 @@ describe("canonical chat turn projection", () => {
     });
 
     it("keeps an optimistic user delete hidden after provenance recovery", () => {
+        const optimisticRunId = "dashboard-chat-delete";
         const optimistic = projectDefault([
             {
                 content: "queued prompt",
                 local: true,
                 role: "user",
+                runId: optimisticRunId,
                 text: "queued prompt",
                 timestamp: "2026-07-31T04:00:00.000Z",
             },
@@ -988,6 +990,7 @@ describe("canonical chat turn projection", () => {
                         source: "openclaw-history",
                     },
                     role: "user",
+                    runId: optimisticRunId,
                     text: "queued prompt",
                     timestamp: "2026-07-31T04:00:02.000Z",
                 },
@@ -997,9 +1000,30 @@ describe("canonical chat turn projection", () => {
 
         expect(optimisticDeleteKeys).toEqual([
             "user::2026-07-31T04:00:00.000Z::no-run::queued prompt",
-            "user::no-time::no-run::queued prompt",
+            "user::no-time::dashboard-chat-delete::queued prompt",
         ]);
         expect(recovered.rows).toEqual([]);
+
+        const laterUnrelatedPrompt = projectDefault(
+            [
+                {
+                    content: "queued prompt",
+                    provenance: {
+                        id: "later-history-prompt",
+                        sequence: 30,
+                        source: "openclaw-history",
+                    },
+                    role: "user",
+                    runId: "dashboard-chat-later",
+                    text: "queued prompt",
+                    timestamp: "2026-07-31T05:00:00.000Z",
+                },
+            ],
+            { deletedMessageKeys: new Set(optimisticDeleteKeys) }
+        ).projection;
+        expect(laterUnrelatedPrompt.rows.map((row) => row.message.text)).toEqual([
+            "queued prompt",
+        ]);
     });
 
     it("keeps fallback history deletes hidden when page positions move", () => {
@@ -1090,7 +1114,7 @@ describe("canonical chat turn projection", () => {
             runtimeKey: "assistant",
             text: "partial answer",
         };
-        const initial = renderChatProjectionRows([stream], new Set());
+        const initial = renderChatProjectionRows([stream], new Set(), []);
         const continued = renderChatProjectionRows(
             [
                 {
@@ -1107,7 +1131,8 @@ describe("canonical chat turn projection", () => {
                     },
                 },
             ],
-            new Set()
+            new Set(),
+            []
         );
 
         expect(continued[0]?.key).toBe(initial[0]?.key);

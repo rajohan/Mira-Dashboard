@@ -772,7 +772,7 @@ describe("chat projection", () => {
         expect(rows.find((row) => row.message.role === "assistant")?.kind).toBe("stream");
 
         const recoveredHistoryMessage = {
-            ...message("user", "steer"),
+            ...message("user", "steer", "dashboard-chat-steer"),
             timestamp: "2026-07-16T12:00:03.000Z",
         };
         expect(
@@ -785,6 +785,65 @@ describe("chat projection", () => {
                 new Set(optimisticUserRow.deleteKeys)
             ).rows
         ).toEqual([]);
+    });
+
+    it("scopes an optimistic user deletion through acknowledged run aliases", () => {
+        const optimisticRunId = "dashboard-chat-delete";
+        const providerRunId = "provider-delete";
+        const optimisticMessage = {
+            ...message("user", "repeatable prompt", optimisticRunId),
+            local: true,
+            timestamp: NOW,
+        };
+        const optimisticRow = projectChat(
+            [optimisticMessage],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows[0]!;
+        const acknowledged = acknowledgeChatRun(
+            addOptimisticChatRun(createChatRuntimeState(), SESSION, optimisticRunId),
+            SESSION,
+            optimisticRunId,
+            providerRunId
+        );
+        const recovered = projectChat(
+            [
+                {
+                    ...message("user", "repeatable prompt", providerRunId),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            acknowledged,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(optimisticRow.deleteKeys)
+        );
+        const laterUnrelated = projectChat(
+            [
+                {
+                    ...message("user", "repeatable prompt", "provider-later"),
+                    timestamp: "2026-07-16T13:00:00.000Z",
+                },
+            ],
+            acknowledged,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(optimisticRow.deleteKeys)
+        );
+
+        expect(
+            recovered.rows.some((row) => row.message.role.toLowerCase() === "user")
+        ).toBe(false);
+        expect(
+            laterUnrelated.rows
+                .filter((row) => row.message.role.toLowerCase() === "user")
+                .map((row) => row.message.text)
+        ).toEqual(["repeatable prompt"]);
     });
 
     it("keeps a thinking row anchored while runtime output recovers into history", () => {

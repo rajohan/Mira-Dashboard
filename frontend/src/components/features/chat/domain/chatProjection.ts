@@ -140,19 +140,40 @@ function historyMessageDeleteKey(message: ChatHistoryMessage): string {
     });
 }
 
-function userContentDeleteKey(message: ChatHistoryMessage): string {
-    return messageDeleteKey({
-        ...message,
-        runId: undefined,
-        runtimeKey: undefined,
-        timestamp: undefined,
-    });
+function scopedUserRecoveryDeleteKeys(
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
+): string[] {
+    const runId = message.runId?.trim();
+    if (!runId) {
+        return [];
+    }
+    const matchingRun = runs.find((run) => isRunMatchingMessage(run, message));
+    const runIds = matchingRun ? [matchingRun.runId, ...matchingRun.aliases] : [runId];
+    return [
+        ...new Set(
+            runIds.map((candidateRunId) =>
+                messageDeleteKey({
+                    ...message,
+                    runId: candidateRunId,
+                    runtimeKey: undefined,
+                    timestamp: undefined,
+                })
+            )
+        ),
+    ];
 }
 
-function userMessageDeleteKeys(message: ChatHistoryMessage): string[] {
+function userMessageDeleteKeys(
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
+): string[] {
     const historyKey = historyMessageDeleteKey(message);
-    const contentKey = userContentDeleteKey(message);
-    return historyKey === contentKey ? [historyKey] : [historyKey, contentKey];
+    const recoveryKeys = scopedUserRecoveryDeleteKeys(message, runs);
+    return [
+        historyKey,
+        ...recoveryKeys.filter((recoveryKey) => recoveryKey !== historyKey),
+    ];
 }
 
 function projectedMessageRowKey(message: ChatHistoryMessage): string {
@@ -250,10 +271,11 @@ interface ProjectedMessageDeleteIdentity {
 }
 
 function projectedMessageDeleteIdentity(
-    message: ChatHistoryMessage
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
 ): ProjectedMessageDeleteIdentity {
     const sourceKeys = projectedMessageSourceDeleteKeys(message);
-    const userKeys = isUserMessage(message) ? userMessageDeleteKeys(message) : [];
+    const userKeys = isUserMessage(message) ? userMessageDeleteKeys(message, runs) : [];
     if (sourceKeys.length > 0) {
         const stableFallbackKey = hasPositionFallbackHistorySource(message)
             ? projectedMessageRowKey(message)
@@ -1944,15 +1966,17 @@ export function presentChatProjectionContext(
  * Converts presented messages into the unchanged UI row contract.
  * @param messages Presented canonical messages.
  * @param deletedMessageKeys Persisted message deletion identities.
+ * @param runs Canonical runtime runs carrying acknowledged identity aliases.
  * @returns Message and stream rows in presentation order.
  */
 export function renderChatProjectionRows(
     messages: ChatHistoryMessage[],
-    deletedMessageKeys: ReadonlySet<string>
+    deletedMessageKeys: ReadonlySet<string>,
+    runs: ChatRunState[]
 ): ChatRow[] {
     const deleteKeyOccurrences = new Map<string, number>();
     const messageDeleteIdentities = messages.map((message) =>
-        projectedMessageDeleteIdentity(message)
+        projectedMessageDeleteIdentity(message, runs)
     );
     const naturalDeleteKeys = new Set(
         messageDeleteIdentities.flatMap((identity) => identity.baseKeys)
@@ -2119,7 +2143,7 @@ export function finalizeChatProjection(
     const { context } = presentation.structure.reconciliation;
     const activeRuns = selectActiveChatProjectionRuns(context);
     const rows = appendChatProjectionStatus(
-        renderChatProjectionRows(presentation.messages, deletedMessageKeys),
+        renderChatProjectionRows(presentation.messages, deletedMessageKeys, context.runs),
         presentation.messages,
         activeRuns
     );
