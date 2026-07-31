@@ -235,6 +235,7 @@ function inlineFileAttachments(text: string): CanonicalChatAttachment[] {
             mimeType = "application/octet-stream",
             body = "",
         ] = match;
+        const normalizedFileName = fileName.trim() || "attachment";
         const external = body.match(
             /<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>[\s\S]*?\n---\n([\s\S]*?)<<<END_EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>/
         );
@@ -243,8 +244,8 @@ function inlineFileAttachments(text: string): CanonicalChatAttachment[] {
         const contentBase64 = bytes.toBase64();
         const kind = canonicalChatAttachmentKind(mimeType);
         attachments.push({
-            id: `inline-${fileName}-${attachments.length}`,
-            fileName,
+            id: `inline-${normalizedFileName}-${attachments.length}`,
+            fileName: normalizedFileName,
             mimeType,
             sizeBytes: bytes.byteLength,
             contentBase64,

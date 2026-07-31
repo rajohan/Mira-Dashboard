@@ -199,7 +199,9 @@ export function normalizeAssistant(value: unknown, runId?: string): CanonicalCha
         value && typeof value === "object" && !Array.isArray(value)
             ? ({
                   ...(value as RawOpenClawHistoryMessage),
-                  role: (value as RawOpenClawHistoryMessage).role || "assistant",
+                  role:
+                      stringValue((value as RawOpenClawHistoryMessage).role) ||
+                      "assistant",
               } satisfies RawOpenClawHistoryMessage)
             : ({
                   role: "assistant",

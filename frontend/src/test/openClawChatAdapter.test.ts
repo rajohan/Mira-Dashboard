@@ -65,6 +65,32 @@ describe("OpenClaw chat adapter", () => {
         expect(final[0]?.kind === "finish" && final[0].message?.text).toBe("Hello world");
     });
 
+    it("normalizes blank final roles and inline attachment names", () => {
+        const adapter = new OpenClawChatAdapter();
+        const final = adapter.event(
+            envelope(
+                "chat",
+                {
+                    message: { content: "Done", role: "   " },
+                    state: "final",
+                },
+                5
+            )
+        );
+        const history = adapter.history([
+            {
+                content: '<file name="   " mime="text/plain">hello</file>',
+                role: "assistant",
+            },
+        ]);
+
+        expect(final[0]?.kind === "finish" && final[0].message?.role).toBe("assistant");
+        expect(history[0]?.attachments?.[0]).toMatchObject({
+            fileName: "attachment",
+            id: "inline-attachment-0",
+        });
+    });
+
     it("maps thinking, tools, progress and terminal lifecycle in order", () => {
         const adapter = new OpenClawChatAdapter();
         const thinking = adapter.event(
