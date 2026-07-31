@@ -919,6 +919,14 @@ function claimSecurityVerification(event: Event): void {
     event.preventDefault();
 }
 
+function inlineRasterImage(mimeType: string, bytes: Uint8Array) {
+    const encoded = btoa(String.fromCodePoint(...bytes));
+    return {
+        image: { data: encoded, mimeType, type: "image" as const },
+        url: `data:${mimeType};base64,${encoded}`,
+    };
+}
+
 describe("Mira Dashboard frontend behavior", () => {
     beforeEach(() => {
         authActions.clearSession();
@@ -6550,6 +6558,52 @@ describe("Mira Dashboard frontend behavior", () => {
             "https://files.example.test/generated.png"
         );
         expect(chatImageUrl(externalImage)).toBeUndefined();
+    });
+
+    it("validates dimensions from every supported embedded raster header", () => {
+        const gifBytes = new Uint8Array(10);
+        gifBytes.set(Array.from("GIF89a", (character) => character.codePointAt(0) ?? 0));
+        gifBytes.set([3, 0, 2, 0], 6);
+
+        const jpegBytes = new Uint8Array([
+            255, 216, 0, 255, 224, 0, 2, 255, 192, 0, 17, 8, 0, 2, 0, 3,
+        ]);
+
+        const extendedWebpBytes = new Uint8Array(30);
+        extendedWebpBytes.set(
+            Array.from("RIFF0000WEBPVP8X", (character) => character.codePointAt(0) ?? 0)
+        );
+        extendedWebpBytes.set([2, 0, 0, 1, 0, 0], 24);
+
+        const losslessWebpBytes = new Uint8Array(25);
+        losslessWebpBytes.set(
+            Array.from("RIFF0000WEBPVP8L", (character) => character.codePointAt(0) ?? 0)
+        );
+        losslessWebpBytes.set([47, 2, 4, 0, 0], 20);
+
+        const lossyWebpBytes = new Uint8Array(30);
+        lossyWebpBytes.set(
+            Array.from("RIFF0000WEBPVP8 ", (character) => character.codePointAt(0) ?? 0)
+        );
+        lossyWebpBytes.set([157, 1, 42, 3, 0, 2, 0], 23);
+
+        for (const image of [
+            inlineRasterImage("image/gif", gifBytes),
+            inlineRasterImage("image/jpeg", jpegBytes),
+            inlineRasterImage("image/webp", extendedWebpBytes),
+            inlineRasterImage("image/webp", losslessWebpBytes),
+            inlineRasterImage("image/webp", lossyWebpBytes),
+        ]) {
+            expect(chatImageUrl(image.image)).toBe(image.url);
+        }
+
+        expect(
+            chatImageUrl({
+                data: "data:image/png;base64,%not-base64%",
+                mimeType: "image/png",
+                type: "image",
+            })
+        ).toBeUndefined();
     });
 
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {

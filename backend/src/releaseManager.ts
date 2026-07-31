@@ -24,6 +24,7 @@ import {
     isBunRuntimeVersion,
     pruneManagedBunRuntimes,
 } from "./managedBunRuntime.ts";
+import { MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT } from "./managedDashboardUnitPolicy.ts";
 import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     type DashboardReleaseManifest,
@@ -1235,6 +1236,9 @@ export async function publishVerifiedDashboardRelease(
                         destinationPath,
                         fs.constants.COPYFILE_EXCL
                     );
+                    if (relativePath === MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT) {
+                        await fsp.chmod(destinationPath, 0o755);
+                    }
                     await syncFile(destinationPath);
                 }
 

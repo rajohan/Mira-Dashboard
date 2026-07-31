@@ -4801,6 +4801,17 @@ describe("shared component helpers", () => {
                             sv_used: "1",
                             user: "worker",
                         },
+                        {
+                            cl_active: "invalid",
+                            cl_waiting: "invalid",
+                            database: "dashboard",
+                            maxwait: "invalid",
+                            pool_mode: "transaction",
+                            sv_active: "invalid",
+                            sv_idle: "invalid",
+                            sv_used: "invalid",
+                            user: "malformed",
+                        },
                     ]}
                     stats={[
                         {
@@ -4819,6 +4830,7 @@ describe("shared component helpers", () => {
             );
             expect(screen.getAllByText("1,234,567").length).toBeGreaterThan(0);
             expect(screen.getAllByText("5 / 3 / 3").length).toBeGreaterThan(0);
+            expect(screen.queryByText("NaN")).not.toBeInTheDocument();
 
             rerender(<TopQueriesTable enabled={false} data={[]} />);
             expect(

@@ -44,7 +44,9 @@ afterEach(() => {
 describe("git hygiene automation", () => {
     it("commits and pushes only safe OpenClaw workspace paths", () => {
         rememberEnvironment("MIRA_OPENCLAW_ROOT");
+        rememberEnvironment("GIT_CONFIG_PARAMETERS");
         process.env.MIRA_OPENCLAW_ROOT = createTemporaryRoot("mira-openclaw-sync-");
+        process.env.GIT_CONFIG_PARAMETERS = "'core.hooksPath=/tmp/untrusted-hooks'";
         const calls: Array<readonly string[]> = [];
         const mutationEvents: string[] = [];
         const runProcessSpy = jest
@@ -106,6 +108,7 @@ describe("git hygiene automation", () => {
                 ([file, , options]) =>
                     file === "git" &&
                     options?.env?.GIT_CONFIG_COUNT === "1" &&
+                    options.env.GIT_CONFIG_PARAMETERS === undefined &&
                     options.env.GIT_CONFIG_KEY_0 === "core.hooksPath" &&
                     options.env.GIT_CONFIG_VALUE_0 === "/dev/null"
             )

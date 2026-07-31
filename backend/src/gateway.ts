@@ -30,6 +30,7 @@ import {
 } from "./lib/openclawGatewayClient.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import {
+    boundedTimestamp,
     nonEmptyEnvironmentFallback,
     stringFallback,
     unknownArray,
@@ -768,35 +769,21 @@ function gatewayBoolean(
     return typeof record[key] === "boolean" ? record[key] : undefined;
 }
 
-function gatewayTimestamp(value: unknown): number | undefined {
-    let timestamp = Number.NaN;
-    if (typeof value === "string") {
-        timestamp = Date.parse(value);
-    } else if (typeof value === "number") {
-        timestamp = value;
-    }
-    return Number.isFinite(timestamp) && Math.abs(timestamp) <= 8_640_000_000_000_000
-        ? timestamp
-        : undefined;
-}
-
 function gatewaySessionFromRecord(record: Record<string, unknown>): GatewaySession {
     const thinkingLevels = Array.isArray(record.thinkingLevels)
-        ? record.thinkingLevels
-              .flatMap((value) => {
-                  const level = asRecord(value);
-                  const id = level ? gatewayString(level, "id")?.trim() : undefined;
-                  const label = level ? gatewayString(level, "label")?.trim() : undefined;
-                  return id && label ? [{ id, label }] : [];
-              })
-              .slice(0, 100)
+        ? record.thinkingLevels.slice(0, 100).flatMap((value) => {
+              const level = asRecord(value);
+              const id = level ? gatewayString(level, "id")?.trim() : undefined;
+              const label = level ? gatewayString(level, "label")?.trim() : undefined;
+              return id && label ? [{ id, label }] : [];
+          })
         : undefined;
     const thinkingOptions = Array.isArray(record.thinkingOptions)
         ? record.thinkingOptions
+              .slice(0, 100)
               .filter((value): value is string => typeof value === "string")
               .map((value) => value.trim())
               .filter(Boolean)
-              .slice(0, 100)
         : undefined;
     const fastMode =
         typeof record.fastMode === "boolean" || record.fastMode === "auto"
@@ -846,7 +833,7 @@ function gatewaySessionFromRecord(record: Record<string, unknown>): GatewaySessi
         thinkingOptions,
         totalTokens: gatewayFiniteNumber(record, "totalTokens"),
         totalTokensFresh: gatewayBoolean(record, "totalTokensFresh"),
-        updatedAt: gatewayTimestamp(record.updatedAt),
+        updatedAt: boundedTimestamp(record.updatedAt),
         verboseLevel: gatewayString(record, "verboseLevel"),
     };
 }
@@ -871,13 +858,13 @@ export function normalizeGatewaySessionList(response: unknown): Session[] {
                 (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
                 (entry.key === undefined || typeof entry.key === "string") &&
                 (entry.updatedAt === undefined ||
-                    gatewayTimestamp(entry.updatedAt) !== undefined) &&
+                    boundedTimestamp(entry.updatedAt) !== undefined) &&
                 (stringFallback(entry.sessionId).trim() ||
                     stringFallback(entry.key).trim()) !== ""
         )
         .map((entry) => {
             const session = gatewaySessionFromRecord(entry);
-            const updatedAt = gatewayTimestamp(entry.updatedAt);
+            const updatedAt = boundedTimestamp(entry.updatedAt);
             const shouldApplyDefaults =
                 (!session.model || session.model === defaults?.model) &&
                 (!session.modelProvider ||

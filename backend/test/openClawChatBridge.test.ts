@@ -8,7 +8,9 @@ import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntim
 import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../contracts/chatCanonicalUtilities.ts";
 import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
 import type { OpenClawChatSnapshotStore } from "../src/chat/openClawChatPersistence.ts";
+import { envelopeBytes } from "../src/chat/openClawChatProviderAdapter.ts";
 import { OpenClawChatRequestBoundaries } from "../src/chat/openClawChatRequestBoundaries.ts";
+import { MAX_BYTES_PER_ACTIVE_RUN } from "../src/chat/openClawChatRetention.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 
 const MAIN = "agent:main:main";
@@ -383,6 +385,12 @@ describe("OpenClaw chat bridge", () => {
         expect(thinking).toEqual(thinkingTexts);
         expect(itemToolCount).toBeGreaterThan(0);
         expect(itemToolCount).toBeLessThan(itemEventCount);
+        expect(
+            snapshot.events.reduce(
+                (totalBytes, event) => totalBytes + envelopeBytes(event),
+                0
+            )
+        ).toBeLessThanOrEqual(MAX_BYTES_PER_ACTIVE_RUN);
     });
 
     it("bounds aggregate replay memory across independent sessions", () => {

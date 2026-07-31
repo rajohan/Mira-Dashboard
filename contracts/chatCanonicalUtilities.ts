@@ -52,6 +52,55 @@ interface CanonicalToolValueBudget {
     remainingStringCharacters: number;
 }
 
+function uniqueCanonicalToolValueKey(
+    key: string,
+    result: Record<string, unknown>,
+    maximumCharacters: number
+): string | undefined {
+    const maximum = Math.min(4096, maximumCharacters);
+    const boundedKey = truncateCanonicalChatText(key, maximum);
+    if (!Object.hasOwn(result, boundedKey)) {
+        return boundedKey;
+    }
+    for (
+        let collisionIndex = 2;
+        collisionIndex <= MAX_CANONICAL_TOOL_VALUE_NODES;
+        collisionIndex += 1
+    ) {
+        const suffix = ` [${collisionIndex}]`;
+        if (suffix.length > maximum) {
+            return undefined;
+        }
+        const candidate = `${truncateCanonicalChatText(
+            key,
+            maximum - suffix.length
+        )}${suffix}`;
+        if (!Object.hasOwn(result, candidate)) {
+            return candidate;
+        }
+    }
+    return undefined;
+}
+
+function addCanonicalToolValueTruncationMarker(
+    result: Record<string, unknown>,
+    budget: CanonicalToolValueBudget
+): void {
+    const markerKey = uniqueCanonicalToolValueKey(
+        "[truncated]",
+        result,
+        budget.remainingStringCharacters
+    );
+    if (!markerKey) {
+        return;
+    }
+    budget.remainingStringCharacters = Math.max(
+        0,
+        budget.remainingStringCharacters - markerKey.length
+    );
+    result[markerKey] = "[Truncated properties]";
+}
+
 /**
  * Truncates provider text before it enters retained canonical chat state.
  * @param value Provider-controlled text.
@@ -143,13 +192,18 @@ function boundedCanonicalToolValue(
     const result: Record<string, unknown> = {};
     for (const [key, item] of entries) {
         if (budget.remainingNodes <= 0 || budget.remainingStringCharacters <= 0) {
-            result["[truncated]"] = "[Truncated properties]";
+            addCanonicalToolValueTruncationMarker(result, budget);
             break;
         }
-        const boundedKey = truncateCanonicalChatText(
+        const boundedKey = uniqueCanonicalToolValueKey(
             key,
-            Math.min(4096, budget.remainingStringCharacters)
+            result,
+            budget.remainingStringCharacters
         );
+        if (!boundedKey) {
+            addCanonicalToolValueTruncationMarker(result, budget);
+            break;
+        }
         budget.remainingStringCharacters = Math.max(
             0,
             budget.remainingStringCharacters - boundedKey.length

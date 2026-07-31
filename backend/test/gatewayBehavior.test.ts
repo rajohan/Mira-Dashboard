@@ -361,6 +361,19 @@ describe("gateway behavior", () => {
                 thinkingOptions: ["high"],
             }),
         ]);
+        const rawChoiceBounded = normalizeGatewaySessionList([
+            {
+                key: "agent:bounded:main",
+                thinkingLevels: [
+                    ...Array.from({ length: 100 }, () => null),
+                    { id: "late", label: "Late" },
+                ],
+                thinkingOptions: [...Array.from({ length: 100 }, () => null), "late"],
+                updatedAt: "2026-07-30T22:00:00.000Z",
+            },
+        ])[0];
+        expect(rawChoiceBounded?.thinkingLevels).toBeUndefined();
+        expect(rawChoiceBounded?.thinkingOptions).toBeUndefined();
     });
 
     it("waits through transient connect errors during bootstrap", async () => {

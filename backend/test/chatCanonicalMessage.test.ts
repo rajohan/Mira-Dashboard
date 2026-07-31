@@ -8,8 +8,14 @@ import {
     extractCanonicalChatToolCalls,
     MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS,
     MAX_CANONICAL_CHAT_IMAGES,
+    mergeCanonicalChatImages,
+    normalizeCanonicalChatText,
 } from "../../contracts/chatCanonicalMessage";
-import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../contracts/chatCanonicalUtilities";
+import {
+    boundCanonicalChatToolValue,
+    MAX_CANONICAL_CHAT_TEXT_CHARACTERS,
+    MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
+} from "../../contracts/chatCanonicalUtilities";
 
 describe("backend canonical chat media normalization", () => {
     it("rejects absolute Dashboard-shaped media routes without a trusted browser origin", () => {
@@ -129,6 +135,64 @@ describe("backend canonical chat media normalization", () => {
         const serializedKeyedArguments = JSON.stringify(keyedCall?.arguments);
         expect(serializedKeyedArguments.length).toBeLessThan(5000);
         expect(serializedKeyedArguments).toContain("[truncated by Dashboard]");
+    });
+
+    it("keeps distinct same-sized images when only their middle bytes differ", () => {
+        const sharedStart = "a".repeat(128);
+        const sharedEnd = "z".repeat(128);
+        const images = mergeCanonicalChatImages(
+            [
+                {
+                    data: `${sharedStart}${"b".repeat(256)}${sharedEnd}`,
+                    mimeType: "image/png",
+                    type: "image",
+                },
+            ],
+            [
+                {
+                    data: `${sharedStart}${"c".repeat(256)}${sharedEnd}`,
+                    mimeType: "image/png",
+                    type: "image",
+                },
+            ]
+        );
+
+        expect(images).toHaveLength(2);
+    });
+
+    it("bounds array text before joining provider blocks", () => {
+        const content = Array.from({ length: 1001 }, (_, index) => ({
+            text: `${index}:`.padEnd(2000, "x"),
+            type: "text",
+        }));
+        const normalized = normalizeCanonicalChatText(content);
+
+        expect(normalized.length).toBe(MAX_CANONICAL_CHAT_TEXT_CHARACTERS);
+        expect(normalized).toEndWith("[truncated by Dashboard]");
+        expect(normalized).not.toContain("1000:");
+    });
+
+    it("preserves colliding bounded tool keys and a provider truncation key", () => {
+        const sharedKeyPrefix = "k".repeat(5000);
+        const value = boundCanonicalChatToolValue({
+            "[truncated]": "provider value",
+            [`${sharedKeyPrefix}a`]: "first",
+            [`${sharedKeyPrefix}b`]: "second",
+            ...Object.fromEntries(
+                Array.from({ length: 1000 }, (_, index) => [`property-${index}`, index])
+            ),
+        }) as Record<string, unknown>;
+        const boundedLongKeys = Object.keys(value).filter((key) => key.startsWith("k"));
+
+        expect(boundedLongKeys).toHaveLength(2);
+        expect(new Set(boundedLongKeys).size).toBe(2);
+        expect(value["[truncated]"]).toBe("provider value");
+        expect(
+            Object.entries(value).some(
+                ([key, item]) =>
+                    key !== "[truncated]" && item === "[Truncated properties]"
+            )
+        ).toBe(true);
     });
 
     it("normalizes empty provider tool-call identifiers before canonicalizing", () => {

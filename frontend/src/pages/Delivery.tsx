@@ -890,6 +890,7 @@ export function Delivery() {
     const [pendingAction, setPendingAction] = useState<PendingAction>();
     const [lastResult, setLastResult] = useState<string | undefined>();
     const [actionError, setActionError] = useState<string | undefined>();
+    const [isRefreshingDelivery, setIsRefreshingDelivery] = useState(false);
     const isActionPending =
         approvePullRequest.isPending ||
         approvePullRequestReview.isPending ||
@@ -935,10 +936,21 @@ export function Delivery() {
 
     async function refreshDelivery() {
         setActionError(undefined);
+        setIsRefreshingDelivery(true);
+        let refreshError: unknown;
         try {
             await reconcilePullRequestPreview.mutateAsync();
+        } catch (error_) {
+            refreshError = error_;
+        }
+        try {
             await refetchPullRequests();
-        } catch (refreshError) {
+        } catch (error_) {
+            refreshError ??= error_;
+        } finally {
+            setIsRefreshingDelivery(false);
+        }
+        if (refreshError) {
             setActionError(messageFromError(refreshError, "Failed to refresh Delivery"));
         }
     }
@@ -1467,7 +1479,8 @@ export function Delivery() {
                     <div className="grid grid-cols-1 gap-2 sm:justify-items-end">
                         <RefreshButton
                             onClick={() => void refreshDelivery()}
-                            isLoading={reconcilePullRequestPreview.isPending}
+                            isLoading={isRefreshingDelivery}
+                            disabled={isActionPending || isRefreshingDelivery}
                             label="Refresh Delivery"
                         />
                         <Button

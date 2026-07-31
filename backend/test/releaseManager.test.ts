@@ -11,6 +11,7 @@ import {
     readlinkSync,
     renameSync,
     rmSync,
+    statSync,
     symlinkSync,
     utimesSync,
     writeFileSync,
@@ -315,6 +316,10 @@ describe("Dashboard immutable release manager", () => {
         const buildRoot = temporaryReleasesRoot();
         await ensureDashboardReleaseLayout(releasesRoot);
         await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        chmodSync(
+            path.join(buildRoot, "scripts", "runManagedDashboardRelease.sh"),
+            0o644
+        );
         await readDashboardReleaseState(releasesRoot);
         const lockFileDescriptor = holdTransitionLock(releasesRoot);
         const { promise: lockContention, resolve: didReachLockContention } =
@@ -351,6 +356,10 @@ describe("Dashboard immutable release manager", () => {
         }
         const release = await publication;
         expect(release.commitSha).toBe(FIRST_COMMIT);
+        expect(
+            statSync(path.join(release.path, "scripts", "runManagedDashboardRelease.sh"))
+                .mode & 0o777
+        ).toBe(0o755);
     });
 
     it("activates and rolls back verified releases through relative atomic links", async () => {

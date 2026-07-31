@@ -250,7 +250,7 @@ TARGET_SHA="$(jq --raw-output '.previous.commitSha // empty' <<<"$STATUS")"
 [[ "$TARGET_SHA" != "$CURRENT_SHA" ]]
 
 ready_for_commit() {
-  local expected="${1:0:8}"
+  local expected="$1"
   local current_release
   local current_commit
   local response
@@ -263,7 +263,7 @@ ready_for_commit() {
         '.commitSha | select(type == "string" and length == 40)' \
         "$current_release/release-manifest.json" 2>/dev/null || true
     )"
-    [[ "$current_commit" == "$expected"* ]] || {
+    [[ "$current_commit" == "$expected" ]] || {
       sleep 1
       continue
     }

@@ -28,6 +28,7 @@ import {
 } from "../src/lib/safePath.ts";
 import {
     arrayFallback,
+    boundedTimestamp,
     environmentFallback,
     nonEmptyEnvironmentFallback,
     nullableString,
@@ -578,6 +579,12 @@ describe("backend service utilities", () => {
             ).toEqual({});
             expect(arrayFallback(["a"])).toEqual(["a"]);
             expect(arrayFallback("not-array", ["fallback"])).toEqual(["fallback"]);
+            expect(boundedTimestamp("2026-07-31T12:00:00.000Z")).toBe(
+                Date.parse("2026-07-31T12:00:00.000Z")
+            );
+            expect(boundedTimestamp(0)).toBe(0);
+            expect(boundedTimestamp(1e100)).toBeUndefined();
+            expect(boundedTimestamp("invalid")).toBeUndefined();
             expect(resolveDashboardPort(" 4310 ")).toBe(4310);
             expect(resolveDashboardPort("0")).toBe(3100);
             expect(resolveDashboardPort("65536")).toBe(3100);

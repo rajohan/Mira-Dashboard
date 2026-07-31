@@ -6315,7 +6315,7 @@ fi
                     type: "res",
                 })
             );
-            expect(boundedRequest).resolves.toEqual({ bounded: true });
+            expect(await boundedRequest).toEqual({ bounded: true });
         } finally {
             timeoutSpy.mockRestore();
         }

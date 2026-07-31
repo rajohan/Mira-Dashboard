@@ -65,13 +65,15 @@ const CANONICAL_MEDIA_DATA_FIELDS = new Set([
     "dataUrl",
     "image_url",
 ]);
-const CANONICAL_MEDIA_SAMPLE_LENGTH = 64;
 export const MAX_CANONICAL_CHAT_IMAGES = 10;
 export const MAX_CANONICAL_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS =
     Math.ceil((MAX_CANONICAL_CHAT_IMAGE_BYTES * 4) / 3) + 8;
 const MAX_CANONICAL_CHAT_THINKING_BLOCKS = 100;
+const MAX_CANONICAL_CHAT_TEXT_BLOCKS = 1000;
 const MAX_CANONICAL_CHAT_TOOL_CALLS = 100;
+const CANONICAL_CHAT_TEXT_BLOCK_LIMIT_MARKER =
+    "… [additional content omitted by Dashboard]";
 const EMBEDDED_CHAT_IMAGE_MIME_TYPES = new Set([
     "image/gif",
     "image/jpeg",
@@ -97,17 +99,11 @@ function isCanonicalMediaRecord(record: Record<string, unknown>): boolean {
 }
 
 function summarizedCanonicalMediaData(value: string): {
-    edgeFingerprint: string;
+    contentFingerprint: string;
     length: number;
 } {
-    const edgeSample =
-        value.length <= CANONICAL_MEDIA_SAMPLE_LENGTH * 2
-            ? value
-            : `${value.slice(0, CANONICAL_MEDIA_SAMPLE_LENGTH)}${value.slice(
-                  -CANONICAL_MEDIA_SAMPLE_LENGTH
-              )}`;
     return {
-        edgeFingerprint: canonicalChatContentFingerprint(edgeSample),
+        contentFingerprint: canonicalChatContentFingerprint(value),
         length: value.length,
     };
 }
@@ -604,6 +600,22 @@ export function canonicalChatAttachmentKind(
     return "file";
 }
 
+function canonicalChatTextBlock(item: unknown): string {
+    if (typeof item === "string") {
+        return item;
+    }
+    if (!item || typeof item !== "object") {
+        return "";
+    }
+    const block = item as Record<string, unknown>;
+    if (typeof block.text === "string") {
+        return block.text;
+    }
+    return ["image", "image_url", "input_image"].includes(String(block.type))
+        ? "[image]"
+        : "";
+}
+
 /**
  * Normalizes text from OpenClaw string and content-block variants.
  * @param content Provider content.
@@ -614,29 +626,42 @@ export function normalizeCanonicalChatText(content: unknown): string {
         return truncateCanonicalChatText(content, MAX_CANONICAL_CHAT_TEXT_CHARACTERS);
     }
     if (Array.isArray(content)) {
-        return truncateCanonicalChatText(
-            content
-                .map((item) => {
-                    if (typeof item === "string") {
-                        return item;
-                    }
-                    if (!item || typeof item !== "object") {
-                        return "";
-                    }
-                    const block = item as Record<string, unknown>;
-                    if (typeof block.text === "string") {
-                        return block.text;
-                    }
-                    return ["image", "image_url", "input_image"].includes(
-                        String(block.type)
-                    )
-                        ? "[image]"
-                        : "";
-                })
-                .filter(Boolean)
-                .join("\n\n"),
-            MAX_CANONICAL_CHAT_TEXT_CHARACTERS
-        );
+        const items = content as unknown[];
+        const blocks: string[] = [];
+        let retainedCharacters = 0;
+        const blockCount = Math.min(items.length, MAX_CANONICAL_CHAT_TEXT_BLOCKS);
+        for (let index = 0; index < blockCount; index += 1) {
+            const blockText = canonicalChatTextBlock(items[index]);
+            if (!blockText) {
+                continue;
+            }
+            const separator = blocks.length > 0 ? "\n\n" : "";
+            const remainingCharacters =
+                MAX_CANONICAL_CHAT_TEXT_CHARACTERS -
+                retainedCharacters -
+                separator.length;
+            if (blockText.length > remainingCharacters) {
+                const retained = blocks.join("\n\n");
+                const boundedCandidate = `${retained}${separator}${blockText.slice(
+                    0,
+                    Math.max(0, remainingCharacters + 1)
+                )}`;
+                return truncateCanonicalChatText(
+                    boundedCandidate,
+                    MAX_CANONICAL_CHAT_TEXT_CHARACTERS
+                );
+            }
+            blocks.push(blockText);
+            retainedCharacters += separator.length + blockText.length;
+        }
+        const retained = blocks.join("\n\n");
+        if (items.length > MAX_CANONICAL_CHAT_TEXT_BLOCKS) {
+            return truncateCanonicalChatText(
+                `${retained}${retained ? "\n\n" : ""}${CANONICAL_CHAT_TEXT_BLOCK_LIMIT_MARKER}`,
+                MAX_CANONICAL_CHAT_TEXT_CHARACTERS
+            );
+        }
+        return retained;
     }
     if (content && typeof content === "object") {
         const maybe = content as Record<string, unknown>;

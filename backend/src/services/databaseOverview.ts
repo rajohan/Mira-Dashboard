@@ -7,6 +7,7 @@ import type {
     PostgresDeadTupleSummary,
 } from "../../../contracts/database.ts";
 import { runProcess } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { stringFallback } from "../lib/values.ts";
 import { getDashboardSqliteOverview } from "./sqliteOverview.ts";
 
@@ -20,6 +21,7 @@ const HIGH_DEAD_TUPLE_PERCENT = 20;
 const HIGH_DEAD_TUPLE_MINIMUM = 1000;
 const HIGH_DEAD_TUPLE_MINIMUM_BYTES = 64 * 1024 * 1024;
 const CATALOG_TUPLE_ESTIMATE_TOLERANCE_PERCENT = 10;
+const logger = createStructuredLogger("database-overview");
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -425,19 +427,25 @@ async function getTorrentCounts() {
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet"),
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "bitmagnet"),
     ]);
-    const countFromResult = (result: PromiseSettledResult<string>) =>
-        result.status === "fulfilled"
-            ? numberFrom(
-                  stringFallback(
-                      parseTable<{ count: string }>(result.value)[0]?.count,
-                      "0"
-                  )
-              )
-            : 0;
+    const countFromResult = (
+        databaseName: "bitmagnet" | "comet",
+        result: PromiseSettledResult<string>
+    ) => {
+        if (result.status === "rejected") {
+            logger.warn("database_overview.torrent_count_failed", {
+                database: databaseName,
+                error: result.reason,
+            });
+            return 0;
+        }
+        return numberFrom(
+            stringFallback(parseTable<{ count: string }>(result.value)[0]?.count, "0")
+        );
+    };
 
     return {
-        comet: countFromResult(cometResult),
-        bitmagnet: countFromResult(bitmagnetResult),
+        comet: countFromResult("comet", cometResult),
+        bitmagnet: countFromResult("bitmagnet", bitmagnetResult),
     };
 }
 

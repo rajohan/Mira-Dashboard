@@ -104,6 +104,7 @@ function literalPathspec(path_: string): string {
 function gitEnvironment(): NodeJS.ProcessEnv {
     const environment = { ...process.env };
     delete environment.GIT_CONFIG_COUNT;
+    delete environment.GIT_CONFIG_PARAMETERS;
     for (const key of Object.keys(environment)) {
         if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/u.test(key)) {
             delete environment[key];

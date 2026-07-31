@@ -22,7 +22,7 @@ import {
 } from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { unknownArray } from "../lib/values.ts";
+import { boundedTimestamp, unknownArray } from "../lib/values.ts";
 
 const logger = createStructuredLogger("agents");
 
@@ -470,23 +470,6 @@ const gatewayAgentSessionsSnapshot = new CoalescedSnapshot<GatewaySessionSummary
 
 function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     return gatewayAgentSessionsSnapshot.read();
-}
-
-/**
- * Returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings.
- * @param value Value to process.
- * @returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings.
- */
-function toTimestamp(value: unknown): number | undefined {
-    let timestamp = Number.NaN;
-    if (typeof value === "number" && Number.isFinite(value)) {
-        timestamp = value;
-    } else if (typeof value === "string" && value.trim().length > 0) {
-        timestamp = Date.parse(value);
-    }
-    return Number.isFinite(timestamp) && Math.abs(timestamp) <= 8_640_000_000_000_000
-        ? timestamp
-        : undefined;
 }
 
 /**
@@ -1524,8 +1507,8 @@ function findBestSessionForAgent(
     ];
 
     return matches.toSorted((a, b) => {
-        const timeA = toTimestamp(a.updatedAt) || 0;
-        const timeB = toTimestamp(b.updatedAt) || 0;
+        const timeA = boundedTimestamp(a.updatedAt) || 0;
+        const timeB = boundedTimestamp(b.updatedAt) || 0;
         const keyA = a.key.toLowerCase();
         const keyB = b.key.toLowerCase();
         const preferredA = Number(preferredKinds.some((part) => keyA.includes(part)));
@@ -1559,7 +1542,7 @@ function findSessionByKey(
  * @returns Whether Gateway reports a session as currently running.
  */
 function isGatewaySessionRunning(session: GatewaySessionSummary | undefined): boolean {
-    if (!session || toTimestamp(session.endedAt)) {
+    if (!session || boundedTimestamp(session.endedAt)) {
         return false;
     }
 
@@ -1582,7 +1565,7 @@ function applyGatewaySessionStatus(
     status.sessionKey ||= session.key;
     status.channel = getChannelFromSessionKey(session.key);
 
-    const updatedAt = toTimestamp(session.updatedAt);
+    const updatedAt = boundedTimestamp(session.updatedAt);
     if (
         updatedAt !== undefined &&
         (!status.lastActivity || updatedAt > Date.parse(status.lastActivity))
