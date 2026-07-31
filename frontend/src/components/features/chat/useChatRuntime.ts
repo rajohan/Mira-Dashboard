@@ -532,7 +532,6 @@ export function useChatRuntime({
                         handleFinishSideEffects(finish.event, finish.state);
                     }
                 }
-                setSettledReplayScope(replayScope);
             }
         })();
 

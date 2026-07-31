@@ -1381,7 +1381,7 @@ describe("chat runtime controller", () => {
                 result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
             ).toBe("fallback")
         );
-        expect(result.current.hasSettledSelectedSessionReplay).toBe(true);
+        expect(result.current.hasSettledSelectedSessionReplay).toBe(false);
         expect(onSettled).toHaveBeenCalledWith(SELECTED);
     });
 
