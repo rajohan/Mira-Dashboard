@@ -61,6 +61,7 @@ function historyRowId(
         const fingerprint = canonicalChatContentFingerprint(
             stableCanonicalChatStringify({
                 content: summarizeCanonicalChatValueForFingerprint(message.content),
+                idempotencyKey: stringValue(message.idempotencyKey),
                 isError: message.isError,
                 mediaPath: summarizeCanonicalChatValueForFingerprint(message.MediaPath),
                 mediaPaths: summarizeCanonicalChatValueForFingerprint(message.MediaPaths),

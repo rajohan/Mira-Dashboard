@@ -142,13 +142,16 @@ function mergeCachedHistoryRows(
     let didRewriteCachedRows = false;
     const replacedFingerprintSequences = new Set<number>();
     const freshFingerprintRows = new Map<number, CanonicalChatHistoryRow[]>();
+    const freshIdsBySequence = new Map<number, Set<string>>();
     for (const row of freshRows) {
         const sequence = historySequence(row);
-        if (
-            sequence === undefined ||
-            sequence > throughSequence ||
-            !hasSequenceFingerprintIdentity(row)
-        ) {
+        if (sequence === undefined || sequence > throughSequence) {
+            continue;
+        }
+        const freshIds = freshIdsBySequence.get(sequence) ?? new Set<string>();
+        freshIds.add(historyMessageId(row));
+        freshIdsBySequence.set(sequence, freshIds);
+        if (!hasSequenceFingerprintIdentity(row)) {
             continue;
         }
         freshFingerprintRows.set(sequence, [
@@ -176,6 +179,19 @@ function mergeCachedHistoryRows(
         }
         didRewriteCachedRows = true;
         replacedFingerprintSequences.add(sequence);
+    }
+    for (const [id, row] of cachedById) {
+        const sequence = historySequence(row);
+        if (
+            sequence === undefined ||
+            !refreshedSequences.has(sequence) ||
+            hasSequenceFingerprintIdentity(row) ||
+            freshIdsBySequence.get(sequence)?.has(id)
+        ) {
+            continue;
+        }
+        cachedById.delete(id);
+        didRewriteCachedRows = true;
     }
     for (const row of freshRows) {
         const sequence = historySequence(row);
@@ -309,6 +325,78 @@ export class OpenClawHistoryLoader {
         return pages;
     }
 
+    async #completeCachedBoundaryRows(
+        sessionKey: string,
+        limit: number,
+        pages: OpenClawHistoryPage[],
+        cached: OpenClawHistoryCacheEntry
+    ): Promise<CanonicalChatHistoryRow[]> {
+        const initialRows = orderedUniqueMessages(pages);
+        if (!hasIncrementalHistorySequenceMetadata(initialRows)) {
+            return initialRows;
+        }
+        const boundaryRow = initialRows[0];
+        if (!boundaryRow) {
+            return initialRows;
+        }
+        const boundarySequence = historySequence(boundaryRow);
+        if (boundarySequence === undefined) {
+            return initialRows;
+        }
+        const freshBoundaryIds = new Set(
+            initialRows
+                .filter((row) => historySequence(row) === boundarySequence)
+                .map((row) => historyMessageId(row))
+        );
+        const hasMissingCachedSibling = cached.rows.some(
+            (row) =>
+                historySequence(row) === boundarySequence &&
+                !freshBoundaryIds.has(historyMessageId(row))
+        );
+        let page = pages.at(-1);
+        if (!hasMissingCachedSibling || !page?.hasMore) {
+            return initialRows;
+        }
+
+        const extendedPages = [...pages];
+        const visitedOffsets = new Set(pages.map((candidate) => candidate.offset));
+        while (page.hasMore) {
+            const nextOffset = page.nextOffset;
+            if (
+                nextOffset === undefined ||
+                nextOffset <= page.offset ||
+                visitedOffsets.has(nextOffset)
+            ) {
+                throw new Error("OpenClaw returned an invalid chat history page offset");
+            }
+            visitedOffsets.add(nextOffset);
+            const nextPage = await this.#page(sessionKey, limit, nextOffset);
+            if (!isSameHistorySession(pages[0]?.sessionId, nextPage.sessionId)) {
+                throw new Error(
+                    "OpenClaw chat session changed while history was loading"
+                );
+            }
+            extendedPages.push(nextPage);
+            page = nextPage;
+
+            if (!hasIncrementalHistorySequenceMetadata(nextPage.messages)) {
+                return orderedUniqueMessages(extendedPages);
+            }
+            if (
+                nextPage.messages.some((row) => historySequence(row) !== boundarySequence)
+            ) {
+                break;
+            }
+        }
+
+        const initialIds = new Set(initialRows.map((row) => historyMessageId(row)));
+        return orderedUniqueMessages(extendedPages).filter(
+            (row) =>
+                initialIds.has(historyMessageId(row)) ||
+                historySequence(row) === boundarySequence
+        );
+    }
+
     async #loadFresh(
         cacheKey: string,
         sessionKey: string,
@@ -377,7 +465,12 @@ export class OpenClawHistoryLoader {
                       first,
                       cached.throughSequence
                   );
-        const orderedRows = orderedUniqueMessages(pages);
+        const orderedRows = await this.#completeCachedBoundaryRows(
+            sessionKey,
+            limit,
+            pages,
+            cached
+        );
         if (!hasIncrementalHistorySequenceMetadata(orderedRows)) {
             return this.#loadFresh(cacheKey, sessionKey, limit, first, false);
         }

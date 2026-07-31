@@ -310,6 +310,37 @@ describe("canonical chat history contract", () => {
         expect(page.messages.map((row) => row.sequence)).toEqual([7, 7]);
     });
 
+    it("uses idempotency keys to distinguish repeated seq-only user rows", () => {
+        const page = canonicalizeOpenClawHistoryPage(
+            {
+                messages: [
+                    {
+                        __openclaw: { seq: 7 },
+                        content: "repeat",
+                        idempotencyKey: "dashboard-chat-first:user",
+                        role: "user",
+                        timestamp: "2026-07-30T05:10:00.000Z",
+                    },
+                    {
+                        __openclaw: { seq: 7 },
+                        content: "repeat",
+                        idempotencyKey: "dashboard-chat-second:user",
+                        role: "user",
+                        timestamp: "2026-07-30T05:10:00.000Z",
+                    },
+                ],
+                offset: 0,
+            },
+            { offset: 0, sessionKey: SESSION }
+        );
+
+        expect(new Set(page.messages.map((row) => row.id)).size).toBe(2);
+        expect(page.messages.map((row) => row.message.runId)).toEqual([
+            "dashboard-chat-first",
+            "dashboard-chat-second",
+        ]);
+    });
+
     it("includes top-level media references in seq-only row identity", () => {
         const page = canonicalizeOpenClawHistoryPage(
             {
