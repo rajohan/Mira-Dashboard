@@ -5,6 +5,7 @@ import {
     isRenderableChatHistoryMessage,
     mergeChatAttachments,
     mergeChatImages,
+    mergeChatMessageProvenance,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
 
@@ -17,6 +18,11 @@ export function createChatVisibility(
     shouldShowTools: boolean
 ): ChatVisibilitySettings {
     return { shouldShowThinking, shouldShowTools };
+}
+
+function isAnswerCapableRole(role: string): boolean {
+    const normalizedRole = role.toLowerCase();
+    return normalizedRole === "assistant" || normalizedRole === "system";
 }
 
 /**
@@ -138,8 +144,9 @@ function applyFinalThinkingPreference(
         }
 
         const isDiagnosticTool = hasToolOutput && !hasPrimaryContent;
+        const role = message.role.toLowerCase();
         const isPrimaryAnswer =
-            message.role.toLowerCase() === "assistant" &&
+            isAnswerCapableRole(role) &&
             details.isPrimaryAnswerContent &&
             isRenderableChatHistoryMessage(withoutThinking, visibility);
         response.push({
@@ -147,7 +154,7 @@ function applyFinalThinkingPreference(
             primaryAnswer: isPrimaryAnswer,
             retainableThinking: Boolean(
                 visibility.shouldShowThinking &&
-                message.role.toLowerCase() === "assistant" &&
+                role === "assistant" &&
                 message.thinking?.length &&
                 (isDiagnosticTool || !hasPrimaryContent)
             ),
@@ -163,6 +170,10 @@ function applyFinalThinkingPreference(
 
 function hasToolDetails(message: ChatHistoryMessage): boolean {
     return Boolean(message.toolCalls?.length || message.toolResult);
+}
+
+function isThinkingOnlyMessage(message: ChatHistoryMessage): boolean {
+    return Boolean(message.thinking?.length && !hasPrimaryAnswerContent(message));
 }
 
 interface ThinkingGroup {
@@ -250,13 +261,16 @@ function completedResponseStart(
                 nextUserMessage.text.trim()
             );
         const hasPriorAnswer = interveningMessages.some((candidate) =>
-            isPrimaryAssistantMessage(candidate)
+            isSettledAnswerMessage(candidate)
         );
         if (hasPriorAnswer && !isGatewayRestartContinuation) {
             return groupStart;
         }
-        const hasContinuationEvidence = interveningMessages.some((candidate) =>
-            hasToolDetails(candidate)
+        const hasContinuationEvidence = interveningMessages.some(
+            (candidate) =>
+                hasToolDetails(candidate) ||
+                isThinkingOnlyMessage(candidate) ||
+                candidate.isToolUse === true
         );
         if (!hasContinuationEvidence) {
             return groupStart;
@@ -270,10 +284,13 @@ function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {
     return message.role.toLowerCase() === "assistant" && hasPrimaryAnswerContent(message);
 }
 
+function isSettledAnswerMessage(message: ChatHistoryMessage): boolean {
+    return isAnswerCapableRole(message.role) && hasPrimaryAnswerContent(message);
+}
+
 function isExplicitFinalMessage(message: ChatHistoryMessage): boolean {
-    const role = message.role.toLowerCase();
     return (
-        (role === "assistant" || role === "system") &&
+        isAnswerCapableRole(message.role) &&
         message.isFinal === true &&
         hasPrimaryAnswerContent(message)
     );
@@ -369,23 +386,37 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
     const groups = new Map<string, ThinkingGroup>();
 
     for (const [index, message] of messages.entries()) {
-        if (message.role.toLowerCase() !== "assistant" || !message.thinking?.length) {
+        const role = message.role.toLowerCase();
+        if (!isAnswerCapableRole(role) || !message.thinking?.length) {
             continue;
         }
         const segment = segments[index] ?? 0;
         const key = message.runId ? `run:${message.runId}` : `segment:${segment}`;
-        const group = groups.get(key) || {
-            blocks: [],
-            firstIndex: index,
-            runId: message.runId,
-            segment,
-            template: message,
-        };
-        mergeThinkingBlocks(group.blocks, message.thinking);
-        if (message.local === true || group.template.local !== true) {
-            group.template = message;
+        const group = groups.get(key);
+        if (!group) {
+            const blocks: ThinkingGroup["blocks"] = [];
+            mergeThinkingBlocks(blocks, message.thinking);
+            groups.set(key, {
+                blocks,
+                firstIndex: index,
+                runId: message.runId,
+                segment,
+                template: message,
+            });
+            continue;
         }
-        groups.set(key, group);
+        mergeThinkingBlocks(group.blocks, message.thinking);
+        const shouldReplaceTemplate =
+            message.local === true || group.template.local !== true;
+        const primaryTemplate = shouldReplaceTemplate ? message : group.template;
+        const foldedTemplate = shouldReplaceTemplate ? group.template : message;
+        group.template = {
+            ...primaryTemplate,
+            provenance: mergeChatMessageProvenance(
+                primaryTemplate.provenance,
+                foldedTemplate.provenance
+            ),
+        };
     }
 
     const groupsByAnchorIndex = new Map<
@@ -397,7 +428,7 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         const hasSettledAnswer = messages.some(
             (message, index) =>
                 segments[index] === group.segment &&
-                (isExplicitFinalMessage(message) || isPrimaryAssistantMessage(message))
+                (isExplicitFinalMessage(message) || isSettledAnswerMessage(message))
         );
         const isAbandonedUnscopedThinking =
             !group.runId && group.segment < latestSegment && !hasSettledAnswer;
@@ -421,7 +452,16 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         if (anchoredGroups) {
             collapsed.push(...anchoredGroups.map((group) => group.message));
         }
-        collapsed.push(stripThinkingFromMessage(message));
+        const withoutThinking = stripThinkingFromMessage(message);
+        if (
+            !message.thinking?.length ||
+            isRenderableChatHistoryMessage(withoutThinking, {
+                shouldShowThinking: true,
+                shouldShowTools: true,
+            })
+        ) {
+            collapsed.push(withoutThinking);
+        }
     }
     const trailingGroups = groupsByAnchorIndex
         .get(messages.length)
@@ -433,14 +473,25 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
 }
 
 /**
- * Applies visibility as a pure projection. Raw messages are never mutated or
- * discarded, so toggling diagnostics can always reveal the same current run.
- * @param messages Messages value.
+ * Normalizes thinking into stable standalone messages before visibility policy.
+ * @param messages Reconciled messages.
+ * @returns Structured messages with deterministic thinking placement.
+ */
+export function structureChatMessages(
+    messages: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    return collapseRunThinking(messages);
+}
+
+/**
+ * Applies visibility to already-structured messages. Input messages are never
+ * mutated or discarded outside the returned projection.
+ * @param messages Structured messages.
  * @param visibility Visibility value.
  * @param shouldKeepThinkingAfterFinal Whether should keep thinking after final.
- * @returns Present chat messages result.
+ * @returns Presented chat messages.
  */
-export function presentChatMessages(
+export function presentStructuredChatMessages(
     messages: ChatHistoryMessage[],
     visibility: ChatVisibilitySettings,
     shouldKeepThinkingAfterFinal = true
@@ -476,7 +527,7 @@ export function presentChatMessages(
         pendingToolMedia = undefined;
     };
 
-    for (const message of collapseRunThinking(messages)) {
+    for (const message of messages) {
         const role = message.role.toLowerCase();
         const isTool = TOOL_ROLE_VARIANTS.includes(role);
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
@@ -508,10 +559,12 @@ export function presentChatMessages(
             continue;
         }
 
+        const canReceivePendingToolMedia =
+            isAnswerCapableRole(role) && !isThinkingOnlyMessage(message);
         if (
             role === "user" ||
             (pendingToolMedia &&
-                role === "assistant" &&
+                canReceivePendingToolMedia &&
                 pendingToolMedia.runId !== message.runId)
         ) {
             flushToolMedia();
@@ -519,7 +572,7 @@ export function presentChatMessages(
         if (!isRenderableChatHistoryMessage(message, visibility)) {
             continue;
         }
-        if (pendingToolMedia && role === "assistant") {
+        if (pendingToolMedia && canReceivePendingToolMedia) {
             visible.push({
                 ...message,
                 attachments: mergeChatAttachments(
@@ -540,6 +593,26 @@ export function presentChatMessages(
 
     return applyFinalThinkingPreference(
         visible,
+        visibility,
+        shouldKeepThinkingAfterFinal
+    );
+}
+
+/**
+ * Structures and applies visibility as a pure projection. Raw messages are
+ * never mutated, so toggling diagnostics can reveal the same current run.
+ * @param messages Reconciled messages.
+ * @param visibility Visibility value.
+ * @param shouldKeepThinkingAfterFinal Whether should keep thinking after final.
+ * @returns Presented chat messages.
+ */
+export function presentChatMessages(
+    messages: ChatHistoryMessage[],
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal = true
+): ChatHistoryMessage[] {
+    return presentStructuredChatMessages(
+        structureChatMessages(messages),
         visibility,
         shouldKeepThinkingAfterFinal
     );

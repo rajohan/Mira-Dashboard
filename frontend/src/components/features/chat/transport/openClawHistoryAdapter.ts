@@ -1,5 +1,9 @@
 import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chatCanonicalHistory";
-import { type ChatHistoryMessage, mergeChatAttachments } from "../chatTypes";
+import {
+    type ChatHistoryMessage,
+    mergeChatAttachments,
+    mergeChatMessageProvenance,
+} from "../chatTypes";
 
 function matchingToolCallIndex(
     message: ChatHistoryMessage,
@@ -36,7 +40,17 @@ export function appendOpenClawHistory(
     existing: ChatHistoryMessage[],
     rows: CanonicalChatHistoryRow[] | undefined
 ): ChatHistoryMessage[] {
-    const normalized = (rows || []).map((row) => row.message);
+    const normalized = (rows || []).map(
+        (row): ChatHistoryMessage => ({
+            ...row.message,
+            provenance: {
+                id: row.id,
+                provider: row.provider,
+                sequence: row.sequence,
+                source: "openclaw-history",
+            },
+        })
+    );
     const result: ChatHistoryMessage[] = [...existing];
     for (const message of normalized) {
         if (!message.toolResult || !message.role.toLowerCase().startsWith("tool")) {
@@ -68,6 +82,10 @@ export function appendOpenClawHistory(
         result[assistantIndex] = {
             ...assistant,
             attachments: mergeChatAttachments(assistant.attachments, message.attachments),
+            provenance: mergeChatMessageProvenance(
+                assistant.provenance,
+                message.provenance
+            ),
             timestamp: message.timestamp || assistant.timestamp,
             toolCalls,
             toolResult: (toolCalls.length === 1 ? message : assistant).toolResult,

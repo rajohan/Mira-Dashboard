@@ -15,7 +15,11 @@ import {
     messageMediaIdentity,
     stableChatStringify,
 } from "../chatUtilities";
-import { hasPrimaryAnswerContent, presentChatMessages } from "./chatPresentation";
+import {
+    hasPrimaryAnswerContent,
+    presentStructuredChatMessages,
+    structureChatMessages,
+} from "./chatPresentation";
 import type {
     ChatRunState,
     ChatRuntimeState,
@@ -249,14 +253,17 @@ function isMatchedToAnotherRun(
     runs: ChatRunState[]
 ): boolean {
     return runs.some((candidate) => {
-        const isUnacknowledgedDashboardRun =
-            candidate.phase === "active" &&
+        const isDashboardSteerOnlyRun =
+            isDashboardRunId(candidate.runId) &&
             !candidate.assistant &&
             candidate.diagnostics.length === 0 &&
-            isDashboardRunId(candidate.runId);
+            (candidate.phase === "active" ||
+                (candidate.phase === "completed" &&
+                    candidate.lastContentKind === "user" &&
+                    candidate.userMessages.length > 0));
         return (
             candidate.runId !== run.runId &&
-            !isUnacknowledgedDashboardRun &&
+            !isDashboardSteerOnlyRun &&
             isRunMatchingMessage(candidate, message)
         );
     });
@@ -317,6 +324,19 @@ function latestExactToolMessageIndex(
     return latestIndex;
 }
 
+function isEligibleRunPrompt(message: ChatHistoryMessage, run: ChatRunState): boolean {
+    if (!isUserMessage(message) || !isRunMatchingMessage(run, message)) {
+        return false;
+    }
+    const startedAt = Date.parse(run.startedAt);
+    const timestamp = messageTimestamp(message);
+    return (
+        Number.isNaN(startedAt) ||
+        timestamp === undefined ||
+        timestamp <= startedAt + RUN_START_USER_SKEW_MS
+    );
+}
+
 function sequencedRunPromptIndex(
     messages: ChatHistoryMessage[],
     run: ChatRunState
@@ -325,9 +345,7 @@ function sequencedRunPromptIndex(
         .map((message, index) => ({ index, message }))
         .filter(
             ({ message }) =>
-                isUserMessage(message) &&
-                isRunMatchingMessage(run, message) &&
-                message.runtimeSequence !== undefined
+                isEligibleRunPrompt(message, run) && message.runtimeSequence !== undefined
         )
         .toSorted(
             (left, right) =>
@@ -360,9 +378,7 @@ function runFinalAnchorIndex(
         const startedAt = Date.parse(run.startedAt);
         let diagnosticBoundaryIndex =
             sequencedRunPromptIndex(messages, run) ??
-            messages.findLastIndex(
-                (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
-            );
+            messages.findLastIndex((message) => isEligibleRunPrompt(message, run));
         if (diagnosticBoundaryIndex === -1 && !Number.isNaN(startedAt)) {
             diagnosticBoundaryIndex = messages.findLastIndex((message) => {
                 const timestamp = messageTimestamp(message);
@@ -491,7 +507,19 @@ function userBoundaryIndex(
                 timestamp <= startedAt + RUN_START_USER_SKEW_MS
             );
         });
-        userIndex = Math.max(userIndex, startBoundary);
+        const hasSettledAnswerBeforeMatchingUser =
+            startBoundary !== -1 &&
+            userIndex > startBoundary &&
+            messages.slice(startBoundary + 1, userIndex).some((message) => {
+                const role = message.role.toLowerCase();
+                return (
+                    (role === "assistant" || role === "system") &&
+                    hasPrimaryAnswerContent(message)
+                );
+            });
+        if (startBoundary !== -1 && !hasSettledAnswerBeforeMatchingUser) {
+            userIndex = startBoundary;
+        }
     }
 
     if (userIndex === -1 && Number.isNaN(startedAt)) {
@@ -1323,7 +1351,10 @@ function orderRuntimeMessages(
         const runtimeSlots = slotsByRun.get(run.runId) || [];
         const startedAt = Date.parse(run.startedAt);
         const sequencedPrompt = runtimeSlots
-            .filter((slot) => isUserMessage(slot.message) && slot.sequence !== undefined)
+            .filter(
+                (slot) =>
+                    isEligibleRunPrompt(slot.message, run) && slot.sequence !== undefined
+            )
             .toSorted(
                 (left, right) =>
                     (left.sequence ?? Infinity) - (right.sequence ?? Infinity) ||
@@ -1683,6 +1714,219 @@ function currentCompactionStatus(runs: ChatRunState[]): ChatCompactionStatus | u
     };
 }
 
+/** Provider-independent history/runtime inputs selected for projection. */
+export interface ChatProjectionContext {
+    boundaryMessages: ChatHistoryMessage[];
+    history: ChatHistoryMessage[];
+    runs: ChatRunState[];
+    session?: ChatSessionRuntimeState;
+    sessionKey: string;
+}
+
+/** Reconciled canonical messages before visibility policy is applied. */
+export interface ReconciledChatProjection {
+    context: ChatProjectionContext;
+    messages: ChatHistoryMessage[];
+}
+
+/** Reconciled messages with deterministic thinking placement before visibility. */
+export interface StructuredChatProjection {
+    messages: ChatHistoryMessage[];
+    reconciliation: ReconciledChatProjection;
+}
+
+/** Canonical messages after visibility and thinking-retention policy. */
+export interface PresentedChatProjection {
+    messages: ChatHistoryMessage[];
+    structure: StructuredChatProjection;
+}
+
+/**
+ * Selects the session, ordered runs, and transcript boundary inputs.
+ * @param history Canonical history messages.
+ * @param runtime Canonical runtime state.
+ * @param sessionKey Selected session key.
+ * @returns Immutable projection context.
+ */
+export function selectChatProjectionContext(
+    history: ChatHistoryMessage[],
+    runtime: ChatRuntimeState,
+    sessionKey: string
+): ChatProjectionContext {
+    const session = findChatSessionRuntimeState(runtime, sessionKey);
+    const runs = orderedRuns(session);
+    return {
+        boundaryMessages: scopeTranscriptUsersToRuns(
+            mergeAllRuntimeUserMessages(history, runs),
+            runs
+        ),
+        history,
+        runs,
+        session,
+        sessionKey,
+    };
+}
+
+/**
+ * Reconciles one selected transcript with its runtime state.
+ * @param context Selected projection context.
+ * @returns Reconciled projection stage.
+ */
+export function reconcileChatProjectionContext(
+    context: ChatProjectionContext
+): ReconciledChatProjection {
+    return {
+        context,
+        messages: reconcileChatMessages(context.history, context.session),
+    };
+}
+
+/**
+ * Structures reconciled messages before turn grouping and visibility.
+ * @param reconciliation Reconciled projection stage.
+ * @returns Structured projection stage.
+ */
+export function structureChatProjectionContext(
+    reconciliation: ReconciledChatProjection
+): StructuredChatProjection {
+    return {
+        messages: structureChatMessages(reconciliation.messages),
+        reconciliation,
+    };
+}
+
+/**
+ * Applies visibility and thinking-retention policy to structured messages.
+ * @param structure Structured projection stage.
+ * @param visibility Visibility policy.
+ * @param shouldKeepThinkingAfterFinal Whether settled thinking remains visible.
+ * @returns Presented projection stage.
+ */
+export function presentChatProjectionContext(
+    structure: StructuredChatProjection,
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal: boolean
+): PresentedChatProjection {
+    return {
+        messages: presentStructuredChatMessages(
+            structure.messages,
+            visibility,
+            shouldKeepThinkingAfterFinal
+        ),
+        structure,
+    };
+}
+
+/**
+ * Converts presented messages into the unchanged UI row contract.
+ * @param messages Presented canonical messages.
+ * @param deletedMessageKeys Persisted message deletion identities.
+ * @returns Message and stream rows in presentation order.
+ */
+export function renderChatProjectionRows(
+    messages: ChatHistoryMessage[],
+    deletedMessageKeys: ReadonlySet<string>
+): ChatRow[] {
+    return messages.flatMap((message) => {
+        const deleteKeys = projectedMessageDeleteKeys(message);
+        return deleteKeys.some((key) => deletedMessageKeys.has(key))
+            ? []
+            : [
+                  {
+                      deleteKeys,
+                      key: projectedMessageRowKey(message),
+                      kind:
+                          message.local === true &&
+                          message.runId &&
+                          !isUserMessage(message)
+                              ? ("stream" as const)
+                              : ("message" as const),
+                      message: projectedMessageDisplay(message),
+                  },
+              ];
+    });
+}
+
+/**
+ * Selects runs whose canonical final is not yet present in history.
+ * @param context Selected projection context.
+ * @returns Active visible response runs.
+ */
+export function selectActiveChatProjectionRuns(
+    context: ChatProjectionContext
+): ChatRunState[] {
+    const exactToolIndex = indexExactToolMessages(context.boundaryMessages);
+    return context.runs.filter(
+        (run) =>
+            run.phase === "active" &&
+            run.operation !== "compact" &&
+            canonicalFinalIndex(
+                context.boundaryMessages,
+                run,
+                responseSegment(
+                    context.boundaryMessages,
+                    run,
+                    context.runs,
+                    exactToolIndex
+                ),
+                exactToolIndex
+            ) === -1
+    );
+}
+
+/**
+ * Appends a typing row when an active run has no visible assistant stream.
+ * @param rows Presented message rows.
+ * @param messages Presented canonical messages.
+ * @param activeRuns Active visible response runs.
+ * @returns Rows with an optional typing status.
+ */
+export function appendChatProjectionStatus(
+    rows: ChatRow[],
+    messages: ChatHistoryMessage[],
+    activeRuns: ChatRunState[]
+): ChatRow[] {
+    const typing = statusRow(
+        activeRuns,
+        visibleAssistantStreamRunIds(messages, activeRuns)
+    );
+    return typing ? [...rows, typing] : rows;
+}
+
+/**
+ * Selects the latest visible context-compaction lifecycle.
+ * @param runs Ordered session runs.
+ * @returns Current compaction status.
+ */
+export function selectChatCompactionStatus(
+    runs: ChatRunState[]
+): ChatCompactionStatus | undefined {
+    return currentCompactionStatus(runs);
+}
+
+/**
+ * Finalizes presented messages into the stable UI projection contract.
+ * @param presentation Presented projection stage.
+ * @param deletedMessageKeys Persisted message deletion identities.
+ * @returns Final chat projection.
+ */
+export function finalizeChatProjection(
+    presentation: PresentedChatProjection,
+    deletedMessageKeys: ReadonlySet<string>
+): ChatProjection {
+    const { context } = presentation.structure.reconciliation;
+    const activeRuns = selectActiveChatProjectionRuns(context);
+    return {
+        activeRuns,
+        compactionStatus: selectChatCompactionStatus(context.runs),
+        rows: appendChatProjectionStatus(
+            renderChatProjectionRows(presentation.messages, deletedMessageKeys),
+            presentation.messages,
+            activeRuns
+        ),
+    };
+}
+
 /**
  * Builds the exact rows consumed by the unchanged chat message UI.
  * @param history History value.
@@ -1701,58 +1945,13 @@ export function projectChat(
     shouldKeepThinkingAfterFinal: boolean,
     deletedMessageKeys: ReadonlySet<string>
 ): ChatProjection {
-    const session = findChatSessionRuntimeState(runtime, sessionKey);
-    const runs = orderedRuns(session);
-    const boundaryMessages = scopeTranscriptUsersToRuns(
-        mergeAllRuntimeUserMessages(history, runs),
-        runs
-    );
-    const boundaryExactToolIndex = indexExactToolMessages(boundaryMessages);
-    const reconciled = reconcileChatMessages(history, session);
-    const presented = presentChatMessages(
-        reconciled,
+    const context = selectChatProjectionContext(history, runtime, sessionKey);
+    const reconciliation = reconcileChatProjectionContext(context);
+    const structure = structureChatProjectionContext(reconciliation);
+    const presentation = presentChatProjectionContext(
+        structure,
         visibility,
         shouldKeepThinkingAfterFinal
     );
-    const rows: ChatRow[] = [];
-    for (const message of presented) {
-        const deleteKeys = projectedMessageDeleteKeys(message);
-        const isDeleted = deleteKeys.some((key) => deletedMessageKeys.has(key));
-        if (!isDeleted) {
-            rows.push({
-                deleteKeys,
-                key: projectedMessageRowKey(message),
-                kind:
-                    message.local === true && message.runId && !isUserMessage(message)
-                        ? "stream"
-                        : "message",
-                message: projectedMessageDisplay(message),
-            });
-        }
-    }
-    const activeRuns = runs.filter(
-        (run) =>
-            run.phase === "active" &&
-            run.operation !== "compact" &&
-            canonicalFinalIndex(
-                boundaryMessages,
-                run,
-                responseSegment(boundaryMessages, run, runs, boundaryExactToolIndex),
-                boundaryExactToolIndex
-            ) === -1
-    );
-    const typing = statusRow(
-        activeRuns,
-        visibleAssistantStreamRunIds(presented, activeRuns)
-    );
-    if (typing) {
-        rows.push(typing);
-    }
-
-    const compactionStatus = currentCompactionStatus(runs);
-    return {
-        activeRuns,
-        compactionStatus,
-        rows,
-    };
+    return finalizeChatProjection(presentation, deletedMessageKeys);
 }

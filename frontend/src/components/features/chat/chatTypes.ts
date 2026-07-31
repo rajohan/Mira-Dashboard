@@ -1,4 +1,8 @@
 import type { ChatTransportAttachment } from "../../../../../contracts/chat";
+import type {
+    CanonicalChatEvent,
+    CanonicalChatProviderMetadata,
+} from "../../../../../contracts/chatCanonical";
 
 /** Defines normalized role variants that represent tool result rows. */
 export const TOOL_ROLE_VARIANTS: readonly string[] = [
@@ -389,6 +393,64 @@ export interface ChatVisibilitySettings {
     shouldShowTools: boolean;
 }
 
+/** Provider-independent source identity retained while projecting one message. */
+export interface ChatMessageSourceReference {
+    id: string;
+    origin?: CanonicalChatEvent["origin"];
+    provider?: CanonicalChatProviderMetadata;
+    sequence?: number;
+    source: "openclaw-history" | "openclaw-runtime";
+}
+
+/** Primary source plus any provider rows folded into the same visible message. */
+export interface ChatMessageProvenance extends ChatMessageSourceReference {
+    relatedSources?: ChatMessageSourceReference[];
+}
+
+function chatMessageSourceReference(
+    provenance: ChatMessageProvenance
+): ChatMessageSourceReference {
+    const { relatedSources: _relatedSources, ...reference } = provenance;
+    return reference;
+}
+
+function chatMessageSourceKey(source: ChatMessageSourceReference): string {
+    return `${source.source}\u0000${source.id}\u0000${source.sequence ?? ""}`;
+}
+
+/**
+ * Keeps one primary source while retaining every source folded into the message.
+ * @param primary Source represented by the resulting message.
+ * @param folded Older or secondary source folded into the same message.
+ * @returns Combined provenance without duplicate source identities.
+ */
+export function mergeChatMessageProvenance(
+    primary: ChatMessageProvenance | undefined,
+    folded: ChatMessageProvenance | undefined
+): ChatMessageProvenance | undefined {
+    if (!primary) return folded;
+    if (!folded) return primary;
+
+    const primaryKey = chatMessageSourceKey(primary);
+    const relatedSources = new Map<string, ChatMessageSourceReference>();
+    for (const reference of [
+        ...(primary.relatedSources || []),
+        chatMessageSourceReference(folded),
+        ...(folded.relatedSources || []),
+    ]) {
+        const key = chatMessageSourceKey(reference);
+        if (key !== primaryKey) {
+            relatedSources.set(key, reference);
+        }
+    }
+    return {
+        ...primary,
+        ...(relatedSources.size > 0 && {
+            relatedSources: relatedSources.values().toArray(),
+        }),
+    };
+}
+
 /** Represents chat history message. */
 export interface ChatHistoryMessage {
     role: string;
@@ -412,6 +474,8 @@ export interface ChatHistoryMessage {
     runtimeKey?: string;
     /** Canonical Gateway event order used only while reconciling runtime rows. */
     runtimeSequence?: number;
+    /** Canonical transport identity used to assemble versioned turns. */
+    provenance?: ChatMessageProvenance;
 }
 
 /**

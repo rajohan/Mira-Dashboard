@@ -367,6 +367,115 @@ describe("chat runtime state", () => {
         expect(run?.diagnostics[0]?.message.thinking?.[0]?.text).toBe("reasoning");
     });
 
+    it("retains folded runtime provenance for assistant and diagnostic merges", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                id: "assistant-first",
+                kind: "assistant",
+                message: { content: "Hel", role: "assistant", text: "Hel" },
+                mode: "append",
+                runId: "provider-1",
+                source: "runtime",
+            }),
+            event(32, {
+                id: "assistant-second",
+                kind: "assistant",
+                message: { content: "lo", role: "assistant", text: "lo" },
+                mode: "append",
+                runId: "provider-1",
+                source: "runtime",
+            }),
+            event(48, {
+                id: "thinking-first",
+                kind: "thinking",
+                message: {
+                    content: [{ text: "Inspect", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "Inspect" }],
+                },
+                runId: "provider-1",
+            }),
+            event(64, {
+                id: "thinking-second",
+                kind: "thinking",
+                message: {
+                    content: [{ text: " repository", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: " repository" }],
+                },
+                runId: "provider-1",
+            }),
+            event(80, {
+                id: "tool-first",
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { cmd: "pwd" },
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    ],
+                },
+                runId: "provider-1",
+                toolKey: "tool:call-1",
+            }),
+            event(96, {
+                id: "tool-second",
+                kind: "tool",
+                message: {
+                    content: "/workspace",
+                    role: "tool",
+                    text: "/workspace",
+                    toolResult: {
+                        content: "/workspace",
+                        id: "call-1",
+                        name: "exec",
+                    },
+                },
+                runId: "provider-1",
+                toolKey: "tool:call-1",
+            }),
+        ]);
+        const run = state.sessions[SESSION]?.runs["provider-1"];
+
+        expect(run?.assistant?.provenance).toMatchObject({
+            id: "assistant-second",
+            relatedSources: [
+                expect.objectContaining({
+                    id: "assistant-first",
+                    sequence: 16,
+                }),
+            ],
+            sequence: 32,
+        });
+        expect(run?.diagnostics[0]?.message.provenance).toMatchObject({
+            id: "thinking-second",
+            relatedSources: [
+                expect.objectContaining({
+                    id: "thinking-first",
+                    sequence: 48,
+                }),
+            ],
+            sequence: 64,
+        });
+        expect(run?.diagnostics[1]?.message.provenance).toMatchObject({
+            id: "tool-second",
+            relatedSources: [
+                expect.objectContaining({
+                    id: "tool-first",
+                    sequence: 80,
+                }),
+            ],
+            sequence: 96,
+        });
+    });
+
     it("keeps newer provider terminal metadata while merging optimistic diagnostics", () => {
         const providerFirst = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

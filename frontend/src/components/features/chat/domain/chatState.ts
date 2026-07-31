@@ -1,11 +1,17 @@
+import type {
+    CanonicalChatEvent,
+    CanonicalChatProviderMetadata,
+} from "../../../../../../contracts/chatCanonical";
 import { currentIsoString } from "../../../../utils/date";
 import {
     type ChatHistoryMessage,
+    type ChatMessageProvenance,
     type ChatThinkingDisplay,
     type ChatToolCallDisplay,
     type ChatToolResultDisplay,
     mergeChatAttachments,
     mergeChatImages,
+    mergeChatMessageProvenance,
 } from "../chatTypes";
 import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
 
@@ -59,11 +65,32 @@ export interface ChatRuntimeState {
 }
 
 interface RuntimeEventBase {
+    id?: string;
+    origin?: CanonicalChatEvent["origin"];
+    provider?: CanonicalChatProviderMetadata;
     runAliases?: string[];
     runId?: string;
     sequence: number;
     sessionKey: string;
     timestamp: string;
+}
+
+function withRuntimeMessageProvenance(
+    message: ChatHistoryMessage,
+    event: RuntimeEventBase
+): ChatHistoryMessage {
+    if (!event.id) return message;
+    const runtimeProvenance: ChatMessageProvenance = {
+        id: event.id,
+        origin: event.origin,
+        provider: event.provider,
+        sequence: event.sequence,
+        source: "openclaw-runtime",
+    };
+    return {
+        ...message,
+        provenance: mergeChatMessageProvenance(runtimeProvenance, message.provenance),
+    };
 }
 
 export type ChatRuntimeEvent =
@@ -461,6 +488,7 @@ function mergeMessageDetails(
         ...incoming,
         attachments: mergeChatAttachments(previous?.attachments, incoming.attachments),
         images: mergeChatImages(previous?.images, incoming.images),
+        provenance: mergeChatMessageProvenance(incoming.provenance, previous?.provenance),
         text,
         thinking: mergeThinking(previous?.thinking, incoming.thinking),
         toolCalls: incoming.toolCalls?.length ? incoming.toolCalls : previous?.toolCalls,
@@ -530,9 +558,10 @@ function applyAssistantEvent(
             !run.assistantSource ||
             run.assistantSource === event.source ||
             run.phase !== "active");
+    const sourcedMessage = withRuntimeMessageProvenance(event.message, event);
     const incoming = canUseText
-        ? event.message
-        : { ...event.message, content: [], text: "" };
+        ? sourcedMessage
+        : { ...sourcedMessage, content: [], text: "" };
     if (!incoming.text && !hasNonTextDetails(incoming)) {
         return run;
     }
@@ -651,6 +680,7 @@ function mergeToolDiagnostic(
         ...incoming,
         attachments: mergeChatAttachments(previous.attachments, incoming.attachments),
         images: mergeChatImages(previous.images, incoming.images),
+        provenance: mergeChatMessageProvenance(incoming.provenance, previous.provenance),
         toolCalls: calls.length > 0 ? calls : incoming.toolCalls,
         toolResult,
     };
@@ -730,7 +760,7 @@ function applyDiagnosticEvent(
             key,
             event.kind,
             {
-                ...event.message,
+                ...withRuntimeMessageProvenance(event.message, event),
                 timestamp: event.message.timestamp || event.timestamp,
             },
             event.sequence,
@@ -744,7 +774,7 @@ function applyUserEvent(
     event: Extract<ChatRuntimeEvent, { kind: "user" }>
 ): ChatRunState {
     const message = {
-        ...event.message,
+        ...withRuntimeMessageProvenance(event.message, event),
         timestamp: event.message.timestamp || event.timestamp,
     };
     const key = `user:${messageDeleteKey(message)}`;

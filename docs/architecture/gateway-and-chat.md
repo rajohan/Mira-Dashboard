@@ -126,6 +126,34 @@ observed Codex history uses UUID message IDs and separated tool rows, while
 Synthetic uses short provider IDs and can combine thinking plus a tool call in
 one assistant message.
 
+### Canonical Turns And Projection Shadow
+
+Canonical turn schema v1 groups the reconciled transcript into stable logical
+turns before user visibility settings are applied. A turn retains its session
+and run identity, restart aliases, lifecycle, sequence range, provider metadata,
+and ordered entries. Each entry carries stable source identity, canonical
+history/runtime sequence when available, its backend adapter origin, and the
+canonical message. History-only turns use `unknown` lifecycle instead of
+inventing runtime evidence. The same turn contract is therefore produced whether
+thinking and tool output are currently shown or hidden.
+
+Projection is composed from explicit pure stages:
+
+1. select the session, ordered runs, and transcript boundaries;
+2. reconcile canonical history with canonical runtime state;
+3. structure standalone thinking and deterministic diagnostic placement;
+4. group and validate versioned canonical turns;
+5. apply visibility and final-thinking retention;
+6. map messages, active runs, and compaction lifecycle to UI rows.
+
+Canonical shadow mode runs the turn path beside the established projection. It
+returns the established rows to the UI, compares row, active-run, and compaction
+sections, and fails open if any canonical schema or stage invariant fails.
+Mismatch diagnostics contain only schema version, difference categories, and
+counts; transcript content, stable IDs, and internal fingerprints are not
+logged. Existing incident fixtures, projection regressions, and generated replay
+state-machine traces require exact shadow parity before the path can be cut over.
+
 ### Session URL State
 
 The selected chat session is stored in the `/chat?session=<session-key>` query.
