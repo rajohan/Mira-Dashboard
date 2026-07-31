@@ -362,6 +362,32 @@ describe("Dashboard immutable release manager", () => {
         ).toBe(0o755);
     });
 
+    it("repairs launcher permissions when reusing an existing verified release", async () => {
+        const releasesRoot = temporaryReleasesRoot();
+        const buildRoot = temporaryReleasesRoot();
+        await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        const published = await publishVerifiedDashboardRelease(
+            buildRoot,
+            FIRST_COMMIT,
+            releasesRoot
+        );
+        const launcherPath = path.join(
+            published.path,
+            "scripts",
+            "runManagedDashboardRelease.sh"
+        );
+        chmodSync(launcherPath, 0o644);
+
+        const reused = await publishVerifiedDashboardRelease(
+            buildRoot,
+            FIRST_COMMIT,
+            releasesRoot
+        );
+
+        expect(reused.path).toBe(published.path);
+        expect(statSync(launcherPath).mode & 0o777).toBe(0o755);
+    });
+
     it("activates and rolls back verified releases through relative atomic links", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);

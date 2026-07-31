@@ -8474,10 +8474,11 @@ fi
                                 updatedAt: Date.now(),
                             },
                             {
-                                endedAt: Date.now(),
+                                endedAt: 0,
+                                isRunning: true,
                                 key: "agent:coder:main",
                                 model: "openai/gpt-4.1",
-                                status: "exited",
+                                status: "running",
                                 updatedAt: Date.now() - 120_000,
                             },
                             {
@@ -8524,6 +8525,7 @@ fi
                 id: "coder",
                 model: "gpt-4.1",
                 sessionKey: "agent:coder:main",
+                status: "idle",
             })
         );
         expect(statuses).toContainEqual(

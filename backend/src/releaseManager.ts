@@ -1196,12 +1196,23 @@ export async function publishVerifiedDashboardRelease(
         async () => {
             await recoverInterruptedReleaseTransition(layout);
             await options.prepareManifest?.(manifest);
+            let existingRelease: ManagedDashboardRelease | undefined;
             try {
-                return await loadManagedReleaseFromLayout(layout, commitSha);
+                existingRelease = await loadManagedReleaseFromLayout(layout, commitSha);
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
                 }
+            }
+            if (existingRelease) {
+                await fsp.chmod(
+                    path.join(
+                        existingRelease.path,
+                        MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT
+                    ),
+                    0o755
+                );
+                return existingRelease;
             }
 
             const finalPath = path.join(layout.releasesPath, commitSha);

@@ -1542,7 +1542,7 @@ function findSessionByKey(
  * @returns Whether Gateway reports a session as currently running.
  */
 function isGatewaySessionRunning(session: GatewaySessionSummary | undefined): boolean {
-    if (!session || boundedTimestamp(session.endedAt)) {
+    if (!session || boundedTimestamp(session.endedAt) !== undefined) {
         return false;
     }
 
