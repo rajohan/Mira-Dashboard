@@ -4836,6 +4836,53 @@ describe("Mira Dashboard pages", () => {
             expect(chatApiState.projectionShadowRequests).toBe(1);
         });
 
+        await act(async () => {
+            socket.close();
+            await Promise.resolve();
+        });
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2), {
+            timeout: 3000,
+        });
+        const reconnectedSocket = FakeWebSocket.instances[1]!;
+        await act(async () => {
+            reconnectedSocket.emit("open");
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(findSocketRequest(reconnectedSocket, "sessions.list")).toBeDefined();
+        });
+        await respondToSocketRequest(reconnectedSocket, "sessions.list", {
+            sessions: [
+                dashboardSessionFixture({
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    id: "session-main",
+                    key: "agent:main:main",
+                    model: "codex",
+                    type: "MAIN",
+                    updatedAt: Date.parse("2026-07-30T10:00:00.000Z"),
+                }),
+            ],
+        });
+        await waitFor(() => {
+            expect(findSocketRequest(reconnectedSocket, "chat.history")).toBeDefined();
+        });
+        await respondToSocketRequest(reconnectedSocket, "chat.history", {
+            messages: [
+                {
+                    content: "Loaded transcript",
+                    role: "assistant",
+                    timestamp: "2026-07-30T10:00:00.000Z",
+                },
+            ],
+        });
+        await waitFor(
+            () => {
+                expect(chatApiState.projectionShadowRequests).toBe(2);
+            },
+            { timeout: 2000 }
+        );
+
         view.unmount();
         view.queryClient.clear();
     });

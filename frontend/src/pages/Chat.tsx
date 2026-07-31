@@ -283,7 +283,8 @@ export function Chat() {
         const observation = chatProjectionShadowObservation(comparison);
         const observationSignature = chatProjectionShadowStateSignature(
             comparison,
-            selectedSessionKey
+            selectedSessionKey,
+            transport.connectionGeneration
         );
         if (reportedProjectionObservationRef.current !== observationSignature) {
             reportedProjectionObservationRef.current = observationSignature;
@@ -312,7 +313,12 @@ export function Chat() {
             schemaVersion: comparison.schemaVersion,
             turnCount: comparison.turnCount,
         });
-    }, [canReportProjectionShadow, projectionShadow, selectedSessionKey]);
+    }, [
+        canReportProjectionShadow,
+        projectionShadow,
+        selectedSessionKey,
+        transport.connectionGeneration,
+    ]);
     const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
     const chatRows = projectChatActivityRows({
         activeRuns: projection.activeRuns,

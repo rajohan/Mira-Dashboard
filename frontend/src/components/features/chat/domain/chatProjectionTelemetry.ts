@@ -43,13 +43,16 @@ export function chatProjectionShadowObservation(
  * parity state.
  * @param comparison Browser shadow comparison.
  * @param selectedSessionKey Currently selected session.
+ * @param connectionGeneration Current socket connection generation.
  * @returns Stable structural parity signature.
  */
 export function chatProjectionShadowStateSignature(
     comparison: ChatProjectionShadowComparison,
-    selectedSessionKey: string
+    selectedSessionKey: string,
+    connectionGeneration: number
 ): string {
     return JSON.stringify({
+        connectionGeneration,
         differenceKinds: comparison.differenceKinds.toSorted(),
         matches: comparison.matches,
         selectedSessionKey,

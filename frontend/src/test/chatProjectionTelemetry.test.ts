@@ -78,7 +78,7 @@ describe("canonical chat projection telemetry", () => {
             schemaVersion: 1,
             turnCount: 1,
         };
-        const initial = chatProjectionShadowStateSignature(comparison, "session-a");
+        const initial = chatProjectionShadowStateSignature(comparison, "session-a", 1);
         const countChurn = chatProjectionShadowStateSignature(
             {
                 ...comparison,
@@ -90,7 +90,8 @@ describe("canonical chat projection telemetry", () => {
                 legacyRowCount: 3,
                 turnCount: 2,
             },
-            "session-a"
+            "session-a",
+            1
         );
 
         expect(countChurn).toBe(initial);
@@ -101,10 +102,14 @@ describe("canonical chat projection telemetry", () => {
                     differenceKinds: ["rows"],
                     matches: false,
                 },
-                "session-a"
+                "session-a",
+                1
             )
         ).not.toBe(initial);
-        expect(chatProjectionShadowStateSignature(comparison, "session-b")).not.toBe(
+        expect(chatProjectionShadowStateSignature(comparison, "session-b", 1)).not.toBe(
+            initial
+        );
+        expect(chatProjectionShadowStateSignature(comparison, "session-a", 2)).not.toBe(
             initial
         );
     });
