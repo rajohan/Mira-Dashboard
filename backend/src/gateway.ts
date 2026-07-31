@@ -8,7 +8,7 @@ import type { Session } from "../../contracts/sessions.ts";
 import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
 import {
     parseDashboardSocketRequest,
-    readSessionsResponsePayload,
+    readSessionsResponseContainer,
 } from "../../contracts/socket.ts";
 import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
@@ -752,19 +752,9 @@ function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): 
  * @returns Valid Dashboard session rows.
  */
 export function normalizeGatewaySessionList(response: unknown): Session[] {
-    const payload = asRecord(response);
-    const resultPayload = asRecord(payload?.result);
-    const dataPayload = asRecord(payload?.data);
-    let sessionPayload = payload;
-    if (!Array.isArray(sessionPayload?.sessions)) {
-        if (Array.isArray(resultPayload?.sessions)) {
-            sessionPayload = resultPayload;
-        } else if (Array.isArray(dataPayload?.sessions)) {
-            sessionPayload = dataPayload;
-        }
-    }
-    const sessions = readSessionsResponsePayload(response) ?? [];
-    const defaults = asRecord(sessionPayload?.defaults) as GatewaySession | undefined;
+    const container = readSessionsResponseContainer(response);
+    const sessions = container?.sessions ?? [];
+    const defaults = asRecord(container?.defaults) as GatewaySession | undefined;
     return sessions
         .map((entry) => asRecord(entry))
         .filter(

@@ -4990,11 +4990,17 @@ describe("Mira Dashboard pages", () => {
             ).toBeInTheDocument();
         });
 
+        const sessionListRequestCount = socket.sent.filter((entry) =>
+            entry.includes('"method":"sessions.list"')
+        ).length;
         act(() => {
             dispatchEvent(new Event("focus"));
         });
         await waitFor(() => {
-            expect(findSocketRequest(socket, "sessions.list")).toBeDefined();
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.list"'))
+                    .length
+            ).toBeGreaterThan(sessionListRequestCount);
         });
         await respondToSocketRequest(socket, "sessions.list", {
             sessions: resyncedSessions,

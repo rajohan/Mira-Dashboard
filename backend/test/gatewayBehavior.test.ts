@@ -313,20 +313,32 @@ describe("gateway behavior", () => {
             sessionId: "wrapped-session",
             updatedAt: "2026-07-30T22:00:00.000Z",
         };
+        const defaults = {
+            contextTokens: 32_000,
+            model: "openai/gpt-test",
+            modelProvider: "openai",
+        };
 
         for (const response of [
-            [session],
-            { sessions: [session] },
-            { result: { sessions: [session] } },
-            { data: { sessions: [session] } },
+            { defaults, sessions: [session] },
+            { result: { defaults, sessions: [session] } },
+            { data: { defaults, sessions: [session] } },
         ]) {
             expect(normalizeGatewaySessionList(response)).toEqual([
                 expect.objectContaining({
                     id: "wrapped-session",
                     key: "agent:wrapped:subagent:test",
+                    model: "openai/gpt-test",
+                    modelProvider: "openai",
                 }),
             ]);
         }
+        expect(normalizeGatewaySessionList([session])).toEqual([
+            expect.objectContaining({
+                id: "wrapped-session",
+                key: "agent:wrapped:subagent:test",
+            }),
+        ]);
     });
 
     it("waits through transient connect errors during bootstrap", async () => {

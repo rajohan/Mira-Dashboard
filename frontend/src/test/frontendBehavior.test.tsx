@@ -30,7 +30,10 @@ import type { DashboardDiagnosticsResponse } from "../../../contracts/health";
 import type { AppObservabilityMetrics, Metrics } from "../../../contracts/metrics";
 import type { NotificationItem } from "../../../contracts/notifications";
 import type { OpenClawConfig } from "../../../contracts/openClawConfig";
-import { readSessionsResponsePayload } from "../../../contracts/socket";
+import {
+    readNormalizedSessionsResponsePayload,
+    readSessionsResponsePayload,
+} from "../../../contracts/socket";
 import type { Task, TaskUpdate } from "../../../contracts/tasks";
 import { parseWeatherData } from "../../../contracts/weather";
 import { requestBodyText, requestUrl } from "../../../test/support/fetch";
@@ -2135,7 +2138,7 @@ describe("Mira Dashboard frontend behavior", () => {
         ).toBeUndefined();
     });
 
-    it("reads every supported sessions.list response shape without routing unrelated responses", () => {
+    it("separates raw Gateway session wrappers from normalized browser responses", () => {
         const responsePayloads: unknown[] = [
             [],
             { sessions: [] },
@@ -2147,6 +2150,15 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(readSessionsResponsePayload(payload)).toEqual([]);
         }
         expect(readSessionsResponsePayload({ unrelated: [] })).toBeUndefined();
+        expect(readNormalizedSessionsResponsePayload({ sessions: [] })).toEqual([]);
+        for (const payload of [
+            [],
+            { result: { sessions: [] } },
+            { data: { sessions: [] } },
+            { sessions: [{ key: "raw-gateway-session" }] },
+        ]) {
+            expect(readNormalizedSessionsResponsePayload(payload)).toBeUndefined();
+        }
 
         const deletes: string[] = [];
         const restore = patchWritableCollection(
@@ -2930,6 +2942,7 @@ describe("Mira Dashboard frontend behavior", () => {
     });
 
     it("connects the OpenClaw socket provider, publishes messages, and cleans up", async () => {
+        installUserActivityTracking();
         const originalWebSocket = WebSocket;
         FakeWebSocket.instances = [];
         Object.defineProperty(globalThis, "WebSocket", {
@@ -3002,42 +3015,35 @@ describe("Mira Dashboard frontend behavior", () => {
                 });
             });
             expect(result.current.hasConfirmedSessionList).toBe(false);
-            for (const payload of [
-                [],
-                { sessions: [] },
-                { result: { sessions: [] } },
-                { data: { sessions: [] } },
-            ]) {
-                act(() => {
-                    socket.message({ gatewayConnected: true, type: "connected" });
+            act(() => {
+                socket.message({ gatewayConnected: true, type: "connected" });
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(false)
+            );
+            const previousRequestCount = socket.sent.length;
+            act(() => {
+                dispatchEvent(new Event("focus"));
+            });
+            await waitFor(() =>
+                expect(socket.sent.length).toBe(previousRequestCount + 1)
+            );
+            const sessionsRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+                method: string;
+            };
+            expect(sessionsRequest.method).toBe("sessions.list");
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: sessionsRequest.id,
+                    isOk: true,
+                    payload: { sessions: [] },
                 });
-                await waitFor(() =>
-                    expect(result.current.hasConfirmedSessionList).toBe(false)
-                );
-                const previousRequestCount = socket.sent.length;
-                act(() => {
-                    dispatchEvent(new Event("focus"));
-                });
-                await waitFor(() =>
-                    expect(socket.sent.length).toBe(previousRequestCount + 1)
-                );
-                const sessionsRequest = JSON.parse(socket.sent.at(-1)!) as {
-                    id: string;
-                    method: string;
-                };
-                expect(sessionsRequest.method).toBe("sessions.list");
-                act(() => {
-                    socket.message({
-                        type: "response",
-                        id: sessionsRequest.id,
-                        isOk: true,
-                        payload,
-                    });
-                });
-                await waitFor(() =>
-                    expect(result.current.hasConfirmedSessionList).toBe(true)
-                );
-            }
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(true)
+            );
             act(() => {
                 socket.message({ gatewayConnected: true, type: "connected" });
             });

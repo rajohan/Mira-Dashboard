@@ -10,7 +10,7 @@ import {
     useState,
 } from "react";
 
-import { readSessionsResponsePayload } from "../../../contracts/socket";
+import { readNormalizedSessionsResponsePayload } from "../../../contracts/socket";
 import { replaceSessionsFromWebSocket } from "../collections/sessions";
 import {
     AUTH_SESSION_ROTATED_EVENT_NAME,
@@ -124,7 +124,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             if (runtime.currentClient() !== client || !client.isOpen()) {
                 return;
             }
-            const sessions = readSessionsResponsePayload(payload);
+            const sessions = readNormalizedSessionsResponsePayload(payload);
             if (!sessions) {
                 throw new TypeError("Invalid sessions.list response");
             }
