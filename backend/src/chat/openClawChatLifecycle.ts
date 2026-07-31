@@ -8,7 +8,6 @@ import {
     sessionMessageStopReason,
     stringField,
 } from "./openClawChatProviderAdapter.ts";
-import type { RetainedRun } from "./openClawChatRetention.ts";
 
 export interface RuntimeSessionInstance {
     id: string;
@@ -99,13 +98,6 @@ export function isConversationContinuationEvent(
     );
 }
 
-export function isCompactionOnlyRun(run: RetainedRun): boolean {
-    return (
-        run.events.length > 0 &&
-        run.events.every((event) => isCompactionEvent(event.event, event.payload))
-    );
-}
-
 export function isTerminalEvent(event: unknown, payload: unknown): boolean {
     if (event === "model.completed" || event === "session.ended") {
         return true;
@@ -166,32 +158,4 @@ export function isMetadataOnlyCompletionEnvelope(
         payload?.text === undefined &&
         terminalStates.every((value) => !TERMINAL_FAILURE_STATES.has(value || ""))
     );
-}
-
-export function isMetadataOnlyRunlessCompletion(run: RetainedRun): boolean {
-    return (
-        (run.runId === "runless" || /^runless:\d+$/u.test(run.runId)) &&
-        run.events.length > 0 &&
-        run.events.every((event) => isMetadataOnlyCompletionEnvelope(event))
-    );
-}
-
-export function isAuxiliaryOnlyCompletion(run: RetainedRun): boolean {
-    return isMetadataOnlyRunlessCompletion(run) || isCompactionOnlyRun(run);
-}
-
-export function hasChatFinal(run: RetainedRun): boolean {
-    return run.events.some(
-        (candidate) =>
-            candidate.event === "chat" &&
-            (
-                stringField(runtimePayloadView(candidate.payload), "state") || ""
-            ).toLowerCase() === "final"
-    );
-}
-
-export function hasActiveConversationRun(
-    runs: ReadonlyMap<string, RetainedRun>
-): boolean {
-    return runs.values().some((run) => !run.completed && !isCompactionOnlyRun(run));
 }

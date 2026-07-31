@@ -5,8 +5,8 @@ import {
 } from "../../../contracts/chat.ts";
 import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter.ts";
 import {
-    isAuxiliaryOnlyCompletion,
-    isCompactionOnlyRun,
+    isCompactionEvent,
+    isMetadataOnlyCompletionEnvelope,
     isTerminalEvent,
 } from "./openClawChatLifecycle.ts";
 import {
@@ -38,7 +38,7 @@ export const MAX_RUNS_PER_SESSION = 4;
 export const MAX_BYTES_ACROSS_REPLAY = MAX_BYTES_PER_ACTIVE_RUN * MAX_RUNS_PER_SESSION;
 export const ACTIVE_RUN_TTL_MS = 6 * 60 * 60_000;
 
-export const RETAINED_RUNTIME_EVENTS = new Set([
+export const RETAINED_RUNTIME_EVENTS: ReadonlySet<string> = new Set([
     "agent",
     "chat",
     "model.completed",
@@ -255,14 +255,14 @@ export function trimRetainedRun(run: RetainedRun): void {
 }
 
 export function compactCompletedRun(run: RetainedRun): void {
-    const retainedEvents = run.events.filter(
-        (event) => !isTranscriptBackedToolEnvelope(event)
+    const retainedIndexes = run.events.flatMap((event, index) =>
+        isTranscriptBackedToolEnvelope(event) ? [] : [index]
     );
-    if (retainedEvents.length === run.events.length) {
+    if (retainedIndexes.length === run.events.length) {
         return;
     }
-    run.events = retainedEvents;
-    run.eventBytes = retainedEvents.map((event) => envelopeBytes(event));
+    run.events = retainedIndexes.map((index) => run.events[index]!);
+    run.eventBytes = retainedIndexes.map((index) => run.eventBytes[index]!);
     run.totalBytes = run.eventBytes.reduce((total, bytes) => total + bytes, 0);
 }
 
@@ -313,6 +313,41 @@ export function firstSequence(run: RetainedRun): number {
     return run.firstSequence;
 }
 
+export function isCompactionOnlyRun(run: RetainedRun): boolean {
+    return (
+        run.events.length > 0 &&
+        run.events.every((event) => isCompactionEvent(event.event, event.payload))
+    );
+}
+
+export function isMetadataOnlyRunlessCompletion(run: RetainedRun): boolean {
+    return (
+        (run.runId === "runless" || /^runless:\d+$/u.test(run.runId)) &&
+        run.events.length > 0 &&
+        run.events.every((event) => isMetadataOnlyCompletionEnvelope(event))
+    );
+}
+
+export function isAuxiliaryOnlyCompletion(run: RetainedRun): boolean {
+    return isMetadataOnlyRunlessCompletion(run) || isCompactionOnlyRun(run);
+}
+
+export function hasChatFinal(run: RetainedRun): boolean {
+    return run.events.some(
+        (candidate) =>
+            candidate.event === "chat" &&
+            (
+                stringField(runtimePayloadView(candidate.payload), "state") || ""
+            ).toLowerCase() === "final"
+    );
+}
+
+export function hasActiveConversationRun(
+    runs: ReadonlyMap<string, RetainedRun>
+): boolean {
+    return runs.values().some((run) => !run.completed && !isCompactionOnlyRun(run));
+}
+
 export function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
     let latest = -Infinity;
     for (const run of runs) {
@@ -329,12 +364,13 @@ export function replayBytes(runs: Iterable<RetainedRun>): number {
     return bytes;
 }
 
-export function oldestReplayBudgetSessionKey(
+function oldestSessionKey(
     sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
     isSameSessionKey: (left: string, right: string) => boolean,
+    shouldPreferCompletedSessions: boolean,
     protectedSessionKey?: string
 ): string | undefined {
-    let hasOldestActiveRun = true;
+    let hasOldestActiveRun = shouldPreferCompletedSessions;
     let oldestSessionKey: string | undefined;
     let oldestUpdatedAt = Infinity;
     for (const [candidateSessionKey, runs] of sessions) {
@@ -344,7 +380,8 @@ export function oldestReplayBudgetSessionKey(
         ) {
             continue;
         }
-        const hasActiveRun = runs.values().some((run) => !run.completed);
+        const hasActiveRun =
+            shouldPreferCompletedSessions && runs.values().some((run) => !run.completed);
         const updatedAt = latestRunUpdatedAt(runs.values());
         if (
             oldestSessionKey === undefined ||
@@ -359,27 +396,20 @@ export function oldestReplayBudgetSessionKey(
     return oldestSessionKey;
 }
 
+export function oldestReplayBudgetSessionKey(
+    sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
+    isSameSessionKey: (left: string, right: string) => boolean,
+    protectedSessionKey?: string
+): string | undefined {
+    return oldestSessionKey(sessions, isSameSessionKey, true, protectedSessionKey);
+}
+
 export function oldestEvictableSessionKey(
     sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
     isSameSessionKey: (left: string, right: string) => boolean,
     protectedSessionKey?: string
 ): string | undefined {
-    let oldestSessionKey: string | undefined;
-    let oldestUpdatedAt = Infinity;
-    for (const [candidateSessionKey, runs] of sessions) {
-        if (
-            protectedSessionKey &&
-            isSameSessionKey(candidateSessionKey, protectedSessionKey)
-        ) {
-            continue;
-        }
-        const updatedAt = latestRunUpdatedAt(runs.values());
-        if (updatedAt < oldestUpdatedAt) {
-            oldestSessionKey = candidateSessionKey;
-            oldestUpdatedAt = updatedAt;
-        }
-    }
-    return oldestSessionKey;
+    return oldestSessionKey(sessions, isSameSessionKey, false, protectedSessionKey);
 }
 
 /**

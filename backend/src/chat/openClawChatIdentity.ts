@@ -1,6 +1,5 @@
 import type { OpenClawRuntimeEnvelope } from "../../../contracts/chat.ts";
 import {
-    isCompactionOnlyRun,
     isConversationContinuationEvent,
     isMetadataOnlyCompletionEnvelope,
 } from "./openClawChatLifecycle.ts";
@@ -14,6 +13,7 @@ import {
 } from "./openClawChatProviderAdapter.ts";
 import {
     firstSequence,
+    isCompactionOnlyRun,
     lastSequence,
     type RetainedRun,
 } from "./openClawChatRetention.ts";

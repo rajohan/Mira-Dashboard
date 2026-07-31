@@ -105,12 +105,14 @@ The backend runtime boundary is deliberately split by responsibility:
   provider payload variants. It preserves the observed Codex/GPT and Synthetic
   shapes while exposing one field-precedence contract to the rest of the
   runtime.
-- `openClawChatLifecycle.ts` classifies session starts, compaction, continuation,
-  and terminal events.
+- `openClawChatLifecycle.ts` classifies event-level session starts, compaction,
+  continuation, and terminal state.
+- `openClawChatRetention.ts` owns the retained-run contract, run composition,
+  event filtering, coalescing, byte/run/session budgets, and snapshot selection.
 - `openClawChatIdentity.ts` owns session aliases, provisional/provider run
-  identity, and unambiguous restart promotion policy.
-- `openClawChatRetention.ts` owns event filtering, coalescing, byte/run/session
-  budgets, and snapshot selection.
+  identity, and unambiguous restart promotion policy. Its restart decisions
+  consume the retained-run sequence helpers rather than parsing provider events
+  again.
 - `openClawChatRequestBoundaries.ts` owns concurrent send/steer boundaries and
   their persisted metadata.
 - `openClawChatPersistence.ts` defines the replay-store contract and persistence

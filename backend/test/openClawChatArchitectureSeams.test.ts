@@ -17,6 +17,9 @@ import {
     withRuntimeIdentity,
 } from "../src/chat/openClawChatProviderAdapter.ts";
 import {
+    boundedCanonicalRuntimeEnvelope,
+    compactCompletedRun,
+    MAX_BYTES_PER_EVENT,
     shouldRetainRuntimeEvent,
     snapshotFromRetainedRuns,
     type RetainedRun,
@@ -204,5 +207,114 @@ describe("OpenClaw chat architecture seams", () => {
 
         expect(snapshot.completed).toBe(true);
         expect(snapshot.events.map((event) => event.runtimeSequence)).toEqual([1]);
+    });
+
+    it("reuses retained byte accounting when completed tool events compact", () => {
+        const run = retainedRun(
+            "completed",
+            [
+                envelope("chat", { runId: "completed", state: "delta" }, 1),
+                envelope("session.tool", { runId: "completed" }, 2),
+                envelope("chat", { runId: "completed", state: "final" }, 3),
+            ],
+            true
+        );
+        run.eventBytes = [11, 22, 33];
+        run.totalBytes = 66;
+
+        compactCompletedRun(run);
+
+        expect(run.events.map((event) => event.runtimeSequence)).toEqual([1, 3]);
+        expect(run.eventBytes).toEqual([11, 33]);
+        expect(run.totalBytes).toBe(44);
+    });
+
+    it("strips oversized Codex and Synthetic provider content from retained replay", () => {
+        const providerContent = "provider-content".repeat(
+            Math.ceil(MAX_BYTES_PER_EVENT / 16)
+        );
+        const codex = boundedCanonicalRuntimeEnvelope(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        phase: "end",
+                        providerContent,
+                        runId: "codex-run",
+                        sessionKey: "agent:main:main",
+                        status: "completed",
+                        stream: "lifecycle",
+                    },
+                },
+                1
+            )
+        );
+        const synthetic = boundedCanonicalRuntimeEnvelope(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        providerContent,
+                        role: "assistant",
+                        stopReason: "stop",
+                    },
+                    runId: "synthetic-run",
+                    sessionKey: "agent:main:main",
+                },
+                2
+            )
+        );
+        const snapshot = snapshotFromRetainedRuns(
+            new Map([
+                ["codex-run", retainedRun("codex-run", [codex], false)],
+                ["synthetic-run", retainedRun("synthetic-run", [synthetic], false)],
+            ]),
+            2
+        );
+
+        expect(snapshot.events).toHaveLength(2);
+        expect(JSON.stringify(snapshot.events)).not.toContain("providerContent");
+        expect(snapshot.events[0]?.payload).toMatchObject({
+            data: {
+                phase: "end",
+                runId: "codex-run",
+                sessionKey: "agent:main:main",
+                status: "completed",
+                stream: "lifecycle",
+            },
+            runId: "codex-run",
+            sessionKey: "agent:main:main",
+        });
+        expect(snapshot.events[1]?.payload).toMatchObject({
+            message: {
+                role: "assistant",
+                stopReason: "stop",
+            },
+            runId: "synthetic-run",
+            sessionKey: "agent:main:main",
+        });
+        expect(
+            snapshot.events.flatMap((event) =>
+                event.canonicalEvents.map((canonicalEvent) => ({
+                    lifecycle: canonicalEvent.lifecycle,
+                    origin: canonicalEvent.origin,
+                    runId: canonicalEvent.runId,
+                    sessionKey: canonicalEvent.sessionKey,
+                }))
+            )
+        ).toEqual([
+            {
+                lifecycle: "completed",
+                origin: "openclaw-runtime",
+                runId: "codex-run",
+                sessionKey: "agent:main:main",
+            },
+            {
+                lifecycle: "completed",
+                origin: "openclaw-session",
+                runId: "synthetic-run",
+                sessionKey: "agent:main:main",
+            },
+        ]);
     });
 });
