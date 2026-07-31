@@ -115,12 +115,14 @@ The backend runtime boundary is deliberately split by responsibility:
   again.
 - `openClawChatRequestBoundaries.ts` owns concurrent send/steer boundaries and
   their persisted metadata.
-- `openClawChatPersistence.ts` defines the replay-store contract and persistence
-  limits; `openClawChatSnapshotStore.ts` is its SQLite implementation.
+- `openClawChatPersistence.ts` owns hydration indexes, retry tombstones,
+  debounced writes, whole-store clears, and atomic alias promotion behind the
+  replay-store contract; `openClawChatSnapshotStore.ts` is its SQLite
+  implementation.
 - `openClawChatBridge.ts` coordinates those contracts with the live Gateway
-  request/event lifecycle. Provider parsing and the pure lifecycle, identity,
-  retention, request-boundary, and storage policies remain outside the
-  coordinator.
+  request/event lifecycle. Provider parsing plus lifecycle, identity,
+  retention, request-boundary, and stateful storage policy remain outside the
+  bridge coordinator.
 
 The runtime combines several event sources into one visible conversation:
 
