@@ -6,7 +6,7 @@ import {
     type OpenClawRuntimeSnapshot,
 } from "../../contracts/chat.ts";
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
-import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/chat/openClawChatBridge.ts";
+import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/chat/openClawChatPersistence.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 import { database, enableRequiredWalJournalMode } from "../src/database.ts";
 

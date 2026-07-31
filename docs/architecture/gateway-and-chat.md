@@ -85,7 +85,7 @@ the adapter boundary:
 
 ```text
 OpenClaw Gateway
-  -> backend OpenClawChatBridge + shared provider adapter
+  -> backend OpenClawChatBridge coordinator + focused runtime seams
        (raw shapes -> versioned canonical events/history + bounded replay journal)
   -> frontend OpenClaw transport (validates canonical events/history)
   -> chat reducer (session/run state machine)
@@ -98,6 +98,29 @@ and runtime replay each have a focused controller. The domain reducer and
 projection functions do not know RPC method names or OpenClaw event variants.
 Supporting another provider should require a new `ChatTransport` adapter, not
 changes throughout the reducer or UI.
+
+The backend runtime boundary is deliberately split by responsibility:
+
+- `openClawChatProviderAdapter.ts` is the only backend seam that flattens raw
+  provider payload variants. It preserves the observed Codex/GPT and Synthetic
+  shapes while exposing one field-precedence contract to the rest of the
+  runtime.
+- `openClawChatLifecycle.ts` classifies event-level session starts, compaction,
+  continuation, and terminal state.
+- `openClawChatRetention.ts` owns the retained-run contract, run composition,
+  event filtering, coalescing, byte/run/session budgets, and snapshot selection.
+- `openClawChatIdentity.ts` owns session aliases, provisional/provider run
+  identity, and unambiguous restart promotion policy. Its restart decisions
+  consume the retained-run sequence helpers rather than parsing provider events
+  again.
+- `openClawChatRequestBoundaries.ts` owns concurrent send/steer boundaries and
+  their persisted metadata.
+- `openClawChatPersistence.ts` defines the replay-store contract and persistence
+  limits; `openClawChatSnapshotStore.ts` is its SQLite implementation.
+- `openClawChatBridge.ts` coordinates those contracts with the live Gateway
+  request/event lifecycle. Provider parsing and the pure lifecycle, identity,
+  retention, request-boundary, and storage policies remain outside the
+  coordinator.
 
 The runtime combines several event sources into one visible conversation:
 
