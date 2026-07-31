@@ -326,6 +326,18 @@ async function respondToSocketRequest(
     });
 }
 
+async function emitNormalizedSessions(
+    socket: FakeWebSocket,
+    sessions: Session[]
+): Promise<void> {
+    await act(async () => {
+        socket.emit("message", {
+            data: JSON.stringify({ sessions, type: "sessions" }),
+        });
+        await Promise.resolve();
+    });
+}
+
 function findSocketRequest(socket: FakeWebSocket, method: string) {
     return socket.sent
         .toReversed()
@@ -4513,29 +4525,29 @@ describe("Mira Dashboard pages", () => {
                 socket.sent.some((entry) => entry.includes('"method":"sessions.list"'))
             ).toBe(true);
         });
-        await respondToSocketRequest(socket, "sessions.list", {
-            sessions: [
-                dashboardSessionFixture({
-                    id: "session-main",
-                    key: "agent:main:main",
-                    type: "MAIN",
-                    agentType: "main",
-                    displayLabel: "Main chat",
-                    model: "codex",
-                    tokenCount: 525,
-                    maxTokens: 1000,
-                    thinkingDefault: "low",
-                    thinkingLevel: "medium",
-                    thinkingLevels: [
-                        { id: "low", label: "low" },
-                        { id: "medium", label: "medium" },
-                        { id: "high", label: "high" },
-                    ],
-                    verboseLevel: "compact",
-                    updatedAt: Date.parse("2026-06-24T08:00:00.000Z"),
-                }),
-            ],
-        });
+        const sessions = [
+            dashboardSessionFixture({
+                id: "session-main",
+                key: "agent:main:main",
+                type: "MAIN",
+                agentType: "main",
+                displayLabel: "Main chat",
+                model: "codex",
+                tokenCount: 525,
+                maxTokens: 1000,
+                thinkingDefault: "low",
+                thinkingLevel: "medium",
+                thinkingLevels: [
+                    { id: "low", label: "low" },
+                    { id: "medium", label: "medium" },
+                    { id: "high", label: "high" },
+                ],
+                verboseLevel: "compact",
+                updatedAt: Date.parse("2026-06-24T08:00:00.000Z"),
+            }),
+        ];
+        await respondToSocketRequest(socket, "sessions.list", { sessions });
+        await emitNormalizedSessions(socket, sessions);
         await flushQueuedTimers();
         await waitFor(() => {
             expect(
@@ -4788,19 +4800,19 @@ describe("Mira Dashboard pages", () => {
                 socket.sent.some((entry) => entry.includes('"method":"sessions.list"'))
             ).toBe(true);
         });
-        await respondToSocketRequest(socket, "sessions.list", {
-            sessions: [
-                dashboardSessionFixture({
-                    id: "session-main",
-                    key: "agent:main:main",
-                    type: "MAIN",
-                    agentType: "main",
-                    displayLabel: "Main chat",
-                    model: "codex",
-                    updatedAt: Date.parse("2026-06-24T08:00:00.000Z"),
-                }),
-            ],
-        });
+        const sessions = [
+            dashboardSessionFixture({
+                id: "session-main",
+                key: "agent:main:main",
+                type: "MAIN",
+                agentType: "main",
+                displayLabel: "Main chat",
+                model: "codex",
+                updatedAt: Date.parse("2026-06-24T08:00:00.000Z"),
+            }),
+        ];
+        await respondToSocketRequest(socket, "sessions.list", { sessions });
+        await emitNormalizedSessions(socket, sessions);
 
         await waitFor(() => {
             expect(
@@ -4870,6 +4882,7 @@ describe("Mira Dashboard pages", () => {
         await respondToSocketRequest(socket, "sessions.list", {
             sessions: [session],
         });
+        await emitNormalizedSessions(socket, [session]);
         await flushQueuedTimers();
         expect(view.router.state.location.search).toEqual({
             session: "agent:main:main",
@@ -4920,6 +4933,117 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("keeps the selected chat when another session becomes active during resync", async () => {
+        const selectedSessionKey = "agent:ops:main:heartbeat";
+        const activeSessionKey = "agent:main:main";
+        const view = renderChatPage(
+            `/chat?session=${encodeURIComponent(selectedSessionKey)}`
+        );
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(findSocketRequest(socket, "sessions.list")).toBeDefined();
+            expect(findSocketRequest(socket, "chat.history")?.params).toMatchObject({
+                sessionKey: selectedSessionKey,
+            });
+        });
+
+        const activeSession = dashboardSessionFixture({
+            agentType: "main",
+            displayLabel: "Main chat",
+            id: "session-main",
+            key: activeSessionKey,
+            model: "codex",
+            type: "MAIN",
+            updatedAt: Date.parse("2026-07-19T18:00:00.000Z"),
+        });
+        const selectedSession = dashboardSessionFixture({
+            agentType: "ops",
+            displayLabel: "Heartbeat",
+            id: "session-heartbeat",
+            key: selectedSessionKey,
+            model: "synthetic",
+            type: "SUBAGENT",
+            updatedAt: Date.parse("2026-07-19T17:00:00.000Z"),
+        });
+        const resyncedSessions = [
+            {
+                ...activeSession,
+                updatedAt: Date.parse("2026-07-19T19:00:00.000Z"),
+            },
+            selectedSession,
+        ];
+
+        await respondToSocketRequest(socket, "chat.history", { messages: [] });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: resyncedSessions,
+        });
+        await emitNormalizedSessions(socket, [activeSession, selectedSession]);
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "Session: main:heartbeat" })
+            ).toBeInTheDocument();
+        });
+
+        const sessionListRequestCount = socket.sent.filter((entry) =>
+            entry.includes('"method":"sessions.list"')
+        ).length;
+        act(() => {
+            dispatchEvent(new Event("focus"));
+        });
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"sessions.list"'))
+                    .length
+            ).toBeGreaterThan(sessionListRequestCount);
+        });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: resyncedSessions,
+        });
+        await flushQueuedTimers();
+
+        expect(view.router.state.location.search).toEqual({
+            session: selectedSessionKey,
+        });
+        expect(
+            screen.getByRole("button", { name: "Session: main:heartbeat" })
+        ).toBeInTheDocument();
+
+        await emitNormalizedSessions(socket, resyncedSessions);
+        await flushQueuedTimers();
+        expect(view.router.state.location.search).toEqual({
+            session: selectedSessionKey,
+        });
+        const historySessionKeys = socket.sent
+            .filter((entry) => entry.includes('"method":"chat.history"'))
+            .map((entry) => {
+                const request = JSON.parse(entry) as {
+                    params?: { sessionKey?: string };
+                };
+                return request.params?.sessionKey;
+            });
+        expect(new Set(historySessionKeys)).toEqual(new Set([selectedSessionKey]));
+        expect(historySessionKeys).not.toContain(activeSessionKey);
+
+        await emitNormalizedSessions(socket, [activeSession]);
+        await waitFor(() => {
+            expect(view.router.state.location.search).toEqual({
+                session: activeSessionKey,
+            });
+            expect(
+                screen.getByRole("button", { name: "Session: main" })
+            ).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("restores the selected chat session from the URL and follows URL changes", async () => {
         const user = userEvent.setup();
         const view = renderChatPage("/chat?session=agent%3Aops%3Amain%3Aheartbeat");
@@ -4938,28 +5062,28 @@ describe("Mira Dashboard pages", () => {
             });
         });
         await respondToSocketRequest(socket, "chat.history", { messages: [] });
-        await respondToSocketRequest(socket, "sessions.list", {
-            sessions: [
-                dashboardSessionFixture({
-                    agentType: "main",
-                    displayLabel: "Main chat",
-                    id: "session-main",
-                    key: "agent:main:main",
-                    model: "codex",
-                    type: "MAIN",
-                    updatedAt: Date.parse("2026-07-19T18:00:00.000Z"),
-                }),
-                dashboardSessionFixture({
-                    agentType: "ops",
-                    displayLabel: "Heartbeat",
-                    id: "session-heartbeat",
-                    key: "agent:ops:main:heartbeat",
-                    model: "synthetic",
-                    type: "SUBAGENT",
-                    updatedAt: Date.parse("2026-07-19T17:00:00.000Z"),
-                }),
-            ],
-        });
+        const sessions = [
+            dashboardSessionFixture({
+                agentType: "main",
+                displayLabel: "Main chat",
+                id: "session-main",
+                key: "agent:main:main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: Date.parse("2026-07-19T18:00:00.000Z"),
+            }),
+            dashboardSessionFixture({
+                agentType: "ops",
+                displayLabel: "Heartbeat",
+                id: "session-heartbeat",
+                key: "agent:ops:main:heartbeat",
+                model: "synthetic",
+                type: "SUBAGENT",
+                updatedAt: Date.parse("2026-07-19T17:00:00.000Z"),
+            }),
+        ];
+        await respondToSocketRequest(socket, "sessions.list", { sessions });
+        await emitNormalizedSessions(socket, sessions);
         await flushQueuedTimers();
 
         await waitFor(() => {
@@ -5011,19 +5135,19 @@ describe("Mira Dashboard pages", () => {
             await Promise.resolve();
         });
         await respondToSocketRequest(socket, "chat.history", { messages: [] });
-        await respondToSocketRequest(socket, "sessions.list", {
-            sessions: [
-                dashboardSessionFixture({
-                    agentType: "main",
-                    displayLabel: "Main chat",
-                    id: "session-main",
-                    key: "agent:main:main",
-                    model: "codex",
-                    type: "MAIN",
-                    updatedAt: Date.parse("2026-07-19T18:00:00.000Z"),
-                }),
-            ],
-        });
+        const sessions = [
+            dashboardSessionFixture({
+                agentType: "main",
+                displayLabel: "Main chat",
+                id: "session-main",
+                key: "agent:main:main",
+                model: "codex",
+                type: "MAIN",
+                updatedAt: Date.parse("2026-07-19T18:00:00.000Z"),
+            }),
+        ];
+        await respondToSocketRequest(socket, "sessions.list", { sessions });
+        await emitNormalizedSessions(socket, sessions);
         await flushQueuedTimers();
 
         expect(view.router.state.location.search).toEqual({

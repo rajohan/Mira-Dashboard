@@ -8,7 +8,7 @@ import {
     positiveIntegerSchema,
     strictJsonObjectSchema,
 } from "./runtime";
-import { sessionSchema } from "./sessions";
+import { sessionSchema, type Session } from "./sessions";
 
 const nonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
 
@@ -83,8 +83,17 @@ export function parseSocketEnvelope(
 
 const unknownSessionsSchema = v.array(v.unknown());
 const sessionsPayloadSchema = v.object({
+    defaults: v.optional(v.unknown()),
     sessions: unknownSessionsSchema,
 });
+const normalizedSessionsResponsePayloadSchema = v.strictObject({
+    sessions: v.array(sessionSchema),
+});
+
+export interface SessionsResponseContainer {
+    defaults?: unknown;
+    sessions: unknown[];
+}
 
 /**
  * Reads a sessions array from an unknown Gateway payload object.
@@ -106,15 +115,38 @@ const sessionsResponsePayloadSchema = v.union([
 ]);
 
 /**
+ * Resolves the sessions and defaults from one supported Gateway response wrapper.
+ * @param value Value to process.
+ * @returns The aligned sessions response container.
+ */
+export function readSessionsResponseContainer(
+    value: unknown
+): SessionsResponseContainer | undefined {
+    const result = v.safeParse(sessionsResponsePayloadSchema, value);
+    if (!result.success) return undefined;
+    const output = result.output;
+    if (Array.isArray(output)) return { sessions: output };
+    if ("sessions" in output) return output;
+    return output.result ?? output.data;
+}
+
+/**
  * Reads the currently supported sessions.list result wrappers.
  * @param value Value to process.
  * @returns Read the currently supported sessions.list result wrappers.
  */
 export function readSessionsResponsePayload(value: unknown): unknown[] | undefined {
-    const result = v.safeParse(sessionsResponsePayloadSchema, value);
-    if (!result.success) return undefined;
-    const output = result.output;
-    if (Array.isArray(output)) return output;
-    if ("sessions" in output) return output.sessions;
-    return output.result?.sessions ?? output.data?.sessions;
+    return readSessionsResponseContainer(value)?.sessions;
+}
+
+/**
+ * Reads the normalized Dashboard sessions.list response consumed by the browser.
+ * @param value Value to process.
+ * @returns Valid normalized Dashboard sessions.
+ */
+export function readNormalizedSessionsResponsePayload(
+    value: unknown
+): Session[] | undefined {
+    const result = v.safeParse(normalizedSessionsResponsePayloadSchema, value);
+    return result.success ? result.output.sessions : undefined;
 }

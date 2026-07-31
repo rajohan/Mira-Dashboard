@@ -10,7 +10,7 @@ import {
     useState,
 } from "react";
 
-import { readSessionsResponsePayload } from "../../../contracts/socket";
+import { readNormalizedSessionsResponsePayload } from "../../../contracts/socket";
 import { replaceSessionsFromWebSocket } from "../collections/sessions";
 import {
     AUTH_SESSION_ROTATED_EVENT_NAME,
@@ -111,19 +111,6 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState<string | undefined>();
     const [connectionId, setConnectionId] = useState(0);
 
-    /** Applies only the result of a request known to be sessions.list. */
-    const applySessionsListResponse = (client: SocketClient, payload: unknown) => {
-        if (runtime.currentClient() !== client) {
-            return;
-        }
-        const sessions = readSessionsResponsePayload(payload);
-        if (sessions === undefined) {
-            return;
-        }
-        replaceSessionsFromWebSocket(sessions);
-        setHasConfirmedSessionList(true);
-    };
-
     /** Coalesces session resync triggers within this browser connection. */
     const refreshSessionList = async (client: SocketClient): Promise<void> => {
         const existing = runtime.currentSessionListRefresh();
@@ -134,7 +121,15 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
         const load = async () => {
             const payload = await client.request("sessions.list");
-            applySessionsListResponse(client, payload);
+            if (runtime.currentClient() !== client || !client.isOpen()) {
+                return;
+            }
+            const sessions = readNormalizedSessionsResponsePayload(payload);
+            if (!sessions) {
+                throw new TypeError("Invalid sessions.list response");
+            }
+            replaceSessionsFromWebSocket(sessions);
+            setHasConfirmedSessionList(true);
         };
         const refresh = { promise: load() };
         runtime.beginSessionListRefresh(refresh);
