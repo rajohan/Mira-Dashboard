@@ -1,6 +1,7 @@
 import { canonicalChatContentFingerprint } from "../../../../../../contracts/chatCanonicalMessage";
 import {
     type ChatHistoryMessage,
+    type ChatMessageSourceReference,
     type ChatRow,
     type ChatVisibilitySettings,
     mergeChatImages,
@@ -139,6 +140,21 @@ function historyMessageDeleteKey(message: ChatHistoryMessage): string {
     });
 }
 
+function userContentDeleteKey(message: ChatHistoryMessage): string {
+    return messageDeleteKey({
+        ...message,
+        runId: undefined,
+        runtimeKey: undefined,
+        timestamp: undefined,
+    });
+}
+
+function userMessageDeleteKeys(message: ChatHistoryMessage): string[] {
+    const historyKey = historyMessageDeleteKey(message);
+    const contentKey = userContentDeleteKey(message);
+    return historyKey === contentKey ? [historyKey] : [historyKey, contentKey];
+}
+
 function projectedMessageRowKey(message: ChatHistoryMessage): string {
     if (isUserMessage(message)) {
         return historyMessageDeleteKey(message);
@@ -170,14 +186,20 @@ function projectedMessageSourceFacet(message: ChatHistoryMessage): string {
     return "assistant";
 }
 
-function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[] {
+function projectedMessageSources(
+    message: ChatHistoryMessage
+): ChatMessageSourceReference[] {
     const provenance = message.provenance;
     if (!provenance) {
         return [];
     }
     const { relatedSources = [], ...primarySource } = provenance;
+    return [primarySource, ...relatedSources];
+}
+
+function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[] {
     const sourceIdentities = new Set(
-        [primarySource, ...relatedSources].map((source) =>
+        projectedMessageSources(message).map((source) =>
             stableChatStringify({
                 id: source.id,
                 sequence: source.sequence,
@@ -198,6 +220,15 @@ function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[]
         );
 }
 
+function hasPositionFallbackHistorySource(message: ChatHistoryMessage): boolean {
+    return projectedMessageSources(message).some(
+        (source) =>
+            source.source === "openclaw-history" &&
+            source.sequence === undefined &&
+            /^openclaw-history:[^:]+:position%3A/iu.test(source.id)
+    );
+}
+
 /**
  * Keeps persisted delete keys valid when runtime reconciliation adds a run id.
  * @returns Projected message delete keys result.
@@ -211,17 +242,23 @@ function projectedMessageDeleteIdentity(
     message: ChatHistoryMessage
 ): ProjectedMessageDeleteIdentity {
     const sourceKeys = projectedMessageSourceDeleteKeys(message);
+    const userKeys = isUserMessage(message) ? userMessageDeleteKeys(message) : [];
     if (sourceKeys.length > 0) {
-        const optimisticUserKey = isUserMessage(message)
-            ? projectedMessageRowKey(message)
-            : undefined;
+        const baseKeys = [
+            ...sourceKeys,
+            ...userKeys.filter((key) => !sourceKeys.includes(key)),
+        ];
         return {
-            baseKeys:
-                optimisticUserKey && !sourceKeys.includes(optimisticUserKey)
-                    ? [...sourceKeys, optimisticUserKey]
-                    : sourceKeys,
-            persistedKeyCount: sourceKeys.length,
+            baseKeys,
+            persistedKeyCount:
+                sourceKeys.length +
+                (hasPositionFallbackHistorySource(message) && userKeys.length > 0
+                    ? 1
+                    : 0),
         };
+    }
+    if (userKeys.length > 0) {
+        return { baseKeys: userKeys, persistedKeyCount: userKeys.length };
     }
     const currentKey = projectedMessageRowKey(message);
     if (!message.runId || message.local === true) {

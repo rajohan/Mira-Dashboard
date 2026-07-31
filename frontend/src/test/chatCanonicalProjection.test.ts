@@ -974,6 +974,7 @@ describe("canonical chat turn projection", () => {
                 local: true,
                 role: "user",
                 text: "queued prompt",
+                timestamp: "2026-07-31T04:00:00.000Z",
             },
         ]).projection;
         const optimisticDeleteKeys = optimistic.rows[0]?.deleteKeys;
@@ -988,13 +989,52 @@ describe("canonical chat turn projection", () => {
                     },
                     role: "user",
                     text: "queued prompt",
+                    timestamp: "2026-07-31T04:00:02.000Z",
                 },
             ],
             { deletedMessageKeys: new Set(optimisticDeleteKeys) }
         ).projection;
 
-        expect(optimisticDeleteKeys).toEqual(["user::no-time::no-run::queued prompt"]);
+        expect(optimisticDeleteKeys).toEqual([
+            "user::2026-07-31T04:00:00.000Z::no-run::queued prompt",
+            "user::no-time::no-run::queued prompt",
+        ]);
         expect(recovered.rows).toEqual([]);
+    });
+
+    it("keeps fallback history deletes hidden when page positions move", () => {
+        const fallbackPrompt = {
+            content: "position-independent prompt",
+            role: "user",
+            text: "position-independent prompt",
+            timestamp: "2026-07-31T04:01:00.000Z",
+        };
+        const original = projectDefault([
+            {
+                ...fallbackPrompt,
+                provenance: {
+                    id: "openclaw-history:agent%3Amain%3Amain:position%3A0%3Afingerprint%3Aoriginal",
+                    source: "openclaw-history" as const,
+                },
+            },
+        ]).projection;
+        const shifted = projectDefault(
+            [
+                {
+                    ...fallbackPrompt,
+                    provenance: {
+                        id: "openclaw-history:agent%3Amain%3Amain:position%3A1%3Afingerprint%3Aoriginal",
+                        source: "openclaw-history" as const,
+                    },
+                },
+            ],
+            { deletedMessageKeys: new Set(original.rows[0]?.deleteKeys) }
+        ).projection;
+
+        expect(original.rows[0]?.deleteKeys).toContain(
+            "user::2026-07-31T04:01:00.000Z::no-run::position-independent prompt"
+        );
+        expect(shifted.rows).toEqual([]);
     });
 
     it("fails closed when canonical validation detects an invalid session", () => {

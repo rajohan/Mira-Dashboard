@@ -773,7 +773,7 @@ describe("chat projection", () => {
 
         const recoveredHistoryMessage = {
             ...message("user", "steer"),
-            timestamp: NOW,
+            timestamp: "2026-07-16T12:00:03.000Z",
         };
         expect(
             projectChat(
@@ -782,7 +782,7 @@ describe("chat projection", () => {
                 SESSION,
                 createChatVisibility(true, true),
                 true,
-                new Set([optimisticUserRow.key])
+                new Set(optimisticUserRow.deleteKeys)
             ).rows
         ).toEqual([]);
     });
