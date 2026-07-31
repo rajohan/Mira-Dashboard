@@ -141,13 +141,13 @@ function historyMessageDeleteKey(message: ChatHistoryMessage): string {
 }
 
 /**
- * Gives an optimistic prompt and its runless history echo one bounded delete alias.
+ * Gives an optimistic prompt and its history echo one bounded run-independent alias.
  * Two overlapping buckets cover the runtime echo window without hiding the same
  * prompt sent much later. Local rows also carry the no-time alias because Gateway
  * history may omit the provider timestamp together with the run identity.
- * @returns Bounded recovery aliases for runless user history.
+ * @returns Bounded run-independent aliases for recovered user history.
  */
-function runlessUserRecoveryDeleteKeys(message: ChatHistoryMessage): string[] {
+function unscopedUserRecoveryDeleteKeys(message: ChatHistoryMessage): string[] {
     const contentIdentity = canonicalChatContentFingerprint(
         messageDeleteKey({
             ...message,
@@ -178,10 +178,9 @@ function scopedUserRecoveryDeleteKeys(
     runs: ChatRunState[]
 ): string[] {
     const runId = message.runId?.trim();
-    const runlessKeys =
-        message.local === true || !runId ? runlessUserRecoveryDeleteKeys(message) : [];
+    const unscopedKeys = unscopedUserRecoveryDeleteKeys(message);
     if (!runId) {
-        return runlessKeys;
+        return unscopedKeys;
     }
     const matchingRun = runs.find((run) => isRunMatchingMessage(run, message));
     const runIds = matchingRun ? [matchingRun.runId, ...matchingRun.aliases] : [runId];
@@ -195,7 +194,7 @@ function scopedUserRecoveryDeleteKeys(
                     timestamp: undefined,
                 })
             ),
-            ...runlessKeys,
+            ...unscopedKeys,
         ]),
     ];
 }

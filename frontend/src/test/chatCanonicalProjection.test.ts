@@ -1030,6 +1030,25 @@ describe("canonical chat turn projection", () => {
         ).projection;
         expect(recoveredWithoutTimestamp.rows).toEqual([]);
 
+        const recoveredWithProviderRun = projectDefault(
+            [
+                {
+                    content: "queued prompt",
+                    provenance: {
+                        id: "history-provider-prompt",
+                        sequence: 14,
+                        source: "openclaw-history",
+                    },
+                    role: "user",
+                    runId: "provider-run-after-reload",
+                    text: "queued prompt",
+                    timestamp: "2026-07-31T04:00:02.000Z",
+                },
+            ],
+            { deletedMessageKeys: new Set(optimisticDeleteKeys) }
+        ).projection;
+        expect(recoveredWithProviderRun.rows).toEqual([]);
+
         const laterUnrelatedPrompt = projectDefault(
             [
                 {
@@ -1040,6 +1059,7 @@ describe("canonical chat turn projection", () => {
                         source: "openclaw-history",
                     },
                     role: "user",
+                    runId: "provider-later",
                     text: "queued prompt",
                     timestamp: "2026-07-31T05:00:00.000Z",
                 },
