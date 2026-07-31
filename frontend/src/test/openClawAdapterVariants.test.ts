@@ -27,18 +27,10 @@ import {
     createChatRuntimeState,
     reduceChatRuntime,
 } from "../components/features/chat/domain/chatState";
-import { OpenClawChatAdapter as CanonicalOpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
-import { canonicalHistoryRows } from "./support/canonicalChatHistory";
-
-const SESSION = "agent:main:main";
-
-class OpenClawChatAdapter extends CanonicalOpenClawChatAdapter {
-    override history(raw: unknown) {
-        return super.history(
-            canonicalHistoryRows(Array.isArray(raw) ? raw : [], SESSION)
-        );
-    }
-}
+import {
+    TestOpenClawChatAdapter as OpenClawChatAdapter,
+    TEST_OPENCLAW_SESSION_KEY as SESSION,
+} from "./support/canonicalChatHistory";
 
 function envelope(
     event: string,

@@ -3,8 +3,17 @@ import type {
     CanonicalChatHistoryPage,
     CanonicalChatHistoryRow,
 } from "../../../../contracts/chatCanonicalHistory";
+import { OpenClawChatAdapter as CanonicalOpenClawChatAdapter } from "../../components/features/chat/transport/openClawChatAdapter";
 
-const DEFAULT_SESSION_KEY = "agent:main:main";
+export const TEST_OPENCLAW_SESSION_KEY = "agent:main:main";
+
+export class TestOpenClawChatAdapter extends CanonicalOpenClawChatAdapter {
+    override history(raw: unknown) {
+        return super.history(
+            canonicalHistoryRows(Array.isArray(raw) ? raw : [], TEST_OPENCLAW_SESSION_KEY)
+        );
+    }
+}
 
 /**
  * Passes raw provider history through the backend-owned canonical boundary.
@@ -14,7 +23,7 @@ const DEFAULT_SESSION_KEY = "agent:main:main";
  */
 export function canonicalHistoryRows(
     messages: unknown[],
-    sessionKey = DEFAULT_SESSION_KEY
+    sessionKey = TEST_OPENCLAW_SESSION_KEY
 ): CanonicalChatHistoryRow[] {
     return canonicalizeOpenClawHistoryPage(
         { hasMore: false, messages, offset: 0, totalMessages: messages.length },
