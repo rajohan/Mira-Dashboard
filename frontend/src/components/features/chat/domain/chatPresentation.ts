@@ -167,6 +167,10 @@ function hasToolDetails(message: ChatHistoryMessage): boolean {
     return Boolean(message.toolCalls?.length || message.toolResult);
 }
 
+function isThinkingOnlyMessage(message: ChatHistoryMessage): boolean {
+    return Boolean(message.thinking?.length && !hasPrimaryAnswerContent(message));
+}
+
 interface ThinkingGroup {
     blocks: NonNullable<ChatHistoryMessage["thinking"]>;
     firstIndex: number;
@@ -551,10 +555,13 @@ export function presentStructuredChatMessages(
             continue;
         }
 
+        const canReceivePendingToolMedia =
+            (role === "assistant" || role === "system") &&
+            !isThinkingOnlyMessage(message);
         if (
             role === "user" ||
             (pendingToolMedia &&
-                role === "assistant" &&
+                canReceivePendingToolMedia &&
                 pendingToolMedia.runId !== message.runId)
         ) {
             flushToolMedia();
@@ -562,7 +569,7 @@ export function presentStructuredChatMessages(
         if (!isRenderableChatHistoryMessage(message, visibility)) {
             continue;
         }
-        if (pendingToolMedia && role === "assistant") {
+        if (pendingToolMedia && canReceivePendingToolMedia) {
             visible.push({
                 ...message,
                 attachments: mergeChatAttachments(

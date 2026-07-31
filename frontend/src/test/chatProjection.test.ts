@@ -3011,6 +3011,42 @@ describe("chat projection", () => {
         expect(visible[0]?.attachments?.[0]?.fileName).toBe("report.txt");
     });
 
+    it("keeps hidden tool media on a system answer instead of its thinking bubble", () => {
+        const visible = presentChatMessages(
+            [
+                {
+                    attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+                    content: "",
+                    images: [{ data: "tool-image", type: "image" }],
+                    role: "tool",
+                    runId: "run-1",
+                    text: "",
+                    toolResult: { content: "", name: "write" },
+                },
+                {
+                    content: [
+                        { text: "system thought", type: "thinking" },
+                        { text: "system answer", type: "text" },
+                    ],
+                    isFinal: true,
+                    role: "system",
+                    runId: "run-1",
+                    text: "system answer",
+                    thinking: [{ id: "thought-1", text: "system thought" }],
+                },
+            ],
+            createChatVisibility(true, false)
+        );
+
+        expect(visible).toHaveLength(2);
+        expect(visible[0]?.thinking?.[0]?.text).toBe("system thought");
+        expect(visible[0]?.attachments).toBeUndefined();
+        expect(visible[0]?.images).toBeUndefined();
+        expect(visible[1]?.text).toBe("system answer");
+        expect(visible[1]?.attachments?.[0]?.fileName).toBe("report.txt");
+        expect(visible[1]?.images?.[0]?.data).toBe("tool-image");
+    });
+
     it("keeps compacted hidden tool media attached to its canonical final", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             eventAt(16, "2026-07-16T12:00:02.000Z", {
