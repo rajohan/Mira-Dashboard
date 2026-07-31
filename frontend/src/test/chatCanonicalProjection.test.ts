@@ -704,6 +704,69 @@ describe("canonical chat turn projection", () => {
         ]);
     });
 
+    it("carries every folded thinking source into the canonical entry", () => {
+        const provider = {
+            eventName: "chat.history",
+            format: "openclaw-history" as const,
+        };
+        const result = projectChatWithCanonicalShadow(
+            [
+                {
+                    content: "question",
+                    role: "user",
+                    text: "question",
+                },
+                {
+                    content: [{ text: "first thought", type: "thinking" }],
+                    provenance: {
+                        id: "thinking-source-1",
+                        provider,
+                        sequence: 2,
+                        source: "openclaw-history",
+                    },
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "first thought" }],
+                },
+                {
+                    content: [{ text: "second thought", type: "thinking" }],
+                    provenance: {
+                        id: "thinking-source-2",
+                        provider,
+                        sequence: 3,
+                        source: "openclaw-history",
+                    },
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "second thought" }],
+                },
+                {
+                    content: "answer",
+                    isFinal: true,
+                    role: "assistant",
+                    text: "answer",
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const thinkingEntry = result.canonical?.turns[0]?.entries.find(
+            (entry) => entry.kind === "thinking"
+        );
+
+        expect(thinkingEntry?.sequence).toBe(3);
+        expect(thinkingEntry?.relatedSources).toEqual([
+            expect.objectContaining({
+                id: "thinking-source-1",
+                sequence: 2,
+                source: "openclaw-history",
+            }),
+        ]);
+    });
+
     it("treats an unselected idle chat as an empty matching projection", () => {
         const result = projectChatWithCanonicalShadow(
             [],

@@ -3870,6 +3870,30 @@ describe("chat projection", () => {
         ).toEqual(["first turn", "second turn", ["new thought"], "done"]);
     });
 
+    it("keeps thinking anchored to a settled system answer", () => {
+        const visible = presentChatMessages(
+            [
+                message("user", "first turn"),
+                {
+                    content: [
+                        { text: "system thought", type: "thinking" },
+                        { text: "system answer", type: "text" },
+                    ],
+                    role: "system",
+                    text: "system answer",
+                    thinking: [{ text: "system thought" }],
+                },
+                message("user", "second turn"),
+            ],
+            createChatVisibility(true, true),
+            true
+        );
+
+        expect(
+            visible.map((item) => item.thinking?.map((block) => block.text) || item.text)
+        ).toEqual(["first turn", ["system thought"], "system answer", "second turn"]);
+    });
+
     it("uses runtime sequence for interleaved tools and steers across replay", () => {
         const runId = "run-1";
         const runtimeEvents: ChatRuntimeEvent[] = [

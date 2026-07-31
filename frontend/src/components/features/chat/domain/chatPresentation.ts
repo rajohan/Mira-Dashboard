@@ -5,6 +5,7 @@ import {
     isRenderableChatHistoryMessage,
     mergeChatAttachments,
     mergeChatImages,
+    mergeChatMessageProvenance,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
 
@@ -271,6 +272,13 @@ function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {
     return message.role.toLowerCase() === "assistant" && hasPrimaryAnswerContent(message);
 }
 
+function isSettledAnswerMessage(message: ChatHistoryMessage): boolean {
+    const role = message.role.toLowerCase();
+    return (
+        (role === "assistant" || role === "system") && hasPrimaryAnswerContent(message)
+    );
+}
+
 function isExplicitFinalMessage(message: ChatHistoryMessage): boolean {
     const role = message.role.toLowerCase();
     return (
@@ -376,18 +384,29 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         }
         const segment = segments[index] ?? 0;
         const key = message.runId ? `run:${message.runId}` : `segment:${segment}`;
-        const group = groups.get(key) || {
-            blocks: [],
-            firstIndex: index,
-            runId: message.runId,
-            segment,
-            template: message,
-        };
-        mergeThinkingBlocks(group.blocks, message.thinking);
-        if (message.local === true || group.template.local !== true) {
-            group.template = message;
+        const group = groups.get(key);
+        if (!group) {
+            groups.set(key, {
+                blocks: [...message.thinking],
+                firstIndex: index,
+                runId: message.runId,
+                segment,
+                template: message,
+            });
+            continue;
         }
-        groups.set(key, group);
+        mergeThinkingBlocks(group.blocks, message.thinking);
+        const shouldReplaceTemplate =
+            message.local === true || group.template.local !== true;
+        const primaryTemplate = shouldReplaceTemplate ? message : group.template;
+        const foldedTemplate = shouldReplaceTemplate ? group.template : message;
+        group.template = {
+            ...primaryTemplate,
+            provenance: mergeChatMessageProvenance(
+                primaryTemplate.provenance,
+                foldedTemplate.provenance
+            ),
+        };
     }
 
     const groupsByAnchorIndex = new Map<
@@ -399,7 +418,7 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         const hasSettledAnswer = messages.some(
             (message, index) =>
                 segments[index] === group.segment &&
-                (isExplicitFinalMessage(message) || isPrimaryAssistantMessage(message))
+                (isExplicitFinalMessage(message) || isSettledAnswerMessage(message))
         );
         const isAbandonedUnscopedThinking =
             !group.runId && group.segment < latestSegment && !hasSettledAnswer;
