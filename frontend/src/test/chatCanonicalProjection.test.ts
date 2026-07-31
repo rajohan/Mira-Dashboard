@@ -47,6 +47,28 @@ function provenanceBackfillMessage(id: string, sequence: number) {
     };
 }
 
+interface DefaultProjectionOptions {
+    deletedMessageKeys?: ReadonlySet<string>;
+    runtime?: ReturnType<typeof createChatRuntimeState>;
+    sessionKey?: string;
+    shouldKeepThinkingAfterFinal?: boolean;
+    visibility?: ReturnType<typeof createChatVisibility>;
+}
+
+function projectDefault(
+    history: Parameters<typeof projectCanonicalChat>[0],
+    options: DefaultProjectionOptions = {}
+) {
+    return projectCanonicalChat(
+        history,
+        options.runtime ?? createChatRuntimeState(),
+        options.sessionKey ?? SESSION,
+        options.visibility ?? createChatVisibility(true, true),
+        options.shouldKeepThinkingAfterFinal ?? true,
+        options.deletedMessageKeys ?? new Set()
+    );
+}
+
 describe("canonical chat turn projection", () => {
     it("classifies system finals with answer and tool metadata as assistant output", () => {
         const turns = assembleCanonicalChatTurns(
@@ -82,29 +104,22 @@ describe("canonical chat turn projection", () => {
     });
 
     it("normalizes thinking from system finals before canonical validation", () => {
-        const result = projectCanonicalChat(
-            [
-                {
-                    content: "Completed after analysis.",
-                    isFinal: true,
-                    role: "system",
-                    text: "Completed after analysis.",
-                    thinking: [{ text: "private analysis" }],
-                },
-            ],
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
+        const result = projectDefault([
+            {
+                content: "Completed after analysis.",
+                isFinal: true,
+                role: "system",
+                text: "Completed after analysis.",
+                thinking: [{ text: "private analysis" }],
+            },
+        ]);
 
         expect(result.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
             "thinking",
             "assistant",
         ]);
 
-        const withoutSettledThinking = projectCanonicalChat(
+        const withoutSettledThinking = projectDefault(
             [
                 {
                     content: "Completed after analysis.",
@@ -114,11 +129,7 @@ describe("canonical chat turn projection", () => {
                     thinking: [{ text: "private analysis" }],
                 },
             ],
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            false,
-            new Set()
+            { shouldKeepThinkingAfterFinal: false }
         );
         expect(
             withoutSettledThinking.projection.rows.map((row) => row.message.text)
@@ -126,21 +137,14 @@ describe("canonical chat turn projection", () => {
     });
 
     it("omits stripped thinking placeholders from canonical turns", () => {
-        const result = projectCanonicalChat(
-            [
-                {
-                    content: [{ text: "Inspecting state", type: "thinking" }],
-                    role: "assistant",
-                    text: "",
-                    thinking: [{ text: "Inspecting state" }],
-                },
-            ],
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
+        const result = projectDefault([
+            {
+                content: [{ text: "Inspecting state", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "Inspecting state" }],
+            },
+        ]);
 
         expect(result.turns).toHaveLength(1);
         expect(result.turns[0]?.entries.map((entry) => entry.kind)).toEqual(["thinking"]);
@@ -224,30 +228,13 @@ describe("canonical chat turn projection", () => {
         ];
         const runtime = reduceChatRuntime(createChatRuntimeState(), runtimeEvents);
 
-        const first = projectCanonicalChat(
-            history,
+        const first = projectDefault(history, { runtime });
+        const replay = projectDefault(history, { runtime });
+        const hiddenDiagnostics = projectDefault(history, {
             runtime,
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
-        const replay = projectCanonicalChat(
-            history,
-            runtime,
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
-        const hiddenDiagnostics = projectCanonicalChat(
-            history,
-            runtime,
-            SESSION,
-            createChatVisibility(false, false),
-            false,
-            new Set()
-        );
+            shouldKeepThinkingAfterFinal: false,
+            visibility: createChatVisibility(false, false),
+        });
         const turn = first.turns[0];
 
         expect(turn).toMatchObject({
@@ -832,50 +819,43 @@ describe("canonical chat turn projection", () => {
             eventName: "chat.history",
             format: "openclaw-history" as const,
         };
-        const result = projectCanonicalChat(
-            [
-                {
-                    content: "question",
-                    role: "user",
-                    text: "question",
+        const result = projectDefault([
+            {
+                content: "question",
+                role: "user",
+                text: "question",
+            },
+            {
+                content: [{ text: "first thought", type: "thinking" }],
+                provenance: {
+                    id: "thinking-source-1",
+                    provider,
+                    sequence: 2,
+                    source: "openclaw-history",
                 },
-                {
-                    content: [{ text: "first thought", type: "thinking" }],
-                    provenance: {
-                        id: "thinking-source-1",
-                        provider,
-                        sequence: 2,
-                        source: "openclaw-history",
-                    },
-                    role: "assistant",
-                    text: "",
-                    thinking: [{ text: "first thought" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "first thought" }],
+            },
+            {
+                content: [{ text: "second thought", type: "thinking" }],
+                provenance: {
+                    id: "thinking-source-2",
+                    provider,
+                    sequence: 3,
+                    source: "openclaw-history",
                 },
-                {
-                    content: [{ text: "second thought", type: "thinking" }],
-                    provenance: {
-                        id: "thinking-source-2",
-                        provider,
-                        sequence: 3,
-                        source: "openclaw-history",
-                    },
-                    role: "assistant",
-                    text: "",
-                    thinking: [{ text: "second thought" }],
-                },
-                {
-                    content: "answer",
-                    isFinal: true,
-                    role: "assistant",
-                    text: "answer",
-                },
-            ],
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "second thought" }],
+            },
+            {
+                content: "answer",
+                isFinal: true,
+                role: "assistant",
+                text: "answer",
+            },
+        ]);
         const thinkingEntry = result.turns[0]?.entries.find(
             (entry) => entry.kind === "thinking"
         );
@@ -891,14 +871,7 @@ describe("canonical chat turn projection", () => {
     });
 
     it("treats an unselected idle chat as an empty canonical projection", () => {
-        const result = projectCanonicalChat(
-            [],
-            createChatRuntimeState(),
-            "",
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
+        const result = projectDefault([], { sessionKey: "" });
 
         expect(result.turns).toEqual([]);
         expect(result.projection.rows).toEqual([]);
@@ -906,27 +879,20 @@ describe("canonical chat turn projection", () => {
 
     it("keeps full media in canonical turns", () => {
         const imageData = "a".repeat(200_000);
-        const result = projectCanonicalChat(
-            [
-                {
-                    content: [{ data: imageData, mimeType: "image/png", type: "image" }],
-                    images: [
-                        {
-                            data: imageData,
-                            mimeType: "image/png",
-                            type: "image",
-                        },
-                    ],
-                    role: "user",
-                    text: "",
-                },
-            ],
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
+        const result = projectDefault([
+            {
+                content: [{ data: imageData, mimeType: "image/png", type: "image" }],
+                images: [
+                    {
+                        data: imageData,
+                        mimeType: "image/png",
+                        type: "image",
+                    },
+                ],
+                role: "user",
+                text: "",
+            },
+        ]);
 
         expect(result.turns[0]?.entries[0]?.message.images?.[0]?.data).toBe(imageData);
     });
@@ -938,22 +904,8 @@ describe("canonical chat turn projection", () => {
             { content: "repeat", role: "user", text: "repeat" },
             { content: "second answer", role: "assistant", text: "second answer" },
         ];
-        const first = projectCanonicalChat(
-            history,
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
-        const replay = projectCanonicalChat(
-            history,
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
+        const first = projectDefault(history);
+        const replay = projectDefault(history);
         const keys = first.projection.rows.map((row) => row.key);
 
         expect(first.projection.rows.map((row) => row.message.text)).toEqual([
@@ -970,26 +922,16 @@ describe("canonical chat turn projection", () => {
         expect(first.projection.rows[2]?.deleteKeys).toEqual([keys[2]]);
         expect(replay.projection.rows.map((row) => row.key)).toEqual(keys);
 
-        const withoutFirstPrompt = projectCanonicalChat(
-            history,
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set(first.projection.rows[0]?.deleteKeys)
-        );
+        const withoutFirstPrompt = projectDefault(history, {
+            deletedMessageKeys: new Set(first.projection.rows[0]?.deleteKeys),
+        });
         expect(withoutFirstPrompt.projection.rows.map((row) => row.message.text)).toEqual(
             ["first answer", "repeat", "second answer"]
         );
 
-        const withoutSecondPrompt = projectCanonicalChat(
-            history,
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set(first.projection.rows[2]?.deleteKeys)
-        );
+        const withoutSecondPrompt = projectDefault(history, {
+            deletedMessageKeys: new Set(first.projection.rows[2]?.deleteKeys),
+        });
         expect(
             withoutSecondPrompt.projection.rows.map((row) => row.message.text)
         ).toEqual(["repeat", "first answer", "second answer"]);
@@ -1000,14 +942,7 @@ describe("canonical chat turn projection", () => {
             provenanceBackfillMessage("history-2", 2),
             provenanceBackfillMessage("history-3", 3),
         ];
-        const original = projectCanonicalChat(
-            originalHistory,
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        ).projection;
+        const original = projectDefault(originalHistory).projection;
         const originalTarget = original.rows.find(
             (row) => row.message.provenance?.id === "history-2"
         );
@@ -1015,14 +950,7 @@ describe("canonical chat turn projection", () => {
             provenanceBackfillMessage("history-1", 1),
             ...originalHistory,
         ];
-        const backfilled = projectCanonicalChat(
-            backfilledHistory,
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        ).projection;
+        const backfilled = projectDefault(backfilledHistory).projection;
         const backfilledTarget = backfilled.rows.find(
             (row) => row.message.provenance?.id === "history-2"
         );
@@ -1030,14 +958,9 @@ describe("canonical chat turn projection", () => {
         expect(originalTarget?.key).toStartWith("chat-message-source:v1:");
         expect(backfilledTarget?.deleteKeys).toEqual(originalTarget?.deleteKeys);
 
-        const withoutTarget = projectCanonicalChat(
-            backfilledHistory,
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set(originalTarget?.deleteKeys)
-        ).projection;
+        const withoutTarget = projectDefault(backfilledHistory, {
+            deletedMessageKeys: new Set(originalTarget?.deleteKeys),
+        }).projection;
         expect(withoutTarget.rows.map((row) => row.message.provenance?.id)).toEqual([
             "history-1",
             "history-3",
@@ -1045,23 +968,16 @@ describe("canonical chat turn projection", () => {
     });
 
     it("keeps an optimistic user delete hidden after provenance recovery", () => {
-        const optimistic = projectCanonicalChat(
-            [
-                {
-                    content: "queued prompt",
-                    local: true,
-                    role: "user",
-                    text: "queued prompt",
-                },
-            ],
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        ).projection;
+        const optimistic = projectDefault([
+            {
+                content: "queued prompt",
+                local: true,
+                role: "user",
+                text: "queued prompt",
+            },
+        ]).projection;
         const optimisticDeleteKeys = optimistic.rows[0]?.deleteKeys;
-        const recovered = projectCanonicalChat(
+        const recovered = projectDefault(
             [
                 {
                     content: "queued prompt",
@@ -1074,11 +990,7 @@ describe("canonical chat turn projection", () => {
                     text: "queued prompt",
                 },
             ],
-            createChatRuntimeState(),
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set(optimisticDeleteKeys)
+            { deletedMessageKeys: new Set(optimisticDeleteKeys) }
         ).projection;
 
         expect(optimisticDeleteKeys).toEqual(["user::no-time::no-run::queued prompt"]);
@@ -1087,14 +999,9 @@ describe("canonical chat turn projection", () => {
 
     it("fails closed when canonical validation detects an invalid session", () => {
         expect(() =>
-            projectCanonicalChat(
-                [{ content: "orphan", role: "user", text: "orphan" }],
-                createChatRuntimeState(),
-                "",
-                createChatVisibility(true, true),
-                true,
-                new Set()
-            )
+            projectDefault([{ content: "orphan", role: "user", text: "orphan" }], {
+                sessionKey: "",
+            })
         ).toThrow("Canonical chat projection invariant failed: session");
     });
 });
