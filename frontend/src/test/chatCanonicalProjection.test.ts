@@ -493,11 +493,13 @@ describe("canonical chat turn projection", () => {
         );
 
         expect(result.comparison.matches).toBe(true);
-        expect(
-            result.canonical?.turns.flatMap((turn) =>
-                turn.entries.map((entry) => entry.kind)
-            )
-        ).toEqual(["user", "user", "thinking", "assistant"]);
+        expect(result.canonical?.turns).toHaveLength(1);
+        expect(result.canonical?.turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+            "user",
+            "user",
+            "thinking",
+            "assistant",
+        ]);
         expect(result.canonical?.projection.rows.map((row) => row.message.text)).toEqual([
             "initial question",
             "steer",

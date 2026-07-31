@@ -5022,6 +5022,63 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("recovers pre-steer thinking when runtime only echoes a late steer", () => {
+        const runId = "reconstructed-late-steer";
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(8, "2026-07-16T12:00:00.000Z", {
+                kind: "status",
+                runId,
+                text: "Thinking",
+            }),
+            eventAt(16, "2026-07-16T12:00:00.500Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "working", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-recovered", text: "working" }],
+                },
+                runId,
+            }),
+            eventAt(32, "2026-07-16T12:00:05.000Z", {
+                kind: "user",
+                message: message("user", "steer", runId),
+                runId,
+            }),
+        ]);
+        const history: ChatHistoryMessage[] = [
+            {
+                ...message("user", "question"),
+                timestamp: "2026-07-16T11:59:59.500Z",
+            },
+            {
+                content: [{ text: "working", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ id: "thought-recovered", text: "working" }],
+                timestamp: "2026-07-16T12:00:00.500Z",
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+        const thinking = reconciled.filter((item) => item.thinking?.length);
+
+        expect(thinking).toHaveLength(1);
+        expect(thinking[0]?.runId).toBe(runId);
+        expect(
+            projectChat(
+                history,
+                runtime,
+                SESSION,
+                createChatVisibility(true, true),
+                true,
+                new Set()
+            ).rows.map((row) =>
+                row.message.thinking?.length ? "thinking" : row.message.text
+            )
+        ).toEqual(["question", "steer", "thinking", "Thinking"]);
+    });
+
     it("projects a single compacting status without mutating messages", () => {
         const runtime = addOptimisticChatRun(
             createChatRuntimeState(),

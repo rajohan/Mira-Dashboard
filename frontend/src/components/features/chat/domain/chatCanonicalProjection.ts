@@ -305,7 +305,8 @@ function draftRunId(draft: CanonicalTurnDraft): string | undefined {
 function shouldStartTurn(
     draft: CanonicalTurnDraft | undefined,
     entry: CanonicalChatTurnEntry,
-    run: ChatRunState | undefined
+    run: ChatRunState | undefined,
+    continuesExistingTurn: boolean
 ): boolean {
     if (!draft) {
         return true;
@@ -322,6 +323,9 @@ function shouldStartTurn(
         return false;
     }
     if (draft.run && run && draft.run.runId === run.runId) {
+        return false;
+    }
+    if (continuesExistingTurn) {
         return false;
     }
     return draftHasAnswer(draft) || !draftHasResponseContinuation(draft);
@@ -462,6 +466,75 @@ export function assertCanonicalChatTurnInvariants(
     }
 }
 
+function draftCanonicalChatTurns(
+    messages: ChatHistoryMessage[],
+    runs: ChatRunState[],
+    continuedUserOrdinals: ReadonlySet<number>
+): CanonicalTurnDraft[] {
+    const entryOccurrences = new Map<string, number>();
+    const drafts: CanonicalTurnDraft[] = [];
+    let draft: CanonicalTurnDraft | undefined;
+    let userOrdinal = 0;
+    for (const message of messages) {
+        const run = matchingRun(message, runs);
+        const entry = canonicalEntry(message, entryOccurrences);
+        const continuesExistingTurn =
+            entry.kind === "user" && continuedUserOrdinals.has(userOrdinal);
+        if (!draft || shouldStartTurn(draft, entry, run, continuesExistingTurn)) {
+            draft = { entries: [], run };
+            drafts.push(draft);
+        } else if (!draft.run && run) {
+            draft.run = run;
+        }
+        draft.entries.push(entry);
+        if (entry.kind === "user") {
+            userOrdinal += 1;
+        }
+    }
+    return drafts;
+}
+
+/**
+ * Carries raw response-continuation evidence through thinking reordering.
+ * Structuring can move diagnostics, but it preserves user-message order.
+ */
+function continuedUserOrdinalsFromDrafts(
+    drafts: CanonicalTurnDraft[]
+): ReadonlySet<number> {
+    const continued = new Set<number>();
+    let userOrdinal = 0;
+    for (const draft of drafts) {
+        let hasPriorUser = false;
+        for (const entry of draft.entries) {
+            if (entry.kind !== "user") {
+                continue;
+            }
+            if (hasPriorUser) {
+                continued.add(userOrdinal);
+            }
+            hasPriorUser = true;
+            userOrdinal += 1;
+        }
+    }
+    return continued;
+}
+
+function assembleCanonicalChatTurnsWithContinuations(
+    messages: ChatHistoryMessage[],
+    runs: ChatRunState[],
+    sessionKey: string,
+    continuedUsers: ReadonlySet<number>
+): CanonicalChatTurn[] {
+    const drafts = draftCanonicalChatTurns(messages, runs, continuedUsers);
+    const turnOccurrences = new Map<string, number>();
+    const turns = parseCanonicalChatTurns(
+        drafts.map((candidate) => canonicalTurn(sessionKey, candidate, turnOccurrences)),
+        "chatProjection.turns"
+    );
+    assertCanonicalChatTurnInvariants(turns, sessionKey, messages);
+    return turns;
+}
+
 /**
  * Assembles structured canonical messages into versioned logical turns.
  * @param messages Structured canonical messages.
@@ -474,27 +547,12 @@ export function assembleCanonicalChatTurns(
     runs: ChatRunState[],
     sessionKey: string
 ): CanonicalChatTurn[] {
-    const entryOccurrences = new Map<string, number>();
-    const drafts: CanonicalTurnDraft[] = [];
-    let draft: CanonicalTurnDraft | undefined;
-    for (const message of messages) {
-        const run = matchingRun(message, runs);
-        const entry = canonicalEntry(message, entryOccurrences);
-        if (!draft || shouldStartTurn(draft, entry, run)) {
-            draft = { entries: [], run };
-            drafts.push(draft);
-        } else if (!draft.run && run) {
-            draft.run = run;
-        }
-        draft.entries.push(entry);
-    }
-    const turnOccurrences = new Map<string, number>();
-    const turns = parseCanonicalChatTurns(
-        drafts.map((candidate) => canonicalTurn(sessionKey, candidate, turnOccurrences)),
-        "chatProjection.turns"
+    return assembleCanonicalChatTurnsWithContinuations(
+        messages,
+        runs,
+        sessionKey,
+        new Set<number>()
     );
-    assertCanonicalChatTurnInvariants(turns, sessionKey, messages);
-    return turns;
 }
 
 function structureFromTurns(
@@ -602,10 +660,18 @@ export function projectChatWithCanonicalShadow(
         assertCanonicalProjectionContext(context);
         assertCanonicalReconciliation(reconciliation, context);
         assertCanonicalStructure(structure, reconciliation);
-        const turns = assembleCanonicalChatTurns(
+        const reconciliationContinuations = continuedUserOrdinalsFromDrafts(
+            draftCanonicalChatTurns(
+                reconciliation.messages,
+                context.runs,
+                new Set<number>()
+            )
+        );
+        const turns = assembleCanonicalChatTurnsWithContinuations(
             structure.messages,
             context.runs,
-            sessionKey
+            sessionKey,
+            reconciliationContinuations
         );
         const canonicalStructure = structureFromTurns(structure, turns);
         const canonicalPresentation = presentChatProjectionContext(

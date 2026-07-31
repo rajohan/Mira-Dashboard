@@ -324,6 +324,19 @@ function latestExactToolMessageIndex(
     return latestIndex;
 }
 
+function isEligibleRunPrompt(message: ChatHistoryMessage, run: ChatRunState): boolean {
+    if (!isUserMessage(message) || !isRunMatchingMessage(run, message)) {
+        return false;
+    }
+    const startedAt = Date.parse(run.startedAt);
+    const timestamp = messageTimestamp(message);
+    return (
+        Number.isNaN(startedAt) ||
+        timestamp === undefined ||
+        timestamp <= startedAt + RUN_START_USER_SKEW_MS
+    );
+}
+
 function sequencedRunPromptIndex(
     messages: ChatHistoryMessage[],
     run: ChatRunState
@@ -332,9 +345,7 @@ function sequencedRunPromptIndex(
         .map((message, index) => ({ index, message }))
         .filter(
             ({ message }) =>
-                isUserMessage(message) &&
-                isRunMatchingMessage(run, message) &&
-                message.runtimeSequence !== undefined
+                isEligibleRunPrompt(message, run) && message.runtimeSequence !== undefined
         )
         .toSorted(
             (left, right) =>
@@ -367,9 +378,7 @@ function runFinalAnchorIndex(
         const startedAt = Date.parse(run.startedAt);
         let diagnosticBoundaryIndex =
             sequencedRunPromptIndex(messages, run) ??
-            messages.findLastIndex(
-                (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
-            );
+            messages.findLastIndex((message) => isEligibleRunPrompt(message, run));
         if (diagnosticBoundaryIndex === -1 && !Number.isNaN(startedAt)) {
             diagnosticBoundaryIndex = messages.findLastIndex((message) => {
                 const timestamp = messageTimestamp(message);
@@ -498,7 +507,19 @@ function userBoundaryIndex(
                 timestamp <= startedAt + RUN_START_USER_SKEW_MS
             );
         });
-        userIndex = Math.max(userIndex, startBoundary);
+        const hasSettledAnswerBeforeMatchingUser =
+            startBoundary !== -1 &&
+            userIndex > startBoundary &&
+            messages.slice(startBoundary + 1, userIndex).some((message) => {
+                const role = message.role.toLowerCase();
+                return (
+                    (role === "assistant" || role === "system") &&
+                    hasPrimaryAnswerContent(message)
+                );
+            });
+        if (startBoundary !== -1 && !hasSettledAnswerBeforeMatchingUser) {
+            userIndex = startBoundary;
+        }
     }
 
     if (userIndex === -1 && Number.isNaN(startedAt)) {
@@ -1330,16 +1351,10 @@ function orderRuntimeMessages(
         const runtimeSlots = slotsByRun.get(run.runId) || [];
         const startedAt = Date.parse(run.startedAt);
         const sequencedPrompt = runtimeSlots
-            .filter((slot) => {
-                const timestamp = messageTimestamp(slot.message);
-                return (
-                    isUserMessage(slot.message) &&
-                    slot.sequence !== undefined &&
-                    (Number.isNaN(startedAt) ||
-                        timestamp === undefined ||
-                        timestamp <= startedAt + RUN_START_USER_SKEW_MS)
-                );
-            })
+            .filter(
+                (slot) =>
+                    isEligibleRunPrompt(slot.message, run) && slot.sequence !== undefined
+            )
             .toSorted(
                 (left, right) =>
                     (left.sequence ?? Infinity) - (right.sequence ?? Infinity) ||
