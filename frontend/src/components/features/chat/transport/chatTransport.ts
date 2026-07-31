@@ -2,6 +2,7 @@ import type {
     ChatSendRequest,
     ChatSendResponse,
     ChatSessionPreferences,
+    OpenClawRuntimeSnapshot,
 } from "../../../../../../contracts/chat";
 import type { ChatHistoryMessage } from "../chatTypes";
 import type { ChatModelOption } from "../chatUtilities";
@@ -13,6 +14,7 @@ export interface ChatRuntimeSnapshot {
     /** Stable opaque identity for one Gateway endpoint/credential replay boundary. */
     replayScope?: string;
     runtimeGeneration?: string;
+    schemaVersion: OpenClawRuntimeSnapshot["schemaVersion"];
     throughSequence: number;
 }
 

@@ -1,6 +1,7 @@
-import type {
-    OpenClawRuntimeEnvelope,
-    OpenClawRuntimeSnapshot,
+import {
+    OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    type OpenClawRuntimeEnvelope,
+    type OpenClawRuntimeSnapshot,
 } from "../../../contracts/chat.ts";
 import { database } from "../database.ts";
 import {
@@ -187,6 +188,7 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
         const interruptedAtByRun = value.interruptedAtByRun;
         const pendingRequestBoundaries = value.pendingRequestBoundaries;
         const requestBoundary = value.requestBoundary;
+        const schemaVersion = value.schemaVersion;
         if (
             !value ||
             typeof value !== "object" ||
@@ -198,6 +200,7 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             eventFingerprints.length !== value.eventFingerprints.length ||
             !Number.isSafeInteger(throughSequence) ||
             (throughSequence as number) < 0 ||
+            schemaVersion !== OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION ||
             (interruptedAtByRun !== undefined &&
                 !isInterruptedAtByRun(interruptedAtByRun)) ||
             value.eventStorage !== EVENT_ROW_STORAGE ||
@@ -369,6 +372,7 @@ function snapshotMetadata(
             requestBoundary: snapshot.requestBoundary,
         }),
         runSignature,
+        schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
         throughSequence: snapshot.throughSequence,
     };
 }
@@ -628,6 +632,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             ...(stored.snapshot.requestBoundary !== undefined && {
                 requestBoundary: stored.snapshot.requestBoundary,
             }),
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: stored.snapshot.throughSequence,
         };
     }
@@ -638,6 +643,10 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 `SELECT MAX(
                     CASE
                         WHEN json_valid(snapshot_json)
+                            AND json_type(snapshot_json, '$.eventStorage') = 'text'
+                            AND json_extract(snapshot_json, '$.eventStorage') = ?
+                            AND json_type(snapshot_json, '$.schemaVersion') = 'integer'
+                            AND json_extract(snapshot_json, '$.schemaVersion') = ?
                         THEN CASE
                             WHEN json_type(snapshot_json, '$.throughSequence') = 'integer'
                                 AND json_extract(snapshot_json, '$.throughSequence') >= 0
@@ -649,9 +658,12 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 FROM chat_runtime_snapshots
                 WHERE gateway_scope = ?`
             )
-            .get(Number.MAX_SAFE_INTEGER, this.#gatewayScope) as
-            | SnapshotMaximumSequenceRow
-            | undefined;
+            .get(
+                EVENT_ROW_STORAGE,
+                OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+                Number.MAX_SAFE_INTEGER,
+                this.#gatewayScope
+            ) as SnapshotMaximumSequenceRow | undefined;
         return typeof row?.maximum_sequence === "number" &&
             Number.isSafeInteger(row.maximum_sequence) &&
             row.maximum_sequence >= 0

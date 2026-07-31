@@ -1,6 +1,7 @@
-import type {
-    OpenClawRuntimeEnvelope,
-    OpenClawRuntimeSnapshot,
+import {
+    OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+    type OpenClawRuntimeEnvelope,
+    type OpenClawRuntimeSnapshot,
 } from "../../../contracts/chat.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
@@ -1464,6 +1465,7 @@ export class OpenClawChatBridge {
                 interruptedAtByRun,
             }),
             ...(shouldIncludePersistenceMetadata && requestBoundaries),
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
             throughSequence: this.#sequence,
         };
     }

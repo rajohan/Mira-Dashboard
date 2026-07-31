@@ -2,15 +2,17 @@ import { describe, expect, it, jest } from "bun:test";
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
 import type { ChatRuntimeEvent } from "../components/features/chat/domain/chatState";
 import type {
-    ChatRuntimeSnapshot,
+    ChatRuntimeSnapshot as VersionedChatRuntimeSnapshot,
     ChatTransport,
 } from "../components/features/chat/transport/chatTransport";
 import { useChatRuntime } from "../components/features/chat/useChatRuntime";
 
 const SELECTED = "agent:main:main";
 const OFFSCREEN = "agent:other:main";
+type ChatRuntimeSnapshot = Omit<VersionedChatRuntimeSnapshot, "schemaVersion">;
 
 function assistant(
     sessionKey: string,
@@ -78,7 +80,12 @@ function fakeTransport(snapshotPromise: Promise<ChatRuntimeSnapshot>, generation
         models: jest.fn(() => Promise.try(() => [])),
         patchSession: jest.fn(async () => {}),
         send: jest.fn(() => Promise.try(() => ({}))),
-        snapshot: jest.fn(() => snapshotPromise),
+        snapshot: jest.fn(
+            async (): Promise<VersionedChatRuntimeSnapshot> => ({
+                schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+                ...(await snapshotPromise),
+            })
+        ),
         subscribe: (listener) => {
             listeners.add(listener);
             return () => listeners.delete(listener);
