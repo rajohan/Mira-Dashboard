@@ -208,6 +208,18 @@ describe("immutable release deployment", () => {
         expect(resetCommand).not.toContain("/home/ubuntu/projects");
     });
 
+    it("runs both TypeScript build checks through the managed Bun runtime", () => {
+        const rootPackage = JSON.parse(
+            readFileSync(path.resolve(import.meta.dirname, "../../package.json"), "utf8")
+        ) as { scripts?: Record<string, string> };
+
+        for (const scriptName of ["build:frontend", "build:backend"]) {
+            expect(rootPackage.scripts?.[scriptName]).toStartWith(
+                "bun node_modules/typescript/bin/tsc "
+            );
+        }
+    });
+
     it("builds in an isolated worktree and atomically publishes only artifacts", async () => {
         const options = stagingOptions();
         const calls: Array<{
