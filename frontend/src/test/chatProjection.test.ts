@@ -1117,6 +1117,7 @@ describe("chat projection", () => {
             const thinkingIndex = projected.findIndex((item) => item.thinking?.length);
             const toolIndex = projected.findIndex((item) => item.toolCalls?.length);
             expect(steerIndex).toBeGreaterThan(0);
+            expect(steerIndex).toBeLessThan(toolIndex);
             expect(thinkingIndex).toBeGreaterThan(steerIndex);
             expect(thinkingIndex).toBeGreaterThan(toolIndex);
             expect(projected[steerIndex]?.runId).toBe("run-1");
@@ -4175,6 +4176,86 @@ describe("chat projection", () => {
 
         expect(projectionLabels(history, optimisticRuntime)).toEqual(expected);
         expect(projectionLabels(history, acknowledgedRuntime)).toEqual(expected);
+    });
+
+    it("interleaves completed live steer runs with later active-run tools", () => {
+        const runId = "active-provider-run";
+        const firstSteerRunId = "dashboard-chat-first-steer";
+        const secondSteerRunId = "dashboard-chat-second-steer";
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:00.000Z", {
+                kind: "status",
+                runId,
+                text: "Working",
+            }),
+            runtimeToolEvent(
+                32,
+                runId,
+                "call-live-1",
+                "first-tool",
+                "2026-07-16T12:00:01.000Z"
+            ),
+            eventAt(48, "2026-07-16T12:00:03.500Z", {
+                kind: "finish",
+                outcome: "completed",
+                runId: firstSteerRunId,
+            }),
+            eventAt(64, "2026-07-16T12:00:03.600Z", {
+                kind: "user",
+                message: message("user", "first steer", firstSteerRunId),
+                runId: firstSteerRunId,
+            }),
+            runtimeToolEvent(
+                80,
+                runId,
+                "call-live-2",
+                "second-tool",
+                "2026-07-16T12:00:04.000Z"
+            ),
+            eventAt(96, "2026-07-16T12:00:06.500Z", {
+                kind: "finish",
+                outcome: "completed",
+                runId: secondSteerRunId,
+            }),
+            eventAt(112, "2026-07-16T12:00:06.600Z", {
+                kind: "user",
+                message: message("user", "second steer", secondSteerRunId),
+                runId: secondSteerRunId,
+            }),
+            runtimeToolEvent(
+                128,
+                runId,
+                "call-live-3",
+                "third-tool",
+                "2026-07-16T12:00:07.000Z"
+            ),
+            runtimeThinkingEvent(144, runId, "2026-07-16T12:00:08.000Z"),
+        ]);
+        const history: ChatHistoryMessage[] = [
+            {
+                ...message("user", "question", "dashboard-chat-question"),
+                timestamp: "2026-07-16T11:59:00.000Z",
+            },
+            {
+                ...message("user", "first steer", firstSteerRunId),
+                timestamp: "2026-07-16T12:00:03.000Z",
+            },
+            {
+                ...message("user", "second steer", secondSteerRunId),
+                timestamp: "2026-07-16T12:00:06.000Z",
+            },
+        ];
+
+        expect(projectionLabels(history, runtime)).toEqual([
+            "question",
+            "first-tool",
+            "first steer",
+            "second-tool",
+            "second steer",
+            "third-tool",
+            "thinking",
+            "status:Working",
+        ]);
     });
 
     it("interleaves steers in a completed history-only turn", () => {

@@ -253,14 +253,17 @@ function isMatchedToAnotherRun(
     runs: ChatRunState[]
 ): boolean {
     return runs.some((candidate) => {
-        const isUnacknowledgedDashboardRun =
-            candidate.phase === "active" &&
+        const isDashboardSteerOnlyRun =
+            isDashboardRunId(candidate.runId) &&
             !candidate.assistant &&
             candidate.diagnostics.length === 0 &&
-            isDashboardRunId(candidate.runId);
+            (candidate.phase === "active" ||
+                (candidate.phase === "completed" &&
+                    candidate.lastContentKind === "user" &&
+                    candidate.userMessages.length > 0));
         return (
             candidate.runId !== run.runId &&
-            !isUnacknowledgedDashboardRun &&
+            !isDashboardSteerOnlyRun &&
             isRunMatchingMessage(candidate, message)
         );
     });
@@ -1327,7 +1330,16 @@ function orderRuntimeMessages(
         const runtimeSlots = slotsByRun.get(run.runId) || [];
         const startedAt = Date.parse(run.startedAt);
         const sequencedPrompt = runtimeSlots
-            .filter((slot) => isUserMessage(slot.message) && slot.sequence !== undefined)
+            .filter((slot) => {
+                const timestamp = messageTimestamp(slot.message);
+                return (
+                    isUserMessage(slot.message) &&
+                    slot.sequence !== undefined &&
+                    (Number.isNaN(startedAt) ||
+                        timestamp === undefined ||
+                        timestamp <= startedAt + RUN_START_USER_SKEW_MS)
+                );
+            })
             .toSorted(
                 (left, right) =>
                     (left.sequence ?? Infinity) - (right.sequence ?? Infinity) ||
