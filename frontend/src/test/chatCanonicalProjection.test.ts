@@ -7,6 +7,7 @@ import {
     projectCanonicalChat,
 } from "../components/features/chat/domain/chatCanonicalProjection";
 import { createChatVisibility } from "../components/features/chat/domain/chatPresentation";
+import { renderChatProjectionRows } from "../components/features/chat/domain/chatProjection";
 import {
     createChatRuntimeState,
     reduceChatRuntime,
@@ -1017,6 +1018,15 @@ describe("canonical chat turn projection", () => {
                 },
             },
         ]).projection;
+        const shiftedVisible = projectDefault([
+            {
+                ...fallbackPrompt,
+                provenance: {
+                    id: "openclaw-history:agent%3Amain%3Amain:position%3A1%3Afingerprint%3Aoriginal",
+                    source: "openclaw-history" as const,
+                },
+            },
+        ]).projection;
         const shifted = projectDefault(
             [
                 {
@@ -1030,10 +1040,77 @@ describe("canonical chat turn projection", () => {
             { deletedMessageKeys: new Set(original.rows[0]?.deleteKeys) }
         ).projection;
 
+        expect(shiftedVisible.rows[0]?.key).toBe(original.rows[0]?.key);
         expect(original.rows[0]?.deleteKeys).toContain(
             "user::2026-07-31T04:01:00.000Z::no-run::position-independent prompt"
         );
         expect(shifted.rows).toEqual([]);
+    });
+
+    it("keeps fallback assistant row keys stable when page positions move", () => {
+        const fallbackAnswer = {
+            content: "position-independent answer",
+            role: "assistant",
+            text: "position-independent answer",
+            timestamp: "2026-07-31T04:02:00.000Z",
+        };
+        const original = projectDefault([
+            {
+                ...fallbackAnswer,
+                provenance: {
+                    id: "openclaw-history:agent%3Amain%3Amain:position%3A0%3Afingerprint%3Aanswer",
+                    source: "openclaw-history" as const,
+                },
+            },
+        ]).projection;
+        const shifted = projectDefault([
+            {
+                ...fallbackAnswer,
+                provenance: {
+                    id: "openclaw-history:agent%3Amain%3Amain:position%3A1%3Afingerprint%3Aanswer",
+                    source: "openclaw-history" as const,
+                },
+            },
+        ]).projection;
+
+        expect(shifted.rows[0]?.key).toBe(original.rows[0]?.key);
+    });
+
+    it("keeps a stream row key stable as runtime provenance grows", () => {
+        const stream = {
+            content: "partial answer",
+            local: true,
+            provenance: {
+                id: "runtime-assistant-16",
+                sequence: 16,
+                source: "openclaw-runtime" as const,
+            },
+            role: "assistant",
+            runId: RUN,
+            runtimeKey: "assistant",
+            text: "partial answer",
+        };
+        const initial = renderChatProjectionRows([stream], new Set());
+        const continued = renderChatProjectionRows(
+            [
+                {
+                    ...stream,
+                    provenance: {
+                        ...stream.provenance,
+                        relatedSources: [
+                            {
+                                id: "runtime-assistant-112",
+                                sequence: 112,
+                                source: "openclaw-runtime" as const,
+                            },
+                        ],
+                    },
+                },
+            ],
+            new Set()
+        );
+
+        expect(continued[0]?.key).toBe(initial[0]?.key);
     });
 
     it("fails closed when canonical validation detects an invalid session", () => {

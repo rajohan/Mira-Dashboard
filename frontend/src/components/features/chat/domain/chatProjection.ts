@@ -198,22 +198,33 @@ function projectedMessageSources(
 }
 
 function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[] {
-    const sourceIdentities = new Set(
-        projectedMessageSources(message).map((source) =>
-            stableChatStringify({
-                id: source.id,
-                sequence: source.sequence,
-                source: source.source,
-            })
-        )
-    );
+    const sourcesByIdentity = new Map<string, ChatMessageSourceReference>();
+    for (const source of projectedMessageSources(message)) {
+        const identity = stableChatStringify({
+            id: source.id,
+            sequence: source.sequence,
+            source: source.source,
+        });
+        if (!sourcesByIdentity.has(identity)) {
+            sourcesByIdentity.set(identity, source);
+        }
+    }
     const facet = projectedMessageSourceFacet(message);
-    return sourceIdentities
-        .values()
+    return sourcesByIdentity
+        .entries()
         .toArray()
-        .toSorted()
+        .toSorted(([, left], [, right]) => {
+            const sequenceDifference =
+                (left.sequence ?? Number.MAX_SAFE_INTEGER) -
+                (right.sequence ?? Number.MAX_SAFE_INTEGER);
+            return (
+                sequenceDifference ||
+                left.source.localeCompare(right.source) ||
+                left.id.localeCompare(right.id)
+            );
+        })
         .map(
-            (sourceIdentity) =>
+            ([sourceIdentity]) =>
                 `chat-message-source:v1:${canonicalChatContentFingerprint(
                     stableChatStringify({ facet, sourceIdentity })
                 )}`
@@ -244,17 +255,22 @@ function projectedMessageDeleteIdentity(
     const sourceKeys = projectedMessageSourceDeleteKeys(message);
     const userKeys = isUserMessage(message) ? userMessageDeleteKeys(message) : [];
     if (sourceKeys.length > 0) {
+        const stableFallbackKey = hasPositionFallbackHistorySource(message)
+            ? projectedMessageRowKey(message)
+            : undefined;
+        const persistedKeys = stableFallbackKey
+            ? [
+                  stableFallbackKey,
+                  ...sourceKeys.filter((key) => key !== stableFallbackKey),
+              ]
+            : sourceKeys;
         const baseKeys = [
-            ...sourceKeys,
-            ...userKeys.filter((key) => !sourceKeys.includes(key)),
+            ...persistedKeys,
+            ...userKeys.filter((key) => !persistedKeys.includes(key)),
         ];
         return {
             baseKeys,
-            persistedKeyCount:
-                sourceKeys.length +
-                (hasPositionFallbackHistorySource(message) && userKeys.length > 0
-                    ? 1
-                    : 0),
+            persistedKeyCount: persistedKeys.length,
         };
     }
     if (userKeys.length > 0) {

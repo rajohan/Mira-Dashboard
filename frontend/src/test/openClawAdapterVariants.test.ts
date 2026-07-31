@@ -231,8 +231,10 @@ describe("OpenClaw adapter variants", () => {
         expect(visible.some((message) => message.text.includes("Emitting marker"))).toBe(
             false
         );
-        expect(toolRow?.key).toStartWith("chat-message-source:v1:");
-        expect(toolRow?.deleteKeys).toEqual([toolRow?.key]);
+        expect(toolRow?.deleteKeys?.[0]).toBe(toolRow?.key);
+        expect(
+            toolRow?.deleteKeys?.some((key) => key.startsWith("chat-message-source:v1:"))
+        ).toBe(true);
         expect(toolRow).toMatchObject({
             message: {
                 role: "assistant",
