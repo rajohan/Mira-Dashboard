@@ -199,6 +199,7 @@ function canonicalEntryKind(message: ChatHistoryMessage): CanonicalChatTurnEntry
     }
     if (
         TOOL_ROLE_VARIANTS.includes(role) ||
+        message.isToolUse ||
         message.toolCalls?.length ||
         message.toolResult
     ) {
@@ -280,9 +281,10 @@ function draftHasAnswer(draft: CanonicalTurnDraft): boolean {
     );
 }
 
-function draftHasToolContinuation(draft: CanonicalTurnDraft): boolean {
+function draftHasResponseContinuation(draft: CanonicalTurnDraft): boolean {
     return draft.entries.some(
         (entry) =>
+            entry.kind === "thinking" ||
             entry.kind === "tool" ||
             Boolean(entry.message.toolCalls?.length || entry.message.toolResult)
     );
@@ -322,7 +324,7 @@ function shouldStartTurn(
     if (draft.run && run && draft.run.runId === run.runId) {
         return false;
     }
-    return draftHasAnswer(draft) || !draftHasToolContinuation(draft);
+    return draftHasAnswer(draft) || !draftHasResponseContinuation(draft);
 }
 
 function uniqueProviders(

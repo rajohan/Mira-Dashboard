@@ -610,6 +610,37 @@ describe("chat projection", () => {
         });
     });
 
+    it("deduplicates repeated blocks in the first thinking message", () => {
+        const visible = presentChatMessages(
+            [
+                {
+                    content: [
+                        { id: "thought-1", text: "first draft", type: "thinking" },
+                        { id: "thought-1", text: "current draft", type: "thinking" },
+                        { text: "same text", type: "thinking" },
+                        { text: "same text", type: "thinking" },
+                    ],
+                    role: "assistant",
+                    text: "",
+                    thinking: [
+                        { id: "thought-1", text: "first draft" },
+                        { id: "thought-1", text: "current draft" },
+                        { text: "same text" },
+                        { text: "same text" },
+                    ],
+                },
+            ],
+            createChatVisibility(true, true),
+            true
+        );
+
+        expect(visible).toHaveLength(1);
+        expect(visible[0]?.thinking).toEqual([
+            { id: "thought-1", text: "current draft" },
+            { text: "same text" },
+        ]);
+    });
+
     it("hides activity when the same run already has visible assistant text", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(8, { kind: "status", runId: "run-1", text: "Working" }),

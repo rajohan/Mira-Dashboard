@@ -418,6 +418,82 @@ describe("canonical chat turn projection", () => {
         ]);
     });
 
+    it("keeps a runless steer with a thinking-only response", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "initial question",
+                    role: "user",
+                    text: "initial question",
+                },
+                {
+                    content: [{ text: "working through it", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working through it" }],
+                },
+                {
+                    content: "steer the response",
+                    role: "user",
+                    text: "steer the response",
+                },
+                {
+                    content: "final answer",
+                    role: "assistant",
+                    text: "final answer",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(1);
+        expect(turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+            "user",
+            "thinking",
+            "user",
+            "assistant",
+        ]);
+    });
+
+    it("keeps a runless steer with tool-use commentary", () => {
+        const turns = assembleCanonicalChatTurns(
+            [
+                {
+                    content: "initial question",
+                    role: "user",
+                    text: "initial question",
+                },
+                {
+                    content: "Calling the tool.",
+                    isToolUse: true,
+                    role: "assistant",
+                    text: "Calling the tool.",
+                },
+                {
+                    content: "steer the response",
+                    role: "user",
+                    text: "steer the response",
+                },
+                {
+                    content: "final answer",
+                    role: "assistant",
+                    text: "final answer",
+                },
+            ],
+            [],
+            SESSION
+        );
+
+        expect(turns).toHaveLength(1);
+        expect(turns[0]?.entries.map((entry) => entry.kind)).toEqual([
+            "user",
+            "tool",
+            "user",
+            "assistant",
+        ]);
+    });
+
     it("preserves provider run identity on history-only turns", () => {
         const turns = assembleCanonicalChatTurns(
             [

@@ -386,8 +386,10 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         const key = message.runId ? `run:${message.runId}` : `segment:${segment}`;
         const group = groups.get(key);
         if (!group) {
+            const blocks: ThinkingGroup["blocks"] = [];
+            mergeThinkingBlocks(blocks, message.thinking);
             groups.set(key, {
-                blocks: [...message.thinking],
+                blocks,
                 firstIndex: index,
                 runId: message.runId,
                 segment,
