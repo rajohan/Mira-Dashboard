@@ -497,6 +497,8 @@ function draftCanonicalChatTurns(
 /**
  * Carries raw response-continuation evidence through thinking reordering.
  * Structuring can move diagnostics, but it preserves user-message order.
+ * @param drafts Reconciliation-ordered canonical turn drafts.
+ * @returns User ordinals that must remain in the preceding logical turn.
  */
 function continuedUserOrdinalsFromDrafts(
     drafts: CanonicalTurnDraft[]
