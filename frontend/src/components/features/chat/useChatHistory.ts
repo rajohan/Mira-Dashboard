@@ -103,6 +103,7 @@ export function useChatHistory({
                     return;
                 }
                 const requestSequence = beginHistoryRequest();
+                const requestConnectionGeneration = transport.connectionGeneration;
                 try {
                     const history = await transport.history(
                         sessionKey,
@@ -117,7 +118,7 @@ export function useChatHistory({
                             previous.sessionKey === sessionKey ? previous.messages : [],
                             history
                         ),
-                        resolvedConnectionGeneration: transport.connectionGeneration,
+                        resolvedConnectionGeneration: requestConnectionGeneration,
                         sessionKey,
                     }));
                     if (shouldStickToBottomRef.current) {
@@ -248,6 +249,7 @@ export function useChatHistory({
             return;
         }
         const requestSessionKey = selectedSessionKey;
+        const requestConnectionGeneration = transport.connectionGeneration;
         const abortController = new AbortController();
         backgroundAbortRef.current?.abort();
         backgroundAbortRef.current = abortController;
@@ -265,7 +267,7 @@ export function useChatHistory({
                     previous.sessionKey === requestSessionKey ? previous.messages : [],
                     result.messages
                 ),
-                resolvedConnectionGeneration: transport.connectionGeneration,
+                resolvedConnectionGeneration: requestConnectionGeneration,
                 sessionKey: requestSessionKey,
             }));
             setIsAtBottomFromEffect(shouldStickToBottomRef.current);
@@ -302,6 +304,7 @@ export function useChatHistory({
                 return;
             }
             isRefreshInFlight = true;
+            const requestConnectionGeneration = transport.connectionGeneration;
             try {
                 const result = await requestHistory(
                     selectedSessionKey,
@@ -318,7 +321,7 @@ export function useChatHistory({
                             : [],
                         result.messages
                     ),
-                    resolvedConnectionGeneration: transport.connectionGeneration,
+                    resolvedConnectionGeneration: requestConnectionGeneration,
                     sessionKey: selectedSessionKey,
                 }));
                 setIsAtBottomFromEffect(shouldStickToBottomRef.current);

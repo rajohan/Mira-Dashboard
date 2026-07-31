@@ -202,19 +202,37 @@ function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[]
  * Keeps persisted delete keys valid when runtime reconciliation adds a run id.
  * @returns Projected message delete keys result.
  */
-function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
+interface ProjectedMessageDeleteIdentity {
+    baseKeys: string[];
+    persistedKeyCount: number;
+}
+
+function projectedMessageDeleteIdentity(
+    message: ChatHistoryMessage
+): ProjectedMessageDeleteIdentity {
     const sourceKeys = projectedMessageSourceDeleteKeys(message);
     if (sourceKeys.length > 0) {
-        return sourceKeys;
+        const optimisticUserKey = isUserMessage(message)
+            ? projectedMessageRowKey(message)
+            : undefined;
+        return {
+            baseKeys:
+                optimisticUserKey && !sourceKeys.includes(optimisticUserKey)
+                    ? [...sourceKeys, optimisticUserKey]
+                    : sourceKeys,
+            persistedKeyCount: sourceKeys.length,
+        };
     }
     const currentKey = projectedMessageRowKey(message);
     if (!message.runId || message.local === true) {
-        return [currentKey];
+        return { baseKeys: [currentKey], persistedKeyCount: 1 };
     }
     const persistedHistoryKey = historyMessageDeleteKey(message);
-    return currentKey === persistedHistoryKey
-        ? [currentKey]
-        : [currentKey, persistedHistoryKey];
+    const baseKeys =
+        currentKey === persistedHistoryKey
+            ? [currentKey]
+            : [currentKey, persistedHistoryKey];
+    return { baseKeys, persistedKeyCount: baseKeys.length };
 }
 
 function asAssistantToolResultMessage(message: ChatHistoryMessage): ChatHistoryMessage {
@@ -1880,12 +1898,16 @@ export function renderChatProjectionRows(
     deletedMessageKeys: ReadonlySet<string>
 ): ChatRow[] {
     const deleteKeyOccurrences = new Map<string, number>();
+    const messageDeleteIdentities = messages.map((message) =>
+        projectedMessageDeleteIdentity(message)
+    );
     const naturalDeleteKeys = new Set(
-        messages.flatMap((message) => projectedMessageDeleteKeys(message))
+        messageDeleteIdentities.flatMap((identity) => identity.baseKeys)
     );
     const generatedDeleteKeys = new Set<string>();
-    return messages.flatMap((message) => {
-        const deleteKeys = projectedMessageDeleteKeys(message).map((baseKey) => {
+    return messages.flatMap((message, messageIndex) => {
+        const identity = messageDeleteIdentities[messageIndex]!;
+        const matchDeleteKeys = identity.baseKeys.map((baseKey) => {
             const occurrence = deleteKeyOccurrences.get(baseKey) ?? 0;
             deleteKeyOccurrences.set(baseKey, occurrence + 1);
             if (occurrence === 0) {
@@ -1900,12 +1922,16 @@ export function renderChatProjectionRows(
             generatedDeleteKeys.add(key);
             return key;
         });
-        return deleteKeys.some((key) => deletedMessageKeys.has(key))
+        const deleteKeys = matchDeleteKeys.slice(0, identity.persistedKeyCount);
+        return matchDeleteKeys.some((key) => deletedMessageKeys.has(key))
             ? []
             : [
                   {
                       deleteKeys,
-                      key: deleteKeys[0] ?? projectedMessageRowKey(message),
+                      key:
+                          deleteKeys[0] ??
+                          matchDeleteKeys[0] ??
+                          projectedMessageRowKey(message),
                       kind:
                           message.local === true &&
                           message.runId &&

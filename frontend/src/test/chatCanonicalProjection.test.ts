@@ -1044,6 +1044,47 @@ describe("canonical chat turn projection", () => {
         ]);
     });
 
+    it("keeps an optimistic user delete hidden after provenance recovery", () => {
+        const optimistic = projectCanonicalChat(
+            [
+                {
+                    content: "queued prompt",
+                    local: true,
+                    role: "user",
+                    text: "queued prompt",
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).projection;
+        const optimisticDeleteKeys = optimistic.rows[0]?.deleteKeys;
+        const recovered = projectCanonicalChat(
+            [
+                {
+                    content: "queued prompt",
+                    provenance: {
+                        id: "history-prompt",
+                        sequence: 12,
+                        source: "openclaw-history",
+                    },
+                    role: "user",
+                    text: "queued prompt",
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(optimisticDeleteKeys)
+        ).projection;
+
+        expect(optimisticDeleteKeys).toEqual(["user::no-time::no-run::queued prompt"]);
+        expect(recovered.rows).toEqual([]);
+    });
+
     it("fails closed when canonical validation detects an invalid session", () => {
         expect(() =>
             projectCanonicalChat(
