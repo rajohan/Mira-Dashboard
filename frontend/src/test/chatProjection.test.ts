@@ -3894,6 +3894,57 @@ describe("chat projection", () => {
         ).toEqual(["first turn", ["system thought"], "system answer", "second turn"]);
     });
 
+    it("keeps prior system thinking out of a later completed response", () => {
+        const visible = presentChatMessages(
+            [
+                message("user", "first turn"),
+                {
+                    content: [{ text: "first thought", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "first thought" }],
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                {
+                    content: "first system answer",
+                    role: "system",
+                    text: "first system answer",
+                },
+                message("user", "second turn"),
+                {
+                    content: [{ text: "second thought", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "second thought" }],
+                },
+                {
+                    content: "second answer",
+                    isFinal: true,
+                    role: "assistant",
+                    text: "second answer",
+                },
+            ],
+            createChatVisibility(true, true),
+            true
+        );
+
+        expect(
+            visible.map(
+                (item) =>
+                    item.thinking?.map((block) => block.text) ||
+                    (item.toolCalls?.length ? "tool" : item.text)
+            )
+        ).toEqual([
+            "first turn",
+            "tool",
+            ["first thought"],
+            "first system answer",
+            "second turn",
+            ["second thought"],
+            "second answer",
+        ]);
+    });
+
     it("uses runtime sequence for interleaved tools and steers across replay", () => {
         const runId = "run-1";
         const runtimeEvents: ChatRuntimeEvent[] = [

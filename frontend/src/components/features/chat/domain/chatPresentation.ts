@@ -252,7 +252,7 @@ function completedResponseStart(
                 nextUserMessage.text.trim()
             );
         const hasPriorAnswer = interveningMessages.some((candidate) =>
-            isPrimaryAssistantMessage(candidate)
+            isSettledAnswerMessage(candidate)
         );
         if (hasPriorAnswer && !isGatewayRestartContinuation) {
             return groupStart;
