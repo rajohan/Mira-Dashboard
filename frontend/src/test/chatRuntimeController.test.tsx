@@ -109,6 +109,8 @@ describe("chat runtime controller", () => {
             useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
         );
 
+        expect(result.current.hasSettledSelectedSessionReplay).toBe(false);
+
         act(() => {
             fake.emit(assistant(SELECTED, 32, "lo"));
             fake.emit(assistant(OFFSCREEN, 16, "other"));
@@ -131,6 +133,7 @@ describe("chat runtime controller", () => {
         expect(
             result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
         ).toBe("Hello");
+        expect(result.current.hasSettledSelectedSessionReplay).toBe(true);
     });
 
     it("deduplicates a live event that is also returned by the snapshot", async () => {
@@ -1378,6 +1381,7 @@ describe("chat runtime controller", () => {
                 result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
             ).toBe("fallback")
         );
+        expect(result.current.hasSettledSelectedSessionReplay).toBe(true);
         expect(onSettled).toHaveBeenCalledWith(SELECTED);
     });
 

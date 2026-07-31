@@ -21,6 +21,7 @@ import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 
 import type { CacheEnvelope } from "../../../contracts/cache";
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
 import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openClawHistoryPageAdapter";
 import type { Metrics } from "../../../contracts/metrics";
 import type { Session } from "../../../contracts/sessions";
@@ -4791,7 +4792,7 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     }, 10_000);
 
-    it("reports projection parity only after selected chat history resolves", async () => {
+    it("reports projection parity only after history and runtime replay resolve", async () => {
         const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
 
         await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -4831,6 +4832,15 @@ describe("Mira Dashboard pages", () => {
                     timestamp: "2026-07-30T10:00:00.000Z",
                 },
             ],
+        });
+        await flushQueuedTimers();
+        expect(chatApiState.projectionShadowRequests).toBe(0);
+
+        await respondToSocketRequest(socket, "chat.runtimeSnapshot", {
+            completed: false,
+            events: [],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+            throughSequence: 0,
         });
         await waitFor(() => {
             expect(chatApiState.projectionShadowRequests).toBe(1);
@@ -4875,6 +4885,15 @@ describe("Mira Dashboard pages", () => {
                     timestamp: "2026-07-30T10:00:00.000Z",
                 },
             ],
+        });
+        await flushQueuedTimers();
+        expect(chatApiState.projectionShadowRequests).toBe(1);
+
+        await respondToSocketRequest(reconnectedSocket, "chat.runtimeSnapshot", {
+            completed: false,
+            events: [],
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+            throughSequence: 0,
         });
         await waitFor(
             () => {

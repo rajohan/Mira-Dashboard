@@ -274,7 +274,8 @@ export function Chat() {
         Boolean(selectedSession) &&
         hasSuccessfulHistoryLoad &&
         isConnected &&
-        !isLoadingHistory;
+        !isLoadingHistory &&
+        runtime.hasSettledSelectedSessionReplay;
     useEffect(() => {
         if (!canReportProjectionShadow) {
             return;
