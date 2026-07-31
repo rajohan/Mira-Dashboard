@@ -547,10 +547,10 @@ function parseReleaseLinkTarget(target: string): string {
     return commitSha;
 }
 
-async function readReleaseLink(
+async function readReleaseLinkCommitSha(
     layout: DashboardReleaseLayout,
     linkName: ReleaseLinkName
-): Promise<ManagedDashboardRelease | undefined> {
+): Promise<string | undefined> {
     const linkPath = path.join(layout.root, linkName);
     let stat: fs.Stats;
     try {
@@ -571,7 +571,30 @@ async function readReleaseLink(
     if ((await fsp.realpath(linkPath)) !== expectedPath) {
         throw new TypeError(`Managed release ${linkName} link escapes its layout`);
     }
-    return loadManagedReleaseFromLayout(layout, commitSha);
+    return commitSha;
+}
+
+async function readReleaseLink(
+    layout: DashboardReleaseLayout,
+    linkName: ReleaseLinkName
+): Promise<ManagedDashboardRelease | undefined> {
+    const commitSha = await readReleaseLinkCommitSha(layout, linkName);
+    return commitSha ? loadManagedReleaseFromLayout(layout, commitSha) : undefined;
+}
+
+async function readRollbackReleaseLink(
+    layout: DashboardReleaseLayout
+): Promise<ManagedDashboardRelease | undefined> {
+    const commitSha = await readReleaseLinkCommitSha(layout, "previous");
+    if (!commitSha) return undefined;
+    try {
+        return await loadManagedReleaseFromLayout(layout, commitSha);
+    } catch {
+        // A structurally confined but unverifiable rollback slot is never runnable.
+        // Keep the verified current release available and replace this slot on the
+        // next successful activation.
+        return undefined;
+    }
 }
 
 async function assertReleaseLinkSlot(
@@ -864,7 +887,7 @@ async function readDashboardReleaseStateFromLayout(
     layout: DashboardReleaseLayout
 ): Promise<DashboardReleaseState> {
     const current = await readReleaseLink(layout, "current");
-    const previous = await readReleaseLink(layout, "previous");
+    const previous = await readRollbackReleaseLink(layout);
     if (!current && previous) {
         throw new Error("Managed release layout has previous without current");
     }
@@ -885,7 +908,7 @@ async function readActivationReleaseStateFromLayout(
         await assertReleaseLinkSlot(layout, "previous");
         return { root: layout.root };
     }
-    const previous = await readReleaseLink(layout, "previous");
+    const previous = await readRollbackReleaseLink(layout);
     return {
         current,
         ...(previous && { previous }),

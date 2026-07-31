@@ -3,7 +3,7 @@ import type {
     PullRequestPreviewStatus,
     PullRequestSummary,
 } from "../../../contracts/delivery.ts";
-import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { database } from "../database.ts";
 import {
     enqueueJobExecution,
     type JobExecutionRecord,
@@ -28,9 +28,12 @@ import {
     successfulJobExecutionOutput,
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
-import { registerScheduledJobAction } from "./scheduledJobs.ts";
-
-const logger = createStructuredLogger("pull-request-previews");
+import {
+    getScheduledJob,
+    registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
+    upsertScheduledJob,
+} from "./scheduledJobs.ts";
 
 const PREVIEW_START_TIMEOUT_MS = 30 * 60 * 1000;
 const PREVIEW_STOP_TIMEOUT_MS = 6 * 60 * 1000;
@@ -40,6 +43,8 @@ const PREVIEW_ACTION_KEYS = new Set([
     "dashboard.preview.start",
     "dashboard.preview.stop",
 ]);
+const PREVIEW_RECONCILIATION_JOB_ID = "dashboard.preview.reconcile";
+const PREVIEW_RECONCILIATION_INTERVAL_SECONDS = 6 * 60 * 60;
 const PREVIEW_CONTROLS_UNAVAILABLE_MESSAGE =
     "PR dev controls are available only from the production Dashboard.";
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
@@ -237,43 +242,38 @@ export async function reconcileClosedPullRequestPreview(
     ) {
         return;
     }
-    try {
-        if (
-            listJobExecutions(200).some(
-                (execution) =>
-                    ["queued", "running"].includes(execution.status) &&
-                    PREVIEW_ACTION_KEYS.has(execution.actionKey)
-            )
-        ) {
-            return;
-        }
-        const preview = await readPullRequestPreviewStatus();
-        const openPullRequestNumbers = new Set(
-            openPullRequests.map((pullRequest) => pullRequest.number)
-        );
-        const cleanupCandidates = [
-            ...(preview.number !== undefined &&
-            !openPullRequestNumbers.has(preview.number)
-                ? [preview.number]
-                : []),
-            ...listManagedPullRequestPreviewStateNumbers().filter(
-                (number) => !openPullRequestNumbers.has(number)
-            ),
-        ];
-        const uniqueCleanupCandidates = new Set(cleanupCandidates);
-        for (const number of uniqueCleanupCandidates) {
-            if (await isDashboardPullRequestOpen(number)) continue;
-            enqueueJobExecution({
-                actionKey: "dashboard.preview.cleanup",
-                displayName: `Clean up closed PR #${number} preview`,
-                payload: { number },
-                resourceClass: "exclusive",
-                timeoutMs: PREVIEW_STOP_TIMEOUT_MS,
-            });
-            return;
-        }
-    } catch (error) {
-        logger.error("preview.closed_pr_reconciliation_failed", { error });
+    if (
+        listJobExecutions(200).some(
+            (execution) =>
+                ["queued", "running"].includes(execution.status) &&
+                PREVIEW_ACTION_KEYS.has(execution.actionKey)
+        )
+    ) {
+        return;
+    }
+    const preview = await readPullRequestPreviewStatus();
+    const openPullRequestNumbers = new Set(
+        openPullRequests.map((pullRequest) => pullRequest.number)
+    );
+    const cleanupCandidates = [
+        ...(preview.number !== undefined && !openPullRequestNumbers.has(preview.number)
+            ? [preview.number]
+            : []),
+        ...listManagedPullRequestPreviewStateNumbers().filter(
+            (number) => !openPullRequestNumbers.has(number)
+        ),
+    ];
+    const uniqueCleanupCandidates = new Set(cleanupCandidates);
+    for (const number of uniqueCleanupCandidates) {
+        if (await isDashboardPullRequestOpen(number)) continue;
+        enqueueJobExecution({
+            actionKey: "dashboard.preview.cleanup",
+            displayName: `Clean up closed PR #${number} preview`,
+            payload: { number },
+            resourceClass: "exclusive",
+            timeoutMs: PREVIEW_STOP_TIMEOUT_MS,
+        });
+        return;
     }
 }
 
@@ -369,6 +369,15 @@ export async function prepareAndStopPullRequestPreview(
 /** Registers host preview lifecycle actions only in the full production worker. */
 export function registerPullRequestPreviewExecutionActions(): void {
     registerScheduledJobAction(
+        PREVIEW_RECONCILIATION_JOB_ID,
+        async () => {
+            const pullRequests = await listDashboardPullRequests();
+            await reconcileClosedPullRequestPreview(pullRequests);
+            return { openPullRequestCount: pullRequests.length };
+        },
+        { timeoutMs: PREVIEW_STOP_TIMEOUT_MS }
+    );
+    registerScheduledJobAction(
         "dashboard.preview.cleanup",
         async (job, _signal, context) => {
             const number = executionPreviewNumber(job.actionPayload.number);
@@ -425,4 +434,35 @@ export function registerPullRequestPreviewExecutionActions(): void {
             };
         }
     );
+    database.run("BEGIN IMMEDIATE");
+    try {
+        removeScheduledJobsNotInAction(PREVIEW_RECONCILIATION_JOB_ID, [
+            PREVIEW_RECONCILIATION_JOB_ID,
+        ]);
+        const existing = getScheduledJob(PREVIEW_RECONCILIATION_JOB_ID);
+        upsertScheduledJob({
+            id: PREVIEW_RECONCILIATION_JOB_ID,
+            name: "PR preview reconciliation",
+            description:
+                "Clean up managed PR preview resources after pull requests close outside Dashboard.",
+            enabled: existing?.enabled ?? true,
+            scheduleType: existing?.scheduleType ?? "interval",
+            intervalSeconds:
+                existing?.intervalSeconds ?? PREVIEW_RECONCILIATION_INTERVAL_SECONDS,
+            timeOfDay: existing?.timeOfDay,
+            cronExpression: existing?.cronExpression,
+            actionKey: PREVIEW_RECONCILIATION_JOB_ID,
+            actionPayload: {},
+            resourceClass: "light",
+            timeoutMs: PREVIEW_STOP_TIMEOUT_MS,
+        });
+        database.run("COMMIT");
+    } catch (error) {
+        try {
+            database.run("ROLLBACK");
+        } catch {
+            // Preserve the registration error.
+        }
+        throw error;
+    }
 }

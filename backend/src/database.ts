@@ -18,6 +18,23 @@ type DatabaseSync = Database;
 
 const SQLITE_BUSY_TIMEOUT_MS = 5000;
 const SQLITE_JOURNAL_MODE_RETRY_DELAY_MS = 25;
+const TEST_FILE_ARGUMENT_PATTERN = /(?:^|[\\/])[^\\/]+\.test\.[cm]?[jt]sx?$/u;
+
+/**
+ * Detects a Dashboard test process independently of mutable application mode.
+ * A test may exercise production policy by changing NODE_ENV, but that must
+ * never disable the database isolation boundary for the surrounding process.
+ * @returns Whether the current process is executing a Dashboard test file.
+ */
+export function isDashboardTestProcess(
+    environment: NodeJS.ProcessEnv = process.env,
+    arguments_: readonly string[] = process.argv
+): boolean {
+    return (
+        environment.NODE_ENV === "test" ||
+        arguments_.some((argument) => TEST_FILE_ARGUMENT_PATTERN.test(argument))
+    );
+}
 
 /**
  * Converts optional values to SQLite NULL-compatible bindings.
@@ -31,11 +48,16 @@ function resolveDatabasePath(): {
     configuredDatabasePath: string | undefined;
     databasePath: string;
 } {
-    const projectPaths = resolveDashboardProjectPathsForRuntime();
-    const configuredDatabasePath = resolveDashboardRuntimePath(
-        projectPaths?.productionDatabasePath,
-        process.env.MIRA_DASHBOARD_DB_PATH
-    );
+    const isTestProcess = isDashboardTestProcess();
+    const projectPaths = isTestProcess
+        ? undefined
+        : resolveDashboardProjectPathsForRuntime();
+    const configuredDatabasePath = isTestProcess
+        ? process.env.MIRA_DASHBOARD_DB_PATH?.trim() || undefined
+        : resolveDashboardRuntimePath(
+              projectPaths?.productionDatabasePath,
+              process.env.MIRA_DASHBOARD_DB_PATH
+          );
     return {
         configuredDatabasePath,
         databasePath: configuredDatabasePath
@@ -74,7 +96,7 @@ function assertTestDatabasePath(
     databasePath: string,
     configuredDatabasePath: string | undefined
 ): void {
-    if (process.env.NODE_ENV !== "test") {
+    if (!isDashboardTestProcess()) {
         return;
     }
     const configuredTemporaryRoot = path.resolve(os.tmpdir());
@@ -259,7 +281,7 @@ function instrumentStatement<T extends object>(statement: T): T {
 }
 
 function currentDatabase(): DatabaseSync {
-    if (process.env.NODE_ENV !== "test" && activeDatabaseState.database !== undefined) {
+    if (!isDashboardTestProcess() && activeDatabaseState.database !== undefined) {
         return activeDatabaseState.database;
     }
     const { databasePath } = resolveDatabasePath();
@@ -283,7 +305,7 @@ function closeActiveDatabase(): void {
 }
 
 export function closeDatabaseForTests(): void {
-    if (process.env.NODE_ENV !== "test") {
+    if (!isDashboardTestProcess()) {
         throw new Error("closeDatabaseForTests can only be used in test");
     }
     closeActiveDatabase();

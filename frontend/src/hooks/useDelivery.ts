@@ -240,13 +240,6 @@ async function stopPullRequestPreview(number: number): Promise<PullRequestPrevie
     return response.preview;
 }
 
-async function reconcilePullRequestPreview(): Promise<PullRequestActionResponse> {
-    return apiPostParsed(
-        "/pull-requests/preview/reconcile",
-        parsePullRequestActionResponse
-    );
-}
-
 /**
  * Provides pull requests.
  * @param refreshInterval Refresh interval value.
@@ -312,22 +305,6 @@ export function usePullRequestPreview() {
         queryFn: fetchPullRequestPreview,
         staleTime: 2000,
         refetchInterval: refreshPolicy.active,
-    });
-}
-
-/**
- * Reconciles retained preview state after an explicit privileged refresh.
- * @returns Preview reconciliation mutation.
- */
-export function useReconcilePullRequestPreview() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: reconcilePullRequestPreview,
-        onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: deliveryKeys.list() });
-            void queryClient.invalidateQueries({ queryKey: deliveryKeys.preview() });
-        },
     });
 }
 

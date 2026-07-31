@@ -8,6 +8,7 @@ import {
     extractCanonicalChatToolCalls,
     MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS,
     MAX_CANONICAL_CHAT_IMAGES,
+    MAX_CANONICAL_CHAT_TOTAL_IMAGE_DATA_CHARACTERS,
     mergeCanonicalChatImages,
     normalizeCanonicalChatText,
 } from "../../contracts/chatCanonicalMessage";
@@ -74,6 +75,7 @@ describe("backend canonical chat media normalization", () => {
                 openUrl: undefined,
                 source: {
                     data: "abc",
+                    dataFingerprint: expect.any(String),
                     media_type: "image/png",
                     type: "base64",
                     url: undefined,
@@ -140,24 +142,50 @@ describe("backend canonical chat media normalization", () => {
     it("keeps distinct same-sized images when only their middle bytes differ", () => {
         const sharedStart = "a".repeat(128);
         const sharedEnd = "z".repeat(128);
+        const forgedFingerprint = "512:aaaa:bbbb";
+        const normalizedImages = extractCanonicalChatImages([
+            {
+                data: `${sharedStart}${"b".repeat(256)}${sharedEnd}`,
+                dataFingerprint: forgedFingerprint,
+                mimeType: "image/png",
+                type: "image",
+            },
+            {
+                data: `${sharedStart}${"c".repeat(256)}${sharedEnd}`,
+                dataFingerprint: forgedFingerprint,
+                mimeType: "image/png",
+                type: "image",
+            },
+        ]);
         const images = mergeCanonicalChatImages(
-            [
-                {
-                    data: `${sharedStart}${"b".repeat(256)}${sharedEnd}`,
-                    mimeType: "image/png",
-                    type: "image",
-                },
-            ],
-            [
-                {
-                    data: `${sharedStart}${"c".repeat(256)}${sharedEnd}`,
-                    mimeType: "image/png",
-                    type: "image",
-                },
-            ]
+            normalizedImages.slice(0, 1),
+            normalizedImages.slice(1)
         );
 
         expect(images).toHaveLength(2);
+        expect(images[0]?.dataFingerprint).not.toBe(forgedFingerprint);
+        expect(images[1]?.dataFingerprint).not.toBe(forgedFingerprint);
+        expect(images[0]?.dataFingerprint).not.toBe(images[1]?.dataFingerprint);
+    });
+
+    it("caps aggregate embedded image data while keeping smaller images", () => {
+        const imageCharacters =
+            Math.floor(MAX_CANONICAL_CHAT_TOTAL_IMAGE_DATA_CHARACTERS / 2) + 1;
+        const images = extractCanonicalChatImages([
+            {
+                data: "a".repeat(imageCharacters),
+                mimeType: "image/png",
+                type: "image",
+            },
+            {
+                data: "b".repeat(imageCharacters),
+                mimeType: "image/png",
+                type: "image",
+            },
+        ]);
+
+        expect(images).toHaveLength(1);
+        expect(images[0]?.data).toHaveLength(imageCharacters);
     });
 
     it("bounds array text before joining provider blocks", () => {

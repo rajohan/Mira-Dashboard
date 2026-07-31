@@ -27,7 +27,6 @@ import {
     getPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
-    reconcileClosedPullRequestPreview,
 } from "../services/pullRequestPreviews.ts";
 import {
     getDashboardReleaseStatus,
@@ -257,22 +256,6 @@ export const pullRequestRoutes = {
                 }
             } catch (error) {
                 return routeError(error, "PR preview startup failed");
-            }
-        },
-    },
-    "/api/pull-requests/preview/reconcile": {
-        POST: async () => {
-            try {
-                const pullRequests = await listDashboardPullRequests();
-                await reconcileClosedPullRequestPreview(pullRequests);
-                pullRequestListSnapshot.invalidate();
-                pullRequestPreviewSnapshot.invalidate();
-                return json({
-                    isOk: true,
-                    message: "Closed pull request preview state reconciled",
-                } satisfies PullRequestActionResponse);
-            } catch (error) {
-                return routeError(error, "Pull request preview reconciliation failed");
             }
         },
     },

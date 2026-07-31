@@ -1,5 +1,5 @@
-import { getPersistedGatewayToken } from "./auth.ts";
 import gateway from "./gateway.ts";
+import { resolveGatewayToken } from "./gatewayToken.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import {
     getRuntimeReleaseIdentity,
@@ -39,17 +39,6 @@ function rollbackBackgroundServiceStartup(
     } catch (error) {
         logger.error("server.background_cleanup_failed", { error, operation: label });
     }
-}
-
-export function resolveGatewayToken(
-    environment = process.env,
-    persistedToken = getPersistedGatewayToken
-): string | undefined {
-    return (
-        environment.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-        persistedToken()?.trim() ||
-        undefined
-    );
 }
 
 /**

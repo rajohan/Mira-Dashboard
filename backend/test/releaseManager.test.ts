@@ -518,6 +518,33 @@ describe("Dashboard immutable release manager", () => {
         expect(existsSync(path.join(root, "previous"))).toBe(false);
     });
 
+    it("excludes an unverifiable previous slot and replaces it on activation", async () => {
+        const root = temporaryReleasesRoot();
+        const firstReleasePath = await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await createManagedRelease(root, THIRD_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+        rmSync(path.join(firstReleasePath, "scripts", "runManagedDashboardRelease.sh"));
+
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(state.previous).toBeUndefined();
+
+        const activated = await activateDashboardRelease(
+            THIRD_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
+        expect(activated).toMatchObject({
+            current: { commitSha: THIRD_COMMIT },
+            previous: { commitSha: SECOND_COMMIT },
+        });
+        expect(readlinkSync(path.join(root, "previous"))).toBe(
+            `releases/${SECOND_COMMIT}`
+        );
+    });
+
     it("exposes bounded lifecycle command summaries without artifact contents", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);

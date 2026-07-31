@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 import { existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -100,6 +101,42 @@ async function runPreflightInChild(databasePath: string): Promise<{
     return { exitCode, stderr };
 }
 
+async function runProductionModeTestWithoutPreload(
+    projectRoot: string,
+    fixturePath: string
+): Promise<{ exitCode: number; stderr: string }> {
+    const databaseModuleUrl = pathToFileURL(
+        path.resolve(import.meta.dirname, "../src/database.ts")
+    ).href;
+    await writeFile(
+        fixturePath,
+        `import { test } from "bun:test";
+test("cannot mutate production database", async () => {
+    process.env.NODE_ENV = "production";
+    const { database } = await import(${JSON.stringify(databaseModuleUrl)});
+    database.prepare("DELETE FROM sentinel").run();
+});\n`
+    );
+    const environment: NodeJS.ProcessEnv = {
+        ...process.env,
+        MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+        NODE_ENV: "test",
+    };
+    delete environment.MIRA_DASHBOARD_DB_PATH;
+    const child = Bun.spawn({
+        cmd: [process.execPath, "test", fixturePath],
+        env: environment,
+        stderr: "pipe",
+        stdout: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+        child.exited,
+        readText(child.stderr),
+        readText(child.stdout),
+    ]);
+    return { exitCode, stderr };
+}
+
 describe("database test safety guard", () => {
     it("allows fresh database paths inside new temporary subdirectories", async () => {
         const temporaryRoot = await mkdtemp(path.join(tmpdir(), "mira-db-guard-fresh-"));
@@ -142,6 +179,49 @@ describe("database test safety guard", () => {
         expect(stderr).toContain(
             "Refusing to open non-temporary Dashboard test database"
         );
+    });
+
+    it("keeps the test database boundary when a test switches to production mode", async () => {
+        const projectRoot = await mkdtemp(
+            path.join(realHomeRoot, ".mira-db-production-mode-test-")
+        );
+        const fixtureRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-db-production-mode-fixture-")
+        );
+        const fixturePath = path.join(fixtureRoot, "unsafe-production.test.ts");
+        const databasePath = resolveDashboardProjectPaths({
+            MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+        }).productionDatabasePath;
+        await mkdir(path.dirname(databasePath), { recursive: true });
+        const sentinelDatabase = new Database(databasePath, { create: true });
+        sentinelDatabase.run("CREATE TABLE sentinel (value TEXT NOT NULL)");
+        sentinelDatabase.run("INSERT INTO sentinel (value) VALUES ('untouched')");
+        sentinelDatabase.close();
+
+        try {
+            const { exitCode, stderr } = await runProductionModeTestWithoutPreload(
+                projectRoot,
+                fixturePath
+            );
+
+            expect(exitCode).not.toBe(0);
+            expect(stderr).toContain(
+                "Refusing to open non-temporary Dashboard test database"
+            );
+            const verificationDatabase = new Database(databasePath, { readonly: true });
+            try {
+                expect(
+                    verificationDatabase.query("SELECT value FROM sentinel").get() as {
+                        value: string;
+                    }
+                ).toEqual({ value: "untouched" });
+            } finally {
+                verificationDatabase.close();
+            }
+        } finally {
+            await rm(fixtureRoot, { force: true, recursive: true });
+            await rm(projectRoot, { force: true, recursive: true });
+        }
     });
 
     it("refuses preflight access to a non-temporary database while running tests", async () => {

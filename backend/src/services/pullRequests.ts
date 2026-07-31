@@ -186,7 +186,11 @@ const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
-const MAX_DASHBOARD_PULL_REQUESTS = 100;
+const PULL_REQUEST_PAGE_SIZE = 100;
+const MAX_DASHBOARD_PULL_REQUESTS = 500;
+const MAX_DASHBOARD_PULL_REQUEST_PAGES = Math.ceil(
+    MAX_DASHBOARD_PULL_REQUESTS / PULL_REQUEST_PAGE_SIZE
+);
 const MAX_PULL_REQUEST_BODY_LENGTH = 64 * 1024;
 const STACK_MERGE_POLL_INTERVAL_MS = 1000;
 const STACK_MERGE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -865,7 +869,24 @@ function dashboardReleaseSummary(
  * @returns Read the managed production release slots without exposing host paths.
  */
 export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatus> {
-    const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+    let state: Awaited<ReturnType<typeof readDashboardReleaseState>>;
+    try {
+        state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+    } catch (error) {
+        if (
+            process.env.NODE_ENV === "production" ||
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1"
+        ) {
+            throw error;
+        }
+        logger.warn("release_status.isolated_metadata_unavailable", { error });
+        return {
+            rollback: {
+                available: false,
+                reason: "Production release metadata is unavailable in isolated PR dev",
+            },
+        };
+    }
     const current = state.current ? dashboardReleaseSummary(state.current) : undefined;
     const previous = state.previous ? dashboardReleaseSummary(state.previous) : undefined;
     const isRollbackAvailable =
@@ -1923,7 +1944,7 @@ async function listDashboardPullRequestGraphqlRows(
                         }`
         : "";
     const jqParts = [
-        ".data.repository.pullRequests.nodes[]",
+        "$connection.nodes[]",
         `| .body = ((.body // "")[0:${MAX_PULL_REQUEST_BODY_LENGTH}])`,
         "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
     ];
@@ -1933,8 +1954,16 @@ async function listDashboardPullRequestGraphqlRows(
             "| del(.stackEntry)"
         );
     }
-    return runGhJsonLines(
-        [
+    const pullRequests: PullRequestSummary[] = [];
+    const seenCursors = new Set<string>();
+    let endCursor: string | undefined;
+    let pagesRead = 0;
+    while (
+        pagesRead < MAX_DASHBOARD_PULL_REQUEST_PAGES &&
+        pullRequests.length < MAX_DASHBOARD_PULL_REQUESTS
+    ) {
+        pagesRead += 1;
+        const arguments_ = [
             "api",
             "graphql",
             "-F",
@@ -1942,12 +1971,14 @@ async function listDashboardPullRequestGraphqlRows(
             "-F",
             `name=${repo.name}`,
             "-F",
-            `limit=${MAX_DASHBOARD_PULL_REQUESTS}`,
+            `limit=${PULL_REQUEST_PAGE_SIZE}`,
+            ...(endCursor ? ["-F", `endCursor=${endCursor}`] : []),
             "-f",
-            `query=query($owner: String!, $name: String!, $limit: Int!) {
+            `query=query($owner: String!, $name: String!, $limit: Int!, $endCursor: String) {
             repository(owner: $owner, name: $name) {
                 pullRequests(
                     first: $limit
+                    after: $endCursor
                     states: OPEN
                     orderBy: { field: UPDATED_AT, direction: DESC }
                 ) {
@@ -1986,15 +2017,79 @@ async function listDashboardPullRequestGraphqlRows(
                             state
                         }
                     }
+                    pageInfo {
+                        endCursor
+                        hasNextPage
+                    }
                 }
             }
             }`,
             "--jq",
-            jqParts.join(" "),
-        ],
-        parsePullRequestSummary,
-        { timeoutMs: PR_LIST_TIMEOUT_MS }
-    );
+            `.data.repository.pullRequests as $connection | ((${jqParts.join(" ")}), {__miraPageInfo: $connection.pageInfo})`,
+        ];
+        const rows = await runGhJsonLines(arguments_, parsePullRequestGraphqlOutput, {
+            timeoutMs: PR_LIST_TIMEOUT_MS,
+        });
+        const pagePullRequests = rows.flatMap((row) =>
+            row.pullRequest ? [row.pullRequest] : []
+        );
+        pullRequests.push(
+            ...pagePullRequests.slice(
+                0,
+                MAX_DASHBOARD_PULL_REQUESTS - pullRequests.length
+            )
+        );
+        const pageInfoRows = rows.flatMap((row) => (row.pageInfo ? [row.pageInfo] : []));
+        if (pageInfoRows.length > 1) {
+            throw new Error("GitHub returned duplicate pull request page metadata");
+        }
+        const pageInfo = pageInfoRows[0];
+        if (!pageInfo?.hasNextPage) break;
+        if (!pageInfo.endCursor || seenCursors.has(pageInfo.endCursor)) {
+            throw new Error("GitHub returned an invalid pull request page cursor");
+        }
+        if (
+            pullRequests.length >= MAX_DASHBOARD_PULL_REQUESTS ||
+            pagesRead >= MAX_DASHBOARD_PULL_REQUEST_PAGES
+        ) {
+            logger.warn("github.pull_request_list_truncated", {
+                limit: MAX_DASHBOARD_PULL_REQUESTS,
+            });
+            break;
+        }
+        seenCursors.add(pageInfo.endCursor);
+        endCursor = pageInfo.endCursor;
+    }
+    return pullRequests;
+}
+
+interface PullRequestGraphqlOutput {
+    pageInfo?: { endCursor?: string; hasNextPage: boolean };
+    pullRequest?: PullRequestSummary;
+}
+
+function parsePullRequestGraphqlOutput(value: unknown): PullRequestGraphqlOutput {
+    if (isRecord(value) && "__miraPageInfo" in value) {
+        const pageInfo = value.__miraPageInfo;
+        if (!isRecord(pageInfo) || typeof pageInfo.hasNextPage !== "boolean") {
+            throw new TypeError("GitHub pull request page metadata is invalid");
+        }
+        const endCursor = pageInfo.endCursor;
+        if (
+            endCursor !== null &&
+            endCursor !== undefined &&
+            typeof endCursor !== "string"
+        ) {
+            throw new TypeError("GitHub pull request page cursor is invalid");
+        }
+        return {
+            pageInfo: {
+                ...(typeof endCursor === "string" && { endCursor }),
+                hasNextPage: pageInfo.hasNextPage,
+            },
+        };
+    }
+    return { pullRequest: parsePullRequestSummary(value) };
 }
 
 function parseGraphqlPullRequestFieldNames(value: unknown): string[] {

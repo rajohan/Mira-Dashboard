@@ -3210,50 +3210,6 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
-    it("refetches pull requests when preview reconciliation fails", async () => {
-        const user = userEvent.setup();
-        const defaultFetch = globalThis.fetch;
-        let pullRequestFetches = 0;
-        Object.defineProperty(globalThis, "fetch", {
-            configurable: true,
-            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
-                const url = requestUrl(input);
-                const method = init?.method ?? "GET";
-                if (method === "GET" && url === "/api/pull-requests") {
-                    pullRequestFetches += 1;
-                }
-                if (method === "POST" && url === "/api/pull-requests/preview/reconcile") {
-                    return Promise.resolve(
-                        Response.json(
-                            {
-                                error: {
-                                    code: "pull_request_failed",
-                                    message: "Preview reconciliation failed",
-                                    requestId: "019fb9b8-2c69-7ad4-b568-b301f59a8e26",
-                                },
-                            },
-                            { status: 500 }
-                        )
-                    );
-                }
-                return defaultFetch(input, init);
-            }),
-            writable: true,
-        });
-
-        const view = renderPage(createElement(Delivery));
-        await screen.findByText("Expand backend coverage");
-        expect(pullRequestFetches).toBe(1);
-
-        await user.click(screen.getByRole("button", { name: "Refresh Delivery" }));
-
-        await screen.findByText("Preview reconciliation failed");
-        await waitFor(() => expect(pullRequestFetches).toBe(2));
-
-        view.unmount();
-        view.queryClient.clear();
-    });
-
     it("shows dependent PR chains and creates GitHub stacks bottom-to-top", async () => {
         const user = userEvent.setup();
         const defaultFetch = globalThis.fetch;

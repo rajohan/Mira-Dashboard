@@ -24,11 +24,11 @@ import type {
     PullRequestPreviewLifecycle,
     PullRequestPreviewStatus,
 } from "../../../contracts/delivery.ts";
-import { getPersistedGatewayToken } from "../auth.ts";
 import {
     prepareDevelopmentState,
     resolveDevelopmentStackConfig,
 } from "../development/developmentStack.ts";
+import { resolveGatewayToken } from "../gatewayToken.ts";
 import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
@@ -1705,7 +1705,7 @@ export async function startPullRequestPreview(
         writePreviewRecord(config, startingRecord);
         materializeGatewayCredentials(
             config,
-            (options.readGatewayToken || getPersistedGatewayToken)()
+            resolveGatewayToken(process.env, options.readGatewayToken)
         );
         const sandboxCommand = buildPullRequestPreviewSandboxCommand({
             config,

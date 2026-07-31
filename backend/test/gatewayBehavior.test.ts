@@ -1364,7 +1364,10 @@ describe("gateway behavior", () => {
                             id?: string;
                             payload?: {
                                 messages?: Array<{
-                                    message?: { content?: unknown[] };
+                                    message?: {
+                                        content?: unknown[];
+                                        images?: unknown[];
+                                    };
                                 }>;
                             };
                         }
@@ -1380,7 +1383,19 @@ describe("gateway behavior", () => {
                             content: [
                                 { text: "see image", type: "text" },
                                 {
+                                    data: {
+                                        contentFingerprint: expect.any(String),
+                                        length: 12,
+                                    },
+                                    dataFingerprint: expect.any(String),
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            images: [
+                                {
                                     data: "base64-image",
+                                    dataFingerprint: expect.any(String),
                                     mimeType: "image/png",
                                     type: "image",
                                 },

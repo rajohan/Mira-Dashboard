@@ -58,6 +58,7 @@ export function canonicalChatContentFingerprint(content: string): string {
 }
 
 const CANONICAL_MEDIA_BLOCK_TYPES = new Set(["image", "image_url", "input_image"]);
+const CANONICAL_MEDIA_FINGERPRINT_PATTERN = /^\d{1,10}:[\da-z]{1,7}:[\da-z]{1,7}$/u;
 const CANONICAL_MEDIA_DATA_FIELDS = new Set([
     "base64",
     "contentBase64",
@@ -69,6 +70,8 @@ export const MAX_CANONICAL_CHAT_IMAGES = 10;
 export const MAX_CANONICAL_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS =
     Math.ceil((MAX_CANONICAL_CHAT_IMAGE_BYTES * 4) / 3) + 8;
+export const MAX_CANONICAL_CHAT_TOTAL_IMAGE_DATA_CHARACTERS =
+    MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS;
 const MAX_CANONICAL_CHAT_THINKING_BLOCKS = 100;
 const MAX_CANONICAL_CHAT_TEXT_BLOCKS = 1000;
 const MAX_CANONICAL_CHAT_TOOL_CALLS = 100;
@@ -98,12 +101,15 @@ function isCanonicalMediaRecord(record: Record<string, unknown>): boolean {
     );
 }
 
-function summarizedCanonicalMediaData(value: string): {
+function summarizedCanonicalMediaData(
+    value: string,
+    storedFingerprint?: string
+): {
     contentFingerprint: string;
     length: number;
 } {
     return {
-        contentFingerprint: canonicalChatContentFingerprint(value),
+        contentFingerprint: storedFingerprint || canonicalChatContentFingerprint(value),
         length: value.length,
     };
 }
@@ -111,14 +117,19 @@ function summarizedCanonicalMediaData(value: string): {
 function summarizeCanonicalChatFingerprintValue(
     value: unknown,
     field: string,
-    isMediaRecord: boolean
+    isMediaRecord: boolean,
+    parentRecord?: Record<string, unknown>
 ): unknown {
     if (
         typeof value === "string" &&
         isMediaRecord &&
         (CANONICAL_MEDIA_DATA_FIELDS.has(field) || value.startsWith("data:image/"))
     ) {
-        return summarizedCanonicalMediaData(value);
+        const storedFingerprint =
+            field === "data" && typeof parentRecord?.dataFingerprint === "string"
+                ? parentRecord.dataFingerprint
+                : undefined;
+        return summarizedCanonicalMediaData(value, storedFingerprint);
     }
     if (Array.isArray(value)) {
         return value.map((item) =>
@@ -133,7 +144,12 @@ function summarizeCanonicalChatFingerprintValue(
     return Object.fromEntries(
         Object.entries(record).map(([key, item]) => [
             key,
-            summarizeCanonicalChatFingerprintValue(item, key, nestedIsMediaRecord),
+            summarizeCanonicalChatFingerprintValue(
+                item,
+                key,
+                nestedIsMediaRecord,
+                record
+            ),
         ])
     );
 }
@@ -339,8 +355,18 @@ export function mergeCanonicalChatImages(
 ): CanonicalChatImage[] {
     const seen = new Set<string>();
     const images: CanonicalChatImage[] = [];
+    let embeddedCharacters = 0;
     for (const image of [...previous, ...next]) {
-        const normalized = normalizeCanonicalChatImage(image);
+        const record = image as unknown as Record<string, unknown>;
+        const nextEmbeddedCharacters = embeddedMediaCharacters(record);
+        const canIncludeEmbeddedData =
+            embeddedCharacters + nextEmbeddedCharacters <=
+            MAX_CANONICAL_CHAT_TOTAL_IMAGE_DATA_CHARACTERS;
+        const normalized = canonicalChatImageFromRecord(
+            record,
+            canIncludeEmbeddedData,
+            true
+        );
         if (!normalized) {
             continue;
         }
@@ -352,6 +378,9 @@ export function mergeCanonicalChatImages(
         }
         seen.add(identity);
         images.push(normalized);
+        if (canIncludeEmbeddedData) {
+            embeddedCharacters += nextEmbeddedCharacters;
+        }
         if (images.length >= MAX_CANONICAL_CHAT_IMAGES) {
             break;
         }
@@ -391,6 +420,69 @@ function canonicalImageHasUrl(image: CanonicalChatImage): boolean {
     );
 }
 
+function retainedMediaFingerprint(
+    value: string | undefined,
+    originalValue: string | undefined,
+    storedFingerprint: string | undefined,
+    trustStoredFingerprint: boolean
+): string | undefined {
+    if (!value) return undefined;
+    return originalValue === value &&
+        trustStoredFingerprint &&
+        storedFingerprint &&
+        CANONICAL_MEDIA_FINGERPRINT_PATTERN.test(storedFingerprint)
+        ? storedFingerprint
+        : canonicalChatContentFingerprint(value);
+}
+
+function normalizedCanonicalChatImage(
+    image: CanonicalChatImage,
+    trustStoredFingerprint: boolean
+): CanonicalChatImage | undefined {
+    const declaredMimeType = image.source?.media_type || image.mimeType;
+    const data = boundedEmbeddedImageData(image.data, declaredMimeType);
+    const sourceData = boundedEmbeddedImageData(image.source?.data, declaredMimeType);
+    const dataFingerprint = retainedMediaFingerprint(
+        data,
+        image.data,
+        image.dataFingerprint,
+        trustStoredFingerprint
+    );
+    const sourceDataFingerprint = retainedMediaFingerprint(
+        sourceData,
+        image.source?.data,
+        image.source?.dataFingerprint,
+        trustStoredFingerprint
+    );
+    const normalized: CanonicalChatImage = {
+        ...image,
+        alt: image.alt ? truncateCanonicalChatText(image.alt, 4096) : image.alt,
+        data,
+        source: image.source
+            ? {
+                  ...image.source,
+                  data: sourceData,
+              }
+            : undefined,
+    };
+    if (dataFingerprint) {
+        normalized.dataFingerprint = dataFingerprint;
+    } else {
+        delete normalized.dataFingerprint;
+    }
+    if (normalized.source && sourceDataFingerprint) {
+        normalized.source.dataFingerprint = sourceDataFingerprint;
+    } else if (normalized.source) {
+        delete normalized.source.dataFingerprint;
+    }
+    if (normalized.source && !Object.values(normalized.source).some(Boolean)) {
+        normalized.source = undefined;
+    }
+    return data || sourceData || canonicalImageHasUrl(normalized)
+        ? normalized
+        : undefined;
+}
+
 /**
  * Bounds one provider image while retaining URL-backed images and supported payloads.
  * @param image Provider image block.
@@ -399,21 +491,7 @@ function canonicalImageHasUrl(image: CanonicalChatImage): boolean {
 export function normalizeCanonicalChatImage(
     image: CanonicalChatImage
 ): CanonicalChatImage | undefined {
-    const declaredMimeType = image.source?.media_type || image.mimeType;
-    const data = boundedEmbeddedImageData(image.data, declaredMimeType);
-    const sourceData = boundedEmbeddedImageData(image.source?.data, declaredMimeType);
-    const normalized: CanonicalChatImage = {
-        ...image,
-        alt: image.alt ? truncateCanonicalChatText(image.alt, 4096) : image.alt,
-        data,
-        source: image.source ? { ...image.source, data: sourceData } : undefined,
-    };
-    if (normalized.source && !Object.values(normalized.source).some(Boolean)) {
-        normalized.source = undefined;
-    }
-    return data || sourceData || canonicalImageHasUrl(normalized)
-        ? normalized
-        : undefined;
+    return normalizedCanonicalChatImage(image, true);
 }
 
 /**
@@ -437,63 +515,86 @@ export function mergeCanonicalChatAttachments(
     });
 }
 
-/**
- * Extracts image blocks from OpenClaw content.
- * @param content Provider content.
- * @returns Canonical image blocks.
- */
-export function extractCanonicalChatImages(content: unknown): CanonicalChatImage[] {
-    if (!Array.isArray(content)) {
-        return [];
+interface CanonicalizedChatMedia {
+    content: unknown;
+    images: CanonicalChatImage[];
+}
+
+function embeddedMediaCharacters(record: Record<string, unknown>): number {
+    const source = canonicalChatRecord(record.source);
+    const imageUrl =
+        typeof record.image_url === "string"
+            ? record.image_url
+            : canonicalChatRecord(record.image_url)?.url;
+    return (
+        (typeof record.data === "string" ? record.data.length : 0) +
+        (typeof imageUrl === "string" && imageUrl.startsWith("data:image/")
+            ? imageUrl.length
+            : 0) +
+        (typeof source?.data === "string" ? source.data.length : 0)
+    );
+}
+
+function canonicalChatImageFromRecord(
+    record: Record<string, unknown>,
+    includeEmbeddedData: boolean,
+    trustStoredFingerprint: boolean
+): CanonicalChatImage | undefined {
+    const type = CANONICAL_MEDIA_BLOCK_TYPES.has(String(record.type))
+        ? (record.type as CanonicalChatImage["type"])
+        : undefined;
+    if (!type) return undefined;
+
+    const rawImageUrl = record.image_url;
+    const imageUrlRecord = canonicalChatRecord(rawImageUrl);
+    let imageUrlValue: string | undefined;
+    if (typeof rawImageUrl === "string") {
+        imageUrlValue = rawImageUrl;
+    } else if (typeof imageUrlRecord?.url === "string") {
+        imageUrlValue = imageUrlRecord.url;
     }
-    const images: CanonicalChatImage[] = [];
-    for (const item of content) {
-        if (!item || typeof item !== "object" || Array.isArray(item)) {
-            continue;
-        }
-        const record = item as Record<string, unknown>;
-        const type =
-            record.type === "image" ||
-            record.type === "image_url" ||
-            record.type === "input_image"
-                ? record.type
-                : undefined;
-        if (!type) {
-            continue;
-        }
+    const embeddedImageUrl = imageUrlValue?.startsWith("data:image/")
+        ? imageUrlValue
+        : undefined;
+    let imageUrl: CanonicalChatImage["image_url"];
+    if (typeof rawImageUrl === "string" && !embeddedImageUrl) {
+        imageUrl = rawImageUrl;
+    } else if (typeof imageUrlRecord?.url === "string" && !embeddedImageUrl) {
+        imageUrl = { url: imageUrlRecord.url };
+    }
+    const rawSource = canonicalChatRecord(record.source);
+    const source = rawSource
+        ? {
+              data:
+                  includeEmbeddedData && typeof rawSource.data === "string"
+                      ? rawSource.data
+                      : undefined,
+              dataFingerprint:
+                  typeof rawSource.dataFingerprint === "string"
+                      ? rawSource.dataFingerprint
+                      : undefined,
+              media_type:
+                  typeof rawSource.media_type === "string"
+                      ? rawSource.media_type
+                      : undefined,
+              type: typeof rawSource.type === "string" ? rawSource.type : undefined,
+              url: typeof rawSource.url === "string" ? rawSource.url : undefined,
+          }
+        : undefined;
 
-        const rawImageUrl = record.image_url;
-        const imageUrlRecord =
-            rawImageUrl && typeof rawImageUrl === "object" && !Array.isArray(rawImageUrl)
-                ? (rawImageUrl as Record<string, unknown>)
-                : undefined;
-        let imageUrl: CanonicalChatImage["image_url"];
-        if (typeof rawImageUrl === "string") {
-            imageUrl = rawImageUrl;
-        } else if (typeof imageUrlRecord?.url === "string") {
-            imageUrl = { url: imageUrlRecord.url };
-        }
-        const rawSource =
-            record.source &&
-            typeof record.source === "object" &&
-            !Array.isArray(record.source)
-                ? (record.source as Record<string, unknown>)
-                : undefined;
-        const source = rawSource
-            ? {
-                  data: typeof rawSource.data === "string" ? rawSource.data : undefined,
-                  media_type:
-                      typeof rawSource.media_type === "string"
-                          ? rawSource.media_type
-                          : undefined,
-                  type: typeof rawSource.type === "string" ? rawSource.type : undefined,
-                  url: typeof rawSource.url === "string" ? rawSource.url : undefined,
-              }
-            : undefined;
+    let data: string | undefined;
+    if (includeEmbeddedData) {
+        data = typeof record.data === "string" ? record.data : embeddedImageUrl;
+    }
 
-        const image = normalizeCanonicalChatImage({
+    return normalizedCanonicalChatImage(
+        {
             alt: typeof record.alt === "string" ? record.alt : undefined,
-            data: typeof record.data === "string" ? record.data : undefined,
+            data,
+            dataFingerprint:
+                typeof record.dataFingerprint === "string"
+                    ? record.dataFingerprint
+                    : undefined,
             image_url: imageUrl,
             mimeType: typeof record.mimeType === "string" ? record.mimeType : undefined,
             openUrl: typeof record.openUrl === "string" ? record.openUrl : undefined,
@@ -503,15 +604,58 @@ export function extractCanonicalChatImages(content: unknown): CanonicalChatImage
                     : undefined,
             type,
             url: typeof record.url === "string" ? record.url : undefined,
-        });
-        if (image) {
-            images.push(image);
-        }
-        if (images.length >= MAX_CANONICAL_CHAT_IMAGES) {
-            break;
-        }
+        },
+        trustStoredFingerprint
+    );
+}
+
+/**
+ * Extracts bounded display images while replacing embedded media bytes in the
+ * canonical content copy with identities computed once during normalization.
+ * @param content Provider content.
+ * @returns Canonical content and image blocks.
+ */
+export function canonicalizeCanonicalChatMedia(content: unknown): CanonicalizedChatMedia {
+    if (!Array.isArray(content)) {
+        return { content, images: [] };
     }
-    return images;
+    const images: CanonicalChatImage[] = [];
+    const canonicalContent: unknown[] = [];
+    let embeddedCharacters = 0;
+    for (const item of content) {
+        const record = canonicalChatRecord(item);
+        if (!record || !CANONICAL_MEDIA_BLOCK_TYPES.has(String(record.type))) {
+            canonicalContent.push(item);
+            continue;
+        }
+        const nextEmbeddedCharacters = embeddedMediaCharacters(record);
+        const canIncludeEmbeddedData =
+            images.length < MAX_CANONICAL_CHAT_IMAGES &&
+            embeddedCharacters + nextEmbeddedCharacters <=
+                MAX_CANONICAL_CHAT_TOTAL_IMAGE_DATA_CHARACTERS;
+        const image = canonicalChatImageFromRecord(record, canIncludeEmbeddedData, false);
+        if (!image) {
+            canonicalContent.push({ type: record.type });
+            continue;
+        }
+        if (images.length < MAX_CANONICAL_CHAT_IMAGES) {
+            images.push(image);
+            if (canIncludeEmbeddedData) {
+                embeddedCharacters += nextEmbeddedCharacters;
+            }
+        }
+        canonicalContent.push(summarizeCanonicalChatValueForFingerprint(image));
+    }
+    return { content: canonicalContent, images };
+}
+
+/**
+ * Extracts image blocks from OpenClaw content.
+ * @param content Provider content.
+ * @returns Canonical image blocks.
+ */
+export function extractCanonicalChatImages(content: unknown): CanonicalChatImage[] {
+    return canonicalizeCanonicalChatMedia(content).images;
 }
 
 /**

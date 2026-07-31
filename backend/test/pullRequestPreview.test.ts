@@ -524,6 +524,8 @@ describe("managed pull request preview", () => {
     });
 
     it("starts, reuses, updates, reports, and stops one trusted preview slot", async () => {
+        const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+        process.env.OPENCLAW_GATEWAY_TOKEN = "environment-gateway-token";
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-lifecycle-"));
         const config = {
             ...previewConfig(root),
@@ -538,6 +540,7 @@ describe("managed pull request preview", () => {
         let isPreviewUnitCollected = false;
         let didProxyReceiveDisposableToken = false;
         let didProxyReceiveUpstreamToken = false;
+        let expectedUpstreamToken = "environment-gateway-token";
         let didProxyStartWithStartingRecord = false;
         let isMissingWorktreeRegistered = false;
         const activeUnits = new Set<string>();
@@ -626,7 +629,7 @@ describe("managed pull request preview", () => {
                                 readFileSync(
                                     config.gatewayUpstreamTokenFile,
                                     "utf8"
-                                ).trim() === "persisted-gateway-token";
+                                ).trim() === expectedUpstreamToken;
                         }
                         if (commandArguments.includes(`--unit=${config.unitName}`)) {
                             isPreviewUnitCollected = false;
@@ -765,6 +768,8 @@ describe("managed pull request preview", () => {
             expect(didProxyStartWithStartingRecord).toBe(true);
             expect(didProxyReceiveDisposableToken).toBe(true);
             expect(didProxyReceiveUpstreamToken).toBe(true);
+            delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            expectedUpstreamToken = "persisted-gateway-token";
             expect(statSync(config.gatewayTokenFile).mode & 0o777).toBe(0o600);
             expect(commands).toContain(
                 "sudo -n tailscale serve --bg --https=5173 http://127.0.0.1:5173"
@@ -1023,6 +1028,11 @@ describe("managed pull request preview", () => {
                 )
             ).toBe(true);
         } finally {
+            if (originalGatewayToken === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            } else {
+                process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
+            }
             processSpy.mockRestore();
             prepareStateSpy.mockRestore();
             fetchSpy.mockRestore();
@@ -1270,24 +1280,13 @@ describe("managed pull request preview", () => {
                 enqueueCallsBeforeReconciliation + 2
             );
             executionsSpy.mockReturnValue([]);
-            const structuredLogs = captureStructuredLogs();
             statusSpy.mockRejectedValueOnce(new Error("preview status unavailable"));
-            await reconcileClosedPullRequestPreview([]);
+            expect(reconcileClosedPullRequestPreview([])).rejects.toThrow(
+                "preview status unavailable"
+            );
             expect(enqueueSpy).toHaveBeenCalledTimes(
                 enqueueCallsBeforeReconciliation + 2
             );
-            expect(structuredLogs.entries).toContainEqual(
-                expect.objectContaining({
-                    component: "pull-request-previews",
-                    error: {
-                        message: "preview status unavailable",
-                        name: "Error",
-                    },
-                    event: "preview.closed_pr_reconciliation_failed",
-                    level: "error",
-                })
-            );
-            structuredLogs.stop();
 
             for (const route of [
                 "/api/pull-requests/:number/preview/start",
@@ -1342,14 +1341,41 @@ describe("managed pull request preview", () => {
 
             registerPullRequestPreviewExecutionActions();
             const cleanupHandler = handlers.get("dashboard.preview.cleanup");
+            const reconcileHandler = handlers.get("dashboard.preview.reconcile");
             const startHandler = handlers.get("dashboard.preview.start");
             const stopHandler = handlers.get("dashboard.preview.stop");
             expect(cleanupHandler).toBeDefined();
+            expect(reconcileHandler).toBeDefined();
             expect(startHandler).toBeDefined();
             expect(stopHandler).toBeDefined();
-            if (!cleanupHandler || !startHandler || !stopHandler) {
+            if (!cleanupHandler || !reconcileHandler || !startHandler || !stopHandler) {
                 throw new Error("Preview handlers were not registered");
             }
+            expect(
+                scheduledJobs.getScheduledJob("dashboard.preview.reconcile")
+            ).toMatchObject({
+                actionKey: "dashboard.preview.reconcile",
+                enabled: true,
+                intervalSeconds: 6 * 60 * 60,
+                scheduleType: "interval",
+            });
+            scheduledJobs.updateScheduledJob("dashboard.preview.reconcile", {
+                enabled: false,
+                intervalSeconds: 12 * 60 * 60,
+            });
+            registerPullRequestPreviewExecutionActions();
+            expect(
+                scheduledJobs.getScheduledJob("dashboard.preview.reconcile")
+            ).toMatchObject({
+                enabled: false,
+                intervalSeconds: 12 * 60 * 60,
+                scheduleType: "interval",
+            });
+            listSpy.mockResolvedValue([pullRequest]);
+            statusSpy.mockResolvedValue({ status: "stopped" });
+            expect(
+                reconcileHandler(previewScheduledJob(), undefined, context)
+            ).resolves.toEqual({ openPullRequestCount: 1 });
             expect(
                 startHandler(
                     previewScheduledJob("335"),

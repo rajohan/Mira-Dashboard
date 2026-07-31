@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { getPersistedGatewayToken } from "../auth.ts";
+import { resolveGatewayToken } from "../gatewayToken.ts";
 import { byteStreamReader } from "../lib/byteStreams.ts";
 import {
     guardedPath,
@@ -83,11 +83,7 @@ function mimeTypeFromPath(filePath: string): string {
 }
 
 function configuredGatewayToken(): string | undefined {
-    return (
-        process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-        getPersistedGatewayToken()?.trim() ||
-        undefined
-    );
+    return resolveGatewayToken();
 }
 
 function gatewayMediaUrl(request: Request): URL | undefined {

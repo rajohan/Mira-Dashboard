@@ -257,6 +257,33 @@ fi
     chmodSync(binaryPath, 0o755);
 }
 
+function writeFakeGhWithPaginatedPullRequests(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
+  printf '%s\n' '{"data":{"__type":{"fields":[{"name":"number"}]}}}'
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
+  if [[ "$*" == *"-F endCursor=cursor-100"* ]]; then
+    printf '%s\n' '{"number":101,"title":"PR 101","body":"","url":"https://github.test/pr/101","headRefName":"branch-101","headRefOid":"head101","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
+    printf '%s\n' '{"__miraPageInfo":{"endCursor":null,"hasNextPage":false}}'
+  else
+    for number in $(seq 1 100); do
+      printf '{"number":%s,"title":"PR %s","body":"","url":"https://github.test/pr/%s","headRefName":"branch-%s","headRefOid":"head%s","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}\n' "$number" "$number" "$number" "$number" "$number"
+    done
+    printf '%s\n' '{"__miraPageInfo":{"endCursor":"cursor-100","hasNextPage":true}}'
+  fi
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
 function writeFakeGhForPullRequestActions(binaryPath: string, logPath: string): void {
     writeFileSync(
         binaryPath,
@@ -2468,6 +2495,7 @@ describe("backend service behavior", () => {
     });
 
     it("reports managed release slots and queues rollback through the release lock", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE");
         rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_PROJECT_ROOT");
         const projectRoot = createTemporaryRoot("mira-release-status-project-");
@@ -2681,6 +2709,20 @@ describe("backend service behavior", () => {
             const unavailableStatusResponse =
                 await pullRequestRoutes["/api/pull-requests/releases"].GET();
             expect(unavailableStatusResponse.status).toBe(500);
+
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+            const isolatedStatusResponse =
+                await pullRequestRoutes["/api/pull-requests/releases"].GET();
+            expect(isolatedStatusResponse.status).toBe(200);
+            expect(isolatedStatusResponse.json()).resolves.toEqual({
+                release: {
+                    rollback: {
+                        available: false,
+                        reason: "Production release metadata is unavailable in isolated PR dev",
+                    },
+                },
+            });
+            delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
             process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
@@ -4174,6 +4216,27 @@ fi
         expect(ghCommands.match(/api graphql/gu)).toHaveLength(3);
         expect(ghCommands.match(/__type\(name: "PullRequest"\)/gu)).toHaveLength(1);
         expect(ghCommands).not.toContain("stackEntry");
+    });
+
+    it("paginates the bounded open pull request listing beyond 100 rows", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-list-pagination-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-list-pagination-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhWithPaginatedPullRequests(path.join(fakeBin, "gh"), ghLog);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+
+        const { listDashboardPullRequests } =
+            await import("../src/services/pullRequests.ts");
+
+        const pullRequests = await listDashboardPullRequests();
+        expect(pullRequests).toHaveLength(101);
+        expect(pullRequests.map((pullRequest) => pullRequest.number)).toContain(101);
+        const ghCommands = await Bun.file(ghLog).text();
+        expect(ghCommands).toContain("-F endCursor=cursor-100");
+        expect(ghCommands.match(/api graphql/gu)).toHaveLength(3);
     });
 
     it("creates a native GitHub stack only from an existing linear PR chain", async () => {

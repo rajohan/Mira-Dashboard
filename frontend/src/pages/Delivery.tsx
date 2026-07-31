@@ -50,7 +50,6 @@ import {
     useProductionCheckout,
     usePullRequestPreview,
     usePullRequests,
-    useReconcilePullRequestPreview,
     useRejectPullRequest,
     useRollbackDashboard,
     useStartPullRequestPreview,
@@ -886,11 +885,9 @@ export function Delivery() {
     const rollbackDashboard = useRollbackDashboard();
     const startPullRequestPreview = useStartPullRequestPreview();
     const stopPullRequestPreview = useStopPullRequestPreview();
-    const reconcilePullRequestPreview = useReconcilePullRequestPreview();
     const [pendingAction, setPendingAction] = useState<PendingAction>();
     const [lastResult, setLastResult] = useState<string | undefined>();
     const [actionError, setActionError] = useState<string | undefined>();
-    const [isRefreshingDelivery, setIsRefreshingDelivery] = useState(false);
     const isActionPending =
         approvePullRequest.isPending ||
         approvePullRequestReview.isPending ||
@@ -900,8 +897,7 @@ export function Delivery() {
         deployDashboard.isPending ||
         rollbackDashboard.isPending ||
         startPullRequestPreview.isPending ||
-        stopPullRequestPreview.isPending ||
-        reconcilePullRequestPreview.isPending;
+        stopPullRequestPreview.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const productionActionBlockedMessage = isProductionActionBlocked
         ? checkoutMessage(productionCheckout, productionCheckoutError ?? undefined)
@@ -933,27 +929,6 @@ export function Delivery() {
     const externalPullRequests = standalonePullRequests.filter(
         (pr) => !isMiraPullRequest(pr)
     );
-
-    async function refreshDelivery() {
-        setActionError(undefined);
-        setIsRefreshingDelivery(true);
-        let refreshError: unknown;
-        try {
-            await reconcilePullRequestPreview.mutateAsync();
-        } catch (error_) {
-            refreshError = error_;
-        }
-        try {
-            await refetchPullRequests();
-        } catch (error_) {
-            refreshError ??= error_;
-        } finally {
-            setIsRefreshingDelivery(false);
-        }
-        if (refreshError) {
-            setActionError(messageFromError(refreshError, "Failed to refresh Delivery"));
-        }
-    }
 
     /** Performs confirm action. */
     async function confirmAction(action: Exclude<PendingAction, undefined>) {
@@ -1477,12 +1452,6 @@ export function Delivery() {
                         </p>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:justify-items-end">
-                        <RefreshButton
-                            onClick={() => void refreshDelivery()}
-                            isLoading={isRefreshingDelivery}
-                            disabled={isActionPending || isRefreshingDelivery}
-                            label="Refresh Delivery"
-                        />
                         <Button
                             variant="primary"
                             onClick={() => setPendingAction({ type: "deploy" })}
