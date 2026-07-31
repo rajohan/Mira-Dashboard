@@ -68,8 +68,8 @@ describe("canonical chat projection hook", () => {
         rerender({ shouldShowThinking: false });
 
         expect(result.current).not.toBe(initial);
-        expect(initial.legacy.rows.length).toBeGreaterThan(
-            result.current.legacy.rows.length
+        expect(initial.projection.rows.length).toBeGreaterThan(
+            result.current.projection.rows.length
         );
     });
 });
