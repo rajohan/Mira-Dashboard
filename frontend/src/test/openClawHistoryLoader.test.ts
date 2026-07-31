@@ -406,6 +406,38 @@ describe("OpenClaw history loader", () => {
         expect(refreshed.map((message) => message.text)).toEqual(["first"]);
     });
 
+    it("evicts a seq-only row when the refreshed row gains provider identity", async () => {
+        let hasProviderIdentity = false;
+        const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {
+            return {
+                hasMore: false,
+                messages: [
+                    rawMessage(
+                        1,
+                        "assistant",
+                        hasProviderIdentity ? "current answer" : "stale answer",
+                        {
+                            __openclaw: {
+                                ...(hasProviderIdentity ? { id: "provider-answer" } : {}),
+                                seq: 1,
+                            },
+                        }
+                    ),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 1,
+            };
+        });
+
+        const initial = await loader.history(SESSION, 10);
+        hasProviderIdentity = true;
+        const refreshed = await loader.history(SESSION, 10);
+
+        expect(initial.map((message) => message.text)).toEqual(["stale answer"]);
+        expect(refreshed.map((message) => message.text)).toEqual(["current answer"]);
+    });
+
     it("preserves fresh order when a provider row is added to a cached sequence", async () => {
         let includeCall = false;
         const loader = new OpenClawHistoryLoader(new OpenClawChatAdapter(), () => {

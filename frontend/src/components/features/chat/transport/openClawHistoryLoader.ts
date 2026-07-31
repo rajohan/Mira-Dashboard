@@ -156,13 +156,16 @@ function mergeCachedHistoryRows(
             row,
         ]);
     }
-    for (const [sequence, rows] of freshFingerprintRows) {
-        const cachedIds = sequenceFingerprintIds.get(sequence);
+    for (const [sequence, cachedIds] of sequenceFingerprintIds) {
+        if (!refreshedSequences.has(sequence)) {
+            continue;
+        }
+        const rows = freshFingerprintRows.get(sequence) ?? [];
         const freshIds = new Set(rows.map((row) => historyMessageId(row)));
         const hasSameIds =
-            cachedIds?.size === freshIds.size &&
+            cachedIds.size === freshIds.size &&
             [...freshIds].every((id) => cachedIds.has(id));
-        if (sequence > cached.throughSequence || !cachedIds || hasSameIds) {
+        if (sequence > cached.throughSequence || hasSameIds) {
             continue;
         }
         for (const staleId of cachedIds) {
