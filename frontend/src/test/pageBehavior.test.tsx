@@ -88,6 +88,7 @@ const terminalApiState = {
     wasJobStopped: false,
 };
 const chatApiState = {
+    projectionShadowFailuresRemaining: 0,
     projectionShadowRequests: 0,
 };
 const jobsApiState = {
@@ -713,6 +714,18 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (method === "POST" && url === "/api/metrics/chat-projection-shadow") {
         chatApiState.projectionShadowRequests += 1;
+        if (chatApiState.projectionShadowFailuresRemaining > 0) {
+            chatApiState.projectionShadowFailuresRemaining -= 1;
+            return Response.json(
+                {
+                    error: {
+                        code: "projection_shadow_unavailable",
+                        message: "Projection shadow unavailable",
+                    },
+                },
+                { status: 503 }
+            );
+        }
         return Response.json({ isOk: true });
     }
 
@@ -2329,6 +2342,7 @@ async function flushQueuedTimers() {
 describe("Mira Dashboard pages", () => {
     beforeEach(() => {
         FakeWebSocket.instances = [];
+        chatApiState.projectionShadowFailuresRemaining = 0;
         chatApiState.projectionShadowRequests = 0;
         terminalApiState.expectedExecCwd = "/tmp";
         terminalApiState.wasJobStopped = false;
@@ -4792,7 +4806,9 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     }, 10_000);
 
-    it("reports projection parity only after history and runtime replay resolve", async () => {
+    it("waits for replay and retries a failed projection parity report", async () => {
+        const user = userEvent.setup();
+        chatApiState.projectionShadowFailuresRemaining = 1;
         const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
 
         await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -4845,6 +4861,13 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(chatApiState.projectionShadowRequests).toBe(1);
         });
+        await flushQueuedTimers();
+
+        await user.click(screen.getByRole("button", { name: "Chat display settings" }));
+        await user.click(screen.getByRole("button", { name: "Show thinking" }));
+        await waitFor(() => {
+            expect(chatApiState.projectionShadowRequests).toBe(2);
+        });
 
         await act(async () => {
             socket.close();
@@ -4887,7 +4910,7 @@ describe("Mira Dashboard pages", () => {
             ],
         });
         await flushQueuedTimers();
-        expect(chatApiState.projectionShadowRequests).toBe(1);
+        expect(chatApiState.projectionShadowRequests).toBe(2);
 
         await respondToSocketRequest(reconnectedSocket, "chat.runtimeSnapshot", {
             completed: false,
@@ -4897,7 +4920,7 @@ describe("Mira Dashboard pages", () => {
         });
         await waitFor(
             () => {
-                expect(chatApiState.projectionShadowRequests).toBe(2);
+                expect(chatApiState.projectionShadowRequests).toBe(3);
             },
             { timeout: 2000 }
         );

@@ -289,7 +289,11 @@ export function Chat() {
         );
         if (reportedProjectionObservationRef.current !== observationSignature) {
             reportedProjectionObservationRef.current = observationSignature;
-            reportChatProjectionShadowObservation(observation).catch(() => void 0);
+            reportChatProjectionShadowObservation(observation).catch(() => {
+                if (reportedProjectionObservationRef.current === observationSignature) {
+                    reportedProjectionObservationRef.current = "";
+                }
+            });
         }
         if (comparison.matches) {
             return;
