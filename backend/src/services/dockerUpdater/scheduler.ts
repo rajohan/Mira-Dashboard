@@ -6,10 +6,28 @@ import {
     ScheduledJobActionError,
     upsertScheduledJob,
 } from "../scheduledJobs.ts";
+import { createNotificationBestEffort } from "./notifications.ts";
+import type { DockerUpdaterStepResult } from "./types.ts";
 import {
     isNonblockingRegistrationFailure,
     runDockerUpdaterService,
 } from "./updatePolicy.ts";
+
+function skippedGitSyncDetails(
+    step: DockerUpdaterStepResult
+): Record<string, unknown> | undefined {
+    if (step.kind !== "git-sync" || !step.isOk || !step.stdout) {
+        return undefined;
+    }
+    try {
+        const details = JSON.parse(step.stdout) as Record<string, unknown>;
+        return details.pushed === false && typeof details.skippedReason === "string"
+            ? details
+            : undefined;
+    } catch {
+        return undefined;
+    }
+}
 
 export function registerDockerUpdaterScheduledJobs(): void {
     const job = {
@@ -48,11 +66,22 @@ export function registerDockerUpdaterScheduledJobs(): void {
                 signal,
                 context.protectFromCancellation
             );
+            for (const step of steps) {
+                const details = skippedGitSyncDetails(step);
+                if (!details) continue;
+                createNotificationBestEffort(
+                    "Docker updater repository sync skipped",
+                    String(details.skippedReason),
+                    "docker:updater:git-sync-skipped",
+                    "error",
+                    details
+                );
+            }
             const failed = steps.filter(
                 (step) =>
                     !step.isOk &&
                     !isNonblockingRegistrationFailure(step) &&
-                    step.step !== "git-sync:docker"
+                    step.kind !== "git-sync"
             );
             if (failed.length > 0) {
                 throw new ScheduledJobActionError(

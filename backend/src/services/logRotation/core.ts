@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import type { LogRotationSummary as LogRotationContractSummary } from "../../../../contracts/logRotation.ts";
-import { database } from "../../database.ts";
 import {
     resolveDashboardProjectPathsForRuntime,
     resolveDashboardRuntimePath,
@@ -13,15 +12,17 @@ import { resolveAbsoluteNonRootPath } from "../../lib/safePath.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { getProcessReleaseRoot } from "../../releaseManifest.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
+import {
+    dateToISOString,
+    LOG_ROTATION_STATE_KEY,
+    type LogRotationState,
+    readLogRotationState,
+} from "./state.ts";
 
 const logger = createStructuredLogger("log-rotation");
 
 function compareStrings(left: string, right: string): number {
     return left.localeCompare(right);
-}
-
-function dateToISOString(date: Date): string {
-    return date.toISOString();
 }
 
 async function ignoreRejection(promise: Promise<unknown> | undefined): Promise<void> {
@@ -50,7 +51,6 @@ async function ignoreMissingPath(
     }
 }
 
-const STATE_CACHE_KEY = "log_rotation.state";
 const DEFAULT_CONFIG_PATH = path.join(
     getProcessReleaseRoot(),
     "backend/config/log-rotation.json"
@@ -162,15 +162,6 @@ interface LogRotationOptions {
     config?: string;
     group?: string | undefined;
     verbose?: boolean;
-}
-
-interface LogRotationState {
-    version: number;
-    files: Record<
-        string,
-        { lastRotatedAt?: string; lastSizeBytes?: number; lastArchive?: string }
-    >;
-    lastRun?: Record<string, unknown>;
 }
 
 interface LogRotationPolicy {
@@ -1228,37 +1219,6 @@ function shouldRotate({
     };
 }
 
-function emptyState(): LogRotationState {
-    return { version: 1, files: {} };
-}
-
-function readLogRotationState(): LogRotationState {
-    const row = database
-        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | undefined };
-    if (!row?.data_json) {
-        return emptyState();
-    }
-    try {
-        const parsed = JSON.parse(row.data_json) as Partial<LogRotationState>;
-        return {
-            version: 1,
-            files:
-                parsed.files &&
-                typeof parsed.files === "object" &&
-                !Array.isArray(parsed.files)
-                    ? parsed.files
-                    : {},
-            ...(parsed.lastRun &&
-                typeof parsed.lastRun === "object" && {
-                    lastRun: parsed.lastRun,
-                }),
-        };
-    } catch {
-        return emptyState();
-    }
-}
-
 function summarizeGroup(name: string) {
     return {
         name,
@@ -1716,7 +1676,7 @@ export async function runLogRotationService(
             };
             try {
                 writeLogRotationCacheSuccess({
-                    key: STATE_CACHE_KEY,
+                    key: LOG_ROTATION_STATE_KEY,
                     data: state,
                     source: "backend",
                     ttl: 90 * 24,

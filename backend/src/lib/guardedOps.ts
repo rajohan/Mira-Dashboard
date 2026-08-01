@@ -212,6 +212,45 @@ export async function readTextNoFollowGuarded(path: GuardedPath): Promise<string
 }
 
 /**
+ * Reads at most the final `maxBytes` bytes of a UTF-8 file while refusing a
+ * final-component symlink.
+ * @returns The final bytes decoded as UTF-8 text.
+ */
+export async function readTextTailNoFollowGuarded(
+    path: GuardedPath,
+    maxBytes: number
+): Promise<string> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+        throw new TypeError("maxBytes must be a positive safe integer");
+    }
+
+    const file = await openReadNoFollowGuarded(path);
+    try {
+        const { size } = await file.stat();
+        const byteLength = Math.min(size, maxBytes);
+        if (byteLength === 0) {
+            return "";
+        }
+        const buffer = Buffer.allocUnsafe(byteLength);
+        const start = Math.max(0, size - byteLength);
+        let offset = 0;
+        while (offset < byteLength) {
+            const { bytesRead } = await file.read(
+                buffer,
+                offset,
+                byteLength - offset,
+                start + offset
+            );
+            if (bytesRead === 0) break;
+            offset += bytesRead;
+        }
+        return buffer.subarray(0, offset).toString("utf8");
+    } finally {
+        await file.close();
+    }
+}
+
+/**
  * Reads bytes from an already-open descriptor so validation and use stay on the same file object.
  * @param fd Fd value.
  * @param byteLength Byte length value.

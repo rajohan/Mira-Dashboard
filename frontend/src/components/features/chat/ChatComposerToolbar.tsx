@@ -134,12 +134,7 @@ function DisplayToggle({
     );
 }
 
-/**
- * Returns whether Enter should submit instead of inserting a newline.
- *
- * @param event - Keyboard event from the composer textarea.
- * @returns True when Enter should send the message.
- */
+/** Props for the chat composer response and action toolbar. */
 interface ChatComposerToolbarProperties {
     canAttachFiles: boolean;
     canSend: boolean;

@@ -11,21 +11,16 @@ import {
     type ElevatedLogRotationResult,
     runElevatedLogRotationService,
 } from "./runtime.ts";
+import {
+    asRecord,
+    dateToISOString,
+    LOG_ROTATION_STATE_KEY,
+    readLogRotationState,
+} from "./state.ts";
 
-const STATE_CACHE_KEY = "log_rotation.state";
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 const writeLogRotationCacheSuccess = writeCacheSuccess;
-
-function dateToISOString(date: Date): string {
-    return date.toISOString();
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-    return value && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : {};
-}
 
 function logRotationFailureMessage(logRotation: ElevatedLogRotationResult): string {
     if (logRotation.stderr.trim()) {
@@ -75,29 +70,14 @@ function capScheduledLogRotationFailure(
     };
 }
 
-function readLogRotationStateCacheForFailure(): Record<string, unknown> {
-    const fallback = { version: 1, files: {} };
-    const row = database
-        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(STATE_CACHE_KEY) as undefined | { data_json?: string | undefined };
-    if (!row?.data_json) {
-        return fallback;
-    }
-    try {
-        return { ...fallback, ...asRecord(JSON.parse(row.data_json) as unknown) };
-    } catch {
-        return fallback;
-    }
-}
-
 function persistLogRotationScheduledFailure(
     logRotation: ElevatedLogRotationResult,
     message: string
 ): void {
-    const existingState = readLogRotationStateCacheForFailure();
+    const existingState = readLogRotationState();
     const structuredLastRun = asRecord(logRotation.result);
     writeLogRotationCacheSuccess({
-        key: STATE_CACHE_KEY,
+        key: LOG_ROTATION_STATE_KEY,
         data: {
             ...existingState,
             version: 1,
@@ -154,7 +134,7 @@ export function registerLogRotationScheduledJobs(): void {
             timeOfDay: existing ? existing.timeOfDay : "02:10",
             cronExpression: existing?.cronExpression ?? undefined,
             actionKey: LOG_ROTATION_JOB_ID,
-            actionPayload: { key: STATE_CACHE_KEY },
+            actionPayload: { key: LOG_ROTATION_STATE_KEY },
             resourceClass: "host-heavy",
         });
         database.run("COMMIT");

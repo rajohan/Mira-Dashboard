@@ -5,9 +5,9 @@ The frontend is a React/TanStack Router app. Routes live in
 under `frontend/src/components/features`, and shared primitives live under
 `frontend/src/components/ui`.
 
-React Compiler is enabled. Avoid routine `useMemo` and `useCallback`; use them
-only when stable identity is part of an external contract that React Compiler
-cannot infer.
+React Compiler is enabled. Avoid routine `memo`, `useMemo`, and `useCallback`;
+use them only when stable identity is part of an external contract that React
+Compiler cannot infer.
 
 ## Route Map
 
@@ -80,7 +80,7 @@ For destructive actions:
 
 | Pitfall                                   | Expected handling                                                                     |
 | ----------------------------------------- | ------------------------------------------------------------------------------------- |
-| Accidental `useMemo`/`useCallback`        | Remove unless identity stability is semantically required.                            |
+| Accidental `memo`/`useMemo`/`useCallback` | Remove unless identity stability is semantically required.                            |
 | Polling error hides cached data           | Show blocking error only when no cached data exists.                                  |
 | Tool failures shown as global chat errors | Keep failed tool diagnostics in tool rows.                                            |
 | Refresh error clears useful state         | Keep the last successful tasks/reports payload visible and show a non-blocking error. |

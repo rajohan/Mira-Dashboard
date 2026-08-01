@@ -15,6 +15,12 @@ export function errorMessage(error: unknown): string {
     return caughtErrorMessage(error, "Cache refresh failed");
 }
 
+export function stripAnsi(value: string): string {
+    return value
+        .replaceAll(new RegExp(String.raw`\u001B\[[0-9;?]*[ -/]*[@-~]`, "gu"), "")
+        .replaceAll(new RegExp(String.raw`\u001B[@-_]`, "gu"), "");
+}
+
 export function toNumber(value: unknown, fallback = 0): number {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;

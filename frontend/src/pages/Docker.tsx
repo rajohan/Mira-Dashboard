@@ -3,6 +3,12 @@ import type { ChangeEvent } from "react";
 
 import { formatBytes } from "../components/features/docker/dockerFormatters";
 import { DockerImagesTable } from "../components/features/docker/DockerImagesTable";
+import {
+    DockerContainerDetailsPanel,
+    DockerContainersPanel,
+    DockerUpdaterEventsPanel,
+    DockerUpdaterServicesPanel,
+} from "../components/features/docker/DockerPanels";
 import { DockerVolumesTable } from "../components/features/docker/DockerVolumesTable";
 import { useDockerController } from "../components/features/docker/useDockerController";
 import { Button } from "../components/ui/Button";
@@ -27,8 +33,9 @@ export function Docker() {
         consoleContainerId,
         consoleJobId,
         consoleStartError,
-        containerDetailsContent,
-        containersContent,
+        containerDetails,
+        containerDetailsQuery,
+        containers,
         containersQuery,
         dangerousDelete,
         deleteImage,
@@ -37,11 +44,13 @@ export function Docker() {
         dockerPrune,
         execJobQuery,
         handleConsoleCommandKeyDown,
+        handleContainerAction,
         handleDangerousDelete,
         handleManualUpdate,
         handlePrune,
         handleRunDockerUpdater,
         handleStartConsole,
+        handleStackRestart,
         images,
         isDockerIsolated,
         isDockerReadOnly,
@@ -68,8 +77,10 @@ export function Docker() {
         setManualUpdateTarget,
         setSelectedContainerId,
         summary,
-        updaterEventsContent,
-        updaterServicesContent,
+        servicesWithUpdates,
+        updaterEvents,
+        updaterEventsQuery,
+        updaterServicesQuery,
         updaterSummary,
         volumes,
     } = controller;
@@ -125,7 +136,7 @@ export function Docker() {
             {actionOutput ? (
                 <Card
                     ref={(element) => {
-                        actionOutputRef.current = element ?? undefined;
+                        actionOutputRef.current = element;
                     }}
                     aria-live="polite"
                     className="p-3 sm:p-4"
@@ -218,7 +229,13 @@ export function Docker() {
                             Pending or newer candidates
                         </div>
                         <div className="max-h-80 overflow-y-auto pr-1 sm:max-h-100 sm:pr-2">
-                            {updaterServicesContent}
+                            <DockerUpdaterServicesPanel
+                                isLoading={updaterServicesQuery.isLoading}
+                                isManualUpdatePending={dockerManualUpdate.isPending}
+                                isReadOnly={isDockerReadOnly}
+                                onSelectManualUpdate={setManualUpdateTarget}
+                                services={servicesWithUpdates}
+                            />
                         </div>
                     </div>
                     <div className="min-w-0">
@@ -227,13 +244,33 @@ export function Docker() {
                             Recent updater events
                         </div>
                         <div className="max-h-80 overflow-y-auto pr-1 sm:max-h-100 sm:pr-2">
-                            {updaterEventsContent}
+                            <DockerUpdaterEventsPanel
+                                events={updaterEvents}
+                                isLoading={updaterEventsQuery.isLoading}
+                            />
                         </div>
                     </div>
                 </div>
             </Card>
 
-            {containersContent}
+            <DockerContainersPanel
+                containers={containers}
+                error={containersQuery.error}
+                isError={containersQuery.isError}
+                isReadOnly={isDockerReadOnly}
+                onConsole={(containerId) => {
+                    setConsoleContainerId(containerId);
+                    setConsoleJobId(undefined);
+                }}
+                onDetails={setSelectedContainerId}
+                onLogs={setLogsContainerId}
+                onRestart={(containerId) => {
+                    void handleContainerAction(containerId, "restart");
+                }}
+                onRestartStack={() => {
+                    void handleStackRestart();
+                }}
+            />
 
             <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
                 <DockerImagesTable
@@ -275,7 +312,10 @@ export function Docker() {
                 title={selectedContainer?.name || "Container details"}
                 size="3xl"
             >
-                {containerDetailsContent}
+                <DockerContainerDetailsPanel
+                    containerDetails={containerDetails}
+                    isLoading={containerDetailsQuery.isLoading}
+                />
             </Modal>
 
             <Modal

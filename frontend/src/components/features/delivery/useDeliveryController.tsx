@@ -574,9 +574,7 @@ export function useDeliveryController() {
                                     setActionError(undefined);
                                 } catch (error_) {
                                     setActionError(
-                                        error_ instanceof Error
-                                            ? error_.message
-                                            : "Action failed"
+                                        messageFromError(error_, "Action failed")
                                     );
                                 }
                             })();

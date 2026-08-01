@@ -38,6 +38,7 @@ export async function applyServiceUpdate(
             if (!lockedService || lockedService.enabled !== 1) {
                 const code = lockedService ? "DISABLED" : "NOT_FOUND";
                 return {
+                    kind: "update",
                     step: `${eventPrefix}-update:${serviceLabel(service)}`,
                     isOk: false,
                     code,
@@ -47,6 +48,7 @@ export async function applyServiceUpdate(
             }
             if (!hasUpdate(lockedService)) {
                 return {
+                    kind: "update",
                     step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
                     isOk: false,
                     code: "CONFLICT",
@@ -94,6 +96,7 @@ export async function applyServiceUpdate(
                     }
                 );
                 return {
+                    kind: "update",
                     step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
                     isOk: false,
                     stdout: "",
@@ -134,6 +137,7 @@ export async function applyServiceUpdate(
                     `docker:updater:updated:${lockedService.id}:${target}`
                 );
                 return {
+                    kind: "update",
                     step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
                     changedPaths: result.changedPaths,
                     isOk: true,
@@ -166,6 +170,7 @@ export async function applyServiceUpdate(
                     }
                 );
                 return {
+                    kind: "update",
                     step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
                     changedPaths: result.changedPaths,
                     isOk: false,
@@ -180,12 +185,16 @@ export async function applyServiceUpdate(
 
 export async function pruneDanglingImagesBestEffort(signal?: AbortSignal): Promise<void> {
     try {
-        const result = await runProcess(getDockerBin(), ["image", "prune", "-f"], {
-            env: process.env,
-            maxBuffer: 10 * 1024 * 1024,
-            signal,
-            timeoutMs: 120_000,
-        });
+        const result = await runProcess(
+            getDockerBin(),
+            ["image", "prune", "-f", "--filter", "until=24h"],
+            {
+                env: process.env,
+                maxBuffer: 10 * 1024 * 1024,
+                signal,
+                timeoutMs: 120_000,
+            }
+        );
         if (result.code !== 0) {
             throw new Error(
                 result.stderr.trim() || `docker image prune exited ${result.code}`

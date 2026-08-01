@@ -396,8 +396,28 @@ describe("Docker updater tag patterns", () => {
         const appsRoot = createTemporaryRoot("mira-docker-updater-partial-");
         const appRoot = path.join(appsRoot, "unit-partial-app");
         mkdirSync(appRoot, { recursive: true });
+        const composePath = path.join(appRoot, "compose.yaml");
         writeFileSync(
-            path.join(appRoot, "compose.yaml"),
+            composePath,
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/partial:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "  broken:",
+                "    image: ghcr.io/unit/broken:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
+        expect(registerDockerUpdaterServices().isOk).toBe(true);
+
+        writeFileSync(
+            composePath,
             [
                 "services:",
                 "  web:",
@@ -410,8 +430,6 @@ describe("Docker updater tag patterns", () => {
                 "",
             ].join("\n")
         );
-        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
-        process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY = "1";
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockResolvedValue({ code: 0, stderr: "", stdout: "should not run" });
@@ -440,14 +458,19 @@ describe("Docker updater tag patterns", () => {
             ],
         });
         expect(isNonblockingRegistrationFailure(registered)).toBe(true);
-        const service = database
+        const services = database
             .prepare(
-                "SELECT id, service_name FROM docker_managed_services WHERE app_slug = 'unit-partial-app'"
+                "SELECT id, service_name FROM docker_managed_services WHERE app_slug = 'unit-partial-app' ORDER BY service_name"
             )
-            .get() as { id: number; service_name: string };
-        expect(service.service_name).toBe("web");
+            .all() as Array<{ id: number; service_name: string }>;
+        expect(services.map((service) => service.service_name)).toEqual([
+            "broken",
+            "web",
+        ]);
+        const service = services.find((candidate) => candidate.service_name === "web");
+        expect(service).toBeDefined();
 
-        expect(runDockerUpdaterService(service.id)).resolves.toContainEqual(
+        expect(runDockerUpdaterService(service!.id)).resolves.toContainEqual(
             expect.objectContaining({
                 code: "CONFLICT",
                 isOk: false,
@@ -696,7 +719,7 @@ describe("Docker updater tag patterns", () => {
         }
     });
 
-    it("applies a manual update to an isolated Compose file without invoking real Docker", async () => {
+    it("completes a protected manual update after cancellation begins", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
@@ -747,9 +770,17 @@ describe("Docker updater tag patterns", () => {
             });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const controller = new AbortController();
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockResolvedValue({ code: 0, stderr: "", stdout: "compose ok" });
+            .mockImplementation((file) => {
+                if (file === process.env.MIRA_DOCKER_COMPOSE_WRAPPER) {
+                    controller.abort(
+                        new DOMException("Updater cancellation requested", "AbortError")
+                    );
+                }
+                return Promise.resolve({ code: 0, stderr: "", stdout: "compose ok" });
+            });
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
 
         const registered = registerDockerUpdaterServices();
@@ -765,10 +796,11 @@ describe("Docker updater tag patterns", () => {
         const protectFromCancellation = jest.fn();
         const steps = await runDockerUpdaterService(
             service.id,
-            undefined,
+            controller.signal,
             protectFromCancellation
         );
         expect(protectFromCancellation).toHaveBeenCalledTimes(1);
+        expect(controller.signal.aborted).toBe(true);
         expect(steps).toContainEqual(
             expect.objectContaining({
                 isOk: true,
@@ -807,14 +839,120 @@ describe("Docker updater tag patterns", () => {
                 cwd: appRoot,
                 env: process.env,
                 maxBuffer: 10 * 1024 * 1024,
+                signal: controller.signal,
                 timeoutMs: 180_000,
             }
         );
         expect(runProcessSpy).toHaveBeenCalledWith(
             "docker",
-            ["image", "prune", "-f"],
-            expect.objectContaining({ timeoutMs: 120_000 })
+            ["image", "prune", "-f", "--filter", "until=24h"],
+            expect.objectContaining({ signal: undefined, timeoutMs: 120_000 })
         );
+    });
+
+    it("stops the automatic loop after protected cancellation and completes cleanup", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_BIN");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-auto-cancel-");
+        const appRoot = path.join(appsRoot, "unit-auto-cancel-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  first:",
+                "    image: ghcr.io/unit/auto-first:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'true'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: '1.1.0'",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "  second:",
+                "    image: ghcr.io/unit/auto-second:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'true'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: '1.1.0'",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_BIN = "docker";
+        delete process.env.MIRA_DOCKER_COMPOSE_WRAPPER;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(((
+            input: Request | string | URL
+        ) => {
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                if (url.endsWith("/manifests/1.1.0")) {
+                    const digest = url.includes("auto-first")
+                        ? "sha256:auto-first-11"
+                        : "sha256:auto-second-11";
+                    return Response.json(
+                        { digest },
+                        { headers: { "docker-content-digest": digest } }
+                    );
+                }
+                return new Response("not found", { status: 404 });
+            });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+        const controller = new AbortController();
+        let composeCalls = 0;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((file, arguments_) => {
+                if (file === "git") {
+                    return Promise.resolve({
+                        code: 1,
+                        stderr: "not a git repository",
+                        stdout: "",
+                    });
+                }
+                if (file === "docker" && arguments_[0] === "compose") {
+                    composeCalls += 1;
+                    controller.abort(
+                        new DOMException("Updater cancellation requested", "AbortError")
+                    );
+                }
+                return Promise.resolve({ code: 0, stderr: "", stdout: "docker ok" });
+            });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const protectFromCancellation = jest.fn();
+        const steps = await runDockerUpdaterService(
+            undefined,
+            controller.signal,
+            protectFromCancellation
+        );
+
+        expect(controller.signal.aborted).toBe(true);
+        expect(protectFromCancellation).toHaveBeenCalledTimes(1);
+        expect(composeCalls).toBe(1);
+        expect(steps.filter((step) => step.kind === "update")).toHaveLength(1);
+        expect(steps).toContainEqual(
+            expect.objectContaining({ kind: "git-sync", step: "git-sync:docker" })
+        );
+        expect(runProcessSpy).toHaveBeenCalledWith(
+            "docker",
+            ["image", "prune", "-f", "--filter", "until=24h"],
+            expect.objectContaining({ signal: undefined })
+        );
+        const versions = database
+            .prepare(
+                "SELECT current_tag FROM docker_managed_services WHERE app_slug = 'unit-auto-cancel-app' ORDER BY service_name"
+            )
+            .all() as Array<{ current_tag: string }>;
+        expect(versions.map((row) => row.current_tag).toSorted()).toEqual([
+            "1.0.0",
+            "1.1.0",
+        ]);
     });
 
     it("preserves compose formatting when updating image references", async () => {
@@ -1129,7 +1267,7 @@ describe("Docker updater tag patterns", () => {
         );
     });
 
-    it("skips the whole git sync when one rewritten compose file was already dirty", async () => {
+    it("syncs clean rewritten compose files when another rewritten file was already dirty", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
@@ -1196,12 +1334,42 @@ describe("Docker updater tag patterns", () => {
                         if (command === "rev-parse --show-toplevel") {
                             return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
                         }
-                        if (command.startsWith("status --porcelain=v1 -z -- ")) {
+                        if (
+                            command ===
+                            "status --porcelain=v1 -z -- :(literal)unit-atomic-dirty-app/compose.yml :(literal)unit-atomic-dirty-app/docker-compose.yaml"
+                        ) {
                             return {
                                 code: 0,
                                 stderr: "",
                                 stdout: " M unit-atomic-dirty-app/docker-compose.yaml\0",
                             };
+                        }
+                        if (
+                            command ===
+                            "status --porcelain=v1 -z -- :(literal)unit-atomic-dirty-app/compose.yml"
+                        ) {
+                            return {
+                                code: 0,
+                                stderr: "",
+                                stdout: " M unit-atomic-dirty-app/compose.yml\0",
+                            };
+                        }
+                        if (
+                            command ===
+                            "diff --cached --quiet -- :(literal)unit-atomic-dirty-app/compose.yml"
+                        ) {
+                            return { code: 1, stderr: "", stdout: "" };
+                        }
+                        if (
+                            command === "rev-parse --abbrev-ref --symbolic-full-name @{u}"
+                        ) {
+                            return { code: 0, stderr: "", stdout: "origin/main\n" };
+                        }
+                        if (command === "log --format=%s origin/main..HEAD") {
+                            return { code: 0, stderr: "", stdout: "" };
+                        }
+                        if (command === "rev-parse --short HEAD") {
+                            return { code: 0, stderr: "", stdout: "abc1234\n" };
                         }
                         return { code: 0, stderr: "", stdout: "" };
                     }
@@ -1216,7 +1384,7 @@ describe("Docker updater tag patterns", () => {
             expect.objectContaining({
                 isOk: true,
                 step: "git-sync:docker",
-                stdout: expect.stringContaining("no updated compose paths"),
+                stdout: expect.stringContaining('"pushed":true'),
             })
         );
         expect(readFileSync(composePath, "utf8")).toContain(
@@ -1236,15 +1404,40 @@ describe("Docker updater tag patterns", () => {
                 ]),
             ])
         );
-        expect(gitCalls).not.toContainEqual(
-            expect.objectContaining({ arguments_: expect.arrayContaining(["add"]) })
+        expect(gitCalls).toEqual(
+            expect.arrayContaining([
+                {
+                    file: "git",
+                    arguments_: [
+                        "add",
+                        "--",
+                        ":(literal)unit-atomic-dirty-app/compose.yml",
+                    ],
+                },
+                {
+                    file: "git",
+                    arguments_: [
+                        "commit",
+                        "--only",
+                        "-m",
+                        "chore: update managed app images",
+                        "--",
+                        ":(literal)unit-atomic-dirty-app/compose.yml",
+                    ],
+                },
+                {
+                    file: "git",
+                    arguments_: ["push", "origin", "HEAD:refs/heads/main"],
+                },
+            ])
         );
-        expect(gitCalls).not.toContainEqual(
-            expect.objectContaining({ arguments_: expect.arrayContaining(["commit"]) })
-        );
-        expect(gitCalls).not.toContainEqual(
+        expect(
+            gitCalls.filter((call) => call.arguments_[0] === "add")
+        ).not.toContainEqual(
             expect.objectContaining({
-                arguments_: ["push", "origin", "HEAD:refs/heads/main"],
+                arguments_: expect.arrayContaining([
+                    ":(literal)unit-atomic-dirty-app/docker-compose.yaml",
+                ]),
             })
         );
     });
@@ -2243,6 +2436,11 @@ describe("Docker updater tag patterns", () => {
                  WHERE app_slug = 'unit-pagination-origin-app' AND service_name = 'web'`
             )
             .get() as { id: number };
+        database
+            .prepare(
+                "UPDATE docker_managed_services SET latest_tag = ?, latest_digest = ? WHERE id = ?"
+            )
+            .run("1.0.9", "sha256:known-candidate", service.id);
 
         const polled = await pollDockerUpdaterRegistries(service.id);
         expect(polled).toMatchObject({ isOk: false, step: "poll" });
@@ -2258,8 +2456,8 @@ describe("Docker updater tag patterns", () => {
             latest_tag: string | undefined;
             last_status: string;
         };
-        expect(updated.latest_digest).toBeNull();
-        expect(updated.latest_tag).toBeNull();
+        expect(updated.latest_digest).toBe("sha256:known-candidate");
+        expect(updated.latest_tag).toBe("1.0.9");
         expect(updated.last_status).toBe("registry_check_failed");
         expect(
             requests.some((request) => request.url.includes("/v2/library/redis/"))

@@ -291,19 +291,19 @@ function isProjectComposeIncludeCompose(
     projectDirectory = path.dirname(projectComposePath),
     composeEnvironment = loadComposeProjectEnvironment(projectDirectory)
 ): boolean {
-    const realProjectComposePath = fs.realpathSync(projectComposePath);
-    const contextKey = JSON.stringify({
-        env: Object.entries(composeEnvironment).toSorted(([left], [right]) =>
-            left.localeCompare(right)
-        ),
-        path: realProjectComposePath,
-        projectDirectory: path.resolve(projectDirectory),
-    });
-    if (seen.has(contextKey)) {
-        return false;
-    }
-    const branchSeen = new Set([...seen, contextKey]);
     try {
+        const realProjectComposePath = fs.realpathSync(projectComposePath);
+        const contextKey = JSON.stringify({
+            env: Object.entries(composeEnvironment).toSorted(([left], [right]) =>
+                left.localeCompare(right)
+            ),
+            path: realProjectComposePath,
+            projectDirectory: path.resolve(projectDirectory),
+        });
+        if (seen.has(contextKey)) {
+            return false;
+        }
+        const branchSeen = new Set([...seen, contextKey]);
         const document = YAML.parse(
             fs.readFileSync(projectComposePath, "utf8")
         ) as JsonRecord;
@@ -514,35 +514,29 @@ export function getComposeCommand(
     const isManagedDockerPath = path
         .resolve(projectComposePath)
         .startsWith(`${path.resolve(dockerRoot)}${path.sep}`);
+    const composeArgs = [
+        ...composeFileArguments(composePaths),
+        "up",
+        "-d",
+        "--pull",
+        "always",
+        serviceName,
+    ];
+    const cwd = path.dirname(projectComposePath);
     if (
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER ||
         (isManagedDockerPath && fs.existsSync(wrapper))
     ) {
         return {
             file: wrapper,
-            args: [
-                ...composeFileArguments(composePaths),
-                "up",
-                "-d",
-                "--pull",
-                "always",
-                serviceName,
-            ],
-            cwd: path.dirname(projectComposePath),
+            args: composeArgs,
+            cwd,
         };
     }
     return {
         file: getDockerBin(),
-        args: [
-            "compose",
-            ...composeFileArguments(composePaths),
-            "up",
-            "-d",
-            "--pull",
-            "always",
-            serviceName,
-        ],
-        cwd: path.dirname(projectComposePath),
+        args: ["compose", ...composeArgs],
+        cwd,
     };
 }
 

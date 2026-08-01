@@ -210,6 +210,7 @@ function releaseLifecycleInvocation(
 
 function releaseCutoverShellFunctions(): string[] {
     return [
+        `project_root=${shellQuote(resolveDashboardProjectPaths().projectRoot)}`,
         "resolve_dashboard_port() {",
         '  dashboard_port=$(/usr/local/bin/doppler run --config prd --project rajohan -- /bin/sh -c \'printf "%s" "${PORT:-3100}"\' 2>/dev/null || true)',
         "  dashboard_port=\"$(printf \"%s\" \"$dashboard_port\" | /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^0*//')\"",
@@ -722,7 +723,6 @@ export function didScheduleOrphanedReleaseCutoverRecovery(
     const script = [
         "sleep 1",
         ...releaseCutoverShellFunctions(),
-        `project_root=${shellQuote(resolveDashboardProjectPaths().projectRoot)}`,
         `releases_root=${shellQuote(releasesRoot)}`,
         `candidate_commit=${shellQuote(candidateCommit)}`,
         `database_snapshot_id=${shellQuote(persistedCutover?.databaseSnapshotId ?? "")}`,
@@ -891,8 +891,3 @@ export function didScheduleOrphanedReleaseCutoverRecovery(
     }
     return true;
 }
-
-/**
- * Runs deployment work after the API has returned a job to the caller.
- * @returns Promise resolving to the run deployment job result.
- */

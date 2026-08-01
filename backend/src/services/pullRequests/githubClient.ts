@@ -22,7 +22,6 @@ import {
     runProcess,
     spawnProcess,
 } from "../../lib/processes.ts";
-import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { nonEmptyEnvironmentFallback } from "../../lib/values.ts";
 import { DASHBOARD_REPO, DEFAULT_BASE, getDashboardRoot } from "./config.ts";
 import {
@@ -32,14 +31,17 @@ import {
     normalizePullRequest,
     validateDashboardStackMembership,
 } from "./reviewPolicy.ts";
-import { isRecord } from "./support.ts";
+import {
+    isRecord,
+    MAX_PULL_REQUEST_BODY_LENGTH,
+    pullRequestLogger as logger,
+} from "./support.ts";
 
 interface CommandResult {
     stdout: string;
     stderr: string;
 }
 
-const logger = createStructuredLogger("pull-requests");
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
@@ -48,7 +50,6 @@ const MAX_DASHBOARD_PULL_REQUESTS = 500;
 const MAX_DASHBOARD_PULL_REQUEST_PAGES = Math.ceil(
     MAX_DASHBOARD_PULL_REQUESTS / PULL_REQUEST_PAGE_SIZE
 );
-const MAX_PULL_REQUEST_BODY_LENGTH = 64 * 1024;
 const STACK_GRAPHQL_CAPABILITY_CACHE_MS = 60_000;
 const PUBLIC_PR_CACHE_MS = 2 * 60 * 1000;
 const PUBLIC_PR_FAILURE_CACHE_MS = 30_000;
@@ -154,10 +155,7 @@ export function buildReviewCommandEnvironment(): NodeJS.ProcessEnv {
     return buildGithubCommandEnvironment(githubToken);
 }
 
-/**
- * Returns whether the configured reviewer has approved the pull request.
- * @returns Whether the configured reviewer has approved the pull request.
- */
+/** Validates that a selected pull request belongs to the requested preview scope. */
 export async function validatePullRequestPreviewScope(
     pullRequest: PullRequestSummary,
     scope: readonly PullRequestSummary[],

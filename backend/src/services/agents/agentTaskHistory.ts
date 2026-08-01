@@ -3,23 +3,21 @@ import { database } from "../../database.ts";
 
 const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
-function nowIso(): string {
-    return new Date().toISOString();
-}
-
 function timestampToIso(timestamp: number): string {
     return new Date(timestamp).toISOString();
 }
 
 export function closeStaleActiveTasks(): void {
-    const cutoff = timestampToIso(Date.now() - TASK_IDLE_TIMEOUT_MS);
+    const now = Date.now();
+    const completedAt = timestampToIso(now);
+    const cutoff = timestampToIso(now - TASK_IDLE_TIMEOUT_MS);
     database
         .prepare(
             `UPDATE agent_task_history
          SET status = 'completed_auto', completed_at = ?, last_activity_at = ?
          WHERE status = 'active' AND last_activity_at < ?`
         )
-        .run(nowIso(), nowIso(), cutoff);
+        .run(completedAt, completedAt, cutoff);
 }
 
 /**
@@ -100,8 +98,3 @@ export function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
         lastActivityAt: row.last_activity_at,
     }));
 }
-
-/**
- * Parses agents.yml into dashboard agent records while tolerating empty or malformed input.
- * @returns Parsed agents.yml into dashboard agent records while tolerating empty or malformed input.
- */

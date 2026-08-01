@@ -5851,7 +5851,17 @@ fi
             )
             .get() as { data_json: string; metadata_json: string; status: string };
         expect(row.status).toBe("fresh");
-        expect(runProcessSpy).toHaveBeenCalledTimes(2);
+        const initialBashCalls = runProcessSpy.mock.calls.filter(
+            ([file]) => file === "bash"
+        );
+        const initialTmuxCalls = runProcessSpy.mock.calls.filter(
+            ([file]) => file === "tmux"
+        );
+        expect(initialBashCalls).toHaveLength(2);
+        expect(initialTmuxCalls).toHaveLength(2);
+        expect(initialTmuxCalls.map(([, arguments_]) => arguments_.at(-1))).toEqual(
+            initialBashCalls.map((call) => call[2]?.env?.MIRA_QUOTA_CODEX_SESSION)
+        );
         expect(runProcessSpy.mock.calls[0]?.[1]?.[1]).toContain(
             'grep -Eiq "Weekly limit:"'
         );
@@ -5905,7 +5915,12 @@ fi
             ].join("\n"),
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
-        expect(runProcessSpy).toHaveBeenCalledTimes(1);
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "bash")).toHaveLength(
+            1
+        );
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "tmux")).toHaveLength(
+            1
+        );
         const weeklyOnlyQuota = parseJsonText(
             (
                 database
@@ -5931,7 +5946,12 @@ fi
             stdout: "Codex update screen without quota limits",
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
-        expect(runProcessSpy).toHaveBeenCalledTimes(2);
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "bash")).toHaveLength(
+            2
+        );
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "tmux")).toHaveLength(
+            2
+        );
         const repeatedParseFailure = parseJsonText(
             (
                 database
@@ -5950,11 +5970,16 @@ fi
 
         runProcessSpy.mockReset().mockResolvedValue({
             code: 1,
-            stderr: "update failed",
+            stderr: "Account: private@example.test\nupdate failed",
             stdout: "",
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
-        expect(runProcessSpy).toHaveBeenCalledTimes(1);
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "bash")).toHaveLength(
+            1
+        );
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "tmux")).toHaveLength(
+            1
+        );
         const commandFailure = parseJsonText(
             (
                 database

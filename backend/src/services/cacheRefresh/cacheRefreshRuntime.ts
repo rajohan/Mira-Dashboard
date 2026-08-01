@@ -6,8 +6,8 @@ import {
     recordCacheRefreshStarted,
 } from "../cacheRefreshMetrics.ts";
 import {
+    assertSupportedCacheProducerKey,
     cacheRefreshScopeKey,
-    isSupportedCacheProducerKey,
     refreshCacheProducerUnlocked,
 } from "./cacheProducerRegistry.ts";
 import {
@@ -19,6 +19,7 @@ import { SerialOperationQueue } from "./serialOperationQueue.ts";
 
 const logger = createStructuredLogger("cache-refresh");
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
+// One global permit intentionally bounds aggregate producer load on this host.
 const cacheRefreshQueue = new SerialOperationQueue();
 
 function observeCacheRefreshMetric(event: string, operation: () => void): void {
@@ -117,14 +118,13 @@ export async function refreshCacheProducer(
     signal?: AbortSignal,
     options: { force?: boolean } = {}
 ): Promise<{ refreshed: string[] }> {
+    assertSupportedCacheProducerKey(key);
     observeCacheRefreshMetric("request", recordCacheRefreshRequest);
     if (signal?.aborted) {
         throw abortError();
     }
     const scopeKey = cacheRefreshScopeKey(key);
-    const inFlightEntries = isSupportedCacheProducerKey(key)
-        ? [...inFlightCacheRefreshes]
-        : [];
+    const inFlightEntries = [...inFlightCacheRefreshes];
     const existing = inFlightEntries
         .filter(
             ([inFlightKey]) =>

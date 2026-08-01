@@ -8,7 +8,7 @@ import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { stringFallback } from "../../lib/values.ts";
 import { getDockerAppsRoot, managedComposePath } from "./composeProject.ts";
 import { isSafeTagRegexPattern } from "./registryClient.ts";
-import { caughtMessage, nowIso } from "./support.ts";
+import { caughtMessage, nowIso, parseImageReference } from "./support.ts";
 import type { DiscoveredComposeService, DockerUpdaterStepResult } from "./types.ts";
 
 const logger = createStructuredLogger("docker-updater");
@@ -47,22 +47,6 @@ function normalizeLabels(rawLabels: unknown): Map<string, string> {
         );
     }
     return new Map();
-}
-
-function parseImageReference(imageReference: string) {
-    const digestIndex = imageReference.indexOf("@");
-    const beforeDigest =
-        digestIndex === -1 ? imageReference : imageReference.slice(0, digestIndex);
-    const digest = digestIndex === -1 ? undefined : imageReference.slice(digestIndex + 1);
-    const slashIndex = beforeDigest.lastIndexOf("/");
-    const colonIndex = beforeDigest.lastIndexOf(":");
-    const hasTag = colonIndex > slashIndex;
-    return {
-        repo: hasTag ? beforeDigest.slice(0, colonIndex) : beforeDigest,
-        tag: hasTag ? beforeDigest.slice(colonIndex + 1) : undefined,
-        digest,
-        pinMode: digest ? "digest" : "tag",
-    };
 }
 
 function isBooleanLabel(value: string | undefined, isFallback = false): boolean {
@@ -309,10 +293,16 @@ export function registerDockerUpdaterServices(
         signal?.throwIfAborted();
         database.run("BEGIN IMMEDIATE");
         isTxnStarted = true;
+        const failedAppSlugs = new Set(
+            failedDiscoveries.map((discovery) => discovery.appSlug)
+        );
         const discoveredAppSlugs = new Set(
             successfulOrPartialDiscoveries.map((item) => item.appSlug)
         );
         for (const appSlug of discoveredAppSlugs) {
+            if (failedAppSlugs.has(appSlug)) {
+                continue;
+            }
             const serviceNames = new Set(
                 services
                     .filter((service) => service.appSlug === appSlug)
@@ -330,9 +320,6 @@ export function registerDockerUpdaterServices(
                 }
             }
         }
-        const failedAppSlugs = new Set(
-            failedDiscoveries.map((discovery) => discovery.appSlug)
-        );
         for (const row of database
             .prepare("SELECT DISTINCT app_slug FROM docker_managed_services")
             .all() as Array<{ app_slug: string }>) {

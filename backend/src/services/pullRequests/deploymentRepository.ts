@@ -5,7 +5,6 @@ import type {
 } from "../../../../contracts/delivery.ts";
 import { database, sqlNullable } from "../../database.ts";
 import { errorMessage } from "../../lib/errors.ts";
-import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {
     assertManagedDashboardReleaseRollbackSchemaCompatible,
     type ManagedDashboardRelease,
@@ -22,20 +21,20 @@ import {
     registerQueuedJobCancellationHandler,
 } from "../jobExecutionQueue.ts";
 import { DASHBOARD_REPO } from "./config.ts";
+import {
+    dateToISOString,
+    FULL_COMMIT_SHA_PATTERN,
+    isRecord,
+    pullRequestLogger as logger,
+} from "./support.ts";
 
-const logger = createStructuredLogger("pull-requests");
 const DEPLOYMENT_LOCK_STALE_MS = 30 * 60 * 1000;
 const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_DEPLOYMENT_CUTOVER_CONTEXT_BYTES = 4096;
 const DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION = 2;
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "verifying"]);
-const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const SQLITE_CUTOVER_SNAPSHOT_ID_PATTERN =
     /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
-
-function dateToISOString(date: Date): string {
-    return date.toISOString();
-}
 
 export function writeDeploymentJob(job: DeploymentJob): void {
     database
@@ -166,10 +165,6 @@ export interface DeploymentCutoverContext {
     preActivationCommit: string;
     preActivationPreviousCommit?: string;
     rollbackCommit: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function createDeploymentCutoverContext(
@@ -686,9 +681,3 @@ export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatu
         },
     };
 }
-
-/**
- * Performs trim output.
- * @param value Value to process.
- * @returns Trim output result.
- */

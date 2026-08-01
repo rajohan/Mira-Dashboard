@@ -7,11 +7,10 @@ import {
     resolvePullRequestPreviewAllowedAuthors,
 } from "../pullRequestPreviewPolicy.ts";
 import { DEFAULT_BASE, DEFAULT_REVIEWER_AUTHOR } from "./config.ts";
+import { FULL_COMMIT_SHA_PATTERN, MAX_PULL_REQUEST_BODY_LENGTH } from "./support.ts";
 
-const MAX_PULL_REQUEST_BODY_LENGTH = 64 * 1024;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
-const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 
 export function hasReviewerApproval(pr: PullRequestSummary): boolean {
     const author = DEFAULT_REVIEWER_AUTHOR;
@@ -210,12 +209,6 @@ export function applyPullRequestPreviewEligibility(
     });
 }
 
-/**
- * Parses the bounded public REST shape used only by credential-free dev previews.
- * @param value Value to process.
- * @returns Parsed the bounded public REST shape used only by credential-free dev previews.
- */
-
 export function validateDashboardPr(pr: PullRequestSummary): void {
     if (pr.baseRefName !== DEFAULT_BASE) {
         throw new Error(
@@ -404,8 +397,3 @@ function checkTimestamp(check: Record<string, unknown>): number {
 function normalizedCheckValue(value: unknown): string {
     return typeof value === "string" ? value.toLowerCase() : "";
 }
-
-/**
- * Returns production checkout status.
- * @returns production checkout status.
- */

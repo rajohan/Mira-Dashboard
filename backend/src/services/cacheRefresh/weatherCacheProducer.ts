@@ -87,19 +87,19 @@ async function fetchSpydebergWeather() {
             source: "open-meteo",
             data: {
                 location: SPYDEBERG.name,
-                temperatureC: current.temperature_2m ?? undefined,
-                feelsLikeC: current.apparent_temperature ?? undefined,
-                humidityPercent: current.relative_humidity_2m ?? undefined,
-                windKph: current.wind_speed_10m ?? undefined,
+                temperatureC: toOptionalNumber(current.temperature_2m),
+                feelsLikeC: toOptionalNumber(current.apparent_temperature),
+                humidityPercent: toOptionalNumber(current.relative_humidity_2m),
+                windKph: toOptionalNumber(current.wind_speed_10m),
                 description: openMeteoCodeToDescription(current.weather_code),
-                minTempC: minTemps[0] ?? undefined,
-                maxTempC: maxTemps[0] ?? undefined,
+                minTempC: toOptionalNumber(minTemps[0]),
+                maxTempC: toOptionalNumber(maxTemps[0]),
                 forecast: unknownArray(daily.time)
                     .slice(0, 3)
                     .map((date, index) => ({
                         date: typeof date === "string" ? date : "",
-                        minTempC: minTemps[index] ?? undefined,
-                        maxTempC: maxTemps[index] ?? undefined,
+                        minTempC: toOptionalNumber(minTemps[index]),
+                        maxTempC: toOptionalNumber(maxTemps[index]),
                         description: openMeteoCodeToDescription(weatherCodes[index]),
                     })),
                 fetchedAt: nowIso(),

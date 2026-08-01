@@ -11,6 +11,7 @@ import {
     dateToISOString,
     errorMessage,
     fetchJson,
+    stripAnsi,
     type JsonRecord,
     toCurrencyNumber,
     toNumber,
@@ -219,12 +220,6 @@ async function createCodexQuotaProbe(sourceCodexHome: string): Promise<{
     }
 }
 
-function stripAnsi(value: string) {
-    return value
-        .replaceAll(new RegExp(String.raw`\u001B\[[0-9;?]*[ -/]*[@-~]`, "gu"), "")
-        .replaceAll(new RegExp(String.raw`\u001B[@-_]`, "gu"), "");
-}
-
 function cleanPanelText(value: string | undefined) {
     if (!value) return;
     return value.replaceAll(/[│╭╮╰╯]/gu, "").trim() || undefined;
@@ -296,7 +291,7 @@ async function checkOpenAiQuota() {
         const codexPath = getCodexBin();
         const probe = await createCodexQuotaProbe(getQuotaCodexHome());
         const command = String.raw`set -e
-SESSION="codex_quota_$$_$(date +%s)"
+SESSION="$MIRA_QUOTA_CODEX_SESSION"
 cleanup(){ tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 command -v tmux >/dev/null 2>&1 || { echo "__ERR__:tmux_not_found"; exit 0; }
@@ -323,36 +318,50 @@ tmux new-session -d -s "$SESSION" -c "$MIRA_QUOTA_CODEX_WORKSPACE" env CODEX_HOM
 	`;
         try {
             for (let attempt = 0; attempt < 2; attempt += 1) {
-                const { code, stderr, stdout } = await runProcess(
-                    "bash",
-                    ["-c", command],
-                    {
-                        env: {
-                            PATH: process.env.PATH,
-                            NODE_ENV: process.env.NODE_ENV,
-                            MIRA_QUOTA_CODEX_BIN: codexPath,
-                            MIRA_QUOTA_CODEX_HOME: probe.codexHome,
-                            MIRA_QUOTA_CODEX_WORKSPACE: probe.workspace,
-                        },
-                        timeoutMs: 120_000,
-                        maxBuffer: 1024 * 1024,
+                const sessionName = `codex_quota_${process.pid}_${Date.now()}_${attempt}`;
+                try {
+                    const { code, stderr, stdout } = await runProcess(
+                        "bash",
+                        ["-c", command],
+                        {
+                            env: {
+                                PATH: process.env.PATH,
+                                NODE_ENV: process.env.NODE_ENV,
+                                MIRA_QUOTA_CODEX_BIN: codexPath,
+                                MIRA_QUOTA_CODEX_HOME: probe.codexHome,
+                                MIRA_QUOTA_CODEX_SESSION: sessionName,
+                                MIRA_QUOTA_CODEX_WORKSPACE: probe.workspace,
+                            },
+                            timeoutMs: 120_000,
+                            maxBuffer: 1024 * 1024,
+                        }
+                    );
+                    if (code !== 0) {
+                        const output = stripAnsi(`${stderr}\n${stdout}`)
+                            .replaceAll("\r", "")
+                            .replaceAll(/^.*Account:.*$/gimu, "")
+                            .trim()
+                            .slice(-1000);
+                        return {
+                            status: "error" as const,
+                            note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
+                        };
                     }
-                );
-                if (code !== 0) {
-                    const output = stripAnsi(`${stderr}\n${stdout}`)
-                        .replaceAll("\r", "")
-                        .trim()
-                        .slice(-1000);
-                    return {
-                        status: "error" as const,
-                        note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
-                    };
-                }
-                const parsed = parseOpenAiQuotaOutput(
-                    stripAnsi(stdout).replaceAll("\r", "")
-                );
-                if (attempt === 1 || parsed.status !== "error") {
-                    return parsed;
+                    const parsed = parseOpenAiQuotaOutput(
+                        stripAnsi(stdout).replaceAll("\r", "")
+                    );
+                    if (attempt === 1 || parsed.status !== "error") {
+                        return parsed;
+                    }
+                } finally {
+                    try {
+                        await runProcess("tmux", ["kill-session", "-t", sessionName], {
+                            env: { PATH: process.env.PATH },
+                            timeoutMs: 10_000,
+                        });
+                    } catch {
+                        // Shell cleanup handles normal exits; this covers timeouts.
+                    }
                 }
             }
             return {

@@ -65,18 +65,26 @@ export function isSupportedCacheProducerKey(key: string): boolean {
     );
 }
 
+function unsupportedCacheKeyError(key: string): Error {
+    const message = key.startsWith("moltbook.")
+        ? `Unsupported Moltbook cache key: ${key}`
+        : `No backend refresh producer configured for cache key: ${key}`;
+    return Object.assign(new Error(message), { statusCode: 400 });
+}
+
+export function assertSupportedCacheProducerKey(key: string): void {
+    if (!isSupportedCacheProducerKey(key)) {
+        throw unsupportedCacheKeyError(key);
+    }
+}
+
 /**
  * Returns the execution resource class for a registered cache producer.
  * @param key Registered cache key.
  * @returns Scheduled-job resource class.
  */
 export function cacheRefreshResourceClass(key: string): JobResourceClass {
-    if (!isSupportedCacheProducerKey(key)) {
-        throw Object.assign(
-            new Error(`No backend refresh producer configured for cache key: ${key}`),
-            { statusCode: 400 }
-        );
-    }
+    assertSupportedCacheProducerKey(key);
     if (
         key === "weather.spydeberg" ||
         key === "quotas.summary" ||
@@ -91,12 +99,16 @@ export function cacheRefreshResourceClass(key: string): JobResourceClass {
 async function refreshCacheWithFailureRecord(
     key: string,
     refresh: () => Promise<{ refreshed: string[] }> | { refreshed: string[] },
-    failureKeys: string[] = [key]
+    failureKeys?: string[] | ((error: unknown) => string[])
 ): Promise<{ refreshed: string[] }> {
     try {
         return await refresh();
     } catch (error) {
-        for (const failureKey of failureKeys) {
+        const resolvedFailureKeys =
+            typeof failureKeys === "function"
+                ? failureKeys(error)
+                : (failureKeys ?? [key]);
+        for (const failureKey of resolvedFailureKeys) {
             writeCacheFailure({
                 key: failureKey,
                 source: "backend",
@@ -121,26 +133,11 @@ export async function refreshCacheProducerUnlocked(
     key: string
 ): Promise<{ refreshed: string[] }> {
     if (key === "moltbook") {
-        try {
-            return await refreshMoltbookCache();
-        } catch (error) {
-            const failureKeys = getMoltbookFailureKeys(error) ?? [
-                ...MOLTBOOK_CACHE_KEY_LIST,
-            ];
-            for (const failureKey of failureKeys) {
-                writeCacheFailure({
-                    key: failureKey,
-                    source: "backend",
-                    ttl: 15,
-                    ttlUnit: "minutes",
-                    error,
-                    metadata: {
-                        producer: "refreshCacheProducer",
-                    },
-                });
-            }
-            throw error;
-        }
+        return refreshCacheWithFailureRecord(
+            key,
+            refreshMoltbookCache,
+            (error) => getMoltbookFailureKeys(error) ?? [...MOLTBOOK_CACHE_KEY_LIST]
+        );
     }
     if (MOLTBOOK_CACHE_KEYS.has(key)) {
         return refreshCacheWithFailureRecord(key, () =>
@@ -148,9 +145,7 @@ export async function refreshCacheProducerUnlocked(
         );
     }
     if (key.startsWith("moltbook.")) {
-        throw Object.assign(new Error(`Unsupported Moltbook cache key: ${key}`), {
-            statusCode: 400,
-        });
+        throw unsupportedCacheKeyError(key);
     }
     if (key === "weather.spydeberg") {
         return refreshCacheWithFailureRecord(key, refreshWeatherCache);
@@ -182,10 +177,5 @@ export async function refreshCacheProducerUnlocked(
     if (key === LOG_ROTATION_STATE_KEY) {
         return refreshCacheWithFailureRecord(key, refreshLogRotationStateCache);
     }
-    throw Object.assign(
-        new Error(`No backend refresh producer configured for cache key: ${key}`),
-        {
-            statusCode: 400,
-        }
-    );
+    throw unsupportedCacheKeyError(key);
 }

@@ -4,7 +4,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { TASK_ASSIGNEES, type TaskUpdate } from "../../../../../contracts/tasks";
+import { messageFromError } from "../../../lib/errorMessage";
 import { formatDate } from "../../../utils/format";
+import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
 import { Textarea } from "../../ui/Textarea";
 
@@ -28,13 +30,24 @@ export function TaskProgressUpdates({
     const [progressMessage, setProgressMessage] = useState("");
     const [editingUpdateId, setEditingUpdateId] = useState<number | undefined>();
     const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
+    const [isAddingUpdate, setIsAddingUpdate] = useState(false);
+    const [isSavingUpdate, setIsSavingUpdate] = useState(false);
+    const [submissionError, setSubmissionError] = useState<string | undefined>();
     const trimmedProgressMessage = progressMessage.trim();
     const trimmedEditingUpdateMessage = editingUpdateMessage.trim();
 
     const handleAddUpdate = async () => {
-        if (!trimmedProgressMessage) return;
-        await onAddUpdate(trimmedProgressMessage);
-        setProgressMessage("");
+        if (!trimmedProgressMessage || isAddingUpdate) return;
+        setIsAddingUpdate(true);
+        setSubmissionError(undefined);
+        try {
+            await onAddUpdate(trimmedProgressMessage);
+            setProgressMessage("");
+        } catch (error) {
+            setSubmissionError(messageFromError(error, "Failed to add progress update"));
+        } finally {
+            setIsAddingUpdate(false);
+        }
     };
 
     const startEditUpdate = (update: TaskUpdate) => {
@@ -43,10 +56,24 @@ export function TaskProgressUpdates({
     };
 
     const saveUpdateEdit = async () => {
-        if (!editingUpdateId || !trimmedEditingUpdateMessage) return;
-        await onEditUpdate(editingUpdateId, trimmedEditingUpdateMessage);
-        setEditingUpdateId(undefined);
-        setEditingUpdateMessage("");
+        if (
+            editingUpdateId === undefined ||
+            !trimmedEditingUpdateMessage ||
+            isSavingUpdate
+        ) {
+            return;
+        }
+        setIsSavingUpdate(true);
+        setSubmissionError(undefined);
+        try {
+            await onEditUpdate(editingUpdateId, trimmedEditingUpdateMessage);
+            setEditingUpdateId(undefined);
+            setEditingUpdateMessage("");
+        } catch (error) {
+            setSubmissionError(messageFromError(error, "Failed to edit progress update"));
+        } finally {
+            setIsSavingUpdate(false);
+        }
     };
 
     return (
@@ -59,12 +86,9 @@ export function TaskProgressUpdates({
                     <p className="text-sm text-primary-500">No updates yet.</p>
                 ) : (
                     updates.map((update) => {
-                        const authorMeta =
-                            TASK_ASSIGNEES[
-                                update.author === TASK_ASSIGNEES.mira.id
-                                    ? "mira"
-                                    : "raymond"
-                            ];
+                        const authorMeta = Object.values(TASK_ASSIGNEES).find(
+                            (assignee) => assignee.id === update.author
+                        );
                         const isEditingThis = editingUpdateId === update.id;
 
                         return (
@@ -74,13 +98,17 @@ export function TaskProgressUpdates({
                             >
                                 <div className="mb-1 flex flex-col gap-2 text-xs text-primary-500 sm:flex-row sm:items-center sm:justify-between">
                                     <span className="min-w-0 wrap-break-word">
-                                        <a
-                                            href={authorMeta.githubUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                        >
-                                            @{authorMeta.id}
-                                        </a>{" "}
+                                        {authorMeta ? (
+                                            <a
+                                                href={authorMeta.githubUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                            >
+                                                @{authorMeta.id}
+                                            </a>
+                                        ) : (
+                                            `@${update.author}`
+                                        )}{" "}
                                         · {formatDate(update.createdAt)}
                                     </span>
                                     <div className="grid grid-cols-2 gap-2 sm:flex">
@@ -89,6 +117,7 @@ export function TaskProgressUpdates({
                                             variant="ghost"
                                             aria-label={`Edit progress update #${update.id}`}
                                             onClick={() => startEditUpdate(update)}
+                                            disabled={isSavingUpdate}
                                         >
                                             <Pencil className="size-4" />
                                             Edit
@@ -98,6 +127,7 @@ export function TaskProgressUpdates({
                                             variant="ghost"
                                             aria-label={`Delete progress update #${update.id}`}
                                             onClick={() => onDeleteUpdate(update.id)}
+                                            disabled={isSavingUpdate}
                                         >
                                             <Trash2 className="size-4" />
                                             Delete
@@ -116,6 +146,7 @@ export function TaskProgressUpdates({
                                                 )
                                             }
                                             rows={3}
+                                            disabled={isSavingUpdate}
                                         />
                                         <div className="grid grid-cols-1 gap-2 sm:flex">
                                             <Button
@@ -124,10 +155,13 @@ export function TaskProgressUpdates({
                                                 onClick={() => {
                                                     void saveUpdateEdit();
                                                 }}
-                                                disabled={!trimmedEditingUpdateMessage}
+                                                disabled={
+                                                    !trimmedEditingUpdateMessage ||
+                                                    isSavingUpdate
+                                                }
                                             >
                                                 <Save className="size-4" />
-                                                Save
+                                                {isSavingUpdate ? "Saving..." : "Save"}
                                             </Button>
                                             <Button
                                                 size="sm"
@@ -135,6 +169,7 @@ export function TaskProgressUpdates({
                                                 onClick={() =>
                                                     setEditingUpdateId(undefined)
                                                 }
+                                                disabled={isSavingUpdate}
                                             >
                                                 <X className="size-4" />
                                                 Cancel
@@ -155,23 +190,32 @@ export function TaskProgressUpdates({
             </div>
 
             <div className="space-y-2">
+                {submissionError ? (
+                    <Alert
+                        variant="error"
+                        onDismiss={() => setSubmissionError(undefined)}
+                    >
+                        {submissionError}
+                    </Alert>
+                ) : undefined}
                 <Textarea
                     label="Add progress update"
                     value={progressMessage}
                     onChange={(event) => setProgressMessage(event.target.value)}
                     rows={3}
                     placeholder="Markdown supported"
+                    disabled={isAddingUpdate}
                 />
                 <Button
                     variant="secondary"
                     onClick={() => {
                         void handleAddUpdate();
                     }}
-                    disabled={!trimmedProgressMessage}
+                    disabled={!trimmedProgressMessage || isAddingUpdate}
                     className="w-full sm:w-auto"
                 >
                     <Plus className="size-4" />
-                    Add Update
+                    {isAddingUpdate ? "Adding..." : "Add Update"}
                 </Button>
             </div>
         </div>

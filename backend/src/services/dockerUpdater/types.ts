@@ -1,4 +1,5 @@
 export interface DockerUpdaterStepResult {
+    kind?: "git-sync" | "update";
     step: string;
     isOk: boolean;
     stdout: string;

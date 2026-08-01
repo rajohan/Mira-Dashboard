@@ -19,6 +19,14 @@ import { SerialOperationQueue } from "./serialOperationQueue.ts";
 const logger = createStructuredLogger("cache-refresh");
 const DATABASE_SUMMARY_JOB_ID = "cache.database.summary";
 
+function isConflictError(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        "statusCode" in error &&
+        (error as { statusCode?: unknown }).statusCode === 409
+    );
+}
+
 const cacheRefreshScheduledJobs = [
     {
         id: "cache.weather",
@@ -125,11 +133,7 @@ export function enqueueDatabaseSummaryRefresh(): void {
     try {
         enqueueScheduledJob(DATABASE_SUMMARY_JOB_ID, "system");
     } catch (error) {
-        const statusCode =
-            error instanceof Error && "statusCode" in error
-                ? (error as { statusCode?: unknown }).statusCode
-                : undefined;
-        if (statusCode !== 409) {
+        if (!isConflictError(error)) {
             throw error;
         }
     }
@@ -234,11 +238,7 @@ function queueMissingCacheSeeds(
                 availableAt: new Date(startedAt + staggerMs).toISOString(),
             });
         } catch (error) {
-            const statusCode =
-                error instanceof Error && "statusCode" in error
-                    ? (error as { statusCode?: unknown }).statusCode
-                    : undefined;
-            if (statusCode !== 409) {
+            if (!isConflictError(error)) {
                 logger.warn("cache_refresh.startup_seed_queue_failed", {
                     cacheKey: seedJob.key,
                     error,

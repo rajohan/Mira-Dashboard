@@ -1,5 +1,8 @@
 import gateway from "../../gateway.ts";
 import { CoalescedSnapshot } from "../../lib/coalescedSnapshot.ts";
+import { createStructuredLogger } from "../../lib/structuredLogger.ts";
+
+const logger = createStructuredLogger("agents");
 
 export interface GatewaySessionSummary {
     key: string;
@@ -15,41 +18,39 @@ export interface GatewaySessionSummary {
     running?: boolean | undefined;
 }
 
+function cachedGatewaySessions(): GatewaySessionSummary[] {
+    try {
+        return gateway
+            .getSessions()
+            .filter(
+                (session) => typeof session.key === "string" && session.key.length > 0
+            )
+            .map((session) => ({
+                key: session.key,
+                model:
+                    typeof session.model === "string"
+                        ? session.model.trim() || undefined
+                        : undefined,
+                status: session.status,
+                updatedAt: session.updatedAt,
+                startedAt: session.startedAt,
+                endedAt: session.endedAt,
+                runId: session.runId,
+                activeRunId: session.activeRunId,
+                currentRunId: session.currentRunId,
+                isRunning: session.isRunning,
+                running: session.running,
+            }));
+    } catch {
+        return [];
+    }
+}
+
 /**
- * Performs to display model name.
- * @param model Model value.
- * @returns To display model name result.
+ * Loads live Gateway sessions, falling back to the local Gateway cache.
+ * @returns Normalized live sessions, or cached sessions when live loading fails.
  */
-
 async function loadGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
-    const cached: GatewaySessionSummary[] = (() => {
-        try {
-            return gateway
-                .getSessions()
-                .filter(
-                    (session) => typeof session.key === "string" && session.key.length > 0
-                )
-                .map((session) => ({
-                    key: session.key,
-                    model:
-                        typeof session.model === "string"
-                            ? session.model.trim() || undefined
-                            : undefined,
-                    status: session.status,
-                    updatedAt: session.updatedAt,
-                    startedAt: session.startedAt,
-                    endedAt: session.endedAt,
-                    runId: session.runId,
-                    activeRunId: session.activeRunId,
-                    currentRunId: session.currentRunId,
-                    isRunning: session.isRunning,
-                    running: session.running,
-                }));
-        } catch {
-            return [];
-        }
-    })();
-
     try {
         const result = (await gateway.request("sessions.list", {})) as {
             sessions?: Array<{
@@ -89,10 +90,10 @@ async function loadGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> 
                     running: session.running,
                 }));
         }
-    } catch {
-        // Fall back to cached sessions below
+    } catch (error) {
+        logger.warn("agents.gateway_sessions_list_failed", { error });
     }
-    return cached;
+    return cachedGatewaySessions();
 }
 
 const gatewayAgentSessionsSnapshot = new CoalescedSnapshot<GatewaySessionSummary[]>({
@@ -105,8 +106,3 @@ const gatewayAgentSessionsSnapshot = new CoalescedSnapshot<GatewaySessionSummary
 export function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     return gatewayAgentSessionsSnapshot.read();
 }
-
-/**
- * Performs now iso.
- * @returns Now iso result.
- */

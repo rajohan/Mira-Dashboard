@@ -5,13 +5,14 @@ import { isPlainRecord } from "../../../../contracts/runtime.ts";
 import {
     guardedPath,
     readdirGuarded,
-    readTextNoFollowGuarded,
+    readTextTailNoFollowGuarded,
     statGuarded,
 } from "../../lib/guardedOps.ts";
 import { unknownArray } from "../../lib/values.ts";
 import { getSafeAgentActivityRoots, type ActivityLogRoot } from "./agentPaths.ts";
 
 const STALE_THRESHOLD = 5 * 60_000;
+const MAX_ACTIVITY_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 
 // Get activity from a JSONL session file
 /** Captures the latest observed agent activity label and timestamp. */
@@ -21,7 +22,6 @@ export interface ActivityInfo {
     modTime: number;
 }
 
-/** Describes one activity log root to scan for an agent. */
 /** Describes one activity-bearing JSONL file. */
 interface ActivityLogFile {
     name: string;
@@ -475,7 +475,7 @@ export async function getLatestActivityFromFile(
         const scanActivityFile = async (
             file: ActivityLogFile,
             groupTaskTurnId: string | undefined,
-            pendingTaskTurnId: string | undefined
+            inheritedTaskTurnId: string | undefined
         ) => {
             if (now - file.mtime > STALE_THRESHOLD) {
                 return {
@@ -487,7 +487,10 @@ export async function getLatestActivityFromFile(
 
             let content: string;
             try {
-                content = await readTextNoFollowGuarded(guardedPath(file.path));
+                content = await readTextTailNoFollowGuarded(
+                    guardedPath(file.path),
+                    MAX_ACTIVITY_LOG_TAIL_BYTES
+                );
             } catch {
                 return {
                     task: undefined,
@@ -580,7 +583,7 @@ export async function getLatestActivityFromFile(
                                     isVisibleActivityTool(candidate.name)
                             );
                         const expectedTurnId =
-                            fileTaskTurnId || groupTaskTurnId || pendingTaskTurnId;
+                            fileTaskTurnId || groupTaskTurnId || inheritedTaskTurnId;
                         const canUseToolCall =
                             !expectedTurnId || entryTurnId === expectedTurnId;
                         const toolName = toolCall?.name;
@@ -606,7 +609,7 @@ export async function getLatestActivityFromFile(
 
         const scanActivityGroup = async (
             group: { files: ActivityLogFile[]; modTime: number },
-            pendingTaskTurnId: string | undefined
+            inheritedTaskTurnId: string | undefined
         ) => {
             let groupTask: string | undefined;
             let groupTaskTurnId: string | undefined;
@@ -618,7 +621,7 @@ export async function getLatestActivityFromFile(
                     task: fileTask,
                     taskTurnId: fileTaskTurnId,
                     activity: fileActivity,
-                } = await scanActivityFile(file, groupTaskTurnId, pendingTaskTurnId);
+                } = await scanActivityFile(file, groupTaskTurnId, inheritedTaskTurnId);
 
                 if (fileTask && !groupTask) {
                     groupTask = fileTask;

@@ -142,10 +142,13 @@ function parseJsonObjectFromOutput(output: string): Record<string, unknown> | un
         return undefined;
     }
 
-    for (let startIndex = 0; startIndex < trimmed.length; startIndex += 1) {
-        if (trimmed[startIndex] !== "{") {
-            continue;
-        }
+    const maxJsonStartCandidates = 8;
+    let startIndex = trimmed.indexOf("{");
+    for (
+        let attempt = 0;
+        attempt < maxJsonStartCandidates && startIndex !== -1;
+        attempt += 1, startIndex = trimmed.indexOf("{", startIndex + 1)
+    ) {
         try {
             const parsed = JSON.parse(trimmed.slice(startIndex)) as unknown;
             return asRecord(parsed);

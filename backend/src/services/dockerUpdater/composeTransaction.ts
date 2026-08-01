@@ -220,6 +220,7 @@ function writeFileWithMetadata(
                 }
             }
         }
+        fs.fsyncSync(fd);
         isCommitted = true;
     } finally {
         fs.closeSync(fd);
@@ -404,13 +405,11 @@ export async function applyComposeUpdateUnlocked(
             ...commandRollbacks.map((rollback) => rollback.composePath),
         ];
         return {
-            changedPaths:
-                dirtyBefore &&
-                changedPaths.every(
-                    (changedPath) => !dirtyBefore.has(path.resolve(changedPath))
-                )
-                    ? changedPaths
-                    : [],
+            changedPaths: dirtyBefore
+                ? changedPaths.filter(
+                      (changedPath) => !dirtyBefore.has(path.resolve(changedPath))
+                  )
+                : [],
             stdout: String(stdout),
             stderr: String(stderr),
         };

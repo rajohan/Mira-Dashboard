@@ -302,15 +302,16 @@ function hasPositionFallbackHistorySource(message: ChatHistoryMessage): boolean 
     );
 }
 
-/**
- * Keeps persisted delete keys valid when runtime reconciliation adds a run id.
- * @returns Projected message delete keys result.
- */
+/** Separates persisted delete keys from runtime-only fallback identities. */
 export interface ProjectedMessageDeleteIdentity {
     baseKeys: string[];
     persistedKeyCount: number;
 }
 
+/**
+ * Keeps persisted delete keys valid when runtime reconciliation adds a run id.
+ * @returns Projected message delete keys and the persisted-key boundary.
+ */
 export function projectedMessageDeleteIdentity(
     message: ChatHistoryMessage,
     runs: ChatRunState[]

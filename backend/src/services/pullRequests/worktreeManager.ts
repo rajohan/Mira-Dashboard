@@ -252,9 +252,3 @@ export async function syncMain(signal?: AbortSignal): Promise<void> {
     });
     await ensureProductionReadyForDeploy(signal);
 }
-
-/**
- * Performs shell quote.
- * @param value Value to process.
- * @returns Shell quote result.
- */

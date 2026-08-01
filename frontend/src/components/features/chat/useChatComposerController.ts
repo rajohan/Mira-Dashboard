@@ -65,6 +65,15 @@ export function useChatComposerController({
         label: option.label || option.name || option.id || "Unknown",
     }));
     const currentModel = selectedSession?.model || "";
+    if (
+        currentModel &&
+        modelSelectOptions.every((option) => option.value !== currentModel)
+    ) {
+        modelSelectOptions.unshift({ value: currentModel, label: currentModel });
+    }
+    if (modelSelectOptions.length === 0) {
+        modelSelectOptions.push({ value: "", label: "Default" });
+    }
     const canAttachFiles = Boolean(
         isConnected &&
         selectedSessionKey &&
@@ -129,16 +138,6 @@ export function useChatComposerController({
             unsubscribeDrop();
         };
     }, []);
-
-    if (
-        currentModel &&
-        modelSelectOptions.every((option) => option.value !== currentModel)
-    ) {
-        modelSelectOptions.unshift({ value: currentModel, label: currentModel });
-    }
-    if (modelSelectOptions.length === 0) {
-        modelSelectOptions.push({ value: "", label: "Default" });
-    }
 
     /**
      * Performs insert emoji.

@@ -656,8 +656,3 @@ export function CronJobEditor({
         />
     );
 }
-
-/**
- * Renders the jobs UI.
- * @returns Rendered the jobs UI.
- */

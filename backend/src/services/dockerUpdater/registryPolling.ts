@@ -96,8 +96,7 @@ export async function pollDockerUpdaterRegistries(
             database
                 .prepare(
                     `UPDATE docker_managed_services
-                 SET latest_tag = NULL, latest_digest = NULL,
-                     last_checked_at = ?, last_status = 'registry_check_failed'
+                 SET last_checked_at = ?, last_status = 'registry_check_failed'
                  WHERE id = ?`
                 )
                 .run(timestamp, service.id);

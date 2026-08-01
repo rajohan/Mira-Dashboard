@@ -1,24 +1,22 @@
-import { database } from "../../database.ts";
+import { getCacheEntry, parseJsonField } from "../../lib/cacheStore.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
+import { emptyLogRotationState, LOG_ROTATION_STATE_KEY } from "../logRotation/state.ts";
 
-export const LOG_ROTATION_STATE_KEY = "log_rotation.state";
+export { LOG_ROTATION_STATE_KEY } from "../logRotation/state.ts";
 
 /**
  * Preserves the last log-rotation state while renewing its cache envelope.
  * @returns Refreshed cache keys.
  */
 export function refreshLogRotationStateCache(): { refreshed: string[] } {
-    const row = database
-        .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
-        .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json?: string | undefined };
-    let data: unknown = { version: 1, files: {} };
+    const existingData = getCacheEntry(LOG_ROTATION_STATE_KEY)?.data;
+    let data: unknown = emptyLogRotationState();
     let preserveExistingData = false;
-    if (row?.data_json) {
-        try {
-            data = JSON.parse(row.data_json) as unknown;
+    if (existingData) {
+        const parsed = parseJsonField<unknown>(existingData);
+        if (parsed !== undefined) {
+            data = parsed;
             preserveExistingData = true;
-        } catch {
-            data = { version: 1, files: {} };
         }
     } else {
         preserveExistingData = true;

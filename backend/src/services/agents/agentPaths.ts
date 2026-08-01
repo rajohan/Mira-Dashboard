@@ -85,6 +85,7 @@ export function mkdirChildDirectoryFromVerifiedParent(
         FS.constants.O_DIRECTORY | FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
     );
     try {
+        assertOpenedDirectoryMatches(parentFd, FS.realpathSync(parent));
         const fdPath = Path.join("/proc/self/fd", String(parentFd), childName);
         try {
             FS.mkdirSync(Buffer.from(fdPath));
@@ -283,5 +284,3 @@ export function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
         }
     });
 }
-
-// Activity thresholds (in milliseconds)

@@ -406,14 +406,6 @@ export async function prepareAndStartRollback(
     }
 }
 
-/**
- * Waits for GitHub's asynchronous stack merge to reach a terminal state.
- * @param number Pull request selected as the top of the merge group.
- * @param expectedHeadSha Expected selected pull request head.
- * @param signal Signal used to cancel the operation.
- * @returns Terminal asynchronous merge result.
- */
-
 /** Registers managed deploy, rollback, and interrupted-cutover worker actions. */
 export function registerDeploymentExecutionActions(): void {
     registerPullRequestJobLifecycleHandlers();

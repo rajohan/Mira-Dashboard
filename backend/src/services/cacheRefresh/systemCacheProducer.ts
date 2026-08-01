@@ -11,6 +11,7 @@ import {
     type JsonRecord,
     nowIso,
     runCacheCommand,
+    stripAnsi,
     toNumber,
     toOptionalString,
 } from "./cacheProducerSupport.ts";
@@ -135,14 +136,7 @@ export async function refreshSystemCache() {
         doctorResult.status === "fulfilled"
             ? doctorResult.value
                   .split("\n")
-                  .map((line) =>
-                      line
-                          .replaceAll(
-                              new RegExp(String.raw`\u001B\[[0-9;?]*[ -/]*[@-~]`, "gu"),
-                              ""
-                          )
-                          .trim()
-                  )
+                  .map((line) => stripAnsi(line).trim())
                   .filter((line) => line.startsWith("- WARNING:"))
                   .map((line) => line.replace(/^- WARNING:\s*/u, "").trim())
             : [];

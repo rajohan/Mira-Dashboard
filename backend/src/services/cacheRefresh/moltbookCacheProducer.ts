@@ -1,4 +1,5 @@
 import { database } from "../../database.ts";
+import { nonEmptyEnvironmentFallback } from "../../lib/values.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
 import {
     asRecord,
@@ -146,9 +147,12 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         requestedKeys.includes("moltbook.profile") ||
         requestedKeys.includes("moltbook.my-content")
     ) {
+        const agentName = nonEmptyEnvironmentFallback("MOLTBOOK_AGENT_NAME", "mira_2026");
         tasks.push({
             kind: "profile",
-            promise: fetchMoltbookJson("/agents/profile?name=mira_2026"),
+            promise: fetchMoltbookJson(
+                `/agents/profile?name=${encodeURIComponent(agentName)}`
+            ),
         });
     }
 

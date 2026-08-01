@@ -222,11 +222,16 @@ export async function runDockerUpdaterService(
         }
         protectMutation();
         const apply = await applyServiceUpdate(refreshedService, "manual", signal);
+        const completionSignal = signal?.aborted ? undefined : signal;
         if (apply.isOk) {
-            await pruneDanglingImagesBestEffort(signal);
+            await pruneDanglingImagesBestEffort(completionSignal);
         }
         const steps = [register, poll, apply];
-        await syncDockerUpdaterChangesBestEffort(steps, signal, protectMutation);
+        await syncDockerUpdaterChangesBestEffort(
+            steps,
+            completionSignal,
+            protectMutation
+        );
         return steps;
     }
     const blockedAppSlugs = failedDiscoveryAppSlugs(register);
@@ -240,17 +245,21 @@ export async function runDockerUpdaterService(
     );
     const applyResults: DockerUpdaterStepResult[] = [];
     for (const service of autoServices) {
-        signal?.throwIfAborted();
+        if (signal?.aborted) {
+            if (isMutationProtected) break;
+            signal.throwIfAborted();
+        }
         if (!isAutomaticUpdateEligible(service, blockedAppSlugs)) {
             continue;
         }
         protectMutation();
         applyResults.push(await applyServiceUpdate(service, "auto", signal));
     }
+    const completionSignal = isMutationProtected && signal?.aborted ? undefined : signal;
     if (applyResults.some((step) => step.isOk)) {
-        await pruneDanglingImagesBestEffort(signal);
+        await pruneDanglingImagesBestEffort(completionSignal);
     }
     const steps = [register, poll, ...applyResults];
-    await syncDockerUpdaterChangesBestEffort(steps, signal, protectMutation);
+    await syncDockerUpdaterChangesBestEffort(steps, completionSignal, protectMutation);
     return steps;
 }
