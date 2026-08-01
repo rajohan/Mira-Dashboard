@@ -3,13 +3,11 @@ import {
     Check,
     Circle,
     Pencil,
-    Plus,
     Save,
     Trash2,
     UserPlus,
     X,
 } from "lucide-react";
-import type { ComponentProps } from "react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -22,11 +20,6 @@ import {
     type TaskAutomationInput,
     type TaskUpdate,
 } from "../../../../../contracts/tasks";
-import {
-    formatCronLastStatus,
-    formatCronTimestamp,
-    getCronStatusVariant,
-} from "../../../utils/cronUtilities";
 import { timestampFromDateString } from "../../../utils/date";
 import { formatDate, formatDuration } from "../../../utils/format";
 import {
@@ -36,37 +29,12 @@ import {
     normalizeTaskDetailColumn,
     PRIORITY_COLORS,
 } from "../../../utils/taskUtilities";
-import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 import { Textarea } from "../../ui/Textarea";
-
-/**
- * Formats elapsed milliseconds into a short human-readable duration.
- * @param value Value to process.
- * @returns Formatted elapsed milliseconds into a short human-readable duration.
- */
-function formatElapsedMs(value: number): string {
-    if (!Number.isFinite(value) || value < 0) {
-        return "—";
-    }
-
-    const seconds = Math.round(value / 1000);
-    if (seconds < 60) {
-        return `${seconds}s`;
-    }
-
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    if (minutes < 60) {
-        return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-    }
-
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-}
+import { TaskAutomationSummary } from "./TaskAutomationSummary";
+import { TaskProgressUpdates } from "./TaskProgressUpdates";
 
 /** Provides task data and callbacks used by the task detail modal. */
 interface TaskDetailModalProperties {
@@ -118,11 +86,6 @@ export function TaskDetailModal({
         task?.automation?.sessionTarget || ""
     );
 
-    const [progressMessage, setProgressMessage] = useState("");
-
-    const [editingUpdateId, setEditingUpdateId] = useState<number | undefined>();
-    const [editingUpdateMessage, setEditingUpdateMessage] = useState("");
-
     if (!task) {
         return;
     }
@@ -132,23 +95,6 @@ export function TaskDetailModal({
     const currentColumn = normalizeTaskDetailColumn(rawColumn);
     const assigneeLogin = task.assignees[0]?.login || task.assignees[0]?.name;
     const automation = task.automation;
-    let automationStatus = "";
-    let automationStatusVariant: ComponentProps<typeof Badge>["variant"] =
-        getCronStatusVariant(automation?.lastRunStatus || "");
-    if (automation?.runningAtMs) {
-        automationStatus = "RUNNING";
-        automationStatusVariant = "warning";
-    } else if (automation?.enabled === false) {
-        automationStatus = "DISABLED";
-        automationStatusVariant = "default";
-    } else if (automation?.lastRunStatus) {
-        automationStatus = formatCronLastStatus(automation.lastRunStatus);
-    } else if (automation) {
-        automationStatus = "SCHEDULED";
-    }
-    const trimmedProgressMessage = progressMessage.trim();
-    const trimmedEditingUpdateMessage = editingUpdateMessage.trim();
-
     let assigneeProfileUrl: string | undefined;
     if (assigneeLogin === TASK_ASSIGNEES.mira.id) {
         assigneeProfileUrl = TASK_ASSIGNEES.mira.githubUrl;
@@ -216,34 +162,6 @@ export function TaskDetailModal({
         });
 
         setIsEditingTask(false);
-    };
-
-    /** Adds a new progress update when the message is non-empty. */
-    const handleAddUpdate = async () => {
-        if (!trimmedProgressMessage) {
-            return;
-        }
-
-        await onAddUpdate(trimmedProgressMessage);
-        setProgressMessage("");
-    };
-
-    /** Starts editing the selected progress update. */
-    const startEditUpdate = (update: TaskUpdate) => {
-        setEditingUpdateId(update.id);
-        setEditingUpdateMessage(update.messageMd);
-    };
-
-    /** Saves the in-progress edit for a progress update. */
-    const saveUpdateEdit = async () => {
-        if (!editingUpdateId || !trimmedEditingUpdateMessage) {
-            return;
-        }
-
-        await onEditUpdate(editingUpdateId, trimmedEditingUpdateMessage);
-
-        setEditingUpdateId(undefined);
-        setEditingUpdateMessage("");
     };
 
     return (
@@ -386,102 +304,9 @@ export function TaskDetailModal({
                     </span>
                 </div>
 
-                {automation && !isEditingTask && (
-                    <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-4">
-                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                                <h3 className="text-sm font-semibold text-primary-300">
-                                    Backed by OpenClaw cron
-                                </h3>
-                                <p className="mt-1 text-xs text-primary-500">
-                                    This task tracks a recurring automation job.
-                                </p>
-                            </div>
-                            {automationStatus && (
-                                <Badge variant={automationStatusVariant}>
-                                    {automationStatus}
-                                </Badge>
-                            )}
-                        </div>
-                        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                            <div>
-                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                    Cron job
-                                </dt>
-                                <dd className="break-all text-primary-200">
-                                    <a
-                                        href={`/jobs?view=openclaw&job=${encodeURIComponent(automation.cronJobId)}`}
-                                        className="hover:text-primary-100"
-                                    >
-                                        {automation.jobName || automation.cronJobId}
-                                    </a>
-                                </dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                    Schedule
-                                </dt>
-                                <dd className="text-primary-200">
-                                    {automation.scheduleSummary || "—"}
-                                </dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                    Next run
-                                </dt>
-                                <dd className="text-primary-200">
-                                    {formatCronTimestamp(automation.nextRunAtMs)}
-                                </dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                    Last run
-                                </dt>
-                                <dd className="text-primary-200">
-                                    {formatCronTimestamp(automation.lastRunAtMs)}
-                                </dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                    Session
-                                </dt>
-                                <dd className="break-all text-primary-200">
-                                    {automation.sessionTarget || "—"}
-                                </dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                    Runtime
-                                </dt>
-                                <dd className="text-primary-200">
-                                    {[automation.model, automation.thinking]
-                                        .filter(Boolean)
-                                        .join(" · ") || "—"}
-                                </dd>
-                            </div>
-                            {automation.lastDurationMs !== undefined && (
-                                <div>
-                                    <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                        Last duration
-                                    </dt>
-                                    <dd className="text-primary-200">
-                                        {formatElapsedMs(automation.lastDurationMs)}
-                                    </dd>
-                                </div>
-                            )}
-                            <div>
-                                <dt className="text-xs tracking-wide text-primary-500 uppercase">
-                                    Source
-                                </dt>
-                                <dd className="text-primary-200">
-                                    {automation.source === "cron"
-                                        ? "Live cron state"
-                                        : "Stored metadata"}
-                                </dd>
-                            </div>
-                        </dl>
-                    </div>
-                )}
+                {automation && !isEditingTask ? (
+                    <TaskAutomationSummary automation={automation} />
+                ) : undefined}
 
                 {task.body && !isEditingTask && (
                     <div className="rounded-lg border border-primary-700 bg-primary-800/50 p-4">
@@ -496,139 +321,12 @@ export function TaskDetailModal({
                     </div>
                 )}
 
-                <div className="rounded-lg border border-primary-700 bg-primary-800/30 p-4">
-                    <h3 className="mb-2 text-sm font-semibold text-primary-300">
-                        Progress updates
-                    </h3>
-                    <div className="mb-3 space-y-2">
-                        {updates.length === 0 ? (
-                            <p className="text-sm text-primary-500">No updates yet.</p>
-                        ) : (
-                            updates.map((update) => {
-                                const authorMeta =
-                                    TASK_ASSIGNEES[
-                                        update.author === TASK_ASSIGNEES.mira.id
-                                            ? "mira"
-                                            : "raymond"
-                                    ];
-                                const isEditingThis = editingUpdateId === update.id;
-
-                                return (
-                                    <div
-                                        key={update.id}
-                                        className="rounded border border-primary-700 bg-primary-900/40 p-2"
-                                    >
-                                        <div className="mb-1 flex flex-col gap-2 text-xs text-primary-500 sm:flex-row sm:items-center sm:justify-between">
-                                            <span className="min-w-0 wrap-break-word">
-                                                <a
-                                                    href={authorMeta.githubUrl}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                >
-                                                    @{authorMeta.id}
-                                                </a>{" "}
-                                                · {formatDate(update.createdAt)}
-                                            </span>
-                                            <div className="grid grid-cols-2 gap-2 sm:flex">
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    aria-label={`Edit progress update #${update.id}`}
-                                                    onClick={() =>
-                                                        startEditUpdate(update)
-                                                    }
-                                                >
-                                                    <Pencil className="size-4" />
-                                                    Edit
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    aria-label={`Delete progress update #${update.id}`}
-                                                    onClick={() =>
-                                                        onDeleteUpdate(update.id)
-                                                    }
-                                                >
-                                                    <Trash2 className="size-4" />
-                                                    Delete
-                                                </Button>
-                                            </div>
-                                        </div>
-
-                                        {isEditingThis ? (
-                                            <div className="space-y-2">
-                                                <Textarea
-                                                    aria-label={`Message for progress update #${update.id}`}
-                                                    value={editingUpdateMessage}
-                                                    onChange={(event) =>
-                                                        setEditingUpdateMessage(
-                                                            event.target.value
-                                                        )
-                                                    }
-                                                    rows={3}
-                                                />
-                                                <div className="grid grid-cols-1 gap-2 sm:flex">
-                                                    <Button
-                                                        size="sm"
-                                                        variant="primary"
-                                                        onClick={() => {
-                                                            void saveUpdateEdit();
-                                                        }}
-                                                        disabled={
-                                                            !trimmedEditingUpdateMessage
-                                                        }
-                                                    >
-                                                        <Save className="size-4" />
-                                                        Save
-                                                    </Button>
-                                                    <Button
-                                                        size="sm"
-                                                        variant="secondary"
-                                                        onClick={() =>
-                                                            setEditingUpdateId(undefined)
-                                                        }
-                                                    >
-                                                        <X className="size-4" />
-                                                        Cancel
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="prose max-w-none text-sm prose-invert prose-p:my-1">
-                                                <ReactMarkdown
-                                                    remarkPlugins={[remarkGfm]}
-                                                >
-                                                    {update.messageMd}
-                                                </ReactMarkdown>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })
-                        )}
-                    </div>
-
-                    <div className="space-y-2">
-                        <Textarea
-                            label="Add progress update"
-                            value={progressMessage}
-                            onChange={(event) => setProgressMessage(event.target.value)}
-                            rows={3}
-                            placeholder="Markdown supported"
-                        />
-                        <Button
-                            variant="secondary"
-                            onClick={() => {
-                                void handleAddUpdate();
-                            }}
-                            disabled={!trimmedProgressMessage}
-                            className="w-full sm:w-auto"
-                        >
-                            <Plus className="size-4" />
-                            Add Update
-                        </Button>
-                    </div>
-                </div>
+                <TaskProgressUpdates
+                    onAddUpdate={onAddUpdate}
+                    onDeleteUpdate={onDeleteUpdate}
+                    onEditUpdate={onEditUpdate}
+                    updates={updates}
+                />
 
                 <div className="space-y-3 pt-2">
                     <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
