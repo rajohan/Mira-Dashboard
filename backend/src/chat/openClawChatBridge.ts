@@ -1525,6 +1525,17 @@ export class OpenClawChatBridge {
             };
             runs.set(runId, snapshot);
         }
+        const previousEnvelope = snapshot.events.at(-1);
+        // Codex auto-compaction ends its own lifecycle before the parent response
+        // resumes. Treat that adjacent settlement as part of the nested compaction;
+        // completing the parent here would compact tool replay that is not in
+        // chat.history yet.
+        const settlesNestedCompaction = Boolean(
+            isSettlingLifecycleEvent(envelope.event, envelope.payload) &&
+            !isCompactionOnlyRun(snapshot) &&
+            previousEnvelope &&
+            isCompactionEvent(previousEnvelope.event, previousEnvelope.payload)
+        );
         snapshot.firstSequence = Math.min(
             snapshot.firstSequence,
             envelope.runtimeSequence
@@ -1566,6 +1577,7 @@ export class OpenClawChatBridge {
         trimRetainedRun(snapshot);
         const completesRun =
             isTerminal &&
+            !settlesNestedCompaction &&
             (!isCompaction || snapshot.completed || isCompactionOnlyRun(snapshot));
         if (completesRun) {
             snapshot.terminalSequence = envelope.runtimeSequence;

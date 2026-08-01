@@ -3658,6 +3658,43 @@ describe("chat projection", () => {
         expect(visible[finalIndex]?.thinking).toBeUndefined();
     });
 
+    it("keeps an active assistant stream below its thinking", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "commentary",
+                message: {
+                    content: "reasoning",
+                    role: "assistant",
+                    text: "reasoning",
+                },
+                mode: "replace",
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "assistant",
+                message: message("assistant", "answer in progress", "run-1"),
+                mode: "append",
+                runId: "run-1",
+                source: "runtime",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "question")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projectionRowKinds(projection)).toEqual([
+            "question",
+            "thinking",
+            "answer in progress",
+        ]);
+    });
+
     it("keeps canonical tools stable and before thinking after runtime tools compact", () => {
         const history: ChatHistoryMessage[] = [
             {

@@ -863,6 +863,80 @@ describe("OpenClaw chat bridge", () => {
         expect(bridge.snapshot(MAIN)).toMatchObject({ completed: true });
     });
 
+    it("does not let the lifecycle settlement after auto-compaction finish its active parent chat run", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "still working" },
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.tool",
+            {
+                callId: "call-before-compaction",
+                name: "exec",
+                phase: "result",
+                result: "kept",
+                runId: "parent-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end", stream: "lifecycle" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(false);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "agent",
+            "session.tool",
+            "agent",
+            "agent",
+        ]);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "resumed after compaction" },
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end", stream: "lifecycle" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN).completed).toBe(true);
+    });
+
     it("keeps an unscoped final visible while dedicated compaction settles", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

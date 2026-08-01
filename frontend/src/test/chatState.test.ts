@@ -1333,6 +1333,63 @@ describe("chat runtime state", () => {
         expect(state.sessions[SESSION]?.runs["runtime-runless-48"]).toBeUndefined();
     });
 
+    it("does not finish the parent chat run when lifecycle only settles adjacent auto-compaction", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(24, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "exec" }],
+                },
+                runId: "chat-run",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:automatic",
+                text: "Compacting context",
+            }),
+            event(48, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:automatic",
+            }),
+            event(64, {
+                kind: "finish",
+                outcome: "completed",
+                runId: "chat-run",
+                settlesCompactionRunId: "compaction:automatic",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({ key: "thinking:primary" }),
+                expect.objectContaining({ key: "tool:call-1" }),
+            ]),
+            phase: "active",
+        });
+        expect(state.sessions[SESSION]?.runs["compaction:automatic"]).toMatchObject({
+            operationPhase: "complete",
+            phase: "completed",
+        });
+    });
+
     it("keeps runless work with its user echo when the provider id arrives", () => {
         const state = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

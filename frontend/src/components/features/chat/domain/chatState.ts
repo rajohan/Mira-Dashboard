@@ -1203,30 +1203,37 @@ function applyFinishEvent(
     };
 }
 
-function settleRetryingCompactionRun(
+function settleAdjacentCompactionLifecycle(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
-): void {
-    if (event.kind !== "finish" || !event.settlesCompactionRunId) {
-        return;
+): boolean {
+    if (event.kind !== "finish" || event.message || !event.settlesCompactionRunId) {
+        return false;
     }
     const runKey = matchingRunKey(session, event.settlesCompactionRunId);
     const run = runKey ? session.runs[runKey] : undefined;
-    if (!runKey || run?.operation !== "compact" || run.operationPhase !== "retrying") {
-        return;
+    if (
+        !runKey ||
+        run?.operation !== "compact" ||
+        run.lastSequence !== session.lastSequence
+    ) {
+        return false;
     }
-    session.runs[runKey] = {
-        ...run,
-        error: event.error,
-        lastSequence: event.sequence,
-        operationPhase: event.outcome === "completed" ? "complete" : "inactive",
-        operationUpdatedAt: event.timestamp,
-        phase: event.outcome,
-        statusText: undefined,
-        terminalAt: event.timestamp,
-        terminalSequence: event.sequence,
-        updatedAt: event.timestamp,
-    };
+    if (run.operationPhase === "retrying") {
+        session.runs[runKey] = {
+            ...run,
+            error: event.error,
+            lastSequence: event.sequence,
+            operationPhase: event.outcome === "completed" ? "complete" : "inactive",
+            operationUpdatedAt: event.timestamp,
+            phase: event.outcome,
+            statusText: undefined,
+            terminalAt: event.timestamp,
+            terminalSequence: event.sequence,
+            updatedAt: event.timestamp,
+        };
+    }
+    return true;
 }
 
 /**
@@ -1287,7 +1294,22 @@ export function reduceChatRuntime(
                   ),
               }
             : { controls: [], lastSequence: -1, runs: {}, sessionKey };
-        settleRetryingCompactionRun(session, normalizedEvent);
+        const settledAdjacentCompaction = settleAdjacentCompactionLifecycle(
+            session,
+            normalizedEvent
+        );
+        if (settledAdjacentCompaction) {
+            session.lastSequence = normalizedEvent.sequence;
+            const sessions = { ...nextState.sessions };
+            if (previousSessionKey && previousSessionKey !== sessionKey) {
+                delete sessions[previousSessionKey];
+            }
+            nextState = {
+                ...nextState,
+                sessions: { ...sessions, [sessionKey]: session },
+            };
+            continue;
+        }
         if (normalizedEvent.kind === "control") {
             session.controls = applyControlEvent(session.controls, normalizedEvent);
             session.lastSequence = normalizedEvent.sequence;

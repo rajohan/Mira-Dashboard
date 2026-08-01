@@ -858,17 +858,21 @@ function orderRuntimeMessages(
         const transcriptUsers = runtimeSlots
             .filter((slot) => slot !== promptSlot && slot.sequence === undefined)
             .toSorted((left, right) => left.index - right.index);
-        const finalSlots = sequencedActivity.filter((slot) =>
-            isFinalRunMessage(slot.message, run)
+        const answerSlots = sequencedActivity.filter(
+            (slot) =>
+                isFinalRunMessage(slot.message, run) ||
+                isAssistantTextStream(slot.message)
         );
         const thinkingSlots = sequencedActivity.filter(
             (slot) =>
                 !isFinalRunMessage(slot.message, run) &&
+                !isAssistantTextStream(slot.message) &&
                 isThinkingOnlyRunMessage(slot.message)
         );
         const activitySlots = sequencedActivity.filter(
             (slot) =>
                 !isFinalRunMessage(slot.message, run) &&
+                !isAssistantTextStream(slot.message) &&
                 !isThinkingOnlyRunMessage(slot.message)
         );
         const orderedActivity = insertUsersByTimestamp(activitySlots, transcriptUsers);
@@ -876,8 +880,8 @@ function orderRuntimeMessages(
             .map((slot) => slot.index)
             .toSorted((left, right) => left - right);
         const ordered = promptSlot
-            ? [promptSlot, ...orderedActivity, ...thinkingSlots, ...finalSlots]
-            : [...orderedActivity, ...thinkingSlots, ...finalSlots];
+            ? [promptSlot, ...orderedActivity, ...thinkingSlots, ...answerSlots]
+            : [...orderedActivity, ...thinkingSlots, ...answerSlots];
         for (const [slotIndex, index] of targetIndexes.entries()) {
             next[index] = ordered[slotIndex]!.message;
         }
