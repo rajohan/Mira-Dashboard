@@ -24,6 +24,7 @@ import {
     writeTextNoFollowExclusiveGuarded,
     writeTextNoFollowGuarded,
 } from "../src/lib/guardedOps.ts";
+import { captureRejection } from "./support/rejections.ts";
 
 const testState = { temporaryRoot: "" };
 
@@ -163,16 +164,19 @@ describe("guarded writes", () => {
         );
         const tail = await readTextTailNoFollowGuarded(guardedPath(source), 7);
         expect(tail).toBe("ded ops");
-        expect(readTextRangeNoFollowGuarded(guardedPath(source), 6, 7)).resolves.toBe(
+        expect(await readTextRangeNoFollowGuarded(guardedPath(source), 6, 7)).toBe(
             "guarded"
         );
-        expect(readTextRangeNoFollowGuarded(guardedPath(source), 14, 99)).resolves.toBe(
+        expect(await readTextRangeNoFollowGuarded(guardedPath(source), 14, 99)).toBe(
             "ops"
         );
-        expect(readTextRangeNoFollowGuarded(guardedPath(source), 99, 7)).resolves.toBe(
-            ""
+        expect(await readTextRangeNoFollowGuarded(guardedPath(source), 99, 7)).toBe("");
+        const invalidStartError = await captureRejection(() =>
+            readTextRangeNoFollowGuarded(guardedPath(source), -1, 7)
         );
-        expect(readTextRangeNoFollowGuarded(guardedPath(source), -1, 7)).rejects.toThrow(
+        expect(invalidStartError).toBeInstanceOf(TypeError);
+        expect(invalidStartError).toHaveProperty(
+            "message",
             "startByte must be a non-negative safe integer"
         );
 

@@ -8492,7 +8492,16 @@ fi
             [
                 JSON.stringify({
                     message: {
+                        __openclaw: { mirrorIdentity: "large-tail-turn:user" },
                         content: "Recover task beyond bounded tail",
+                        role: "user",
+                    },
+                    runId: "large-tail-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        __openclaw: { mirrorIdentity: "other-turn:user" },
+                        content: "Do not pair this task with the selected activity",
                         role: "user",
                     },
                     runId: "large-tail-run",
@@ -8506,6 +8515,7 @@ fi
                 }),
                 JSON.stringify({
                     message: {
+                        __openclaw: { mirrorIdentity: "large-tail-turn:assistant" },
                         content: [
                             {
                                 name: "read",

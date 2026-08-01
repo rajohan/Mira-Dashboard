@@ -414,6 +414,7 @@ function getTrajectoryActivity(entry: unknown): {
 }
 
 interface ActivityEntryTask {
+    runId: string | undefined;
     task: string;
     turnId: string | undefined;
 }
@@ -422,13 +423,14 @@ function getActivityEntryTask(
     entry: unknown,
     trajectoryTask: string | undefined
 ): ActivityEntryTask | undefined {
+    const record = isPlainRecord(entry) ? entry : {};
+    const runId = typeof record.runId === "string" ? record.runId : undefined;
     const turnId = getActivityEntryTurnId(entry);
     if (trajectoryTask) {
         const task = cleanTaskText(trajectoryTask);
-        return task ? { task, turnId } : undefined;
+        return task ? { runId, task, turnId } : undefined;
     }
 
-    const record = isPlainRecord(entry) ? entry : {};
     const messageValue = record.message ?? entry;
     const message = isPlainRecord(messageValue) ? messageValue : {};
     if (message.role !== "user" || !message.content) {
@@ -443,12 +445,24 @@ function getActivityEntryTask(
         .join(" ");
     const taskText = typeof message.content === "string" ? message.content : text;
     const task = cleanTaskText(taskText);
-    return task ? { task, turnId } : undefined;
+    return task ? { runId, task, turnId } : undefined;
+}
+
+function activityContextsMatch(
+    firstRunId: string | undefined,
+    firstTurnId: string | undefined,
+    secondRunId: string | undefined,
+    secondTurnId: string | undefined
+): boolean {
+    const runMatches = !firstRunId || !secondRunId || firstRunId === secondRunId;
+    const turnMatches = !firstTurnId || !secondTurnId || firstTurnId === secondTurnId;
+    return runMatches && turnMatches;
 }
 
 function findActivityTask(
     content: string,
-    targetRunId: string | undefined
+    targetRunId: string | undefined,
+    targetTurnId: string | undefined
 ): ActivityEntryTask | undefined {
     const lines = content.trim().split("\n");
     let fileRunId = targetRunId;
@@ -478,7 +492,10 @@ function findActivityTask(
             }
 
             const task = getActivityEntryTask(entry, getTrajectoryActivity(entry).task);
-            if (task) {
+            if (
+                task &&
+                activityContextsMatch(task.runId, task.turnId, targetRunId, targetTurnId)
+            ) {
                 return task;
             }
         } catch {
@@ -579,8 +596,11 @@ export async function getLatestActivityFromFile(
 
             const lines = content.trim().split("\n");
             let fileTask: string | undefined;
+            let fileTaskRunId: string | undefined;
             let fileTaskTurnId: string | undefined;
             let fileActivity: string | undefined;
+            let fileActivityRunId: string | undefined;
+            let fileActivityTurnId: string | undefined;
             let fileRunId: string | undefined;
 
             // Scan from end to find most recent user message and visible tool use.
@@ -614,17 +634,35 @@ export async function getLatestActivityFromFile(
                     const entryTask = fileTask
                         ? undefined
                         : getActivityEntryTask(entry, trajectoryActivity.task);
-                    if (entryTask) {
+                    if (
+                        entryTask &&
+                        activityContextsMatch(
+                            entryTask.runId,
+                            entryTask.turnId,
+                            fileActivityRunId,
+                            fileActivityTurnId
+                        )
+                    ) {
                         fileTask = entryTask.task;
+                        fileTaskRunId = entryTask.runId;
                         fileTaskTurnId = entryTask.turnId;
                     }
-                    if (!fileActivity && trajectoryActivity.activity) {
-                        fileActivity = trajectoryActivity.activity;
-                    }
-
-                    const codexActivity = getCodexResponseItemActivity(entry);
-                    if (!fileActivity && codexActivity) {
-                        fileActivity = codexActivity;
+                    const entryActivity =
+                        trajectoryActivity.activity ??
+                        getCodexResponseItemActivity(entry);
+                    if (
+                        !fileActivity &&
+                        entryActivity &&
+                        activityContextsMatch(
+                            fileTaskRunId,
+                            fileTaskTurnId,
+                            entryRunId,
+                            entryTurnId
+                        )
+                    ) {
+                        fileActivity = entryActivity;
+                        fileActivityRunId = entryRunId;
+                        fileActivityTurnId = entryTurnId;
                     }
 
                     const messageValue = record.message ?? entry;
@@ -647,10 +685,18 @@ export async function getLatestActivityFromFile(
                         const expectedTurnId =
                             fileTaskTurnId || groupTaskTurnId || inheritedTaskTurnId;
                         const canUseToolCall =
-                            !expectedTurnId || entryTurnId === expectedTurnId;
+                            (!expectedTurnId || entryTurnId === expectedTurnId) &&
+                            activityContextsMatch(
+                                fileTaskRunId,
+                                fileTaskTurnId,
+                                entryRunId,
+                                entryTurnId
+                            );
                         const toolName = toolCall?.name;
                         if (canUseToolCall && typeof toolName === "string") {
                             fileActivity = summarizeToolActivity(toolName, toolCall);
+                            fileActivityRunId = entryRunId;
+                            fileActivityTurnId = entryTurnId;
                         }
                     }
 
@@ -680,9 +726,14 @@ export async function getLatestActivityFromFile(
                             lookbackStart,
                             lookbackEnd - lookbackStart
                         );
-                        const earlierTask = findActivityTask(earlierContent, fileRunId);
+                        const earlierTask = findActivityTask(
+                            earlierContent,
+                            fileActivityRunId ?? fileRunId,
+                            fileActivityTurnId
+                        );
                         if (earlierTask) {
                             fileTask = earlierTask.task;
+                            fileTaskRunId = earlierTask.runId;
                             fileTaskTurnId = earlierTask.turnId;
                         }
                     }
