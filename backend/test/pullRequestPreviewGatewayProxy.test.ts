@@ -459,6 +459,27 @@ describe("PR dev Gateway capability proxy", () => {
             });
 
             socket.send({
+                id: "allowed-full-message",
+                method: "chat.message.get",
+                params: {
+                    messageId: "history-message-1",
+                    sessionKey: "agent:main:main",
+                },
+                type: "req",
+            });
+            expect(socket.next()).resolves.toMatchObject({
+                id: "allowed-full-message",
+                isOk: true,
+                payload: {
+                    method: "chat.message.get",
+                    parameters: {
+                        messageId: "history-message-1",
+                        sessionKey: "agent:main:main",
+                    },
+                },
+            });
+
+            socket.send({
                 id: "allowed-cron-list",
                 method: "cron.list",
                 params: {},
@@ -502,7 +523,7 @@ describe("PR dev Gateway capability proxy", () => {
                 id: "blocked-1",
                 isOk: false,
             });
-            expect(request).toHaveBeenCalledTimes(3);
+            expect(request).toHaveBeenCalledTimes(4);
 
             clientOptions?.onEvent?.({
                 event: "tick",
@@ -525,7 +546,7 @@ describe("PR dev Gateway capability proxy", () => {
                 type: "req",
             });
             await rejectedSocket.closed;
-            expect(request).toHaveBeenCalledTimes(3);
+            expect(request).toHaveBeenCalledTimes(4);
 
             clientOptions?.onClose?.(1006, "upstream unavailable");
             expect(fetch(`http://127.0.0.1:${proxy.port}/health`)).resolves.toMatchObject(
@@ -541,7 +562,7 @@ describe("PR dev Gateway capability proxy", () => {
                 type: "req",
             });
             await disconnectedSocket.closed;
-            expect(request).toHaveBeenCalledTimes(3);
+            expect(request).toHaveBeenCalledTimes(4);
         } finally {
             await proxy?.stop();
             disconnectedSocket?.close();

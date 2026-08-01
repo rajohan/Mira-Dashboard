@@ -671,6 +671,7 @@ describe("backend service utilities", () => {
         for (const method of [
             "chat.abort",
             "chat.history",
+            "chat.message.get",
             "chat.send",
             "config.get",
             "cron.list",
@@ -691,6 +692,7 @@ describe("backend service utilities", () => {
             expect(isDevelopmentGatewayMethodBlocked(method, safeEnvironment)).toBe(true);
         }
         expect(isDevelopmentGatewayProxyMethodAllowed("sessions.subscribe")).toBe(true);
+        expect(isDevelopmentGatewayProxyMethodAllowed("chat.message.get")).toBe(true);
         expect(isDevelopmentGatewayProxyMethodAllowed("subscribe")).toBe(false);
         expect(isDevelopmentGatewayProxyMethodAllowed("config.patch")).toBe(false);
         expect(isDevelopmentGatewayProxyEventAllowed("session.message")).toBe(true);
@@ -698,6 +700,7 @@ describe("backend service utilities", () => {
             false
         );
         expect(requiresRecentMfaForGatewayMethod("chat.history")).toBe(false);
+        expect(requiresRecentMfaForGatewayMethod("chat.message.get")).toBe(false);
         expect(requiresRecentMfaForGatewayMethod("config.get")).toBe(true);
         expect(requiresRecentMfaForGatewayMethod("cron.list")).toBe(true);
         expect(isDevelopmentGatewayMethodBlocked("config.patch", {})).toBe(false);

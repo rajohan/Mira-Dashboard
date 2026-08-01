@@ -1,5 +1,6 @@
 const RECENT_MFA_EXEMPT_GATEWAY_METHODS = new Set([
     "chat.history",
+    "chat.message.get",
     "chat.runtimeSnapshot",
     "models.list",
     "sessions.list",
@@ -19,6 +20,7 @@ const DEVELOPMENT_ALLOWED_GATEWAY_METHODS = new Set([
 const DEVELOPMENT_GATEWAY_PROXY_METHODS = new Set([
     "chat.abort",
     "chat.history",
+    "chat.message.get",
     "chat.send",
     "config.get",
     "cron.list",
