@@ -467,7 +467,8 @@ describe("PR dev Gateway capability proxy", () => {
                 },
                 type: "req",
             });
-            expect(socket.next()).resolves.toMatchObject({
+            const fullMessageResponse = await socket.next();
+            expect(fullMessageResponse).toMatchObject({
                 id: "allowed-full-message",
                 isOk: true,
                 payload: {
