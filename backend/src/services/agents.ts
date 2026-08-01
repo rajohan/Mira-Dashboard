@@ -16,10 +16,8 @@ import { safePathWithinRoot } from "../lib/safePath.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { boundedTimestamp } from "../lib/values.ts";
 import {
-    getAgentSessionsFromFiles,
     getLatestActivityFromFile,
     getSessionFileModificationTime,
-    type SessionInfo,
 } from "./agents/activityFileSource.ts";
 import {
     assertOpenedDirectoryMatches,
@@ -38,6 +36,10 @@ import {
     type GatewaySessionSummary,
     getGatewaySessionsForAgents,
 } from "./agents/gatewaySessionSource.ts";
+import {
+    getAgentSessionsFromFiles,
+    type SessionInfo,
+} from "./agents/sessionFileSource.ts";
 
 export {
     closeStaleActiveTasks,

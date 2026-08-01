@@ -8,68 +8,10 @@ import {
     readTextNoFollowGuarded,
     statGuarded,
 } from "../../lib/guardedOps.ts";
-import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { unknownArray } from "../../lib/values.ts";
-import {
-    getSafeAgentActivityRoots,
-    getSafeAgentSessionsDirectory,
-    type ActivityLogRoot,
-} from "./agentPaths.ts";
+import { getSafeAgentActivityRoots, type ActivityLogRoot } from "./agentPaths.ts";
 
 const STALE_THRESHOLD = 5 * 60_000;
-const logger = createStructuredLogger("agents");
-
-export interface SessionInfo {
-    key?: string;
-    sessionId?: string;
-    updatedAt?: number;
-    channel?: string;
-    displayName?: string;
-    label?: string;
-}
-
-function isSessionInfo(value: unknown): value is SessionInfo {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return false;
-    }
-    const session = value as SessionInfo;
-    return (
-        typeof session.key === "string" &&
-        (session.sessionId === undefined || typeof session.sessionId === "string") &&
-        (session.updatedAt === undefined || typeof session.updatedAt === "number") &&
-        (session.channel === undefined || typeof session.channel === "string") &&
-        (session.displayName === undefined || typeof session.displayName === "string") &&
-        (session.label === undefined || typeof session.label === "string")
-    );
-}
-
-/**
- * Loads cached Gateway session summaries for an agent from guarded storage.
- * @param agentId Agent identifier.
- * @returns Cached session summaries, or an empty list when unavailable.
- */
-export async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]> {
-    const sessionsDirectory = getSafeAgentSessionsDirectory(agentId);
-    if (!sessionsDirectory) {
-        return [];
-    }
-
-    try {
-        const content = await readTextNoFollowGuarded(
-            guardedPath(Path.join(sessionsDirectory, "sessions.json"))
-        );
-        const sessions = Bun.JSON5.parse(content);
-        return Array.isArray(sessions)
-            ? sessions.filter((session) => isSessionInfo(session))
-            : [];
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            return [];
-        }
-        logger.error("agents.sessions_read_failed", { error });
-        return [];
-    }
-}
 
 // Get activity from a JSONL session file
 /** Captures the latest observed agent activity label and timestamp. */
@@ -756,9 +698,3 @@ export function getSessionFileModificationTime(agentId: string): number | undefi
         return undefined;
     }
 }
-
-/**
- * Infers the source channel encoded in an OpenClaw session key.
- * @param sessionKey Session key value.
- * @returns Channel from session key value.
- */
