@@ -1228,7 +1228,18 @@ function adjacentCompactionRunEntry(
     }
     const parentRunKey = event.runId ? matchingRunKey(session, event.runId) : undefined;
     const parentRun = parentRunKey ? session.runs[parentRunKey] : undefined;
-    if (!parentRun || parentRun.operation === "compact") {
+    let activeParentRuns: ChatRunState[];
+    if (event.runId) {
+        activeParentRuns =
+            parentRun && parentRun.operation !== "compact" && parentRun.phase === "active"
+                ? [parentRun]
+                : [];
+    } else {
+        activeParentRuns = Object.values(session.runs).filter(
+            (run) => run.operation !== "compact" && run.phase === "active"
+        );
+    }
+    if (activeParentRuns.length !== 1) {
         return undefined;
     }
     const adjacentCompactionRuns = Object.entries(session.runs).filter(

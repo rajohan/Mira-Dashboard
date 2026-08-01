@@ -287,6 +287,7 @@ export class OpenClawChatBridge {
                 repairedRunIdentity.providerRunId,
                 storedStorageKey
             );
+            this.#rescheduleDeferredCompactionTimersForSession(storedStorageKey);
         }
         const prunedStaleRun = this.#pruneStaleActiveRuns(storedStorageKey);
         if (prunedStaleRun && !this.#runsBySession.has(storedStorageKey)) {
@@ -361,6 +362,42 @@ export class OpenClawChatBridge {
             }
             clearTimeout(timer);
             this.#deferredCompactionTimers.delete(key);
+        }
+    }
+
+    #rescheduleDeferredCompactionTimersForSession(sessionKey: string): void {
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        this.#clearDeferredCompactionTimersForSession(storageSessionKey);
+        const runs = this.#runsBySession.get(storageSessionKey);
+        if (!runs) {
+            return;
+        }
+        for (const run of runs.values()) {
+            if (run.pendingCompactionSettlementAt !== undefined && !run.completed) {
+                this.#scheduleDeferredCompactionSettlement(storageSessionKey, run);
+            }
+        }
+    }
+
+    #mergeDeferredCompactionSettlementState(
+        target: RetainedRun,
+        source: RetainedRun
+    ): void {
+        if (target.completed || source.completed) {
+            target.pendingCompactionSettlementAt = undefined;
+            target.pendingCompactionSettlementSequence = undefined;
+            return;
+        }
+        const targetLastSequence = lastSequence(target);
+        const sourceLastSequence = lastSequence(source);
+        const sourceIsNewer =
+            sourceLastSequence > targetLastSequence ||
+            (sourceLastSequence === targetLastSequence &&
+                source.updatedAt > target.updatedAt);
+        if (sourceIsNewer) {
+            target.pendingCompactionSettlementAt = source.pendingCompactionSettlementAt;
+            target.pendingCompactionSettlementSequence =
+                source.pendingCompactionSettlementSequence;
         }
     }
 
@@ -663,6 +700,7 @@ export class OpenClawChatBridge {
             }
             const existing = nextCanonicalRuns.get(runId);
             if (existing) {
+                this.#mergeDeferredCompactionSettlementState(existing, sourceRun);
                 this.#replaceRunEvents(existing, [
                     ...existing.events,
                     ...sourceRun.events,
@@ -771,6 +809,8 @@ export class OpenClawChatBridge {
         for (const runId of evictedCanonicalRunIds) {
             this.#identity.forgetRunSession(runId, canonicalStorageKey);
         }
+        this.#rescheduleDeferredCompactionTimersForSession(sourceStorageKey);
+        this.#rescheduleDeferredCompactionTimersForSession(canonicalStorageKey);
         this.#enforceSessionLimit(protectedSessionKey);
         this.#enforceReplayMemoryLimit(protectedSessionKey || canonicalStorageKey);
         return true;
@@ -1013,6 +1053,7 @@ export class OpenClawChatBridge {
         runs.delete(provisionalRunId);
         const existing = runs.get(providerRunId);
         if (existing) {
+            this.#mergeDeferredCompactionSettlementState(existing, provisional);
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
             existing.completed ||= provisional.completed;
             existing.firstSequence = Math.min(
@@ -1052,6 +1093,7 @@ export class OpenClawChatBridge {
         );
         if (shouldForgetAssociation && promotedRun) {
             this.#identity.forgetRunSession(provisionalRunId, sessionKey);
+            this.#rescheduleDeferredCompactionTimersForSession(sessionKey);
         }
         return promotedRun;
     }
@@ -1162,6 +1204,7 @@ export class OpenClawChatBridge {
             this.#identity.forgetRunSession(interruptedRunId, candidateSessionKey);
         }
         this.#identity.rememberRunSession(repaired.providerRunId, candidateSessionKey);
+        this.#rescheduleDeferredCompactionTimersForSession(candidateSessionKey);
         this.#enforceReplayMemoryLimit(candidateSessionKey);
         this.#persistence.flushSession(candidateSessionKey);
         return repaired;

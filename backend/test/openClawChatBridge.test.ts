@@ -2325,6 +2325,105 @@ describe("OpenClaw chat bridge", () => {
         expect(clearedBridge.snapshot("main").events).toEqual([]);
     });
 
+    it("moves a deferred compaction settlement timer with its canonical session", async () => {
+        const deferredEnvelopes: unknown[] = [];
+        const bridge = new OpenClawChatBridge(undefined, {
+            nestedCompactionSettlementGraceMs: 10,
+            onDeferredEnvelope: (envelope) => deferredEnvelopes.push(envelope),
+        });
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "working" },
+                runId: "parent-run",
+                sessionKey: "main",
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: "parent-run",
+                sessionKey: "main",
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end", stream: "lifecycle" },
+                sessionKey: "main",
+            },
+            []
+        );
+
+        bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+        expect(deferredEnvelopes).toHaveLength(1);
+        expect(deferredEnvelopes[0]).toMatchObject({
+            event: "model.completed",
+            payload: { runId: "parent-run", sessionKey: MAIN },
+        });
+        expect(bridge.snapshot(MAIN).completed).toBe(true);
+        expect(bridge.snapshot("main").events).toEqual([]);
+    });
+
+    it("moves a deferred compaction settlement timer to the provider run", async () => {
+        const deferredEnvelopes: unknown[] = [];
+        const provisionalRunId = "dashboard-chat-compaction";
+        const providerRunId = "provider-compaction";
+        const bridge = new OpenClawChatBridge(undefined, {
+            nestedCompactionSettlementGraceMs: 10,
+            onDeferredEnvelope: (envelope) => deferredEnvelopes.push(envelope),
+        });
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "working" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end", stream: "lifecycle" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            { idempotencyKey: provisionalRunId, sessionKey: MAIN },
+            { runId: providerRunId }
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+        expect(deferredEnvelopes).toHaveLength(1);
+        expect(deferredEnvelopes[0]).toMatchObject({
+            event: "model.completed",
+            payload: { runId: providerRunId, sessionKey: MAIN },
+        });
+        expect(bridge.snapshot(MAIN).completed).toBe(true);
+    });
+
     it("merges quarantined and canonical replay for the same run", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

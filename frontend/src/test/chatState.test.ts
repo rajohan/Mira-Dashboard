@@ -1389,6 +1389,39 @@ describe("chat runtime state", () => {
         ).toMatchObject({ operationPhase: "complete", phase: "completed" });
     });
 
+    it("does not finish the sole active parent from an unscoped compaction lifecycle", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:compact-operation",
+            }),
+            event(48, {
+                kind: "finish",
+                outcome: "completed",
+                settlesCompactionRunId: `compaction:${SESSION}`,
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            phase: "active",
+        });
+        expect(
+            state.sessions[SESSION]?.runs["compaction:compact-operation"]
+        ).toMatchObject({ operationPhase: "complete", phase: "completed" });
+    });
+
     it("applies a failed adjacent compaction lifecycle to the parent run", () => {
         const state = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
