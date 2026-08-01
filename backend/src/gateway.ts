@@ -749,6 +749,38 @@ async function hydrateOmittedChatHistoryImages(
     return history;
 }
 
+/**
+ * Rehydrates omitted image blocks in one `chat.message.get` response.
+ * @param payload Raw full-message response.
+ * @param requestedSessionKey Requested session key.
+ * @returns Response with transcript-backed image data when available.
+ */
+async function hydrateOmittedChatMessageImages(
+    payload: unknown,
+    requestedSessionKey?: string
+): Promise<unknown> {
+    const result = asRecord(payload);
+    if (!result || !asRecord(result.message)) {
+        return payload;
+    }
+    const hydratedHistory = asRecord(
+        await hydrateOmittedChatHistoryImages(
+            {
+                messages: [result.message],
+                sessionId:
+                    typeof result.sessionId === "string" ? result.sessionId : undefined,
+                sessionKey:
+                    typeof result.sessionKey === "string"
+                        ? result.sessionKey
+                        : requestedSessionKey,
+            },
+            requestedSessionKey
+        )
+    ) as ChatHistoryPayload | undefined;
+    const hydratedMessage = hydratedHistory?.messages?.[0];
+    return hydratedMessage ? { ...result, message: hydratedMessage } : payload;
+}
+
 function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): boolean {
     return gatewayState.client === expectedClient;
 }
@@ -1339,15 +1371,20 @@ async function forwardRequest(
                             : "",
                 });
             } else if (method === "chat.message.get") {
+                const requestedSessionKey =
+                    typeof parameters.sessionKey === "string"
+                        ? parameters.sessionKey
+                        : undefined;
+                payload = await hydrateOmittedChatMessageImages(
+                    payload,
+                    requestedSessionKey
+                );
                 payload = canonicalizeOpenClawHistoryMessageResult(payload, {
                     messageId:
                         typeof parameters.messageId === "string"
                             ? parameters.messageId
                             : "",
-                    sessionKey:
-                        typeof parameters.sessionKey === "string"
-                            ? parameters.sessionKey
-                            : "",
+                    sessionKey: requestedSessionKey ?? "",
                 });
             } else if (method === "sessions.list") {
                 normalizedSessions = normalizeGatewaySessionList(payload);

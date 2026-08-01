@@ -777,7 +777,7 @@ function matchingDiagnosticIndex(
                         (call) =>
                             !call.id &&
                             !call.toolResult &&
-                            call.name === (result.name || call.name)
+                            (!result.name || call.name === result.name)
                     ) === true
             );
         }

@@ -80,6 +80,16 @@ function message(role: string, text: string, runId?: string): ChatHistoryMessage
     return { content: text, role, runId, text };
 }
 
+function controlMessage(controlId: string): ChatHistoryMessage {
+    return {
+        content: "Task progress: #389",
+        controlId,
+        intent: "control",
+        role: "system",
+        text: "Task progress: #389",
+    };
+}
+
 function thinkingMessage(runId: string): ChatHistoryMessage {
     return {
         content: [{ text: "same reasoning", type: "thinking" }],
@@ -1190,6 +1200,33 @@ describe("chat projection", () => {
         });
         expect(controlIndex).toBeGreaterThan(0);
         expect(controlIndex).toBeLessThan(thinkingIndex);
+    });
+
+    it("preserves same-text controls with distinct provider identities", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:01.000Z", {
+                kind: "control",
+                message: controlMessage("message-1"),
+            }),
+            eventAt(32, "2026-07-16T12:00:02.000Z", {
+                kind: "control",
+                message: controlMessage("message-2"),
+            }),
+        ]);
+
+        const controls = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows.filter((row) => row.message.intent === "control");
+
+        expect(controls.map((row) => row.key)).toEqual([
+            "control-message-1",
+            "control-message-2",
+        ]);
     });
 
     it("keeps sibling tool call and result row keys distinct", () => {

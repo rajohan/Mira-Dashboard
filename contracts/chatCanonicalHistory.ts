@@ -33,7 +33,7 @@ export const canonicalChatHistoryPageSchema = v.strictObject({
     totalMessages: v.optional(nonNegativeIntegerSchema),
 });
 
-export const canonicalChatHistoryMessageResultSchema = v.union([
+export const canonicalChatHistoryMessageResultSchema = v.variant("ok", [
     v.strictObject({
         message: canonicalChatHistoryRowSchema,
         ok: v.literal(true),

@@ -93,6 +93,46 @@ describe("canonical chat history contract", () => {
         ).toThrow("chatHistoryMessage");
     });
 
+    it("rejects full-message responses without the requested provider identity", () => {
+        for (const providerMessageId of [undefined, "another-message"]) {
+            expect(() =>
+                canonicalizeOpenClawHistoryMessageResult(
+                    {
+                        message: {
+                            __openclaw: { id: providerMessageId, seq: 1 },
+                            content: "wrong response",
+                            role: "assistant",
+                        },
+                        ok: true,
+                    },
+                    { messageId: "requested-message", sessionKey: SESSION }
+                )
+            ).toThrow("OpenClaw full chat message identity is invalid");
+        }
+    });
+
+    it("honors provider truncation metadata when display wording changes", () => {
+        const [preview] = canonicalizeOpenClawHistoryPage(
+            {
+                messages: [
+                    {
+                        __openclaw: {
+                            id: "metadata-truncated-message",
+                            seq: 1,
+                            truncated: true,
+                        },
+                        content: "provider-specific shortened wording",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+            },
+            { offset: 0, sessionKey: SESSION }
+        ).messages;
+
+        expect(preview?.truncated).toBe(true);
+    });
+
     it("canonicalizes redacted Codex history with UUID identity and sequence", () => {
         const raw = {
             hasMore: false,

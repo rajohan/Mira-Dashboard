@@ -220,6 +220,28 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 }
                 return response;
             }
+            if (method === "chat.message.get") {
+                if (requestParameters.messageId === "history-message-missing") {
+                    return { ok: false, unavailableReason: "not_found" };
+                }
+                return {
+                    message: {
+                        __openclaw: {
+                            id: "history-message-1",
+                            seq: 1,
+                        },
+                        content: [
+                            { text: "see image", type: "text" },
+                            { source: { omitted: true }, type: "image" },
+                        ],
+                        model: "gpt-test",
+                        provider: "openai",
+                        role: "assistant",
+                        timestamp: 1_782_345_600_000,
+                    },
+                    ok: true,
+                };
+            }
             if (method === "demo.fail") {
                 throw new Error("gateway rejected");
             }
@@ -1482,6 +1504,89 @@ describe("gateway behavior", () => {
             payload: {
                 messages: [expect.objectContaining({ sequence: 1 })],
                 offset: 0,
+            },
+        });
+
+        socket.emitMessage({
+            id: "history-full-message",
+            method: "chat.message.get",
+            params: {
+                messageId: "history-message-1",
+                sessionKey: "agent:main:main",
+            },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"history-full-message"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            isOk?: boolean;
+                            payload?: unknown;
+                        }
+                )
+                .find((message) => message.id === "history-full-message")
+        ).toMatchObject({
+            isOk: true,
+            payload: {
+                message: {
+                    id: "openclaw-history:agent%3Amain%3Amain:history-message-1",
+                    message: {
+                        role: "assistant",
+                        text: "see image",
+                        images: [
+                            expect.objectContaining({
+                                data: "base64-image",
+                                mimeType: "image/png",
+                            }),
+                        ],
+                    },
+                    messageId: "history-message-1",
+                    provider: {
+                        eventName: "chat.message.get",
+                        format: "openclaw-history",
+                    },
+                    sessionKey: "agent:main:main",
+                    truncated: false,
+                },
+                ok: true,
+                schemaVersion: 1,
+            },
+        });
+
+        socket.emitMessage({
+            id: "history-full-message-missing",
+            method: "chat.message.get",
+            params: {
+                messageId: "history-message-missing",
+                sessionKey: "agent:main:main",
+            },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"history-full-message-missing"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            isOk?: boolean;
+                            payload?: unknown;
+                        }
+                )
+                .find((message) => message.id === "history-full-message-missing")
+        ).toMatchObject({
+            isOk: true,
+            payload: {
+                ok: false,
+                schemaVersion: 1,
+                unavailableReason: "not_found",
             },
         });
 

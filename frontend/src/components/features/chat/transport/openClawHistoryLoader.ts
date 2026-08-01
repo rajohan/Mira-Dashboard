@@ -5,6 +5,11 @@ import {
     type CanonicalChatHistoryMessageResult,
     type CanonicalChatHistoryRow,
 } from "../../../../../../contracts/chatCanonicalHistory";
+import {
+    canonicalChatContentFingerprint,
+    summarizeCanonicalChatValueForFingerprint,
+} from "../../../../../../contracts/chatCanonicalMessage";
+import { stableCanonicalChatStringify } from "../../../../../../contracts/chatCanonicalUtilities";
 import type { ChatHistoryMessage } from "../chatTypes";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 import { appendOpenClawHistory } from "./openClawHistoryAdapter";
@@ -38,6 +43,21 @@ const MAX_CACHED_HISTORY_ENTRIES = 2;
 const MAX_CACHED_FULL_MESSAGE_ENTRIES = 128;
 const MAX_CONCURRENT_FULL_MESSAGE_REQUESTS = 4;
 const MAX_FULL_MESSAGE_CHARACTERS = 2_000_000;
+
+function fullMessagePreviewCacheKey(
+    preview: CanonicalChatHistoryRow,
+    messageId: string
+): string {
+    const previewFingerprint = canonicalChatContentFingerprint(
+        stableCanonicalChatStringify({
+            id: preview.id,
+            message: summarizeCanonicalChatValueForFingerprint(preview.message),
+            provider: preview.provider,
+            sequence: preview.sequence,
+        })
+    );
+    return `${preview.sessionKey.toLowerCase()}:${messageId}:${previewFingerprint}`;
+}
 
 function historyMessageId(row: CanonicalChatHistoryRow): string {
     return row.id;
@@ -339,7 +359,7 @@ export class OpenClawHistoryLoader {
         if (!preview.truncated || !messageId || !this.#requestFullMessage) {
             return undefined;
         }
-        const cacheKey = `${preview.sessionKey.toLowerCase()}:${messageId}`;
+        const cacheKey = fullMessagePreviewCacheKey(preview, messageId);
         const cached = this.#fullMessageCache.get(cacheKey);
         if (cached) {
             this.#fullMessageCache.delete(cacheKey);

@@ -738,6 +738,13 @@ function mergeDiagnosticDetails(
  */
 export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
+    const controlIdentity =
+        message.intent === "control"
+            ? message.controlId || message.runtimeKey
+            : undefined;
+    if (controlIdentity) {
+        return `${role}::control::${controlIdentity}`;
+    }
     const diagnosticIdentity = diagnosticMessageIdentity(message);
     const mediaIdentity = messageMediaIdentity(message);
     const textIdentity =

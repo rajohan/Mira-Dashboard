@@ -122,6 +122,7 @@ function canonicalHistoryRow(
         isPrimaryTranscriptMessage &&
         (normalizedText.endsWith(CHAT_HISTORY_TRUNCATION_SUFFIX.trimStart()) ||
             normalizedText === CHAT_HISTORY_OVERSIZED_PLACEHOLDER);
+    const isProviderTruncated = metadata?.truncated === true;
     return {
         id: historyRowId(
             sessionKey,
@@ -138,7 +139,9 @@ function canonicalHistoryRow(
         sequence: nonNegativeInteger(metadata?.seq),
         sessionKey,
         source: "openclaw-history",
-        truncated: options.truncated ?? (isLightweightPreview || undefined),
+        truncated:
+            options.truncated ??
+            (isProviderTruncated || isLightweightPreview || undefined),
     };
 }
 
@@ -241,6 +244,10 @@ export function canonicalizeOpenClawHistoryMessageResult(
     const message = asRecord(result.message) as RawOpenClawHistoryMessage | undefined;
     if (!message) {
         throw new Error("OpenClaw full chat message is missing");
+    }
+    const responseMessageId = stringValue(asRecord(message.__openclaw)?.id);
+    if (responseMessageId !== messageId) {
+        throw new Error("OpenClaw full chat message identity is invalid");
     }
     return parseCanonicalChatHistoryMessageResult({
         message: canonicalHistoryRow(sessionKey, message, 0, {

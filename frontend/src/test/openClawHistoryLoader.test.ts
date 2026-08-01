@@ -99,6 +99,38 @@ describe("OpenClaw history loader", () => {
         ]);
     });
 
+    it("refreshes a cached full message when its truncated preview changes", async () => {
+        let revision = 1;
+        const fullRequests: number[] = [];
+        const loader = new OpenClawHistoryLoader(
+            new OpenClawChatAdapter(),
+            () => ({
+                hasMore: false,
+                messages: [
+                    rawMessage(1, "assistant", `preview ${revision}\n...(truncated)...`),
+                ],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 1,
+            }),
+            () => {
+                fullRequests.push(revision);
+                return {
+                    message: rawMessage(1, "assistant", `complete ${revision}`),
+                    ok: true,
+                };
+            }
+        );
+
+        const initial = await loader.history(SESSION, 100);
+        revision = 2;
+        const refreshed = await loader.history(SESSION, 100);
+
+        expect(initial[0]?.text).toBe("complete 1");
+        expect(refreshed[0]?.text).toBe("complete 2");
+        expect(fullRequests).toEqual([1, 2]);
+    });
+
     it("keeps the bounded preview when the full message is unavailable", async () => {
         const preview = "partial answer\n...(truncated)...";
         const loader = new OpenClawHistoryLoader(
