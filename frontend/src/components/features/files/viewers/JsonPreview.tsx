@@ -22,9 +22,17 @@ function jsonPreviewSource(content: string): object {
  * Renders the JSON preview UI.
  * @returns Rendered the JSON preview UI.
  */
-export function JsonPreview({ content }: { content: string }) {
+export function JsonPreview({
+    content,
+    scrollOwner = "self",
+}: {
+    content: string;
+    scrollOwner?: "parent" | "self";
+}) {
     return (
-        <div className="min-w-0 overflow-auto p-3 sm:p-4">
+        <div
+            className={`min-w-0 p-3 sm:p-4 ${scrollOwner === "self" ? "overflow-auto" : ""}`}
+        >
             <ReactJsonView
                 src={jsonPreviewSource(content)}
                 theme="monokai"

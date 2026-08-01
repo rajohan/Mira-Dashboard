@@ -621,8 +621,11 @@ export function mergeChatMessageProvenance(
 export interface ChatHistoryMessage {
     role: string;
     content: unknown;
+    controlId?: string;
     text: string;
     images?: ChatImageBlock[];
+    /** Dashboard-visible system/control notice that must not become a human turn. */
+    intent?: "commentary" | "control";
     attachments?: ChatAttachmentDisplay[];
     /** True when every attachment was carried over from hidden tool output. */
     hasOnlyHiddenToolAttachments?: boolean;

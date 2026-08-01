@@ -542,6 +542,7 @@ export function ChatMessagesList({
                         return (
                             <div
                                 key={virtualItem.key}
+                                data-chat-intent={row.message.intent}
                                 data-chat-row-key={row.key}
                                 data-index={virtualItem.index}
                                 ref={messagesVirtualizer.measureElement}

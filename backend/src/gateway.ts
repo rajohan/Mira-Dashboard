@@ -2,7 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
-import { canonicalizeOpenClawHistoryPage } from "../../contracts/chat/openClawHistoryPageAdapter.ts";
+import {
+    canonicalizeOpenClawHistoryMessageResult,
+    canonicalizeOpenClawHistoryPage,
+} from "../../contracts/chat/openClawHistoryPageAdapter.ts";
 import type { ChatRuntimeMetrics, GatewayMetrics } from "../../contracts/metrics.ts";
 import type { Session } from "../../contracts/sessions.ts";
 import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
@@ -1335,6 +1338,17 @@ async function forwardRequest(
                             ? parameters.sessionKey
                             : "",
                 });
+            } else if (method === "chat.message.get") {
+                payload = canonicalizeOpenClawHistoryMessageResult(payload, {
+                    messageId:
+                        typeof parameters.messageId === "string"
+                            ? parameters.messageId
+                            : "",
+                    sessionKey:
+                        typeof parameters.sessionKey === "string"
+                            ? parameters.sessionKey
+                            : "",
+                });
             } else if (method === "sessions.list") {
                 normalizedSessions = normalizeGatewaySessionList(payload);
                 payload = { sessions: normalizedSessions };
@@ -1668,6 +1682,24 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
 }
 
 /**
+ * Appends a durable control notice without creating a human chat turn, then wakes the
+ * owning agent through OpenClaw's system-event lane.
+ * @param sessionKey Session key value.
+ * @param message Control notice to display and deliver.
+ */
+async function sendSessionControlEvent(
+    sessionKey: string,
+    message: string
+): Promise<void> {
+    await sendRequestAsync("chat.inject", { message, sessionKey }, { timeoutMs: 10_000 });
+    await sendRequestAsync(
+        "wake",
+        { mode: "now", sessionKey, text: message },
+        { timeoutMs: 10_000 }
+    );
+}
+
+/**
  * Performs abort session run.
  * @param sessionKey Session key value.
  */
@@ -1749,6 +1781,7 @@ export default {
     getMetrics,
     getChatMetrics,
     getGatewayWs,
+    sendSessionControlEvent,
     sendSessionMessage,
     abortSessionRun,
     deleteSession,

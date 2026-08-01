@@ -647,6 +647,7 @@ describe("canonical chat turn projection", () => {
             [
                 {
                     aliases: [],
+                    commentary: [],
                     diagnostics: [],
                     lastSequence: 3,
                     phase: "active",
@@ -956,7 +957,7 @@ describe("canonical chat turn projection", () => {
             (row) => row.message.provenance?.id === "history-2"
         );
 
-        expect(originalTarget?.key).toStartWith("chat-message-source:v1:");
+        expect(originalTarget?.deleteKeys?.[0]).toStartWith("chat-message-source:v1:");
         expect(backfilledTarget?.deleteKeys).toEqual(originalTarget?.deleteKeys);
 
         const withoutTarget = projectDefault(backfilledHistory, {
@@ -1198,6 +1199,44 @@ describe("canonical chat turn projection", () => {
         );
 
         expect(continued[0]?.key).toBe(initial[0]?.key);
+    });
+
+    it("keeps the response row key through live-to-history settlement", () => {
+        const live = renderChatProjectionRows(
+            [
+                {
+                    content: "partial answer",
+                    local: true,
+                    role: "assistant",
+                    runId: RUN,
+                    runtimeKey: "assistant",
+                    text: "partial answer",
+                },
+            ],
+            new Set(),
+            []
+        );
+        const settled = renderChatProjectionRows(
+            [
+                {
+                    content: "complete answer",
+                    isFinal: true,
+                    provenance: {
+                        id: "history-final-1",
+                        sequence: 120,
+                        source: "openclaw-history",
+                    },
+                    role: "assistant",
+                    runId: RUN,
+                    text: "complete answer",
+                },
+            ],
+            new Set(),
+            []
+        );
+
+        expect(live[0]?.key).toBe(`response-${RUN}`);
+        expect(settled[0]?.key).toBe(live[0]?.key);
     });
 
     it("fails closed when canonical validation detects an invalid session", () => {

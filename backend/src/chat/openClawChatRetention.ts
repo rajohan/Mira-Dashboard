@@ -80,6 +80,12 @@ export function shouldRetainRuntimeEvent(
     payload: Record<string, unknown>,
     canonicalEvents: OpenClawRuntimeEnvelope["canonicalEvents"]
 ): boolean {
+    // Injected control messages already live in chat.history. They must reach live
+    // clients, but retaining their synthetic run would displace response replay and
+    // could promote an interrupted response into the inject-* run.
+    if (canonicalEvents.some((canonicalEvent) => canonicalEvent.kind === "control")) {
+        return false;
+    }
     if (event === "session.started" && !stringField(payload, "runId")) {
         return false;
     }

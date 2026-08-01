@@ -1,5 +1,9 @@
-import { canonicalizeOpenClawHistoryPage } from "../../../../contracts/chat/openClawHistoryPageAdapter";
+import {
+    canonicalizeOpenClawHistoryMessageResult,
+    canonicalizeOpenClawHistoryPage,
+} from "../../../../contracts/chat/openClawHistoryPageAdapter";
 import type {
+    CanonicalChatHistoryMessageResult,
     CanonicalChatHistoryPage,
     CanonicalChatHistoryRow,
 } from "../../../../contracts/chatCanonicalHistory";
@@ -42,4 +46,17 @@ export function canonicalHistoryPage(
     request: { offset: number; sessionKey: string }
 ): CanonicalChatHistoryPage {
     return canonicalizeOpenClawHistoryPage(raw, request);
+}
+
+/**
+ * Simulates the backend response received for one full transcript message.
+ * @param raw Raw OpenClaw message result.
+ * @param request Original full-message request.
+ * @returns Canonical full-message result.
+ */
+export function canonicalHistoryMessageResult(
+    raw: unknown,
+    request: { messageId: string; sessionKey: string }
+): CanonicalChatHistoryMessageResult {
+    return canonicalizeOpenClawHistoryMessageResult(raw, request);
 }

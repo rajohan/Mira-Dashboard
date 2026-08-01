@@ -172,22 +172,25 @@ export function ChatAttachmentPickerModal({
         <Modal
             isOpen={isOpen}
             onClose={handleClose}
+            scrollOwner={previewItem ? "content" : "body"}
             title={previewItem?.title || "Attach files"}
             size={previewItem ? "3xl" : "lg"}
         >
             {previewItem ? (
-                <div className="min-w-0 space-y-3">
+                <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
                     <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         onClick={() => setPreviewItem(undefined)}
-                        className="-ml-2"
+                        className="-ml-2 shrink-0 self-start"
                     >
                         <ArrowLeft className="size-4" />
                         Back to attachments
                     </Button>
-                    <AttachmentPreviewContent previewItem={previewItem} />
+                    <div className="min-h-0 flex-1">
+                        <AttachmentPreviewContent previewItem={previewItem} />
+                    </div>
                 </div>
             ) : (
                 <div className="min-w-0 space-y-4">

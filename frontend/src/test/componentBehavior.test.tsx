@@ -546,6 +546,18 @@ describe("shared component helpers", () => {
             "download",
             "Preview image"
         );
+        const attachmentPreviewDialog = screen.getByRole("dialog", {
+            name: "Preview image",
+        });
+        expect(
+            attachmentPreviewDialog.querySelector('[data-modal-scroll-owner="content"]')
+        ).toBeInTheDocument();
+        expect(
+            attachmentPreviewDialog.querySelector("[data-attachment-preview-scroll]")
+        ).toHaveClass("overflow-auto");
+        expect(
+            attachmentPreviewDialog.querySelectorAll(".overflow-auto, .overflow-y-auto")
+        ).toHaveLength(1);
 
         rerender(
             <AttachmentPreviewModal
@@ -1255,6 +1267,12 @@ describe("shared component helpers", () => {
         );
         const previewDialog = screen.getByRole("dialog", { name: "note.txt" });
         expect(within(previewDialog).getByText("hello")).toBeInTheDocument();
+        expect(
+            previewDialog.querySelector('[data-modal-scroll-owner="content"]')
+        ).toBeInTheDocument();
+        expect(
+            previewDialog.querySelectorAll(".overflow-auto, .overflow-y-auto")
+        ).toHaveLength(1);
         await user.click(
             within(previewDialog).getByRole("button", {
                 name: "Back to attachments",

@@ -620,6 +620,37 @@ describe("gateway behavior", () => {
             },
         });
         expect(chatSendRequest?.parameters).not.toHaveProperty("timeoutMs");
+
+        await gateway.sendSessionControlEvent("main", "Task progress: #388");
+
+        const controlRequests = client?.requests.filter(({ method }) =>
+            ["chat.inject", "wake"].includes(method)
+        );
+        expect(controlRequests).toEqual([
+            {
+                method: "chat.inject",
+                options: { timeoutMs: 10_000 },
+                parameters: {
+                    message: "Task progress: #388",
+                    sessionKey: "main",
+                },
+            },
+            {
+                method: "wake",
+                options: { timeoutMs: 10_000 },
+                parameters: {
+                    mode: "now",
+                    sessionKey: "main",
+                    text: "Task progress: #388",
+                },
+            },
+        ]);
+        expect(
+            client?.requests.find(
+                ({ method, parameters }) =>
+                    method === "chat.send" && parameters.message === "Task progress: #388"
+            )
+        ).toBeUndefined();
     });
 
     it("rehydrates run associations before reconnect events resume", async () => {

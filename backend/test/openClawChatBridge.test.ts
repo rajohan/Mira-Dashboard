@@ -3543,6 +3543,82 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
+    it("broadcasts injected controls without retaining or promoting synthetic runs", () => {
+        const store = new MemorySnapshotStore();
+        const interruptedRunId = "provider-before-control";
+        const resumedRunId = "provider-after-control";
+        const bridge = new OpenClawChatBridge(store);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before restart" },
+                runId: interruptedRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected();
+        expect(bridge.flush()).toBe(true);
+
+        const restarted = new OpenClawChatBridge(store);
+        const control = restarted.recordEvent(
+            "chat",
+            {
+                message: {
+                    content: "Task progress: #389",
+                    model: "gateway-injected",
+                    provider: "openclaw",
+                    role: "assistant",
+                    stopReason: "stop",
+                },
+                runId: "inject-control-1",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        expect(control.runtimeRunAliases).toBeUndefined();
+        expect(control.canonicalEvents).toEqual([
+            expect.objectContaining({
+                kind: "control",
+                lifecycle: "completed",
+            }),
+        ]);
+        expect(control.canonicalEvents[0]?.runId).toBeUndefined();
+        expect(restarted.snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [
+                expect.objectContaining({
+                    payload: expect.objectContaining({ runId: interruptedRunId }),
+                }),
+            ],
+        });
+
+        const resumed = restarted.recordEvent(
+            "agent",
+            {
+                data: {
+                    item: { kind: "preamble", progressText: "after control" },
+                    phase: "update",
+                    stream: "item",
+                },
+                runId: resumedRunId,
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(resumed.runtimeRunAliases).toEqual([interruptedRunId]);
+        expect(
+            restarted
+                .snapshot(MAIN)
+                .events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual([resumedRunId, resumedRunId]);
+    });
+
     it("repairs one active provider run after an abrupt Dashboard restart", () => {
         const store = new MemorySnapshotStore();
         const providerRunId = "provider-before-dashboard-crash";

@@ -68,27 +68,31 @@ function AttachmentPreviewBody({
             <img
                 src={imagePreviewUrl}
                 alt={previewItem.title}
-                className="max-h-[70vh] w-full rounded-lg object-contain"
+                className="max-h-full w-full rounded-lg object-contain"
             />
         );
     }
     if (isTextPreview && textPreview !== undefined) {
         if (shouldRenderJson) {
             return (
-                <div className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950">
-                    <JsonPreview content={textPreview} />
+                <div className="rounded-lg border border-primary-700 bg-primary-950">
+                    <JsonPreview content={textPreview} scrollOwner="parent" />
                 </div>
             );
         }
         if (shouldRenderMarkdown) {
             return (
-                <div className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950">
-                    <MarkdownPreview content={textPreview} renderImages={false} />
+                <div className="rounded-lg border border-primary-700 bg-primary-950">
+                    <MarkdownPreview
+                        content={textPreview}
+                        renderImages={false}
+                        scrollOwner="parent"
+                    />
                 </div>
             );
         }
         return (
-            <pre className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm whitespace-pre-wrap text-primary-100">
+            <pre className="rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm whitespace-pre-wrap text-primary-100">
                 {textPreview}
             </pre>
         );
@@ -189,8 +193,8 @@ export function AttachmentPreviewContent({
     const isTextPreview = previewItem.kind === "text";
 
     return (
-        <div className="space-y-3">
-            <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-primary-700 bg-primary-900/55 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex h-full min-h-0 flex-col gap-3">
+            <div className="flex min-w-0 shrink-0 flex-col gap-3 rounded-lg border border-primary-700 bg-primary-900/55 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-700 text-accent-300">
                         <PreviewFileIcon kind={previewItem.kind} />
@@ -220,16 +224,21 @@ export function AttachmentPreviewContent({
                     </a>
                 ) : undefined}
             </div>
-            <AttachmentPreviewBody
-                imagePreviewUrl={imagePreviewUrl}
-                isLoadingTextPreview={isLoadingTextPreview}
-                isTextPreview={isTextPreview}
-                previewItem={previewItem}
-                shouldRenderJson={shouldRenderJson}
-                shouldRenderMarkdown={shouldRenderMarkdown}
-                textPreview={textPreview}
-                textPreviewError={textPreviewError}
-            />
+            <div
+                className="min-h-0 flex-1 overflow-auto overscroll-contain"
+                data-attachment-preview-scroll
+            >
+                <AttachmentPreviewBody
+                    imagePreviewUrl={imagePreviewUrl}
+                    isLoadingTextPreview={isLoadingTextPreview}
+                    isTextPreview={isTextPreview}
+                    previewItem={previewItem}
+                    shouldRenderJson={shouldRenderJson}
+                    shouldRenderMarkdown={shouldRenderMarkdown}
+                    textPreview={textPreview}
+                    textPreviewError={textPreviewError}
+                />
+            </div>
         </div>
     );
 }
@@ -246,6 +255,7 @@ export function AttachmentPreviewModal({
         <Modal
             isOpen={Boolean(previewItem)}
             onClose={onClose}
+            scrollOwner="content"
             title={previewItem?.title || "Attachment preview"}
             size="3xl"
         >

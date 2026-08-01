@@ -184,8 +184,8 @@ export function isToolResultItem(data: Record<string, unknown>): boolean {
     ].includes(itemType(data));
 }
 
-export function isThinkingItem(data: Record<string, unknown>): boolean {
-    const markers = itemStrings(data, [
+function itemMarkerText(data: Record<string, unknown>): string {
+    return itemStrings(data, [
         "itemId",
         "itemKind",
         "kind",
@@ -197,10 +197,14 @@ export function isThinkingItem(data: Record<string, unknown>): boolean {
     ])
         .join(" ")
         .toLowerCase();
-    return (
-        markers.includes("preamble") ||
-        /\b(reasoning|reason|thinking|analysis)\b/u.test(markers)
-    );
+}
+
+export function isPreambleItem(data: Record<string, unknown>): boolean {
+    return itemMarkerText(data).includes("preamble");
+}
+
+export function isThinkingItem(data: Record<string, unknown>): boolean {
+    return /\b(reasoning|reason|thinking|analysis)\b/u.test(itemMarkerText(data));
 }
 
 export function normalizeAssistant(value: unknown, runId?: string): CanonicalChatMessage {

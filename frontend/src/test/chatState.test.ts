@@ -58,6 +58,102 @@ function noIdToolResult(sequence: number, content: string): ChatRuntimeEvent {
 }
 
 describe("chat runtime state", () => {
+    it("stores controls outside response runs and commentary inside its owning run", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "control",
+                message: {
+                    content: "Task progress: #389",
+                    controlId: "message-1",
+                    intent: "control",
+                    role: "system",
+                    text: "Task progress: #389",
+                },
+            }),
+            event(32, {
+                kind: "commentary",
+                message: {
+                    content: "",
+                    intent: "commentary",
+                    role: "assistant",
+                    runtimeKey: "commentary:preamble-1",
+                    text: "Continuing the architectural repair.",
+                },
+                mode: "replace",
+                runId: "run-1",
+            }),
+            event(48, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "checking identity", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "checking identity" }],
+                },
+                runId: "run-1",
+            }),
+        ]);
+        const session = state.sessions[SESSION];
+        const run = session?.runs["run-1"];
+
+        expect(session?.controls).toEqual([
+            expect.objectContaining({
+                key: "control:message-1",
+                message: expect.objectContaining({
+                    controlId: "message-1",
+                    intent: "control",
+                    runId: undefined,
+                }),
+            }),
+        ]);
+        expect(Object.keys(session?.runs || {})).toEqual(["run-1"]);
+        expect(run?.commentary).toEqual([
+            expect.objectContaining({
+                key: "commentary:preamble-1",
+                message: expect.objectContaining({
+                    intent: "commentary",
+                    text: "Continuing the architectural repair.",
+                }),
+            }),
+        ]);
+        expect(run?.diagnostics).toHaveLength(1);
+        expect(run?.lastContentKind).toBe("thinking");
+        expect(run?.lastContentSequence).toBe(48);
+    });
+
+    it("appends commentary deltas and replaces full preamble snapshots", () => {
+        const commentaryMessage = {
+            content: "",
+            intent: "commentary" as const,
+            role: "assistant",
+            runtimeKey: "commentary:preamble-1",
+        };
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "commentary",
+                message: { ...commentaryMessage, text: "Checking " },
+                mode: "append",
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "commentary",
+                message: { ...commentaryMessage, text: "identity." },
+                mode: "append",
+                runId: "run-1",
+            }),
+            event(48, {
+                kind: "commentary",
+                message: { ...commentaryMessage, text: "Checking identity carefully." },
+                mode: "replace",
+                runId: "run-1",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-1"]?.commentary[0]?.message.text).toBe(
+            "Checking identity carefully."
+        );
+    });
+
     it("keeps duplicate provider run ids scoped to their sessions", () => {
         const first = event(16, {
             kind: "assistant",

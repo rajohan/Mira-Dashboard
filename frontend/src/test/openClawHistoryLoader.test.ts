@@ -3,19 +3,32 @@ import { describe, expect, it } from "bun:test";
 import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
 import {
     OpenClawHistoryLoader as CanonicalOpenClawHistoryLoader,
+    type OpenClawHistoryMessageRequest,
     type OpenClawHistoryPageRequest,
 } from "../components/features/chat/transport/openClawHistoryLoader";
-import { canonicalHistoryPage } from "./support/canonicalChatHistory";
+import {
+    canonicalHistoryMessageResult,
+    canonicalHistoryPage,
+} from "./support/canonicalChatHistory";
 
 const SESSION = "agent:main:main";
 
 class OpenClawHistoryLoader extends CanonicalOpenClawHistoryLoader {
     constructor(
         adapter: OpenClawChatAdapter,
-        requestPage: (request: OpenClawHistoryPageRequest) => unknown
+        requestPage: (request: OpenClawHistoryPageRequest) => unknown,
+        requestFullMessage?: (request: OpenClawHistoryMessageRequest) => unknown
     ) {
-        super(adapter, async (request) =>
-            canonicalHistoryPage(await requestPage(request), request)
+        super(
+            adapter,
+            async (request) => canonicalHistoryPage(await requestPage(request), request),
+            requestFullMessage
+                ? async (request) =>
+                      canonicalHistoryMessageResult(
+                          await requestFullMessage(request),
+                          request
+                      )
+                : undefined
         );
     }
 }
@@ -48,6 +61,62 @@ function rawMessageWithoutSequence(id: string, role: string, content: unknown) {
 }
 
 describe("OpenClaw history loader", () => {
+    it("hydrates lightweight assistant previews once before exposing history", async () => {
+        const preview = `${"preview ".repeat(1000)}\n...(truncated)...`;
+        const fullText = `${"complete ".repeat(1500)}finished`;
+        const fullRequests: OpenClawHistoryMessageRequest[] = [];
+        const loader = new OpenClawHistoryLoader(
+            new OpenClawChatAdapter(),
+            () => ({
+                hasMore: false,
+                messages: [rawMessage(1, "assistant", [{ text: preview, type: "text" }])],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 1,
+            }),
+            (request) => {
+                fullRequests.push(request);
+                return {
+                    message: rawMessage(1, "assistant", [
+                        { text: fullText, type: "text" },
+                    ]),
+                    ok: true,
+                };
+            }
+        );
+
+        const first = await loader.history(SESSION, 100);
+        const cached = await loader.history(SESSION, 100);
+
+        expect(first[0]?.text).toBe(fullText);
+        expect(cached).toBe(first);
+        expect(fullRequests).toEqual([
+            {
+                maxChars: 2_000_000,
+                messageId: "message-1",
+                sessionKey: SESSION,
+            },
+        ]);
+    });
+
+    it("keeps the bounded preview when the full message is unavailable", async () => {
+        const preview = "partial answer\n...(truncated)...";
+        const loader = new OpenClawHistoryLoader(
+            new OpenClawChatAdapter(),
+            () => ({
+                hasMore: false,
+                messages: [rawMessage(1, "assistant", preview)],
+                offset: 0,
+                sessionId: "session-1",
+                totalMessages: 1,
+            }),
+            () => ({ ok: false, unavailableReason: "oversized" })
+        );
+
+        const messages = await loader.history(SESSION, 100);
+        expect(messages[0]?.text).toBe(preview);
+    });
+
     it("loads every offset page and folds tools split across a page boundary", async () => {
         const requests: Array<{ limit: number; offset: number; sessionKey: string }> = [];
         const pages = new Map<number, unknown>([

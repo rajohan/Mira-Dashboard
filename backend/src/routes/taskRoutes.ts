@@ -320,7 +320,7 @@ async function notifyMira(
     if (isDevelopmentExternalNotificationSuppressed()) return;
     const isAutomation = currentRequestAuditContext()?.actor.type === "automation";
     try {
-        await gateway.sendSessionMessage(
+        await gateway.sendSessionControlEvent(
             "main",
             isAutomation
                 ? miraAutomationTaskNotificationMessage(eventType, task.id)

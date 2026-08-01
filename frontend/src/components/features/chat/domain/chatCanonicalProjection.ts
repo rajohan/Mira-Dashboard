@@ -140,6 +140,12 @@ function canonicalMessage(message: ChatHistoryMessage): CanonicalChatMessage {
 }
 
 function canonicalEntryKind(message: ChatHistoryMessage): CanonicalChatTurnEntry["kind"] {
+    if (message.intent === "commentary") {
+        return "commentary";
+    }
+    if (message.intent === "control") {
+        return "control";
+    }
     const role = message.role.toLowerCase();
     if (role === "user") {
         return "user";

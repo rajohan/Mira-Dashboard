@@ -941,10 +941,10 @@ describe("backend route and service behavior", () => {
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
         const originalRequest = gateway.request;
-        const originalSendSessionMessage = gateway.sendSessionMessage;
+        const originalSendSessionControlEvent = gateway.sendSessionControlEvent;
         cleanupCallbacks.push(() => {
             gateway.request = originalRequest;
-            gateway.sendSessionMessage = originalSendSessionMessage;
+            gateway.sendSessionControlEvent = originalSendSessionControlEvent;
         });
         const taskNotifications: string[] = [];
         gateway.request = () =>
@@ -961,7 +961,7 @@ describe("backend route and service behavior", () => {
                     },
                 ],
             }));
-        gateway.sendSessionMessage = (_sessionKey, message) => {
+        gateway.sendSessionControlEvent = (_sessionKey, message) => {
             return Promise.try(() => {
                 taskNotifications.push(message);
             });

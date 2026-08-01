@@ -944,6 +944,254 @@ describe("chat projection", () => {
         );
     });
 
+    it("places a newly persisted tool before thinking on its first render", () => {
+        const thinkingRuntime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "working", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "working" }],
+                },
+                runId: "run-1",
+            }),
+        ]);
+        const history = [
+            message("user", "question"),
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                toolCalls: [{ id: "call-1", name: "read" }],
+            },
+        ];
+        const firstProjection = projectChat(
+            history,
+            thinkingRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const enrichedRuntime = reduceChatRuntime(thinkingRuntime, [
+            event(32, {
+                kind: "tool",
+                message: history[1]!,
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+        ]);
+        const enrichedProjection = projectChat(
+            history,
+            enrichedRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        const firstKinds = projectionRowKinds(firstProjection);
+        const enrichedKinds = projectionRowKinds(enrichedProjection);
+        expect(firstKinds.indexOf("tool")).toBeLessThan(firstKinds.indexOf("thinking"));
+        expect(enrichedKinds.indexOf("tool")).toBeLessThan(
+            enrichedKinds.indexOf("thinking")
+        );
+        expect(projectionToolKey(enrichedProjection)).toBe(
+            projectionToolKey(firstProjection)
+        );
+        expect(enrichedProjection.rows.find((row) => row.message.thinking)?.key).toBe(
+            firstProjection.rows.find((row) => row.message.thinking)?.key
+        );
+    });
+
+    it("keeps one tool row and key when the provider backfills its call id", () => {
+        const firstEvent = event(16, {
+            kind: "tool",
+            message: {
+                content: "",
+                role: "assistant",
+                text: "",
+                toolCalls: [{ arguments: { path: "/tmp/a" }, name: "read" }],
+            },
+            runId: "run-1",
+            toolKey: 'tool:read:{"path":"/tmp/a"}',
+        });
+        const initialRuntime = reduceChatRuntime(createChatRuntimeState(), [firstEvent]);
+        const initialProjection = projectChat(
+            [message("user", "question")],
+            initialRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const enrichedRuntime = reduceChatRuntime(initialRuntime, [
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { path: "/tmp/a" },
+                            id: "call-read-1",
+                            name: "read",
+                        },
+                    ],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-read-1",
+            }),
+        ]);
+        const enrichedProjection = projectChat(
+            [message("user", "question")],
+            enrichedRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            enrichedRuntime.sessions[SESSION]?.runs["run-1"]?.diagnostics
+        ).toHaveLength(1);
+        expect(
+            enrichedProjection.rows.filter((row) => row.message.toolCalls?.length)
+        ).toHaveLength(1);
+        expect(projectionToolKey(enrichedProjection)).toBe(
+            projectionToolKey(initialProjection)
+        );
+    });
+
+    it("folds commentary and reasoning into one stable thinking row", () => {
+        const commentaryRuntime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:01.000Z", {
+                kind: "commentary",
+                message: {
+                    content: "",
+                    intent: "commentary",
+                    role: "assistant",
+                    runtimeKey: "commentary:preamble-1",
+                    text: "Continuing the architectural repair.",
+                },
+                mode: "replace",
+                runId: "run-1",
+            }),
+        ]);
+        const firstProjection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+            ],
+            commentaryRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const reasoningRuntime = reduceChatRuntime(commentaryRuntime, [
+            eventAt(32, "2026-07-16T12:00:02.000Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "Checking identity.", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "Checking identity." }],
+                },
+                runId: "run-1",
+            }),
+        ]);
+        const enrichedProjection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+            ],
+            reasoningRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const firstThinkingRows = firstProjection.rows.filter(
+            (row) => row.message.thinking?.length
+        );
+        const enrichedThinkingRows = enrichedProjection.rows.filter(
+            (row) => row.message.thinking?.length
+        );
+
+        expect(firstThinkingRows).toHaveLength(1);
+        expect(enrichedThinkingRows).toHaveLength(1);
+        expect(
+            enrichedThinkingRows[0]?.message.thinking?.map((block) => block.text)
+        ).toEqual(["Continuing the architectural repair.", "Checking identity."]);
+        expect(
+            enrichedProjection.rows.some(
+                (row) => row.message.text === "Continuing the architectural repair."
+            )
+        ).toBe(false);
+        expect(enrichedThinkingRows[0]?.key).toBe(firstThinkingRows[0]?.key);
+    });
+
+    it("places controls like steers without creating or settling a response run", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:01.000Z", {
+                kind: "thinking",
+                message: thinkingMessage("run-1"),
+                runId: "run-1",
+            }),
+            eventAt(32, "2026-07-16T12:00:02.000Z", {
+                kind: "control",
+                message: {
+                    content: "Task progress: #389",
+                    controlId: "message-1",
+                    intent: "control",
+                    role: "system",
+                    text: "Task progress: #389",
+                },
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const controlIndex = projection.rows.findIndex(
+            (row) => row.message.intent === "control"
+        );
+        const thinkingIndex = projection.rows.findIndex(
+            (row) => row.message.thinking?.length
+        );
+
+        expect(runtime.sessions[SESSION]?.controls).toHaveLength(1);
+        expect(Object.keys(runtime.sessions[SESSION]?.runs || {})).toEqual(["run-1"]);
+        expect(runtime.sessions[SESSION]?.runs["run-1"]?.phase).toBe("active");
+        expect(projection.rows[controlIndex]).toMatchObject({
+            key: "control-message-1",
+            kind: "message",
+            message: {
+                intent: "control",
+                role: "system",
+                text: "Task progress: #389",
+            },
+        });
+        expect(controlIndex).toBeGreaterThan(0);
+        expect(controlIndex).toBeLessThan(thinkingIndex);
+    });
+
     it("keeps sibling tool call and result row keys distinct", () => {
         const projection = projectChat(
             [
@@ -2316,11 +2564,13 @@ describe("chat projection", () => {
         }
         history.push(message("assistant", "answer"));
         const session: ChatSessionRuntimeState = {
+            controls: [],
             lastSequence: toolCount + 1,
             runs: {
                 "run-long": {
                     aliases: [],
                     assistant: message("assistant", "answer", "run-long"),
+                    commentary: [],
                     diagnostics,
                     lastSequence: toolCount + 1,
                     phase: "completed",

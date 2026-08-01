@@ -102,6 +102,46 @@ function fakeTransport(snapshotPromise: Promise<ChatRuntimeSnapshot>, generation
 }
 
 describe("chat runtime controller", () => {
+    it("refreshes selected history for a control without creating a response run", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const onSettled = jest.fn();
+        const { result } = renderHook(() =>
+            useChatRuntime({
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
+        );
+
+        act(() => {
+            fake.emit({
+                kind: "control",
+                message: {
+                    content: "Task progress: #389",
+                    controlId: "message-1",
+                    intent: "control",
+                    role: "system",
+                    text: "Task progress: #389",
+                },
+                sequence: 16,
+                sessionKey: SELECTED,
+                timestamp: "2026-07-16T12:00:00.000Z",
+            });
+        });
+
+        expect(result.current.state.sessions[SELECTED]).toBeUndefined();
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 0 });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions[SELECTED]?.controls).toHaveLength(1);
+        expect(result.current.state.sessions[SELECTED]?.runs).toEqual({});
+        expect(onSettled).toHaveBeenCalledTimes(1);
+        expect(onSettled).toHaveBeenCalledWith(SELECTED);
+    });
+
     it("gates only the selected session and reconciles snapshot/live events", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

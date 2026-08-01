@@ -46,6 +46,21 @@ export interface RawOpenClawHistoryMessage {
     stopReason?: unknown;
 }
 
+function historyMetadata(message: RawOpenClawHistoryMessage): Record<string, unknown> {
+    return message.__openclaw &&
+        typeof message.__openclaw === "object" &&
+        !Array.isArray(message.__openclaw)
+        ? (message.__openclaw as Record<string, unknown>)
+        : {};
+}
+
+function isInjectedControlMessage(message: RawOpenClawHistoryMessage): boolean {
+    return (
+        stringValue(message.provider)?.toLowerCase() === "openclaw" &&
+        stringValue(message.model)?.toLowerCase() === "gateway-injected"
+    );
+}
+
 function normalizedIsFinal(message: RawOpenClawHistoryMessage): true | undefined {
     const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
     if (
@@ -410,6 +425,7 @@ function stripGeneratedImagePlaceholder(
 export function normalizeOpenClawHistoryMessage(
     message: RawOpenClawHistoryMessage
 ): CanonicalChatMessage {
+    const isControl = isInjectedControlMessage(message);
     const content = message.content ?? message.text ?? "";
     const primaryText = normalizeCanonicalChatText(primaryContent(content));
     const canonicalMedia = canonicalizeCanonicalChatMedia(content);
@@ -427,11 +443,17 @@ export function normalizeOpenClawHistoryMessage(
         images,
         attachments
     );
+    let role = typeof message.role === "string" ? message.role : "unknown";
+    if (isControl) {
+        role = "system";
+    }
     return {
-        role: typeof message.role === "string" ? message.role : "unknown",
+        role,
         content: canonicalMedia.content,
+        controlId: isControl ? stringValue(historyMetadata(message).id) : undefined,
         text,
         images,
+        intent: isControl ? "control" : undefined,
         attachments,
         isFinal: normalizedIsFinal(message),
         isToolUse: normalizedIsToolUse(message),
