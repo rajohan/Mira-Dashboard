@@ -4,7 +4,9 @@ import type {
 } from "../chatCanonical";
 import {
     CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
+    parseCanonicalChatHistoryMessageResult,
     parseCanonicalChatHistoryPage,
+    type CanonicalChatHistoryMessageResult,
     type CanonicalChatHistoryPage,
     type CanonicalChatHistoryRow,
 } from "../chatCanonicalHistory";
@@ -24,6 +26,14 @@ interface CanonicalizeOpenClawHistoryPageOptions {
     sessionKey: string;
 }
 
+interface CanonicalizeOpenClawHistoryMessageOptions {
+    messageId: string;
+    sessionKey: string;
+}
+
+const CHAT_HISTORY_TRUNCATION_SUFFIX = "\n...(truncated)...";
+const CHAT_HISTORY_OVERSIZED_PLACEHOLDER = "[chat.history omitted: message too large]";
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
@@ -41,10 +51,11 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function historyProvider(
-    message: RawOpenClawHistoryMessage
+    message: RawOpenClawHistoryMessage,
+    eventName = "chat.history"
 ): CanonicalChatProviderMetadata {
     return {
-        eventName: "chat.history",
+        eventName,
         format: "openclaw-history",
         model: stringValue(message.model),
         provider: stringValue(message.provider),
@@ -56,9 +67,10 @@ function historyRowId(
     message: RawOpenClawHistoryMessage,
     canonicalMessage: CanonicalChatMessage,
     metadata: Record<string, unknown> | undefined,
-    fallbackPosition: number
+    fallbackPosition: number,
+    explicitMessageId?: string
 ): string {
-    const providerId = stringValue(metadata?.id);
+    const providerId = explicitMessageId || stringValue(metadata?.id);
     const providerSequence = nonNegativeInteger(metadata?.seq);
     let sourceId = providerId;
     if (!sourceId) {
@@ -93,24 +105,43 @@ function historyRowId(
 function canonicalHistoryRow(
     sessionKey: string,
     message: RawOpenClawHistoryMessage,
-    fallbackPosition: number
+    fallbackPosition: number,
+    options: {
+        eventName?: string;
+        messageId?: string;
+        truncated?: boolean;
+    } = {}
 ): CanonicalChatHistoryRow {
     const metadata = asRecord(message.__openclaw);
     const canonicalMessage = normalizeOpenClawHistoryMessage(message);
+    const messageId = options.messageId || stringValue(metadata?.id);
+    const role = canonicalMessage.role.toLowerCase();
+    const isPrimaryTranscriptMessage = ["assistant", "system", "user"].includes(role);
+    const normalizedText = canonicalMessage.text.trimEnd();
+    const isLightweightPreview =
+        isPrimaryTranscriptMessage &&
+        (normalizedText.endsWith(CHAT_HISTORY_TRUNCATION_SUFFIX.trimStart()) ||
+            normalizedText === CHAT_HISTORY_OVERSIZED_PLACEHOLDER);
+    const isProviderTruncated = metadata?.truncated === true;
     return {
         id: historyRowId(
             sessionKey,
             message,
             canonicalMessage,
             metadata,
-            fallbackPosition
+            fallbackPosition,
+            messageId
         ),
         message: canonicalMessage,
-        provider: historyProvider(message),
+        messageId,
+        provider: historyProvider(message, options.eventName),
         schemaVersion: CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
         sequence: nonNegativeInteger(metadata?.seq),
         sessionKey,
         source: "openclaw-history",
+        truncated:
+            options.truncated ??
+            (isProviderTruncated || isLightweightPreview || undefined),
     };
 }
 
@@ -176,5 +207,55 @@ export function canonicalizeOpenClawHistoryPage(
         sessionId: stringValue(page?.sessionId),
         sessionKey,
         totalMessages: nonNegativeInteger(page?.totalMessages),
+    });
+}
+
+/**
+ * Converts one raw Gateway chat.message.get response into the Dashboard contract.
+ * @param raw Raw Gateway response.
+ * @param options Requested transcript and message identity.
+ * @returns Versioned provider-independent full-message response.
+ */
+export function canonicalizeOpenClawHistoryMessageResult(
+    raw: unknown,
+    options: CanonicalizeOpenClawHistoryMessageOptions
+): CanonicalChatHistoryMessageResult {
+    const result = asRecord(raw);
+    const sessionKey = options.sessionKey.trim();
+    const messageId = options.messageId.trim();
+    if (!sessionKey || !messageId) {
+        throw new Error("OpenClaw full chat message identity is required");
+    }
+    if (result?.ok !== true) {
+        const unavailableReason = result?.unavailableReason;
+        if (
+            unavailableReason !== "not_found" &&
+            unavailableReason !== "not_visible" &&
+            unavailableReason !== "oversized"
+        ) {
+            throw new Error("OpenClaw full chat message unavailable reason is invalid");
+        }
+        return parseCanonicalChatHistoryMessageResult({
+            ok: false,
+            schemaVersion: CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
+            unavailableReason,
+        });
+    }
+    const message = asRecord(result.message) as RawOpenClawHistoryMessage | undefined;
+    if (!message) {
+        throw new Error("OpenClaw full chat message is missing");
+    }
+    const responseMessageId = stringValue(asRecord(message.__openclaw)?.id);
+    if (responseMessageId !== messageId) {
+        throw new Error("OpenClaw full chat message identity is invalid");
+    }
+    return parseCanonicalChatHistoryMessageResult({
+        message: canonicalHistoryRow(sessionKey, message, 0, {
+            eventName: "chat.message.get",
+            messageId,
+            truncated: false,
+        }),
+        ok: true,
+        schemaVersion: CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
     });
 }

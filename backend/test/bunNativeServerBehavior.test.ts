@@ -490,6 +490,21 @@ describe("Bun-native dashboard backend", () => {
             isOk: false,
             type: "response",
         });
+        const fullMessageRead = await nextSocketMessage(passwordSocket, {
+            id: "password-full-message-read",
+            method: "chat.message.get",
+            params: {
+                messageId: "history-message-1",
+                sessionKey: "agent:main:main",
+            },
+            type: "req",
+        });
+        expect(fullMessageRead).toMatchObject({
+            error: "Gateway not connected",
+            id: "password-full-message-read",
+            isOk: false,
+            type: "response",
+        });
         passwordSocket.close();
 
         const staleSocket = await connectDashboardSocket(state.staleSessionToken);

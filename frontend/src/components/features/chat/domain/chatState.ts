@@ -27,6 +27,8 @@ type ChatRunContentKind = "assistant" | "thinking" | "tool" | "user";
 
 const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
 export const MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN = 200;
+export const MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN = 100;
+export const MAX_CHAT_RUNTIME_CONTROLS_PER_SESSION = 100;
 
 export interface ChatRuntimeMessageEntry {
     key: string;
@@ -39,6 +41,7 @@ export interface ChatRunState {
     aliases: string[];
     assistant?: ChatHistoryMessage;
     assistantSource?: ChatTextSource;
+    commentary: ChatRuntimeMessageEntry[];
     diagnostics: ChatRuntimeMessageEntry[];
     error?: string;
     lastContentKind?: ChatRunContentKind;
@@ -60,6 +63,7 @@ export interface ChatRunState {
 }
 
 export interface ChatSessionRuntimeState {
+    controls: ChatRuntimeMessageEntry[];
     lastSequence: number;
     runs: Record<string, ChatRunState>;
     sessionKey: string;
@@ -102,6 +106,15 @@ function withRuntimeMessageProvenance(
 export type ChatRuntimeEvent =
     | (RuntimeEventBase & {
           kind: "identity";
+      })
+    | (RuntimeEventBase & {
+          kind: "control";
+          message: ChatHistoryMessage;
+      })
+    | (RuntimeEventBase & {
+          kind: "commentary";
+          message: ChatHistoryMessage;
+          mode: "append" | "replace";
       })
     | (RuntimeEventBase & {
           kind: "user";
@@ -149,6 +162,8 @@ function runContentKind(event: ChatRuntimeEvent): ChatRunContentKind | undefined
         case "finish": {
             return event.message ? "assistant" : undefined;
         }
+        case "commentary":
+        case "control":
         case "identity":
         case "status": {
             return undefined;
@@ -294,6 +309,7 @@ function emptyRun(
 ): ChatRunState {
     return {
         aliases: [runId],
+        commentary: [],
         diagnostics: [],
         lastSequence: sequence,
         phase: "active",
@@ -333,6 +349,7 @@ function matchingRunKey(
                 (run.runId.startsWith("dashboard-chat-") ||
                     run.runId.startsWith("dashboard-compact-")) &&
                 !run.assistant &&
+                run.commentary.length === 0 &&
                 run.diagnostics.length === 0 &&
                 run.userMessages.length === 0
             )
@@ -629,6 +646,27 @@ function isSameToolCall(left: ChatToolCallDisplay, right: ChatToolCallDisplay): 
     );
 }
 
+function hasSameToolCallShape(
+    left: ChatToolCallDisplay,
+    right: ChatToolCallDisplay
+): boolean {
+    return (
+        left.name === right.name &&
+        stableChatStringify(left.arguments ?? undefined) ===
+            stableChatStringify(right.arguments ?? undefined)
+    );
+}
+
+function uniqueMatchingDiagnosticIndex(
+    diagnostics: ChatRuntimeMessageEntry[],
+    predicate: (entry: ChatRuntimeMessageEntry) => boolean
+): number {
+    const indexes = diagnostics.flatMap((entry, index) =>
+        predicate(entry) ? [index] : []
+    );
+    return indexes.length === 1 ? indexes[0]! : -1;
+}
+
 function mergeToolDiagnostic(
     previous: ChatHistoryMessage | undefined,
     incoming: ChatHistoryMessage
@@ -642,18 +680,23 @@ function mergeToolDiagnostic(
     const calls = [...(previous.toolCalls || [])];
     let callIndex = -1;
     if (incomingCall) {
-        callIndex = calls.findIndex((candidate) => {
-            if (incomingCall.id || candidate.id) {
-                return Boolean(
+        callIndex = calls.findIndex(
+            (candidate) =>
+                Boolean(
                     incomingCall.id && candidate.id && incomingCall.id === candidate.id
-                );
-            }
-            return (
-                incomingCall.name === candidate.name &&
-                stableChatStringify(incomingCall.arguments ?? undefined) ===
-                    stableChatStringify(candidate.arguments ?? undefined)
+                ) ||
+                (!incomingCall.id &&
+                    !candidate.id &&
+                    hasSameToolCallShape(candidate, incomingCall))
+        );
+        if (callIndex === -1 && incomingCall.id) {
+            const shapeMatches = calls.flatMap((candidate, index) =>
+                !candidate.id && hasSameToolCallShape(candidate, incomingCall)
+                    ? [index]
+                    : []
             );
-        });
+            callIndex = shapeMatches.length === 1 ? shapeMatches[0]! : -1;
+        }
         if (callIndex === -1) {
             calls.push(incomingCall);
             callIndex = calls.length - 1;
@@ -716,6 +759,26 @@ function matchingDiagnosticIndex(
                 entry.message.toolCalls?.some(
                     (call) => !call.toolResult && isSameToolCall(call, incomingCall)
                 )
+            );
+        } else if (index === -1 && incomingCall) {
+            index = uniqueMatchingDiagnosticIndex(
+                diagnostics,
+                (entry) =>
+                    entry.message.toolCalls?.some(
+                        (call) => !call.id && hasSameToolCallShape(call, incomingCall)
+                    ) === true
+            );
+        }
+        if (index === -1 && result) {
+            index = uniqueMatchingDiagnosticIndex(
+                diagnostics,
+                (entry) =>
+                    entry.message.toolCalls?.some(
+                        (call) =>
+                            !call.id &&
+                            !call.toolResult &&
+                            (!result.name || call.name === result.name)
+                    ) === true
             );
         }
     }
@@ -844,6 +907,82 @@ function applyUserEvent(
     };
 }
 
+function applyControlEvent(
+    controls: ChatRuntimeMessageEntry[],
+    event: Extract<ChatRuntimeEvent, { kind: "control" }>
+): ChatRuntimeMessageEntry[] {
+    const controlId = event.message.controlId;
+    const key = `control:${controlId || event.id || event.sequence}`;
+    const incoming = {
+        ...withRuntimeMessageProvenance(event.message, event),
+        intent: "control" as const,
+        runId: undefined,
+        runtimeKey: key,
+        runtimeSequence: event.sequence,
+        timestamp: event.message.timestamp || event.timestamp,
+    };
+    const index = controls.findIndex(
+        (entry) =>
+            entry.key === key ||
+            Boolean(controlId && entry.message.controlId === controlId)
+    );
+    const next = [...controls];
+    const entry = {
+        key: next[index]?.key || key,
+        message: mergeMessageDetails(next[index]?.message, incoming, incoming.text),
+        sequence: Math.min(next[index]?.sequence ?? event.sequence, event.sequence),
+    };
+    if (index === -1) {
+        next.push(entry);
+    } else {
+        next[index] = entry;
+    }
+    return next.length <= MAX_CHAT_RUNTIME_CONTROLS_PER_SESSION
+        ? next
+        : next.slice(-MAX_CHAT_RUNTIME_CONTROLS_PER_SESSION);
+}
+
+function applyCommentaryEvent(
+    run: ChatRunState,
+    event: Extract<ChatRuntimeEvent, { kind: "commentary" }>
+): ChatRunState {
+    const messageKey = event.message.runtimeKey?.trim();
+    const key = messageKey || `commentary:${event.id || event.sequence}`;
+    const incoming = {
+        ...withRuntimeMessageProvenance(event.message, event),
+        intent: "commentary" as const,
+        local: true,
+        runId: run.runId,
+        runtimeKey: key,
+        runtimeSequence: event.sequence,
+        timestamp: event.message.timestamp || event.timestamp,
+    };
+    const index = run.commentary.findIndex((entry) => entry.key === key);
+    const commentary = [...run.commentary];
+    const previous = commentary[index];
+    const text =
+        event.mode === "replace"
+            ? incoming.text
+            : mergeChatStreamText(previous?.message.text || "", incoming.text);
+    const entry = {
+        key: previous?.key || key,
+        message: mergeMessageDetails(previous?.message, incoming, text),
+        sequence: Math.min(previous?.sequence ?? event.sequence, event.sequence),
+    };
+    if (index === -1) {
+        commentary.push(entry);
+    } else {
+        commentary[index] = entry;
+    }
+    return {
+        ...run,
+        commentary:
+            commentary.length <= MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN
+                ? commentary
+                : commentary.slice(-MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN),
+    };
+}
+
 function mergeRunDiagnostics(
     older: ChatRunState,
     newer: ChatRunState
@@ -883,6 +1022,38 @@ function mergeRunUserMessages(
             (left, right) =>
                 left.sequence - right.sequence || left.key.localeCompare(right.key)
         );
+}
+
+function mergeRunCommentary(
+    older: ChatRunState,
+    newer: ChatRunState
+): ChatRuntimeMessageEntry[] {
+    const entries = new Map<string, ChatRuntimeMessageEntry>();
+    for (const entry of [...older.commentary, ...newer.commentary]) {
+        const previous = entries.get(entry.key);
+        entries.set(
+            entry.key,
+            previous
+                ? {
+                      key: previous.key,
+                      message: mergeMessageDetails(
+                          previous.message,
+                          entry.message,
+                          entry.message.text || previous.message.text
+                      ),
+                      sequence: Math.min(previous.sequence, entry.sequence),
+                  }
+                : entry
+        );
+    }
+    return entries
+        .values()
+        .toArray()
+        .toSorted(
+            (left, right) =>
+                left.sequence - right.sequence || left.key.localeCompare(right.key)
+        )
+        .slice(-MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN);
 }
 
 function mergeAcknowledgedRuns(
@@ -941,6 +1112,7 @@ function mergeAcknowledgedRuns(
         ]),
         assistant,
         assistantSource: newer.assistantSource || older.assistantSource,
+        commentary: mergeRunCommentary(older, newer),
         diagnostics: mergeRunDiagnostics(older, newer),
         error: (terminalRun ?? newer).error,
         lastContentKind: latestContentRun?.lastContentKind,
@@ -1099,12 +1271,14 @@ export function reduceChatRuntime(
         const session: ChatSessionRuntimeState = previousSession
             ? {
                   ...previousSession,
+                  controls: [...previousSession.controls],
                   sessionKey,
                   runs: Object.fromEntries(
                       Object.entries(previousSession.runs).map(([key, run]) => [
                           key,
                           {
                               ...run,
+                              commentary: [...run.commentary],
                               diagnostics: [...run.diagnostics],
                               sessionKey,
                               userMessages: [...run.userMessages],
@@ -1112,8 +1286,21 @@ export function reduceChatRuntime(
                       ])
                   ),
               }
-            : { lastSequence: -1, runs: {}, sessionKey };
+            : { controls: [], lastSequence: -1, runs: {}, sessionKey };
         settleRetryingCompactionRun(session, normalizedEvent);
+        if (normalizedEvent.kind === "control") {
+            session.controls = applyControlEvent(session.controls, normalizedEvent);
+            session.lastSequence = normalizedEvent.sequence;
+            const sessions = { ...nextState.sessions };
+            if (previousSessionKey && previousSessionKey !== sessionKey) {
+                delete sessions[previousSessionKey];
+            }
+            nextState = {
+                ...nextState,
+                sessions: { ...sessions, [sessionKey]: session },
+            };
+            continue;
+        }
         const resolved = resolveRun(session, normalizedEvent);
         session.lastSequence = normalizedEvent.sequence;
         const sessions = { ...nextState.sessions };
@@ -1160,6 +1347,9 @@ function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState
         case "assistant": {
             return applyAssistantEvent(run, event);
         }
+        case "commentary": {
+            return applyCommentaryEvent(run, event);
+        }
         case "thinking":
         case "tool": {
             return applyDiagnosticEvent(run, event);
@@ -1195,6 +1385,9 @@ function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState
                 terminalSequence,
             };
         }
+        case "control": {
+            return run;
+        }
         default: {
             return applyFinishEvent(run, event);
         }
@@ -1221,15 +1414,27 @@ export function addOptimisticChatRun(
     const session: ChatSessionRuntimeState = previousSession
         ? {
               ...previousSession,
+              controls: [...previousSession.controls],
               sessionKey: canonicalSessionKey,
               runs: Object.fromEntries(
                   Object.entries(previousSession.runs).map(([key, run]) => [
                       key,
-                      { ...run, sessionKey: canonicalSessionKey },
+                      {
+                          ...run,
+                          commentary: [...run.commentary],
+                          diagnostics: [...run.diagnostics],
+                          sessionKey: canonicalSessionKey,
+                          userMessages: [...run.userMessages],
+                      },
                   ])
               ),
           }
-        : { lastSequence: -1, runs: {}, sessionKey: canonicalSessionKey };
+        : {
+              controls: [],
+              lastSequence: -1,
+              runs: {},
+              sessionKey: canonicalSessionKey,
+          };
     const existingEntry = Object.entries(session.runs).find(
         ([key, run]) => key === runId || run.aliases.includes(runId)
     );
@@ -1406,6 +1611,7 @@ export function restoreChatRuns(
     const previousEntry = matchingSessionEntry(state, sessionKey);
     const previousSessionKey = previousEntry?.[0] ?? sessionKey;
     const previousSession = previousEntry?.[1] ?? {
+        controls: [],
         lastSequence: -1,
         runs: {},
         sessionKey,

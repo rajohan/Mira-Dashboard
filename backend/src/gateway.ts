@@ -2,7 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
-import { canonicalizeOpenClawHistoryPage } from "../../contracts/chat/openClawHistoryPageAdapter.ts";
+import {
+    canonicalizeOpenClawHistoryMessageResult,
+    canonicalizeOpenClawHistoryPage,
+} from "../../contracts/chat/openClawHistoryPageAdapter.ts";
 import type { ChatRuntimeMetrics, GatewayMetrics } from "../../contracts/metrics.ts";
 import type { Session } from "../../contracts/sessions.ts";
 import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
@@ -746,6 +749,38 @@ async function hydrateOmittedChatHistoryImages(
     return history;
 }
 
+/**
+ * Rehydrates omitted image blocks in one `chat.message.get` response.
+ * @param payload Raw full-message response.
+ * @param requestedSessionKey Requested session key.
+ * @returns Response with transcript-backed image data when available.
+ */
+async function hydrateOmittedChatMessageImages(
+    payload: unknown,
+    requestedSessionKey?: string
+): Promise<unknown> {
+    const result = asRecord(payload);
+    if (!result || !asRecord(result.message)) {
+        return payload;
+    }
+    const hydratedHistory = asRecord(
+        await hydrateOmittedChatHistoryImages(
+            {
+                messages: [result.message],
+                sessionId:
+                    typeof result.sessionId === "string" ? result.sessionId : undefined,
+                sessionKey:
+                    typeof result.sessionKey === "string"
+                        ? result.sessionKey
+                        : requestedSessionKey,
+            },
+            requestedSessionKey
+        )
+    ) as ChatHistoryPayload | undefined;
+    const hydratedMessage = hydratedHistory?.messages?.[0];
+    return hydratedMessage ? { ...result, message: hydratedMessage } : payload;
+}
+
 function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): boolean {
     return gatewayState.client === expectedClient;
 }
@@ -1335,6 +1370,22 @@ async function forwardRequest(
                             ? parameters.sessionKey
                             : "",
                 });
+            } else if (method === "chat.message.get") {
+                const requestedSessionKey =
+                    typeof parameters.sessionKey === "string"
+                        ? parameters.sessionKey
+                        : undefined;
+                payload = await hydrateOmittedChatMessageImages(
+                    payload,
+                    requestedSessionKey
+                );
+                payload = canonicalizeOpenClawHistoryMessageResult(payload, {
+                    messageId:
+                        typeof parameters.messageId === "string"
+                            ? parameters.messageId
+                            : "",
+                    sessionKey: requestedSessionKey ?? "",
+                });
             } else if (method === "sessions.list") {
                 normalizedSessions = normalizeGatewaySessionList(payload);
                 payload = { sessions: normalizedSessions };
@@ -1668,6 +1719,24 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
 }
 
 /**
+ * Appends a durable control notice without creating a human chat turn, then wakes the
+ * owning agent through OpenClaw's system-event lane.
+ * @param sessionKey Session key value.
+ * @param message Control notice to display and deliver.
+ */
+async function sendSessionControlEvent(
+    sessionKey: string,
+    message: string
+): Promise<void> {
+    await sendRequestAsync("chat.inject", { message, sessionKey }, { timeoutMs: 10_000 });
+    await sendRequestAsync(
+        "wake",
+        { mode: "now", sessionKey, text: message },
+        { timeoutMs: 10_000 }
+    );
+}
+
+/**
  * Performs abort session run.
  * @param sessionKey Session key value.
  */
@@ -1749,6 +1818,7 @@ export default {
     getMetrics,
     getChatMetrics,
     getGatewayWs,
+    sendSessionControlEvent,
     sendSessionMessage,
     abortSessionRun,
     deleteSession,

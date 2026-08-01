@@ -12,6 +12,7 @@ interface ModalProperties {
     onClose: () => void;
     title?: string;
     children: ReactNode;
+    scrollOwner?: "body" | "content";
     size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
 }
 
@@ -32,6 +33,7 @@ export function Modal({
     isOpen,
     isDismissDisabled = false,
     onClose,
+    scrollOwner = "body",
     title,
     children,
     size = "md",
@@ -77,7 +79,15 @@ export function Modal({
                             </Button>
                         </div>
                     )}
-                    <div className="flex-1 overflow-y-auto p-4">{children}</div>
+                    <div
+                        className={cn(
+                            "min-h-0 flex-1 p-4",
+                            scrollOwner === "body" ? "overflow-y-auto" : "overflow-hidden"
+                        )}
+                        data-modal-scroll-owner={scrollOwner}
+                    >
+                        {children}
+                    </div>
                 </DialogPanel>
             </div>
         </Dialog>

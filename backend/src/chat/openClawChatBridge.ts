@@ -1333,7 +1333,14 @@ export class OpenClawChatBridge {
                   JSON.stringify({ runId: explicitRunId, sessionKey: storageSessionKey })
               )
             : 0;
-        if (explicitRunId && associationBytes <= MAX_BYTES_PER_EVENT) {
+        const isTranscriptBackedControl = envelope.canonicalEvents.some(
+            (canonicalEvent) => canonicalEvent.kind === "control"
+        );
+        if (
+            explicitRunId &&
+            !isTranscriptBackedControl &&
+            associationBytes <= MAX_BYTES_PER_EVENT
+        ) {
             this.#identity.rememberRunSession(explicitRunId, storageSessionKey);
         }
         if (

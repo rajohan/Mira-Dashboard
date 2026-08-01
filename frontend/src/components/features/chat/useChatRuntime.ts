@@ -92,6 +92,7 @@ function displacedReplayGroupForSession(
 }
 
 type FinishEvent = Extract<ChatRuntimeEvent, { kind: "finish" }>;
+type ControlEvent = Extract<ChatRuntimeEvent, { kind: "control" }>;
 
 interface RuntimeReduction {
     finishes: Array<{ event: FinishEvent; state: ChatRuntimeState }>;
@@ -133,6 +134,7 @@ function carryActiveRunsToGeneration(
                     }
                     const retained = {
                         ...run,
+                        commentary: [...run.commentary],
                         diagnostics: [...run.diagnostics],
                         lastSequence: -1,
                         userMessages: [...run.userMessages],
@@ -141,8 +143,18 @@ function carryActiveRunsToGeneration(
                     return [[runKey, retained]];
                 })
             );
-            return Object.keys(runs).length > 0
-                ? [[sessionKey, { ...session, lastSequence: -1, runs }]]
+            return Object.keys(runs).length > 0 || session.controls.length > 0
+                ? [
+                      [
+                          sessionKey,
+                          {
+                              ...session,
+                              controls: [...session.controls],
+                              lastSequence: -1,
+                              runs,
+                          },
+                      ],
+                  ]
                 : [];
         })
     );
@@ -271,6 +283,12 @@ export function useChatRuntime({
         callbacksRef.current.onSettled?.(selectedSessionRef.current);
     };
 
+    const handleControlSideEffect = (event: ControlEvent) => {
+        if (isSameChatSession(event.sessionKey, selectedSessionRef.current)) {
+            callbacksRef.current.onSettled?.(selectedSessionRef.current);
+        }
+    };
+
     useEffect(() => {
         if (!transport.isConnected) {
             gateRef.current = undefined;
@@ -284,8 +302,12 @@ export function useChatRuntime({
                 return;
             }
 
-            const reduction = reduceRuntimeEvents(stateRef.current, [event]);
+            const previousState = stateRef.current;
+            const reduction = reduceRuntimeEvents(previousState, [event]);
             updateState(() => reduction.state);
+            if (event.kind === "control" && reduction.state !== previousState) {
+                handleControlSideEffect(event);
+            }
             for (const finish of reduction.finishes) {
                 handleFinishSideEffects(finish.event, finish.state);
             }
@@ -487,6 +509,11 @@ export function useChatRuntime({
                     );
                 }
                 updateState(() => next);
+                for (const event of queuedAfterSnapshot) {
+                    if (event.kind === "control") {
+                        handleControlSideEffect(event);
+                    }
+                }
                 for (const finish of replayReduction.finishes) {
                     handleFinishSideEffects(finish.event, finish.state);
                 }
@@ -501,6 +528,11 @@ export function useChatRuntime({
                 if (gate.events.length > 0) {
                     const reduction = reduceRuntimeEvents(stateRef.current, gate.events);
                     updateState(() => reduction.state);
+                    for (const event of gate.events) {
+                        if (event.kind === "control") {
+                            handleControlSideEffect(event);
+                        }
+                    }
                     for (const finish of reduction.finishes) {
                         handleFinishSideEffects(finish.event, finish.state);
                     }
@@ -516,6 +548,11 @@ export function useChatRuntime({
                 if (queued.length > 0) {
                     const reduction = reduceRuntimeEvents(stateRef.current, queued);
                     updateState(() => reduction.state);
+                    for (const event of queued) {
+                        if (event.kind === "control") {
+                            handleControlSideEffect(event);
+                        }
+                    }
                     for (const finish of reduction.finishes) {
                         handleFinishSideEffects(finish.event, finish.state);
                     }

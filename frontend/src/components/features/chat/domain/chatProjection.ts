@@ -123,11 +123,26 @@ function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined
     const toolCallIds = toolCalls
         .map((toolCall) => toolCall.id)
         .filter((id): id is string => Boolean(id));
-    if (toolCalls.length > 0 && toolCallIds.length === toolCalls.length) {
+    const expectedCallRuntimeKey =
+        toolCallIds.length === 1 ? `tool:${toolCallIds[0]}` : undefined;
+    if (
+        toolCalls.length > 0 &&
+        toolCallIds.length === toolCalls.length &&
+        (!message.runtimeKey || message.runtimeKey === expectedCallRuntimeKey)
+    ) {
         return `diagnostic-${message.runId}-tool-call-${toolCallIds.join(":")}`;
     }
-    if (toolCalls.length === 0 && message.toolResult?.id) {
+    if (
+        toolCalls.length === 0 &&
+        message.toolResult?.id &&
+        (!message.runtimeKey || message.runtimeKey === `tool:${message.toolResult.id}`)
+    ) {
         return `diagnostic-${message.runId}-tool-result-${message.toolResult.id}`;
+    }
+    const facet = toolCalls.length > 0 ? "tool-call" : "tool-result";
+    if (message.runtimeKey) {
+        const runtimeIdentity = canonicalChatContentFingerprint(message.runtimeKey);
+        return `diagnostic-${message.runId}-${facet}-runtime-${runtimeIdentity}`;
     }
     return undefined;
 }
@@ -215,15 +230,36 @@ function projectedMessageRowKey(message: ChatHistoryMessage): string {
     if (isUserMessage(message)) {
         return historyMessageDeleteKey(message);
     }
-    return (
-        stableDiagnosticRowKey(message) ||
-        (message.local === true && message.runId
-            ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
-            : messageDeleteKey(message))
-    );
+    if (message.intent === "control") {
+        return `control-${
+            message.controlId ||
+            message.runtimeKey ||
+            canonicalChatContentFingerprint(
+                `${message.timestamp || ""}\u0000${message.text}`
+            )
+        }`;
+    }
+    const diagnosticKey = stableDiagnosticRowKey(message);
+    if (diagnosticKey) {
+        return diagnosticKey;
+    }
+    const role = message.role.toLowerCase();
+    if (
+        message.runId &&
+        (role === "assistant" || role === "system") &&
+        hasPrimaryAnswerContent(message)
+    ) {
+        return `response-${message.runId}`;
+    }
+    return message.local === true && message.runId
+        ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
+        : messageDeleteKey(message);
 }
 
 function projectedMessageSourceFacet(message: ChatHistoryMessage): string {
+    if (message.intent) {
+        return message.intent;
+    }
     const role = message.role.toLowerCase();
     if (role === "user") {
         return "user";
@@ -1374,6 +1410,33 @@ function scopeTranscriptUsersToRuns(
     });
 }
 
+function scopeTranscriptDiagnosticsToRuns(
+    messages: ChatHistoryMessage[],
+    runs: ChatRunState[]
+): ChatHistoryMessage[] {
+    const activeRuns = runs.filter((run) => run.phase === "active");
+    if (activeRuns.length === 0) {
+        return messages;
+    }
+    const exactToolIndex = indexExactToolMessages(messages);
+    const candidates = new Map<number, ChatRunState[]>();
+    for (const run of activeRuns) {
+        const segment = responseSegment(messages, run, runs, exactToolIndex);
+        for (let index = segment.start; index < segment.end; index += 1) {
+            const message = messages[index];
+            if (message && !message.runId && isStandaloneDiagnostic(message)) {
+                candidates.set(index, [...(candidates.get(index) || []), run]);
+            }
+        }
+    }
+    return messages.map((message, index) => {
+        const matchingRuns = candidates.get(index);
+        return matchingRuns?.length === 1
+            ? { ...message, runId: matchingRuns[0]!.runId }
+            : message;
+    });
+}
+
 function isFinalRunMessage(message: ChatHistoryMessage, run: ChatRunState): boolean {
     const role = message.role.toLowerCase();
     return (
@@ -1702,6 +1765,69 @@ function mergeAllRuntimeUserMessages(
     return insertMessagesByTimestamp(next, missingMessages.toReversed());
 }
 
+function mergeRuntimeControlMessages(
+    messages: ChatHistoryMessage[],
+    controls: Readonly<ChatSessionRuntimeState["controls"]>
+): ChatHistoryMessage[] {
+    const next = [...messages];
+    const missing: ChatHistoryMessage[] = [];
+    for (const entry of controls) {
+        const runtimeMessage: ChatHistoryMessage = {
+            ...entry.message,
+            intent: "control",
+            local: true,
+            role: "system",
+            runId: undefined,
+            runtimeKey: entry.key,
+            runtimeSequence: entry.sequence,
+        };
+        const recoveredIndex = runtimeMessage.controlId
+            ? next.findIndex(
+                  (candidate) =>
+                      candidate.intent === "control" &&
+                      candidate.controlId === runtimeMessage.controlId
+              )
+            : -1;
+        if (recoveredIndex === -1) {
+            missing.push(runtimeMessage);
+            continue;
+        }
+        const recovered = next[recoveredIndex]!;
+        next[recoveredIndex] = {
+            ...mergeChatMessageDetails(recovered, runtimeMessage),
+            controlId: runtimeMessage.controlId,
+            intent: "control",
+            role: "system",
+            runId: undefined,
+            runtimeKey: entry.key,
+            runtimeSequence: entry.sequence,
+        };
+    }
+    return insertMessagesByTimestamp(next, missing);
+}
+
+function transientCommentaryMessages(run: ChatRunState): ChatHistoryMessage[] {
+    return run.commentary.map((entry) => ({
+        ...entry.message,
+        content: "",
+        intent: "commentary" as const,
+        local: true,
+        role: "assistant",
+        runId: run.runId,
+        runtimeKey: entry.key,
+        runtimeSequence: entry.sequence,
+        text: "",
+        thinking: [
+            {
+                id: entry.key,
+                snapshot: true,
+                text: entry.message.text,
+            },
+        ],
+        timestamp: entry.message.timestamp || run.updatedAt,
+    }));
+}
+
 /**
  * Reconciles history with the current provider-independent runtime turn.
  * @param history History value.
@@ -1713,11 +1839,19 @@ export function reconcileChatMessages(
     session?: ChatSessionRuntimeState
 ): ChatHistoryMessage[] {
     const runs = orderedRuns(session);
-    const messages = scopeTranscriptUsersToRuns(
-        mergeAllRuntimeUserMessages(orderCompletedHistoryTurns(history, runs), runs),
+    const historyWithControls = mergeRuntimeControlMessages(
+        history,
+        session?.controls || []
+    );
+    const orderedHistory = orderCompletedHistoryTurns(historyWithControls, runs);
+    const historyWithRuntimeUsers = mergeAllRuntimeUserMessages(orderedHistory, runs);
+    const historyWithScopedUsers = scopeTranscriptUsersToRuns(
+        historyWithRuntimeUsers,
         runs
     );
+    const messages = scopeTranscriptDiagnosticsToRuns(historyWithScopedUsers, runs);
     for (const run of runs) {
+        const commentaries = transientCommentaryMessages(run);
         for (const [index, message] of messages.entries()) {
             const shouldUseCanonicalRunId =
                 (isUserMessage(message) || isStandaloneDiagnostic(message)) &&
@@ -1765,6 +1899,7 @@ export function reconcileChatMessages(
                     messages[index] = {
                         ...messages[index]!,
                         runId: run.runId,
+                        runtimeKey: entry.key,
                         runtimeSequence: entry.sequence,
                     };
                 }
@@ -1791,11 +1926,11 @@ export function reconcileChatMessages(
                     runtimeSequence: assistantRuntimeSequence(run),
                 };
             }
-            messages.splice(finalIndex, 0, ...diagnostics);
+            messages.splice(finalIndex, 0, ...diagnostics, ...commentaries);
             continue;
         }
 
-        const additions = [...diagnostics];
+        const additions = [...diagnostics, ...commentaries];
         if (run.assistant) {
             additions.push(
                 transientMessage(
@@ -2012,6 +2147,7 @@ export function renderChatProjectionRows(
     runs: ChatRunState[]
 ): ChatRow[] {
     const deleteKeyOccurrences = new Map<string, number>();
+    const rowKeyOccurrences = new Map<string, number>();
     const messageDeleteIdentities = messages.map((message) =>
         projectedMessageDeleteIdentity(message, runs)
     );
@@ -2019,6 +2155,10 @@ export function renderChatProjectionRows(
         messageDeleteIdentities.flatMap((identity) => identity.baseKeys)
     );
     const generatedDeleteKeys = new Set<string>();
+    const naturalRowKeys = new Set(
+        messages.map((message) => projectedMessageRowKey(message))
+    );
+    const generatedRowKeys = new Set<string>();
     return messages.flatMap((message, messageIndex) => {
         const identity = messageDeleteIdentities[messageIndex]!;
         const matchDeleteKeys = identity.baseKeys.map((baseKey) => {
@@ -2037,15 +2177,25 @@ export function renderChatProjectionRows(
             return key;
         });
         const deleteKeys = matchDeleteKeys.slice(0, identity.persistedKeyCount);
-        return matchDeleteKeys.some((key) => deletedMessageKeys.has(key))
+        const baseRowKey = projectedMessageRowKey(message);
+        const rowOccurrence = rowKeyOccurrences.get(baseRowKey) ?? 0;
+        rowKeyOccurrences.set(baseRowKey, rowOccurrence + 1);
+        const rowKey =
+            rowOccurrence === 0
+                ? baseRowKey
+                : unusedChatProjectionRowOccurrenceKey(
+                      baseRowKey,
+                      rowOccurrence,
+                      naturalRowKeys,
+                      generatedRowKeys
+                  );
+        generatedRowKeys.add(rowKey);
+        return [...matchDeleteKeys, rowKey].some((key) => deletedMessageKeys.has(key))
             ? []
             : [
                   {
                       deleteKeys,
-                      key:
-                          deleteKeys[0] ??
-                          matchDeleteKeys[0] ??
-                          projectedMessageRowKey(message),
+                      key: rowKey,
                       kind:
                           message.local === true &&
                           message.runId &&

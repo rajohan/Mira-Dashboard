@@ -12,6 +12,7 @@ import {
 import {
     asRecord,
     isNonWorkTool,
+    isPreambleItem,
     isThinkingItem,
     itemStrings,
     itemTexts,
@@ -114,6 +115,22 @@ function chatEventDrafts(
         rawMessage === undefined
             ? undefined
             : normalizeAssistant(rawMessage, common.runId);
+    if (state === "final" && message?.intent === "control") {
+        const controlId = message.controlId || common.runId?.replace(/^inject-/u, "");
+        return [
+            {
+                kind: "control",
+                message: {
+                    ...message,
+                    controlId,
+                    runId: undefined,
+                    timestamp: common.timestamp,
+                },
+                sessionKey: common.sessionKey,
+                timestamp: common.timestamp,
+            },
+        ];
+    }
     const isCommand = asRecord(payload.message)?.command === true;
     const explicitError = stringValue(payload.errorMessage) || stringValue(payload.error);
     const isMessageToolFailure = state === "error" && isToolFailureError(message?.text);
@@ -214,6 +231,8 @@ function runtimeStreamDrafts(
         }
     } else if (stream === "thinking" || stream === "reasoning") {
         appendThinkingDraft(drafts, data, common);
+    } else if (stream === "item" && isPreambleItem(data)) {
+        appendItemCommentaryDraft(drafts, data, common);
     } else if (stream === "item" && isThinkingItem(data)) {
         appendItemThinkingDraft(drafts, data, common);
     }
@@ -340,6 +359,40 @@ function appendItemThinkingDraft(
     });
 }
 
+function appendItemCommentaryDraft(
+    drafts: CanonicalChatEventDraft[],
+    data: Record<string, unknown>,
+    common: { runId?: string; sessionKey: string; timestamp: string }
+): void {
+    const snapshotText = itemTexts(data, [
+        "progressText",
+        "summary",
+        "text",
+        "meta",
+        "content",
+    ])[0];
+    const textDelta = itemTexts(data, ["delta"])[0];
+    const text = snapshotText || textDelta;
+    if (!text) {
+        return;
+    }
+    const itemId = itemStrings(data, ["itemId", "id"])[0];
+    drafts.push({
+        ...common,
+        kind: "commentary",
+        message: {
+            content: "",
+            intent: "commentary",
+            role: "assistant",
+            runId: common.runId,
+            runtimeKey: itemId ? `commentary:${itemId}` : undefined,
+            text,
+            timestamp: common.timestamp,
+        },
+        mode: snapshotText ? "replace" : "append",
+    });
+}
+
 function canonicalOpenClawOrigin(eventName: string): CanonicalChatEvent["origin"] {
     if (eventName === "chat") {
         return "openclaw-chat";
@@ -368,6 +421,9 @@ function canonicalOpenClawFormat(
 function canonicalOpenClawLifecycle(
     draft: CanonicalChatEventDraft
 ): CanonicalChatLifecycle {
+    if (draft.kind === "control") {
+        return "completed";
+    }
     if (draft.kind === "finish") {
         return draft.outcome;
     }
@@ -469,9 +525,10 @@ export function adaptOpenClawRuntimeEvent(
             lifecycle: canonicalOpenClawLifecycle(draft),
             origin,
             provider,
-            ...(runtimeRunAliases.length > 0 && {
-                runAliases: runtimeRunAliases,
-            }),
+            ...(draft.kind !== "control" &&
+                runtimeRunAliases.length > 0 && {
+                    runAliases: runtimeRunAliases,
+                }),
             schemaVersion: CANONICAL_CHAT_EVENT_SCHEMA_VERSION,
             sequence: canonicalSequence,
         };
@@ -526,11 +583,14 @@ export function withCurrentCanonicalOpenClawIdentity<
                 event.message && {
                     message: {
                         ...event.message,
-                        runId: context.runId,
+                        runId: event.kind === "control" ? undefined : context.runId,
                     },
                 }),
-            runAliases: runAliases.length > 0 ? runAliases : undefined,
-            runId: context.runId,
+            runAliases:
+                event.kind !== "control" && runAliases.length > 0
+                    ? runAliases
+                    : undefined,
+            runId: event.kind === "control" ? undefined : context.runId,
             sessionKey: context.sessionKey,
         })),
     };

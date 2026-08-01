@@ -914,6 +914,56 @@ describe("OpenClaw adapter variants", () => {
                 29
             )
         );
+        const commentary = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        itemId: "preamble-1",
+                        kind: "preamble",
+                        progressText: "Continuing the architectural repair.",
+                    },
+                    stream: "item",
+                },
+                30
+            )
+        );
+        const commentaryDelta = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        delta: "Continuing.",
+                        itemId: "preamble-1",
+                        kind: "preamble",
+                    },
+                    stream: "item",
+                },
+                31
+            )
+        );
+        const control = adapter.event(
+            envelope(
+                "chat",
+                {
+                    message: {
+                        content: [
+                            {
+                                text: "Task progress: #389",
+                                type: "text",
+                            },
+                        ],
+                        model: "gateway-injected",
+                        provider: "openclaw",
+                        role: "assistant",
+                        stopReason: "stop",
+                    },
+                    runId: "inject-message-1",
+                    state: "final",
+                },
+                32
+            )
+        );
 
         expect(sessionMessage[0]).toMatchObject({
             kind: "assistant",
@@ -973,6 +1023,42 @@ describe("OpenClaw adapter variants", () => {
             }),
         });
         expect(itemThinking).toEqual([expectedItemThinking]);
+        expect(commentary).toEqual([
+            expect.objectContaining({
+                kind: "commentary",
+                message: expect.objectContaining({
+                    intent: "commentary",
+                    runtimeKey: "commentary:preamble-1",
+                    text: "Continuing the architectural repair.",
+                }),
+                mode: "replace",
+                runId: "run-variants",
+            }),
+        ]);
+        expect(commentaryDelta).toEqual([
+            expect.objectContaining({
+                kind: "commentary",
+                message: expect.objectContaining({
+                    runtimeKey: "commentary:preamble-1",
+                    text: "Continuing.",
+                }),
+                mode: "append",
+            }),
+        ]);
+        expect(control).toEqual([
+            expect.objectContaining({
+                kind: "control",
+                lifecycle: "completed",
+                message: expect.objectContaining({
+                    controlId: "message-1",
+                    intent: "control",
+                    role: "system",
+                    runId: undefined,
+                    text: "Task progress: #389",
+                }),
+            }),
+        ]);
+        expect(control[0]?.runId).toBeUndefined();
     });
 
     it("normalizes item tool calls, results and progress-only items", () => {

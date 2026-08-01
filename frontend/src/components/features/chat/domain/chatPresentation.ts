@@ -70,6 +70,8 @@ function primaryAnswerDetails(message: ChatHistoryMessage): PrimaryAnswerDetails
         hasPrimaryContent,
         hasToolOutput,
         isPrimaryAnswerContent:
+            message.intent !== "commentary" &&
+            message.intent !== "control" &&
             !message.isToolUse &&
             hasPrimaryContent &&
             (!hasToolOutput || message.isFinal === true),
@@ -341,9 +343,13 @@ function thinkingAnchorIndex(
             continue;
         }
         const isUser = message.role.toLowerCase() === "user";
+        const isControl = message.intent === "control";
+        const isCommentary = message.intent === "commentary";
         const isCompatibleSteer =
             isUser && (!message.runId || message.runId.startsWith("dashboard-chat-"));
         if (
+            isCommentary ||
+            isControl ||
             (isUser && (isCompatibleSteer || isInGroup(message, index))) ||
             (isInGroup(message, index) && hasToolDetails(message))
         ) {

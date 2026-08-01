@@ -27,7 +27,7 @@ const canonicalChatTurnSourceReferenceSchema = v.strictObject({
 
 export const canonicalChatTurnEntrySchema = v.strictObject({
     id: nonEmptyStringSchema,
-    kind: v.picklist(["assistant", "thinking", "tool", "user"]),
+    kind: v.picklist(["assistant", "commentary", "control", "thinking", "tool", "user"]),
     message: canonicalChatMessageSchema,
     origin: v.optional(
         v.picklist(["openclaw-chat", "openclaw-runtime", "openclaw-session"])

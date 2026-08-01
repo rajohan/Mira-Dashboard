@@ -74,8 +74,10 @@ export const canonicalChatToolCallSchema = v.strictObject({
 export const canonicalChatMessageSchema = v.strictObject({
     attachments: v.optional(v.array(canonicalChatAttachmentSchema)),
     content: v.unknown(),
+    controlId: v.optional(nonEmptyStringSchema),
     hasOnlyHiddenToolAttachments: v.optional(v.boolean()),
     images: v.optional(v.array(canonicalChatImageSchema)),
+    intent: v.optional(v.picklist(["commentary", "control"])),
     isFinal: v.optional(v.boolean()),
     isToolUse: v.optional(v.boolean()),
     local: v.optional(v.boolean()),
@@ -123,6 +125,17 @@ export const canonicalChatEventSchema = v.variant("kind", [
     v.strictObject({
         ...canonicalEventBase,
         kind: v.literal("identity"),
+    }),
+    v.strictObject({
+        ...canonicalEventBase,
+        kind: v.literal("control"),
+        message: canonicalChatMessageSchema,
+    }),
+    v.strictObject({
+        ...canonicalEventBase,
+        kind: v.literal("commentary"),
+        message: canonicalChatMessageSchema,
+        mode: v.picklist(["append", "replace"]),
     }),
     v.strictObject({
         ...canonicalEventBase,

@@ -1,8 +1,15 @@
 import {
+    parseCanonicalChatHistoryMessageResult,
     parseCanonicalChatHistoryPage,
     type CanonicalChatHistoryPage,
+    type CanonicalChatHistoryMessageResult,
     type CanonicalChatHistoryRow,
 } from "../../../../../../contracts/chatCanonicalHistory";
+import {
+    canonicalChatContentFingerprint,
+    summarizeCanonicalChatValueForFingerprint,
+} from "../../../../../../contracts/chatCanonicalMessage";
+import { stableCanonicalChatStringify } from "../../../../../../contracts/chatCanonicalUtilities";
 import type { ChatHistoryMessage } from "../chatTypes";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 import { appendOpenClawHistory } from "./openClawHistoryAdapter";
@@ -13,7 +20,14 @@ export interface OpenClawHistoryPageRequest extends Record<string, unknown> {
     sessionKey: string;
 }
 
+export interface OpenClawHistoryMessageRequest extends Record<string, unknown> {
+    maxChars: number;
+    messageId: string;
+    sessionKey: string;
+}
+
 type RequestHistoryPage = (request: OpenClawHistoryPageRequest) => Promise<unknown>;
+type RequestFullMessage = (request: OpenClawHistoryMessageRequest) => Promise<unknown>;
 
 type OpenClawHistoryPage = CanonicalChatHistoryPage;
 
@@ -26,6 +40,24 @@ interface OpenClawHistoryCacheEntry {
 }
 
 const MAX_CACHED_HISTORY_ENTRIES = 2;
+const MAX_CACHED_FULL_MESSAGE_ENTRIES = 128;
+const MAX_CONCURRENT_FULL_MESSAGE_REQUESTS = 4;
+const MAX_FULL_MESSAGE_CHARACTERS = 2_000_000;
+
+function fullMessagePreviewCacheKey(
+    preview: CanonicalChatHistoryRow,
+    messageId: string
+): string {
+    const previewFingerprint = canonicalChatContentFingerprint(
+        stableCanonicalChatStringify({
+            id: preview.id,
+            message: summarizeCanonicalChatValueForFingerprint(preview.message),
+            provider: preview.provider,
+            sequence: preview.sequence,
+        })
+    );
+    return `${preview.sessionKey.toLowerCase()}:${messageId}:${previewFingerprint}`;
+}
 
 function historyMessageId(row: CanonicalChatHistoryRow): string {
     return row.id;
@@ -57,6 +89,10 @@ function parseHistoryPage(raw: unknown, requestedOffset: number): OpenClawHistor
         throw new Error("OpenClaw returned a mismatched chat history page offset");
     }
     return page;
+}
+
+function parseFullMessage(raw: unknown): CanonicalChatHistoryMessageResult {
+    return parseCanonicalChatHistoryMessageResult(raw, "chat.message.get");
 }
 
 function isSameHistorySession(
@@ -244,18 +280,29 @@ function mergeCachedHistoryRows(
 export class OpenClawHistoryLoader {
     readonly #adapter: OpenClawChatAdapter;
     readonly #cache = new Map<string, OpenClawHistoryCacheEntry>();
+    readonly #fullMessageCache = new Map<
+        string,
+        Promise<CanonicalChatHistoryRow | undefined>
+    >();
     readonly #pending = new Map<string, Promise<ChatHistoryMessage[]>>();
+    readonly #requestFullMessage?: RequestFullMessage;
     readonly #requestPage: RequestHistoryPage;
     #generation = 0;
 
-    constructor(adapter: OpenClawChatAdapter, requestPage: RequestHistoryPage) {
+    constructor(
+        adapter: OpenClawChatAdapter,
+        requestPage: RequestHistoryPage,
+        requestFullMessage?: RequestFullMessage
+    ) {
         this.#adapter = adapter;
         this.#requestPage = requestPage;
+        this.#requestFullMessage = requestFullMessage;
     }
 
     reset(): void {
         this.#generation += 1;
         this.#cache.clear();
+        this.#fullMessageCache.clear();
     }
 
     #cached(cacheKey: string): OpenClawHistoryCacheEntry | undefined {
@@ -288,6 +335,97 @@ export class OpenClawHistoryLoader {
             await this.#requestPage({ limit, offset, sessionKey }),
             offset
         );
+    }
+
+    #rememberFullMessage(
+        cacheKey: string,
+        request: Promise<CanonicalChatHistoryRow | undefined>
+    ): void {
+        this.#fullMessageCache.delete(cacheKey);
+        this.#fullMessageCache.set(cacheKey, request);
+        while (this.#fullMessageCache.size > MAX_CACHED_FULL_MESSAGE_ENTRIES) {
+            const oldestKey = this.#fullMessageCache.keys().next().value;
+            if (!oldestKey) {
+                break;
+            }
+            this.#fullMessageCache.delete(oldestKey);
+        }
+    }
+
+    async #fullMessage(
+        preview: CanonicalChatHistoryRow
+    ): Promise<CanonicalChatHistoryRow | undefined> {
+        const messageId = preview.messageId;
+        if (!preview.truncated || !messageId || !this.#requestFullMessage) {
+            return undefined;
+        }
+        const cacheKey = fullMessagePreviewCacheKey(preview, messageId);
+        const cached = this.#fullMessageCache.get(cacheKey);
+        if (cached) {
+            this.#fullMessageCache.delete(cacheKey);
+            this.#fullMessageCache.set(cacheKey, cached);
+            return cached;
+        }
+
+        const request = (async () => {
+            try {
+                const result = parseFullMessage(
+                    await this.#requestFullMessage!({
+                        maxChars: MAX_FULL_MESSAGE_CHARACTERS,
+                        messageId,
+                        sessionKey: preview.sessionKey,
+                    })
+                );
+                if (!result.ok || result.message.id !== preview.id) {
+                    return;
+                }
+                return {
+                    ...result.message,
+                    sequence: result.message.sequence ?? preview.sequence,
+                };
+            } catch {
+                this.#fullMessageCache.delete(cacheKey);
+                return;
+            }
+        })();
+        this.#rememberFullMessage(cacheKey, request);
+        return request;
+    }
+
+    async #hydrateRows(
+        rows: CanonicalChatHistoryRow[]
+    ): Promise<CanonicalChatHistoryRow[]> {
+        if (!this.#requestFullMessage) {
+            return rows;
+        }
+        const candidateIndexes = rows.flatMap((row, index) =>
+            row.truncated && row.messageId ? [index] : []
+        );
+        if (candidateIndexes.length === 0) {
+            return rows;
+        }
+        const hydrated = [...rows];
+        let cursor = 0;
+        const workers = Array.from(
+            {
+                length: Math.min(
+                    MAX_CONCURRENT_FULL_MESSAGE_REQUESTS,
+                    candidateIndexes.length
+                ),
+            },
+            async () => {
+                while (cursor < candidateIndexes.length) {
+                    const index = candidateIndexes[cursor++]!;
+                    const preview = rows[index]!;
+                    const fullMessage = await this.#fullMessage(preview);
+                    if (fullMessage) {
+                        hydrated[index] = fullMessage;
+                    }
+                }
+            }
+        );
+        await Promise.all(workers);
+        return hydrated;
     }
 
     async #pagesUntil(
@@ -406,7 +544,7 @@ export class OpenClawHistoryLoader {
     ): Promise<ChatHistoryMessage[]> {
         const pages = await this.#pagesUntil(sessionKey, limit, first);
         const throughSequence = first.totalMessages;
-        const orderedRows = orderedUniqueMessages(pages);
+        const orderedRows = await this.#hydrateRows(orderedUniqueMessages(pages));
         const rows = orderedRows.filter((row) => {
             const sequence = historySequence(row);
             return (
@@ -465,11 +603,8 @@ export class OpenClawHistoryLoader {
                       first,
                       cached.throughSequence
                   );
-        const orderedRows = await this.#completeCachedBoundaryRows(
-            sessionKey,
-            limit,
-            pages,
-            cached
+        const orderedRows = await this.#hydrateRows(
+            await this.#completeCachedBoundaryRows(sessionKey, limit, pages, cached)
         );
         if (!hasIncrementalHistorySequenceMetadata(orderedRows)) {
             return this.#loadFresh(cacheKey, sessionKey, limit, first, false);

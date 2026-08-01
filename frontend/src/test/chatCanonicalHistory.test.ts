@@ -1,12 +1,138 @@
 import { describe, expect, it } from "bun:test";
 
-import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openClawHistoryPageAdapter";
-import { parseCanonicalChatHistoryPage } from "../../../contracts/chatCanonicalHistory";
+import {
+    canonicalizeOpenClawHistoryMessageResult,
+    canonicalizeOpenClawHistoryPage,
+} from "../../../contracts/chat/openClawHistoryPageAdapter";
+import {
+    parseCanonicalChatHistoryMessageResult,
+    parseCanonicalChatHistoryPage,
+} from "../../../contracts/chatCanonicalHistory";
 import { summarizeCanonicalChatValueForFingerprint } from "../../../contracts/chatCanonicalMessage";
 
 const SESSION = "agent:main:format-probe";
 
 describe("canonical chat history contract", () => {
+    it("marks Codex and Synthetic previews and preserves row identity when hydrated", () => {
+        for (const provider of ["openai", "synthetic"] as const) {
+            const messageId = `${provider}-long-message`;
+            const preview = canonicalizeOpenClawHistoryPage(
+                {
+                    messages: [
+                        {
+                            __openclaw: { id: messageId, seq: 12 },
+                            content: [
+                                {
+                                    text: "bounded text\n...(truncated)...",
+                                    type: "text",
+                                },
+                            ],
+                            model:
+                                provider === "synthetic"
+                                    ? "hf:MiniMaxAI/MiniMax-M2.5"
+                                    : "gpt-5.6-sol",
+                            provider,
+                            role: "assistant",
+                            stopReason: "stop",
+                        },
+                    ],
+                    offset: 0,
+                },
+                { offset: 0, sessionKey: SESSION }
+            ).messages[0]!;
+            const full = canonicalizeOpenClawHistoryMessageResult(
+                {
+                    message: {
+                        __openclaw: { id: messageId, seq: 12 },
+                        content: [
+                            { text: "the complete assistant answer", type: "text" },
+                        ],
+                        model:
+                            provider === "synthetic"
+                                ? "hf:MiniMaxAI/MiniMax-M2.5"
+                                : "gpt-5.6-sol",
+                        provider,
+                        role: "assistant",
+                        stopReason: "stop",
+                    },
+                    ok: true,
+                },
+                { messageId, sessionKey: SESSION }
+            );
+
+            expect(preview).toMatchObject({ messageId, truncated: true });
+            expect(full).toMatchObject({
+                message: {
+                    id: preview.id,
+                    message: { text: "the complete assistant answer" },
+                    messageId,
+                    truncated: false,
+                },
+                ok: true,
+            });
+        }
+    });
+
+    it("validates explicit full-message unavailability", () => {
+        expect(
+            canonicalizeOpenClawHistoryMessageResult(
+                { ok: false, unavailableReason: "not_visible" },
+                { messageId: "message-1", sessionKey: SESSION }
+            )
+        ).toEqual({
+            ok: false,
+            schemaVersion: 1,
+            unavailableReason: "not_visible",
+        });
+        expect(() =>
+            parseCanonicalChatHistoryMessageResult({
+                ok: false,
+                schemaVersion: 1,
+                unavailableReason: "unknown",
+            })
+        ).toThrow("chatHistoryMessage");
+    });
+
+    it("rejects full-message responses without the requested provider identity", () => {
+        for (const providerMessageId of [undefined, "another-message"]) {
+            expect(() =>
+                canonicalizeOpenClawHistoryMessageResult(
+                    {
+                        message: {
+                            __openclaw: { id: providerMessageId, seq: 1 },
+                            content: "wrong response",
+                            role: "assistant",
+                        },
+                        ok: true,
+                    },
+                    { messageId: "requested-message", sessionKey: SESSION }
+                )
+            ).toThrow("OpenClaw full chat message identity is invalid");
+        }
+    });
+
+    it("honors provider truncation metadata when display wording changes", () => {
+        const [preview] = canonicalizeOpenClawHistoryPage(
+            {
+                messages: [
+                    {
+                        __openclaw: {
+                            id: "metadata-truncated-message",
+                            seq: 1,
+                            truncated: true,
+                        },
+                        content: "provider-specific shortened wording",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+            },
+            { offset: 0, sessionKey: SESSION }
+        ).messages;
+
+        expect(preview?.truncated).toBe(true);
+    });
+
     it("canonicalizes redacted Codex history with UUID identity and sequence", () => {
         const raw = {
             hasMore: false,

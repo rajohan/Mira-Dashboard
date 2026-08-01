@@ -15,6 +15,7 @@ import {
     compactStatus,
     formatToolName,
     isNonWorkTool,
+    isPreambleItem,
     isThinkingItem,
     isToolCallItem,
     isToolResultItem,
@@ -236,7 +237,11 @@ export function openClawProgress(
         };
     }
     if (stream === "item") {
-        if (data.suppressChannelProgress === true || isThinkingItem(data)) {
+        if (
+            data.suppressChannelProgress === true ||
+            isPreambleItem(data) ||
+            isThinkingItem(data)
+        ) {
             return {};
         }
         const name = stringValue(data.name) || stringValue(data.itemKind);

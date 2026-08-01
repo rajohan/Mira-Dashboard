@@ -26,8 +26,10 @@ export function useOpenClawChatTransport(): ChatTransport {
     const [adapter] = useState(() => new OpenClawChatAdapter());
     const [historyLoader] = useState(
         () =>
-            new OpenClawHistoryLoader(adapter, (request) =>
-                socket.request("chat.history", request)
+            new OpenClawHistoryLoader(
+                adapter,
+                (request) => socket.request("chat.history", request),
+                (request) => socket.request("chat.message.get", request)
             )
     );
 
