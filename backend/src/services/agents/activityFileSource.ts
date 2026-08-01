@@ -733,7 +733,6 @@ export async function getLatestActivityFromFile(
                         );
                         if (earlierTask) {
                             fileTask = earlierTask.task;
-                            fileTaskRunId = earlierTask.runId;
                             fileTaskTurnId = earlierTask.turnId;
                         }
                     }
