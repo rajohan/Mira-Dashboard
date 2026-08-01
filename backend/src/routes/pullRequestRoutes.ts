@@ -27,7 +27,6 @@ import {
     getPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
-    reconcileClosedPullRequestPreview,
 } from "../services/pullRequestPreviews.ts";
 import {
     getDashboardReleaseStatus,
@@ -78,12 +77,7 @@ const pullRequestListSnapshot = new CoalescedSnapshot<
     Awaited<ReturnType<typeof listDashboardPullRequests>>
 >({
     freshForMs: 15_000,
-    load: async () => {
-        const pullRequests = await listDashboardPullRequests();
-        await reconcileClosedPullRequestPreview(pullRequests);
-        pullRequestPreviewSnapshot.invalidate();
-        return pullRequests;
-    },
+    load: listDashboardPullRequests,
     name: "github.pull-requests",
     staleForMs: 120_000,
 });

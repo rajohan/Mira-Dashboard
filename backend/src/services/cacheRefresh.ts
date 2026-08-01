@@ -1,14 +1,6 @@
-import { type Stats } from "node:fs";
-import {
-    type FileHandle,
-    mkdir,
-    open,
-    rename,
-    rm,
-    stat,
-    writeFile,
-} from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 
 import type { JobResourceClass, ScheduledJob } from "../../../contracts/jobs.ts";
 import { database } from "../database.ts";
@@ -62,10 +54,6 @@ function dateGetTime(date: Date): number {
     return date.getTime();
 }
 
-const codexTrustConfigLocks = new Map<string, Promise<void>>();
-const CODEX_TRUST_LOCK_TIMEOUT_MS = 5000;
-const CODEX_TRUST_LOCK_RETRY_MS = 100;
-const CODEX_TRUST_STALE_LOCK_MS = 5 * 60 * 1000;
 const KOPIA_EXPECTED_SOURCE_PATHS = [
     "/source/docker",
     "/source/projects",
@@ -93,11 +81,6 @@ const SPYDEBERG = {
     openMeteoUrl:
         "https://api.open-meteo.com/v1/forecast?latitude=59.62&longitude=11.08&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Europe%2FOslo&forecast_days=3",
 };
-const CODEX_TRUSTED_DIRS = [
-    "/home/ubuntu/.openclaw",
-    "/home/ubuntu/projects",
-    dashboardProjectPaths.projectRoot,
-];
 const MOLTBOOK_CACHE_KEY_LIST = [
     "moltbook.home",
     "moltbook.feed.hot",
@@ -196,109 +179,6 @@ function toCurrencyNumber(value: unknown): number | undefined {
     }
     const parsed = Number(cleaned);
     return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
-
-type CodexTrustConfigFileHandle = Pick<FileHandle, "close">;
-
-type AsyncCodexTrustConfigLockDependencies = {
-    now?: () => number;
-    open?: (
-        path: string,
-        flags: string,
-        mode: number
-    ) => Promise<CodexTrustConfigFileHandle>;
-    remove?: typeof rm;
-    rename?: typeof rename;
-    sleep?: typeof sleep;
-    stat?: typeof stat;
-};
-
-function isSameFileStat(left: Stats, right: Stats): boolean {
-    return (
-        left.mtimeMs === right.mtimeMs && left.dev === right.dev && left.ino === right.ino
-    );
-}
-
-async function acquireCodexTrustConfigLockAsync(
-    lockPath: string,
-    dependencies: AsyncCodexTrustConfigLockDependencies = {}
-): Promise<CodexTrustConfigFileHandle> {
-    const now = dependencies.now ?? Date.now;
-    const openFile = dependencies.open ?? open;
-    const removeFile = dependencies.remove ?? rm;
-    const renameFile = dependencies.rename ?? rename;
-    const sleepFor = dependencies.sleep ?? sleep;
-    const statFile = dependencies.stat ?? stat;
-    const startedAt = now();
-    let isStaleRecoveryAttempted = false;
-    for (;;) {
-        try {
-            return await openFile(lockPath, "wx", 0o600);
-        } catch (error) {
-            if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) {
-                throw error;
-            }
-            const elapsedMs = now() - startedAt;
-            if (elapsedMs < CODEX_TRUST_LOCK_TIMEOUT_MS) {
-                await sleepFor(CODEX_TRUST_LOCK_RETRY_MS);
-                continue;
-            }
-            if (!isStaleRecoveryAttempted) {
-                isStaleRecoveryAttempted = true;
-                try {
-                    const lockStat = await statFile(lockPath);
-                    if (now() - lockStat.mtimeMs > CODEX_TRUST_STALE_LOCK_MS) {
-                        const reclaimedPath = `${lockPath}.reclaimed.${process.pid}`;
-                        try {
-                            await renameFile(lockPath, reclaimedPath);
-                            const reclaimedStat = await statFile(reclaimedPath);
-                            if (isSameFileStat(lockStat, reclaimedStat)) {
-                                await removeFile(reclaimedPath, { force: true });
-                                continue;
-                            }
-                            try {
-                                if (
-                                    isSameFileStat(
-                                        lockStat,
-                                        await statFile(reclaimedPath)
-                                    )
-                                ) {
-                                    await renameFile(reclaimedPath, lockPath);
-                                }
-                            } catch {
-                                // Best effort: preserve the live lock path if a newer owner won.
-                            }
-                        } catch (renameError) {
-                            if (
-                                renameError instanceof Error &&
-                                "code" in renameError &&
-                                renameError.code === "ENOENT"
-                            ) {
-                                continue;
-                            }
-                        }
-                        throw error;
-                    }
-                } catch (statError) {
-                    if (
-                        statError instanceof Error &&
-                        "code" in statError &&
-                        statError.code === "ENOENT"
-                    ) {
-                        continue;
-                    }
-                    throw statError;
-                }
-            }
-            throw error;
-        }
-    }
 }
 
 export { writeCacheSuccess } from "./cacheEntryWriter.ts";
@@ -1516,86 +1396,42 @@ function getCodexBin() {
     return nonEmptyEnvironmentFallback("CODEX_BIN", "/home/ubuntu/.npm-global/bin/codex");
 }
 
-async function ensureCodexTrustConfig(codexHome: string) {
-    const existing = codexTrustConfigLocks.get(codexHome);
-    if (existing) {
-        await existing;
-        return;
-    }
-    const update = updateCodexTrustConfig(codexHome);
-    codexTrustConfigLocks.set(codexHome, update);
+async function createCodexQuotaProbe(sourceCodexHome: string): Promise<{
+    cleanup: () => Promise<void>;
+    codexHome: string;
+    workspace: string;
+}> {
+    const root = await mkdtemp(path.join(os.tmpdir(), "mira-codex-quota-"));
+    const codexHome = path.join(root, "codex-home");
+    const workspace = path.join(root, "workspace");
     try {
-        await update;
-    } finally {
-        codexTrustConfigLocks.delete(codexHome);
-    }
-}
-
-async function updateCodexTrustConfig(codexHome: string) {
-    const lockPath = `${codexHome}/config.toml.lock`;
-    let lockHandle: CodexTrustConfigFileHandle | undefined;
-    try {
-        await mkdir(codexHome, { recursive: true });
-        lockHandle = await acquireCodexTrustConfigLockAsync(lockPath);
-        const configPath = `${codexHome}/config.toml`;
-        let existing = "";
+        await Promise.all([
+            mkdir(codexHome, { mode: 0o700 }),
+            mkdir(workspace, { mode: 0o700 }),
+        ]);
         try {
-            existing = await Bun.file(configPath).text();
+            const authPath = path.join(codexHome, "auth.json");
+            await copyFile(path.join(sourceCodexHome, "auth.json"), authPath);
+            await chmod(authPath, 0o600);
         } catch (error) {
             if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
                 throw error;
             }
         }
-        let next = existing;
-        const additions = CODEX_TRUSTED_DIRS.flatMap((directory) => {
-            const header = `[projects.${JSON.stringify(directory)}]`;
-            const normalizedConfig = ensureCodexTrustedSection(next, header);
-            if (normalizedConfig === undefined) {
-                return [`${header}\ntrust_level = "trusted"\n`];
-            }
-            next = normalizedConfig;
-            return [];
-        });
-        if (additions.length > 0) {
-            const prefix = next && !next.endsWith("\n") ? "\n" : "";
-            const separator = next ? "\n" : "";
-            next += `${prefix}${separator}${additions.join("\n")}`;
-        }
-        if (next !== existing) {
-            const temporaryPath = `${configPath}.${process.pid}.tmp`;
-            await writeFile(temporaryPath, next, { mode: 0o600 });
-            await rename(temporaryPath, configPath);
-        }
-    } finally {
-        if (lockHandle !== undefined) {
-            await lockHandle.close();
-            await rm(lockPath, { force: true });
-        }
+        await writeFile(
+            path.join(codexHome, "config.toml"),
+            `[projects.${JSON.stringify(workspace)}]\ntrust_level = "trusted"\n`,
+            { mode: 0o600 }
+        );
+        return {
+            cleanup: () => rm(root, { force: true, recursive: true }),
+            codexHome,
+            workspace,
+        };
+    } catch (error) {
+        await rm(root, { force: true, recursive: true });
+        throw error;
     }
-}
-
-function ensureCodexTrustedSection(config: string, header: string) {
-    const lines = config.split("\n");
-    const headerIndex = lines.findIndex((line) => line.trim() === header);
-    if (headerIndex === -1) {
-        return;
-    }
-    const nextHeaderIndex = lines.findIndex(
-        (line, index) => index > headerIndex && /^\s*\[.*\]\s*$/u.test(line)
-    );
-    const sectionEndIndex = nextHeaderIndex === -1 ? lines.length : nextHeaderIndex;
-    const trustLevelIndex = lines.findIndex(
-        (line, index) =>
-            index > headerIndex &&
-            index < sectionEndIndex &&
-            /^\s*trust_level\s*=/u.test(line)
-    );
-    if (trustLevelIndex === -1) {
-        lines.splice(headerIndex + 1, 0, 'trust_level = "trusted"');
-    } else if (lines[trustLevelIndex] !== 'trust_level = "trusted"') {
-        lines[trustLevelIndex] = 'trust_level = "trusted"';
-    }
-    return lines.join("\n");
 }
 
 function stripAnsi(value: string) {
@@ -1673,8 +1509,7 @@ function parseOpenAiQuotaOutput(output: string) {
 async function checkOpenAiQuota() {
     try {
         const codexPath = getCodexBin();
-        const codexHome = getQuotaCodexHome();
-        await ensureCodexTrustConfig(codexHome);
+        const probe = await createCodexQuotaProbe(getQuotaCodexHome());
         const command = String.raw`set -e
 SESSION="codex_quota_$$_$(date +%s)"
 cleanup(){ tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; }
@@ -1688,7 +1523,7 @@ else
     exit 0
   }
 fi
-tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd /home/ubuntu/.openclaw --no-alt-screen
+tmux new-session -d -s "$SESSION" -c "$MIRA_QUOTA_CODEX_WORKSPACE" env CODEX_HOME="$MIRA_QUOTA_CODEX_HOME" CODEX_DISABLE_UPDATE_CHECK=1 NO_UPDATE_NOTIFIER=1 "$MIRA_QUOTA_CODEX_BIN" --cd "$MIRA_QUOTA_CODEX_WORKSPACE" --no-alt-screen
 	OUT=""
 	has_limits(){ echo "$OUT" | grep -Eiq "Weekly limit:"; }
 	for i in $(seq 1 12); do
@@ -1701,36 +1536,47 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
 	for i in $(seq 1 20); do OUT=$(tmux capture-pane -pt "$SESSION" -S -320 || true); has_limits && break; sleep 1; done
 	printf "%s\n" "$OUT"
 	`;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-            const { code, stderr, stdout } = await runProcess("bash", ["-c", command], {
-                env: {
-                    PATH: process.env.PATH,
-                    NODE_ENV: process.env.NODE_ENV,
-                    MIRA_QUOTA_CODEX_BIN: codexPath,
-                    MIRA_QUOTA_CODEX_HOME: codexHome,
-                },
-                timeoutMs: 120_000,
-                maxBuffer: 1024 * 1024,
-            });
-            if (code !== 0) {
-                const output = stripAnsi(`${stderr}\n${stdout}`)
-                    .replaceAll("\r", "")
-                    .trim()
-                    .slice(-1000);
-                return {
-                    status: "error" as const,
-                    note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
-                };
+        try {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const { code, stderr, stdout } = await runProcess(
+                    "bash",
+                    ["-c", command],
+                    {
+                        env: {
+                            PATH: process.env.PATH,
+                            NODE_ENV: process.env.NODE_ENV,
+                            MIRA_QUOTA_CODEX_BIN: codexPath,
+                            MIRA_QUOTA_CODEX_HOME: probe.codexHome,
+                            MIRA_QUOTA_CODEX_WORKSPACE: probe.workspace,
+                        },
+                        timeoutMs: 120_000,
+                        maxBuffer: 1024 * 1024,
+                    }
+                );
+                if (code !== 0) {
+                    const output = stripAnsi(`${stderr}\n${stdout}`)
+                        .replaceAll("\r", "")
+                        .trim()
+                        .slice(-1000);
+                    return {
+                        status: "error" as const,
+                        note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
+                    };
+                }
+                const parsed = parseOpenAiQuotaOutput(
+                    stripAnsi(stdout).replaceAll("\r", "")
+                );
+                if (attempt === 1 || parsed.status !== "error") {
+                    return parsed;
+                }
             }
-            const parsed = parseOpenAiQuotaOutput(stripAnsi(stdout).replaceAll("\r", ""));
-            if (attempt === 1 || parsed.status !== "error") {
-                return parsed;
-            }
+            return {
+                status: "error" as const,
+                note: "Could not parse Codex /status output",
+            };
+        } finally {
+            await probe.cleanup();
         }
-        return {
-            status: "error" as const,
-            note: "Could not parse Codex /status output",
-        };
     } catch (error) {
         return { status: "error" as const, note: errorMessage(error) };
     }
@@ -2475,17 +2321,22 @@ export function registerCacheRefreshScheduledJobs(
             if (existing) {
                 timeOfDay = existing.timeOfDay;
             }
+            let cronExpression: string | undefined;
+            if (existing) {
+                cronExpression = existing.cronExpression;
+            } else if (
+                "cronExpression" in job &&
+                typeof job.cronExpression === "string"
+            ) {
+                cronExpression = job.cronExpression;
+            }
             upsertScheduledJob({
                 ...job,
                 enabled: isAllowed ? (existing?.enabled ?? true) : false,
                 scheduleType: existing?.scheduleType ?? job.scheduleType,
                 intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
                 timeOfDay,
-                cronExpression:
-                    existing?.cronExpression ??
-                    ("cronExpression" in job && typeof job.cronExpression === "string"
-                        ? job.cronExpression
-                        : undefined),
+                cronExpression,
             });
             if (isAllowed && (existing?.enabled ?? true)) {
                 seedJobs.push({ id: job.id, key: job.actionPayload.key });

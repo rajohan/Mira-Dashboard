@@ -5649,10 +5649,20 @@ describe("Mira Dashboard pages", () => {
             addDeletedMessageKeys(new Set(["current"]), ["scoped", "history"])
         ).toEqual(new Set(["current", "scoped", "history"]));
 
-        writeDeletedMessageKeys("agent:main:main", new Set(["message-1"]));
-        expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set(["message-1"]));
+        const opaqueKey = "user::no-time::no-run::v2:6:abc123:def456";
+        writeDeletedMessageKeys("agent:main:main", new Set([opaqueKey]));
+        expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set([opaqueKey]));
+        localStorage.setItem(
+            "openclaw:deleted:agent:main:main",
+            JSON.stringify(["user::no-time::no-run::deleted prompt text", opaqueKey])
+        );
+        expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set([opaqueKey]));
+        expect(localStorage.getItem("openclaw:deleted:agent:main:main")).toBe(
+            JSON.stringify([opaqueKey])
+        );
         localStorage.setItem("openclaw:deleted:agent:main:main", "{bad json");
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set());
+        expect(localStorage.getItem("openclaw:deleted:agent:main:main")).toBeNull();
 
         expect(sessionTimestampMs("2026-06-24T08:00:00.000Z")).toBeGreaterThan(0);
         expect(sessionTimestampMs(Number.NaN)).toBeUndefined();

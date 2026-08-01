@@ -1168,17 +1168,22 @@ export function registerBackupScheduledJobs(): void {
 
         for (const job of backupScheduledJobs) {
             const existing = getScheduledJob(job.id);
+            let cronExpression: string | undefined;
+            if (existing) {
+                cronExpression = existing.cronExpression;
+            } else if (
+                "cronExpression" in job &&
+                typeof job.cronExpression === "string"
+            ) {
+                cronExpression = job.cronExpression;
+            }
             upsertScheduledJob({
                 ...job,
                 enabled: existing?.enabled ?? true,
                 scheduleType: existing?.scheduleType ?? job.scheduleType,
                 intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-                timeOfDay: existing?.timeOfDay ?? job.timeOfDay,
-                cronExpression:
-                    existing?.cronExpression ??
-                    ("cronExpression" in job && typeof job.cronExpression === "string"
-                        ? job.cronExpression
-                        : undefined),
+                timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
+                cronExpression,
             });
         }
         database.run("COMMIT");

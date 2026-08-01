@@ -28,6 +28,7 @@ import {
 } from "../src/lib/safePath.ts";
 import {
     arrayFallback,
+    boundedTimestamp,
     environmentFallback,
     nonEmptyEnvironmentFallback,
     nullableString,
@@ -471,6 +472,21 @@ describe("backend service utilities", () => {
             version: { current: "1.0.0" },
         });
 
+        expect(
+            compactHeartbeatData("backup.kopia.status", { latest: [null] })
+        ).toMatchObject({ latest: [] });
+        expect(
+            compactHeartbeatData("database.summary", { databases: [null] })
+        ).toMatchObject({ databases: [] });
+        expect(
+            compactHeartbeatData("docker.summary", { containers: [null] })
+        ).toMatchObject({ containers: [] });
+        expect(
+            compactHeartbeatData("system.openclaw", {
+                security: { findings: [null] },
+            })
+        ).toMatchObject({ security: { findings: [] } });
+
         for (const key of [
             "git.workspace",
             "moltbook.home",
@@ -563,15 +579,19 @@ describe("backend service utilities", () => {
             ).toEqual({});
             expect(arrayFallback(["a"])).toEqual(["a"]);
             expect(arrayFallback("not-array", ["fallback"])).toEqual(["fallback"]);
+            expect(boundedTimestamp("2026-07-31T12:00:00.000Z")).toBe(
+                Date.parse("2026-07-31T12:00:00.000Z")
+            );
+            expect(boundedTimestamp(0)).toBe(0);
+            expect(boundedTimestamp(1e100)).toBeUndefined();
+            expect(boundedTimestamp("invalid")).toBeUndefined();
             expect(resolveDashboardPort(" 4310 ")).toBe(4310);
             expect(resolveDashboardPort("0")).toBe(3100);
             expect(resolveDashboardPort("65536")).toBe(3100);
             expect(resolveDashboardPort("not-a-port")).toBe(3100);
             expect(resolveDashboardHost(" 127.0.0.1 ")).toBe("127.0.0.1");
             expect(resolveDashboardHost("")).toBe("0.0.0.0");
-            expect(resolveDashboardHost("127.0.0.1", { NODE_ENV: "production" })).toBe(
-                "0.0.0.0"
-            );
+            expect(resolveDashboardHost("127.0.0.1")).toBe("127.0.0.1");
             expect(() => resolveDashboardHost("bad host")).toThrow(
                 "MIRA_DASHBOARD_HOST must be a valid bind host"
             );
@@ -1338,6 +1358,31 @@ describe("backend service utilities", () => {
         }
     });
 
+    it("does not append generic audit rows for unauthenticated public auth mutations", async () => {
+        const handler = jest.fn(() => new Response("ok"));
+        const persistAuditEvent = jest.fn();
+        const routes = withRequestPolicy(
+            {
+                "/api/auth/logout": {
+                    POST: handler,
+                },
+            },
+            { persistAuditEvent }
+        );
+
+        const logoutRoute = routes["/api/auth/logout"] as {
+            POST: (request: Request, server: Server<unknown>) => Promise<Response>;
+        };
+        const response = await logoutRoute.POST(
+            new Request("http://localhost/api/auth/logout", { method: "POST" }),
+            serverWithAddress("203.0.113.10")
+        );
+
+        expect(response.status).toBe(200);
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(persistAuditEvent).not.toHaveBeenCalled();
+    });
+
     it("applies request policy auth, rate limit, and handler error behavior", async () => {
         resetRequestPolicyForTests();
         const stderrSpy = jest
@@ -1448,7 +1493,7 @@ describe("backend service utilities", () => {
                             event.action === "http.request"
                     )
                     .map((event) => event.outcome)
-            ).toEqual(["accepted", "attempted"]);
+            ).toEqual([]);
 
             const crossOriginMutation = await callTestRoute(
                 routes,

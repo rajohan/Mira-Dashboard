@@ -21,6 +21,11 @@ interface DatabaseRow {
     total_query_count: number;
 }
 
+function finiteDatabaseMetric(value: unknown): number {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+}
+
 /**
  * Performs merge with pool data.
  * @param databases Databases value.
@@ -33,8 +38,38 @@ function mergeWithPoolData(
     pools: DatabaseOverviewResponse["pgbouncerPools"],
     stats: DatabaseOverviewResponse["pgbouncerStats"]
 ): DatabaseRow[] {
-    const poolMap = new Map<string, DatabaseOverviewResponse["pgbouncerPools"][number]>();
-    for (const pool of pools) poolMap.set(pool.database, pool);
+    const poolMap = new Map<
+        string,
+        Pick<
+            DatabaseRow,
+            "cl_active" | "cl_waiting" | "sv_active" | "sv_idle" | "sv_used"
+        >
+    >();
+    for (const pool of pools) {
+        const previous = poolMap.get(pool.database);
+        poolMap.set(pool.database, {
+            cl_active: String(
+                finiteDatabaseMetric(previous?.cl_active) +
+                    finiteDatabaseMetric(pool.cl_active)
+            ),
+            cl_waiting: String(
+                finiteDatabaseMetric(previous?.cl_waiting) +
+                    finiteDatabaseMetric(pool.cl_waiting)
+            ),
+            sv_active: String(
+                finiteDatabaseMetric(previous?.sv_active) +
+                    finiteDatabaseMetric(pool.sv_active)
+            ),
+            sv_idle: String(
+                finiteDatabaseMetric(previous?.sv_idle) +
+                    finiteDatabaseMetric(pool.sv_idle)
+            ),
+            sv_used: String(
+                finiteDatabaseMetric(previous?.sv_used) +
+                    finiteDatabaseMetric(pool.sv_used)
+            ),
+        });
+    }
 
     const statsMap = new Map<
         string,
@@ -52,9 +87,9 @@ function mergeWithPoolData(
             sv_active: pool?.sv_active ?? "—",
             sv_idle: pool?.sv_idle ?? "—",
             sv_used: pool?.sv_used ?? "—",
-            avg_query_time: Number(stat?.avg_query_time ?? 0),
-            avg_xact_time: Number(stat?.avg_xact_time ?? 0),
-            total_query_count: Number(stat?.total_query_count ?? 0),
+            avg_query_time: finiteDatabaseMetric(stat?.avg_query_time),
+            avg_xact_time: finiteDatabaseMetric(stat?.avg_xact_time),
+            total_query_count: finiteDatabaseMetric(stat?.total_query_count),
         };
     });
 }

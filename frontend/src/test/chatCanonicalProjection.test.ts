@@ -915,9 +915,10 @@ describe("canonical chat turn projection", () => {
             "second answer",
         ]);
         expect(new Set(keys).size).toBe(keys.length);
-        expect(keys[0]).toBe("user::no-time::no-run::repeat");
+        expect(keys[0]).toStartWith("user::no-time::no-run::v2:");
         expect(keys[2]).toStartWith("chat-row-occurrence:v1:");
         expect(keys[2]).not.toBe(keys[0]);
+        expect(keys.every((key) => !key.includes("repeat"))).toBe(true);
         expect(first.projection.rows[0]?.deleteKeys).toEqual([keys[0]]);
         expect(first.projection.rows[2]?.deleteKeys).toEqual([keys[2]]);
         expect(replay.projection.rows.map((row) => row.key)).toEqual(keys);
@@ -997,10 +998,15 @@ describe("canonical chat turn projection", () => {
             { deletedMessageKeys: new Set(optimisticDeleteKeys) }
         ).projection;
 
-        expect(optimisticDeleteKeys?.slice(0, 2)).toEqual([
-            "user::2026-07-31T04:00:00.000Z::no-run::queued prompt",
-            "user::no-time::dashboard-chat-delete::queued prompt",
-        ]);
+        expect(optimisticDeleteKeys?.[0]).toStartWith(
+            "user::2026-07-31T04:00:00.000Z::no-run::v2:"
+        );
+        expect(optimisticDeleteKeys?.[1]).toStartWith(
+            "user::no-time::dashboard-chat-delete::v2:"
+        );
+        expect(optimisticDeleteKeys?.every((key) => !key.includes("queued prompt"))).toBe(
+            true
+        );
         expect(
             optimisticDeleteKeys?.some((key) =>
                 key.startsWith("chat-user-recovery:v1:time-")
@@ -1110,9 +1116,20 @@ describe("canonical chat turn projection", () => {
         ).projection;
 
         expect(shiftedVisible.rows[0]?.key).toBe(original.rows[0]?.key);
-        expect(original.rows[0]?.deleteKeys).toContain(
-            "user::2026-07-31T04:01:00.000Z::no-run::position-independent prompt"
-        );
+        const originalDeleteKeys = original.rows[0]?.deleteKeys;
+        if (!originalDeleteKeys) {
+            throw new Error("Fallback prompt fixture is missing delete keys");
+        }
+        expect(
+            originalDeleteKeys.some((key) =>
+                key.startsWith("user::2026-07-31T04:01:00.000Z::no-run::v2:")
+            )
+        ).toBe(true);
+        expect(
+            originalDeleteKeys.every(
+                (key) => !key.includes("position-independent prompt")
+            )
+        ).toBe(true);
         expect(shifted.rows).toEqual([]);
     });
 

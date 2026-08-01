@@ -40,11 +40,8 @@ export function resolveDashboardPort(value = process.env.PORT): number {
  * @param environment Environment value.
  * @returns the explicit Dashboard bind host or the production-compatible default.
  */
-export function resolveDashboardHost(
-    value = process.env.MIRA_DASHBOARD_HOST,
-    environment: Record<string, string | undefined> = process.env
-): string {
-    const host = environment.NODE_ENV === "production" ? undefined : value?.trim();
+export function resolveDashboardHost(value = process.env.MIRA_DASHBOARD_HOST): string {
+    const host = value?.trim();
     if (!host) {
         return "0.0.0.0";
     }
@@ -137,4 +134,21 @@ export function arrayFallback<T>(value: unknown, fallback: T[] = []): T[] {
  */
 export function unknownArray(value: unknown): unknown[] {
     return Array.isArray(value) ? (value as unknown[]) : [];
+}
+
+/**
+ * Returns a Date-safe millisecond timestamp for numeric and ISO provider values.
+ * @param value Candidate timestamp.
+ * @returns A bounded timestamp or undefined.
+ */
+export function boundedTimestamp(value: unknown): number | undefined {
+    let timestamp = Number.NaN;
+    if (typeof value === "number" && Number.isFinite(value)) {
+        timestamp = value;
+    } else if (typeof value === "string" && value.trim().length > 0) {
+        timestamp = Date.parse(value);
+    }
+    return Number.isFinite(timestamp) && Math.abs(timestamp) <= 8_640_000_000_000_000
+        ? timestamp
+        : undefined;
 }

@@ -24,6 +24,16 @@ function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
 }
 
+function isOpaqueDeletedMessageKey(value: string): boolean {
+    return (
+        /::v2:\d+:[0-9a-z]+:[0-9a-z]+$/u.test(value) ||
+        /^chat-user-recovery:v1:(?:no-time|time-\d+):\d+:[0-9a-z]+:[0-9a-z]+$/u.test(
+            value
+        ) ||
+        /^chat-row-occurrence:v1:\d+:\d+:\d+:[0-9a-z]+:[0-9a-z]+$/u.test(value)
+    );
+}
+
 export function isResetSlashCommand(text: string): boolean {
     return /^\/(?:new|reset)(?:\s|$)/iu.test(text);
 }
@@ -33,14 +43,27 @@ export function readDeletedMessageKeys(sessionKey: string): Set<string> {
         return new Set();
     }
     try {
-        const raw = localStorage.getItem(deletedMessagesStorageKey(sessionKey));
+        const storageKey = deletedMessagesStorageKey(sessionKey);
+        const raw = localStorage.getItem(storageKey);
         const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-        return new Set(
-            Array.isArray(parsed)
-                ? parsed.filter((value): value is string => typeof value === "string")
-                : []
+        if (!Array.isArray(parsed)) {
+            localStorage.setItem(storageKey, "[]");
+            return new Set();
+        }
+        const opaqueKeys = parsed.filter(
+            (value): value is string =>
+                typeof value === "string" && isOpaqueDeletedMessageKey(value)
         );
+        if (opaqueKeys.length !== parsed.length) {
+            localStorage.setItem(storageKey, JSON.stringify(opaqueKeys));
+        }
+        return new Set(opaqueKeys);
     } catch {
+        try {
+            localStorage.removeItem(deletedMessagesStorageKey(sessionKey));
+        } catch {
+            // Browser storage is unavailable; there is no persisted value to sanitize.
+        }
         return new Set();
     }
 }
@@ -66,9 +89,10 @@ export function writeDeletedMessageKeys(
         return;
     }
     try {
+        const opaqueKeys = [...keys].filter((key) => isOpaqueDeletedMessageKey(key));
         localStorage.setItem(
             deletedMessagesStorageKey(sessionKey),
-            JSON.stringify([...keys])
+            JSON.stringify(opaqueKeys)
         );
     } catch {
         // Keep the in-memory deleted state if browser storage is unavailable.

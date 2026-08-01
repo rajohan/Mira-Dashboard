@@ -9,13 +9,17 @@ import {
     canonicalChatImageDisplayUrl,
     canonicalChatLocalMediaPathFromUrl,
     canonicalChatPortableDashboardMediaUrl,
-    extractCanonicalChatImages,
+    canonicalizeCanonicalChatMedia,
     extractCanonicalChatThinking,
     extractCanonicalChatToolCalls,
     mergeCanonicalChatAttachments,
     normalizeCanonicalChatText,
 } from "../chatCanonicalMessage";
-import { canonicalIsoString } from "../chatCanonicalUtilities";
+import {
+    canonicalIsoString,
+    MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
+    truncateCanonicalChatText,
+} from "../chatCanonicalUtilities";
 
 const REMOTE_MEDIA_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -362,7 +366,8 @@ function primaryContent(content: unknown): unknown {
 
 function toolResult(
     message: RawOpenClawHistoryMessage,
-    content: unknown
+    content: unknown,
+    images: CanonicalChatImage[]
 ): CanonicalChatToolResult | undefined {
     const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
     if (!role.startsWith("tool")) {
@@ -374,9 +379,12 @@ function toolResult(
     return {
         id: toolCallId,
         name: toolName,
-        content: normalizeCanonicalChatText(content),
+        content: truncateCanonicalChatText(
+            normalizeCanonicalChatText(content),
+            MAX_CANONICAL_TOOL_RESULT_CHARACTERS
+        ),
         isError: typeof message.isError === "boolean" ? message.isError : undefined,
-        images: extractCanonicalChatImages(content),
+        images,
     };
 }
 
@@ -404,7 +412,8 @@ export function normalizeOpenClawHistoryMessage(
 ): CanonicalChatMessage {
     const content = message.content ?? message.text ?? "";
     const primaryText = normalizeCanonicalChatText(primaryContent(content));
-    const images = extractCanonicalChatImages(content);
+    const canonicalMedia = canonicalizeCanonicalChatMedia(content);
+    const images = canonicalMedia.images;
     const attachments = mergeCanonicalChatAttachments(
         mediaReferenceAttachments(message),
         [
@@ -420,7 +429,7 @@ export function normalizeOpenClawHistoryMessage(
     );
     return {
         role: typeof message.role === "string" ? message.role : "unknown",
-        content,
+        content: canonicalMedia.content,
         text,
         images,
         attachments,
@@ -428,7 +437,7 @@ export function normalizeOpenClawHistoryMessage(
         isToolUse: normalizedIsToolUse(message),
         thinking: extractCanonicalChatThinking(content),
         toolCalls: extractCanonicalChatToolCalls(content),
-        toolResult: toolResult(message, content),
+        toolResult: toolResult(message, content, images),
         runId: normalizedRunId(message),
         timestamp: normalizedTimestamp(message.timestamp),
     };

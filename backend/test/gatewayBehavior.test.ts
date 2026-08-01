@@ -339,6 +339,41 @@ describe("gateway behavior", () => {
                 key: "agent:wrapped:subagent:test",
             }),
         ]);
+        expect(
+            normalizeGatewaySessionList([
+                {
+                    key: "agent:malformed:main",
+                    model: 123,
+                    modelProvider: { name: "bad" },
+                    thinkingLevels: "bad",
+                    thinkingOptions: [null, " high ", 42],
+                    updatedAt: "2026-07-30T22:00:00.000Z",
+                },
+                {
+                    key: "agent:out-of-range:main",
+                    updatedAt: 1e100,
+                },
+            ])
+        ).toEqual([
+            expect.objectContaining({
+                key: "agent:malformed:main",
+                model: "Unknown",
+                thinkingOptions: ["high"],
+            }),
+        ]);
+        const rawChoiceBounded = normalizeGatewaySessionList([
+            {
+                key: "agent:bounded:main",
+                thinkingLevels: [
+                    ...Array.from({ length: 100 }, () => null),
+                    { id: "late", label: "Late" },
+                ],
+                thinkingOptions: [...Array.from({ length: 100 }, () => null), "late"],
+                updatedAt: "2026-07-30T22:00:00.000Z",
+            },
+        ])[0];
+        expect(rawChoiceBounded?.thinkingLevels).toBeUndefined();
+        expect(rawChoiceBounded?.thinkingOptions).toBeUndefined();
     });
 
     it("waits through transient connect errors during bootstrap", async () => {
@@ -1035,7 +1070,7 @@ describe("gateway behavior", () => {
         expect(
             client?.requests.find(({ method }) => method === "sessions.compact")
         ).toMatchObject({
-            options: { shouldWaitIndefinitely: true },
+            options: { timeoutMs: 15 * 60_000 },
             parameters: { key: "agent:main:main" },
         });
         const researcherSession = sessionsMessage?.sessions?.find(
@@ -1329,7 +1364,10 @@ describe("gateway behavior", () => {
                             id?: string;
                             payload?: {
                                 messages?: Array<{
-                                    message?: { content?: unknown[] };
+                                    message?: {
+                                        content?: unknown[];
+                                        images?: unknown[];
+                                    };
                                 }>;
                             };
                         }
@@ -1345,7 +1383,19 @@ describe("gateway behavior", () => {
                             content: [
                                 { text: "see image", type: "text" },
                                 {
+                                    data: {
+                                        contentFingerprint: expect.any(String),
+                                        length: 12,
+                                    },
+                                    dataFingerprint: expect.any(String),
+                                    mimeType: "image/png",
+                                    type: "image",
+                                },
+                            ],
+                            images: [
+                                {
                                     data: "base64-image",
+                                    dataFingerprint: expect.any(String),
                                     mimeType: "image/png",
                                     type: "image",
                                 },

@@ -16,6 +16,7 @@ import {
 } from "./managedBunRuntime.ts";
 import {
     MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT,
+    MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT,
     MANAGED_DASHBOARD_UNIT_POLICY_ENVIRONMENT,
     MANAGED_DASHBOARD_UNITS,
     type ManagedDashboardUnitName,
@@ -254,9 +255,9 @@ export function managedDashboardUnitContract(
         releaseRoot: path.join(root, "current"),
         releasesRoot: root,
         runtimeLauncher: path.join(
-            projectPaths.productionCheckoutRoot,
-            "scripts",
-            "runManagedDashboardRelease.sh"
+            root,
+            "current",
+            MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT
         ),
         sourceRoot: resolveAbsoluteNonRootPath(
             projectPaths.productionCheckoutRoot,

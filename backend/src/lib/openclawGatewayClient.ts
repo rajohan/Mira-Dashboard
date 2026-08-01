@@ -21,17 +21,12 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
  *
  * @param configuredTimeoutMs - Client default timeout.
  * @param requestedTimeoutMs - Per-request timeout override.
- * @param shouldWaitIndefinitely - Whether the request disables its timer.
- * @returns Effective timeout, or `undefined` for an indefinite request.
+ * @returns Effective bounded timeout.
  */
 function effectiveGatewayRequestTimeout(
     configuredTimeoutMs: number,
-    requestedTimeoutMs: number | undefined,
-    shouldWaitIndefinitely: boolean | undefined
-): number | undefined {
-    if (shouldWaitIndefinitely === true) {
-        return undefined;
-    }
+    requestedTimeoutMs: number | undefined
+): number {
     if (
         typeof requestedTimeoutMs === "number" &&
         Number.isFinite(requestedTimeoutMs) &&
@@ -129,8 +124,6 @@ export type OpenClawGatewayClientOptions = {
 /** Configures one Gateway request without changing the connection defaults. */
 export type OpenClawGatewayRequestOptions = {
     timeoutMs?: number;
-    /** Leaves completion timing to the Gateway operation lifecycle. */
-    shouldWaitIndefinitely?: boolean;
 };
 
 /** Defines open claw gateway client instance. */
@@ -746,27 +739,21 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         const requestedTimeoutMs = options.timeoutMs;
         const timeoutMs = effectiveGatewayRequestTimeout(
             configuredTimeoutMs,
-            requestedTimeoutMs,
-            options.shouldWaitIndefinitely
+            requestedTimeoutMs
         );
 
         return new Promise((resolve, reject) => {
-            const timeout =
-                timeoutMs === undefined
-                    ? undefined
-                    : setTimeout(() => {
-                          this.pending.delete(id);
-                          reject(new Error(`Gateway request timed out: ${method}`));
-                      }, timeoutMs);
+            const timeout = setTimeout(() => {
+                this.pending.delete(id);
+                reject(new Error(`Gateway request timed out: ${method}`));
+            }, timeoutMs);
 
             this.pending.set(id, { resolve, reject, timeout });
             try {
                 ws.send(JSON.stringify(frame));
             } catch (error) {
                 this.pending.delete(id);
-                if (timeout !== undefined) {
-                    clearTimeout(timeout);
-                }
+                clearTimeout(timeout);
                 reject(asError(error));
             }
         });

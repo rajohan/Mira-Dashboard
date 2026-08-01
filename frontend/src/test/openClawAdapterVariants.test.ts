@@ -1493,7 +1493,7 @@ describe("OpenClaw adapter variants", () => {
         expect(runtimeText([{ text: "block", type: "text" }])).toBe("block");
         expect(runtimeText()).toBe("");
         expect(runtimeText({ ok: true })).toBe('{\n  "ok": true\n}');
-        expect(runtimeText(circular)).toBe("[Runtime value could not be serialized]");
+        expect(runtimeText(circular)).toBe('{\n  "self": "[Circular]"\n}');
         expect(formatToolName("functions.read_file")).toBe("Read file");
         expect(formatToolName("---")).toBe("Tool");
         expect(isNonWorkTool("functions.message")).toBe(true);

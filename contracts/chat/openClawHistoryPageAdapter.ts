@@ -1,4 +1,7 @@
-import type { CanonicalChatProviderMetadata } from "../chatCanonical";
+import type {
+    CanonicalChatMessage,
+    CanonicalChatProviderMetadata,
+} from "../chatCanonical";
 import {
     CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
     parseCanonicalChatHistoryPage,
@@ -51,6 +54,7 @@ function historyProvider(
 function historyRowId(
     sessionKey: string,
     message: RawOpenClawHistoryMessage,
+    canonicalMessage: CanonicalChatMessage,
     metadata: Record<string, unknown> | undefined,
     fallbackPosition: number
 ): string {
@@ -60,7 +64,7 @@ function historyRowId(
     if (!sourceId) {
         const fingerprint = canonicalChatContentFingerprint(
             stableCanonicalChatStringify({
-                content: summarizeCanonicalChatValueForFingerprint(message.content),
+                content: canonicalMessage.content,
                 idempotencyKey: stringValue(message.idempotencyKey),
                 isError: message.isError,
                 mediaPath: summarizeCanonicalChatValueForFingerprint(message.MediaPath),
@@ -92,9 +96,16 @@ function canonicalHistoryRow(
     fallbackPosition: number
 ): CanonicalChatHistoryRow {
     const metadata = asRecord(message.__openclaw);
+    const canonicalMessage = normalizeOpenClawHistoryMessage(message);
     return {
-        id: historyRowId(sessionKey, message, metadata, fallbackPosition),
-        message: normalizeOpenClawHistoryMessage(message),
+        id: historyRowId(
+            sessionKey,
+            message,
+            canonicalMessage,
+            metadata,
+            fallbackPosition
+        ),
+        message: canonicalMessage,
         provider: historyProvider(message),
         schemaVersion: CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
         sequence: nonNegativeInteger(metadata?.seq),

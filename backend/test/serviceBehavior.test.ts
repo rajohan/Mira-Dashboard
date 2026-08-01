@@ -203,9 +203,9 @@ function writeFakeGh(binaryPath: string): void {
         binaryPath,
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
   if [[ "$*" == *'baseRefName: "main"'* ]]; then
     echo "pull request list unexpectedly filtered to main" >&2
     exit 2
@@ -240,14 +240,41 @@ function writeFakeGhWithoutStackGraphqlFields(
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   ${
       probeFails
           ? "printf 'stack metadata probe unavailable\\n' >&2\n  exit 2"
           : `printf '%s\\n' '{"data":{"__type":{"fields":[{"name":"number"}]}}}'`
   }
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
   printf '%s\n' '{"number":31,"title":"Fallback PR","body":"","url":"https://github.test/pr/31","headRefName":"fallback","headRefOid":"head31","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
+else
+  echo "unexpected gh args: $*" >&2
+  exit 2
+fi
+`
+    );
+    chmodSync(binaryPath, 0o755);
+}
+
+function writeFakeGhWithPaginatedPullRequests(binaryPath: string, logPath: string): void {
+    writeFileSync(
+        binaryPath,
+        String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
+  printf '%s\n' '{"data":{"__type":{"fields":[{"name":"number"}]}}}'
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
+  if [[ "$*" == *"-F endCursor=cursor-100"* ]]; then
+    printf '%s\n' '{"number":101,"title":"PR 101","body":"","url":"https://github.test/pr/101","headRefName":"branch-101","headRefOid":"head101","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}'
+    printf '%s\n' '{"__miraPageInfo":{"endCursor":null,"hasNextPage":false}}'
+  else
+    for number in $(seq 1 100); do
+      printf '{"number":%s,"title":"PR %s","body":"","url":"https://github.test/pr/%s","headRefName":"branch-%s","headRefOid":"head%s","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-07-30T08:00:00.000Z","updatedAt":"2026-07-30T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[]}\n' "$number" "$number" "$number" "$number" "$number"
+    done
+    printf '%s\n' '{"__miraPageInfo":{"endCursor":"cursor-100","hasNextPage":true}}'
+  fi
 else
   echo "unexpected gh args: $*" >&2
   exit 2
@@ -710,9 +737,9 @@ function writeFakeGhForPullRequestStackCreation(
         String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
-if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+if [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
   printf '%s\n' ${JSON.stringify(
       JSON.stringify({
           additions: 1,
@@ -1028,9 +1055,9 @@ elif [[ "$1" == "api" && "$2" == "repos/rajohan/Mira-Dashboard/stacks?pull_reque
 elif [[ "$1 $2 $3" == "pr review 12" ]]; then
   touch ${JSON.stringify(reviewedPath)}
   printf 'review ok\n'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" != *"-F limit=100"* ]]; then
   printf '%s\n' '{"data":{"__type":{"fields":[{"name":"stack"},{"name":"stackEntry"}]}}}'
-elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* ]]; then
+elif [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"-F limit=100"* ]]; then
   printf '%s\n' ${JSON.stringify(bottomRow)}
   printf '%s\n' ${JSON.stringify(approvedMiddleRow)}
 else
@@ -2468,6 +2495,7 @@ describe("backend service behavior", () => {
     });
 
     it("reports managed release slots and queues rollback through the release lock", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE");
         rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_PROJECT_ROOT");
         const projectRoot = createTemporaryRoot("mira-release-status-project-");
@@ -2681,6 +2709,20 @@ describe("backend service behavior", () => {
             const unavailableStatusResponse =
                 await pullRequestRoutes["/api/pull-requests/releases"].GET();
             expect(unavailableStatusResponse.status).toBe(500);
+
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+            const isolatedStatusResponse =
+                await pullRequestRoutes["/api/pull-requests/releases"].GET();
+            expect(isolatedStatusResponse.status).toBe(200);
+            expect(isolatedStatusResponse.json()).resolves.toEqual({
+                release: {
+                    rollback: {
+                        available: false,
+                        reason: "Production release metadata is unavailable in isolated PR dev",
+                    },
+                },
+            });
+            delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
             process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
@@ -2860,7 +2902,7 @@ else
 fi
 printf '%s\n' \
   "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${projectPaths.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${releasesRoot}/current/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
   "WorkingDirectory=${releasesRoot}/current/backend"
 `
         );
@@ -3410,7 +3452,7 @@ else
 fi
 printf '%s\n' \
   "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${projectPaths.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${releasesRoot}/current/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
   'WorkingDirectory=${releasesRoot}/current/backend'
 `
         );
@@ -3562,6 +3604,28 @@ printf 'scheduled\n'
             );
             expect(restartCommand).toContain("--connect-timeout 2 --max-time 5");
             expect(restartCommand).toContain("for attempt in {1..30}");
+            expect(restartCommand).toContain("dashboard_listener_identity");
+            expect(restartCommand).toContain(
+                "--property=ControlGroup --property=ExecMainStartTimestampMonotonic"
+            );
+            expect(restartCommand).toContain(
+                '/usr/bin/ss -H -ltnp "sport = :$dashboard_port"'
+            );
+            expect(restartCommand).toContain(
+                "listener_cgroup=$(/usr/bin/sed -n 's/^0:://p' \"/proc/$listener_pid/cgroup\""
+            );
+            expect(restartCommand).toContain(
+                'listener_backend=$(/usr/bin/readlink --canonicalize-existing "/proc/$listener_pid/cwd"'
+            );
+            expect(restartCommand).toContain(
+                '[ "$listener_backend" = "$current_backend" ]'
+            );
+            expect(restartCommand).toContain(
+                '[ "$dashboard_identity_after" = "$dashboard_identity_before" ]'
+            );
+            expect(restartCommand).toContain(
+                '[ "$current_dashboard_identity" = "$initial_dashboard_identity" ]'
+            );
             expect(restartCommand).toContain("worker_identity");
             expect(restartCommand).toContain("ExecMainStartTimestampMonotonic");
             expect(restartCommand).toContain("sleep 31");
@@ -3569,7 +3633,11 @@ printf 'scheduled\n'
                 "Atomic release activated. Web, worker, commit, and 31-second worker stability checks passed"
             );
             expect(restartCommand).toContain("updatedAt: new Date().toISOString()");
-            expect(restartCommand).toContain(".checks.release.backendCommit");
+            expect(restartCommand).toContain(
+                'current_release=$(/usr/bin/realpath --canonicalize-existing "$project_root/production/releases/current"'
+            );
+            expect(restartCommand).toContain(".commitSha");
+            expect(restartCommand).not.toContain(".checks.release.backendCommit");
             expect(restartCommand).toContain("releaseLifecycle.js");
             expect(restartCommand).toContain("MIRA_DEPLOYMENT_SNAPSHOT_ID=");
             expect(restartCommand).toContain('execution?.status === "success"');
@@ -4170,6 +4238,27 @@ fi
         expect(ghCommands.match(/api graphql/gu)).toHaveLength(3);
         expect(ghCommands.match(/__type\(name: "PullRequest"\)/gu)).toHaveLength(1);
         expect(ghCommands).not.toContain("stackEntry");
+    });
+
+    it("paginates the bounded open pull request listing beyond 100 rows", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        const fakeRoot = createTemporaryRoot("mira-pr-list-pagination-root-");
+        const fakeBin = createTemporaryRoot("mira-pr-list-pagination-bin-");
+        const ghLog = path.join(fakeRoot, "gh.log");
+        writeFakeGhWithPaginatedPullRequests(path.join(fakeBin, "gh"), ghLog);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+
+        const { listDashboardPullRequests } =
+            await import("../src/services/pullRequests.ts");
+
+        const pullRequests = await listDashboardPullRequests();
+        expect(pullRequests).toHaveLength(101);
+        expect(pullRequests.map((pullRequest) => pullRequest.number)).toContain(101);
+        const ghCommands = await Bun.file(ghLog).text();
+        expect(ghCommands).toContain("-F endCursor=cursor-100");
+        expect(ghCommands.match(/api graphql/gu)).toHaveLength(3);
     });
 
     it("creates a native GitHub stack only from an existing linear PR chain", async () => {
@@ -5358,7 +5447,7 @@ fi
         const spawnSpy = jest
             .spyOn(processModule, "spawnProcess")
             .mockImplementation((_executable, arguments_) => {
-                const isPullRequestList = arguments_.includes("--paginate");
+                const isPullRequestList = arguments_.includes("limit=100");
                 return {
                     exited: Promise.resolve(0),
                     kill: () => {},
@@ -6294,23 +6383,24 @@ fi
             );
             expect(fractionalRequest).resolves.toEqual({ fractional: true });
 
-            const timeoutCallCount = timeoutSpy.mock.calls.length;
-            const noDeadlineRequest = client.request(
-                "demo.no-deadline",
+            const boundedRequest = client.request(
+                "demo.bounded",
                 {},
-                { shouldWaitIndefinitely: true }
+                {
+                    timeoutMs: Number.MAX_SAFE_INTEGER,
+                }
             );
-            expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
-            const noDeadlineFrame = JSON.parse(socket!.sent[5]!) as { id: string };
+            expect(timeoutSpy.mock.calls.at(-1)?.[1]).toBe(2_147_483_647);
+            const boundedFrame = JSON.parse(socket!.sent[5]!) as { id: string };
             socket?.message(
                 JSON.stringify({
-                    id: noDeadlineFrame.id,
+                    id: boundedFrame.id,
                     ok: true,
-                    payload: { completed: true },
+                    payload: { bounded: true },
                     type: "res",
                 })
             );
-            expect(noDeadlineRequest).resolves.toEqual({ completed: true });
+            expect(await boundedRequest).toEqual({ bounded: true });
         } finally {
             timeoutSpy.mockRestore();
         }
@@ -8469,11 +8559,17 @@ fi
                                 updatedAt: Date.now(),
                             },
                             {
-                                endedAt: Date.now(),
+                                endedAt: 0,
+                                isRunning: true,
                                 key: "agent:coder:main",
                                 model: "openai/gpt-4.1",
-                                status: "exited",
+                                status: "running",
                                 updatedAt: Date.now() - 120_000,
+                            },
+                            {
+                                key: "agent:researcher:main",
+                                model: "openai/gpt-5.5",
+                                updatedAt: 1e100,
                             },
                             { key: "", model: "ignored" },
                         ],
@@ -8514,6 +8610,7 @@ fi
                 id: "coder",
                 model: "gpt-4.1",
                 sessionKey: "agent:coder:main",
+                status: "idle",
             })
         );
         expect(statuses).toContainEqual(
@@ -8949,6 +9046,12 @@ fi
         mkdirSync(path.join(packageRoot, "skills", "builtinSkill"), {
             recursive: true,
         });
+        mkdirSync(path.join(openclawHome, "workspace", "skills", "linkedSkill"), {
+            recursive: true,
+        });
+        mkdirSync(path.join(openclawHome, "workspace", "skills", "oversizedSkill"), {
+            recursive: true,
+        });
         mkdirSync(
             path.join(packageRoot, "dist", "extensions", "demo", "skills", "extraSkill"),
             { recursive: true }
@@ -8960,6 +9063,16 @@ fi
         writeFileSync(
             path.join(packageRoot, "skills", "builtinSkill", "SKILL.md"),
             "# Builtin skill\n"
+        );
+        const secretFile = path.join(routeRoot, "secret.txt");
+        writeFileSync(secretFile, "description: must not be disclosed\n");
+        symlinkSync(
+            secretFile,
+            path.join(openclawHome, "workspace", "skills", "linkedSkill", "SKILL.md")
+        );
+        writeFileSync(
+            path.join(openclawHome, "workspace", "skills", "oversizedSkill", "SKILL.md"),
+            `description: ${"x".repeat(256 * 1024)}\n`
         );
         writeFileSync(
             path.join(
@@ -9049,6 +9162,10 @@ fi
                 name: "workspaceSkill",
                 source: "workspace",
             })
+        );
+        expect(skillsBody.skills.map((skill) => skill.name)).not.toContain("linkedSkill");
+        expect(skillsBody.skills.map((skill) => skill.name)).not.toContain(
+            "oversizedSkill"
         );
         expect(skillsBody.skills).toContainEqual(
             expect.objectContaining({

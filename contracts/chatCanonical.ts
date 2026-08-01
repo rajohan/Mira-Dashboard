@@ -5,10 +5,16 @@ import { nonNegativeIntegerSchema, parseContract } from "./runtime";
 export const CANONICAL_CHAT_EVENT_SCHEMA_VERSION = 1;
 
 const nonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
+const contentFingerprintSchema = v.pipe(
+    nonEmptyStringSchema,
+    v.maxLength(64),
+    v.regex(/^\d{1,10}:[\da-z]{1,7}:[\da-z]{1,7}$/u)
+);
 
 export const canonicalChatImageSchema = v.object({
     alt: v.optional(v.string()),
     data: v.optional(v.string()),
+    dataFingerprint: v.optional(contentFingerprintSchema),
     image_url: v.optional(
         v.union([
             v.string(),
@@ -22,6 +28,7 @@ export const canonicalChatImageSchema = v.object({
     source: v.optional(
         v.object({
             data: v.optional(v.string()),
+            dataFingerprint: v.optional(contentFingerprintSchema),
             media_type: v.optional(v.string()),
             type: v.optional(v.string()),
             url: v.optional(v.string()),

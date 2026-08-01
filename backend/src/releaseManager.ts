@@ -24,6 +24,7 @@ import {
     isBunRuntimeVersion,
     pruneManagedBunRuntimes,
 } from "./managedBunRuntime.ts";
+import { MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT } from "./managedDashboardUnitPolicy.ts";
 import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     type DashboardReleaseManifest,
@@ -546,10 +547,10 @@ function parseReleaseLinkTarget(target: string): string {
     return commitSha;
 }
 
-async function readReleaseLink(
+async function readReleaseLinkCommitSha(
     layout: DashboardReleaseLayout,
     linkName: ReleaseLinkName
-): Promise<ManagedDashboardRelease | undefined> {
+): Promise<string | undefined> {
     const linkPath = path.join(layout.root, linkName);
     let stat: fs.Stats;
     try {
@@ -570,7 +571,30 @@ async function readReleaseLink(
     if ((await fsp.realpath(linkPath)) !== expectedPath) {
         throw new TypeError(`Managed release ${linkName} link escapes its layout`);
     }
-    return loadManagedReleaseFromLayout(layout, commitSha);
+    return commitSha;
+}
+
+async function readReleaseLink(
+    layout: DashboardReleaseLayout,
+    linkName: ReleaseLinkName
+): Promise<ManagedDashboardRelease | undefined> {
+    const commitSha = await readReleaseLinkCommitSha(layout, linkName);
+    return commitSha ? loadManagedReleaseFromLayout(layout, commitSha) : undefined;
+}
+
+async function readRollbackReleaseLink(
+    layout: DashboardReleaseLayout
+): Promise<ManagedDashboardRelease | undefined> {
+    const commitSha = await readReleaseLinkCommitSha(layout, "previous");
+    if (!commitSha) return undefined;
+    try {
+        return await loadManagedReleaseFromLayout(layout, commitSha);
+    } catch {
+        // A structurally confined but unverifiable rollback slot is never runnable.
+        // Keep the verified current release available and replace this slot on the
+        // next successful activation.
+        return undefined;
+    }
 }
 
 async function assertReleaseLinkSlot(
@@ -863,7 +887,7 @@ async function readDashboardReleaseStateFromLayout(
     layout: DashboardReleaseLayout
 ): Promise<DashboardReleaseState> {
     const current = await readReleaseLink(layout, "current");
-    const previous = await readReleaseLink(layout, "previous");
+    const previous = await readRollbackReleaseLink(layout);
     if (!current && previous) {
         throw new Error("Managed release layout has previous without current");
     }
@@ -884,7 +908,7 @@ async function readActivationReleaseStateFromLayout(
         await assertReleaseLinkSlot(layout, "previous");
         return { root: layout.root };
     }
-    const previous = await readReleaseLink(layout, "previous");
+    const previous = await readRollbackReleaseLink(layout);
     return {
         current,
         ...(previous && { previous }),
@@ -1163,6 +1187,15 @@ async function withPreparedReleaseTransition<T>(
     }
 }
 
+async function ensureManagedLauncherExecutable(
+    release: ManagedDashboardRelease
+): Promise<void> {
+    await fsp.chmod(
+        path.join(release.path, MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT),
+        0o755
+    );
+}
+
 /**
  * Copies a verified build into the immutable release store while excluding
  * activation, rollback, pruning, and another publisher from its staging path.
@@ -1195,12 +1228,17 @@ export async function publishVerifiedDashboardRelease(
         async () => {
             await recoverInterruptedReleaseTransition(layout);
             await options.prepareManifest?.(manifest);
+            let existingRelease: ManagedDashboardRelease | undefined;
             try {
-                return await loadManagedReleaseFromLayout(layout, commitSha);
+                existingRelease = await loadManagedReleaseFromLayout(layout, commitSha);
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
                 }
+            }
+            if (existingRelease) {
+                await ensureManagedLauncherExecutable(existingRelease);
+                return existingRelease;
             }
 
             const finalPath = path.join(layout.releasesPath, commitSha);
@@ -1235,6 +1273,9 @@ export async function publishVerifiedDashboardRelease(
                         destinationPath,
                         fs.constants.COPYFILE_EXCL
                     );
+                    if (relativePath === MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT) {
+                        await fsp.chmod(destinationPath, 0o755);
+                    }
                     await syncFile(destinationPath);
                 }
 
@@ -1264,6 +1305,7 @@ export async function publishVerifiedDashboardRelease(
                         layout,
                         commitSha
                     );
+                    await ensureManagedLauncherExecutable(concurrentlyPublished);
                     await fsp.rm(stagingPath, { recursive: true });
                     await syncDirectory(layout.releasesPath);
                     return concurrentlyPublished;

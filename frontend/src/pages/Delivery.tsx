@@ -705,6 +705,16 @@ function PullRequestDescription({ body }: { body: string }) {
                                 </a>
                             );
                         },
+                        img: ({ node, alt, src }) => {
+                            void node;
+                            return src ? (
+                                <a href={src} target="_blank" rel="noreferrer">
+                                    {alt || "External image"}
+                                </a>
+                            ) : (
+                                <span>{alt || "Image"}</span>
+                            );
+                        },
                     }}
                 >
                     {normalizedBody}

@@ -9,7 +9,7 @@ UMask=0077
 WorkingDirectory=%h/projects/mira-dashboard/production/releases/current/backend
 Environment=NODE_ENV=production
 Environment=MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
-ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- /home/ubuntu/projects/mira-dashboard/production/checkout/scripts/runManagedDashboardRelease.sh dist/workerStart.js
+ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- /home/ubuntu/projects/mira-dashboard/production/releases/current/scripts/runManagedDashboardRelease.sh dist/workerStart.js
 Restart=on-failure
 RestartSec=5
 KillMode=control-group

@@ -7,6 +7,7 @@ import type {
     PostgresDeadTupleSummary,
 } from "../../../contracts/database.ts";
 import { runProcess } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { stringFallback } from "../lib/values.ts";
 import { getDashboardSqliteOverview } from "./sqliteOverview.ts";
 
@@ -20,6 +21,7 @@ const HIGH_DEAD_TUPLE_PERCENT = 20;
 const HIGH_DEAD_TUPLE_MINIMUM = 1000;
 const HIGH_DEAD_TUPLE_MINIMUM_BYTES = 64 * 1024 * 1024;
 const CATALOG_TUPLE_ESTIMATE_TOLERANCE_PERCENT = 10;
+const logger = createStructuredLogger("database-overview");
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -421,20 +423,38 @@ async function queryAllUserDatabases<T extends object>(
  * @returns current torrent counts for Comet and Bitmagnet.
  */
 async function getTorrentCounts() {
-    const [cometOutput, bitmagnetOutput] = await Promise.all([
+    const [cometResult, bitmagnetResult] = await Promise.allSettled([
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet"),
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "bitmagnet"),
     ]);
-    const cometCount = stringFallback(
-        parseTable<{ count: string }>(cometOutput)[0]?.count,
-        "0"
-    );
-    const bitmagnetCount = stringFallback(
-        parseTable<{ count: string }>(bitmagnetOutput)[0]?.count,
-        "0"
-    );
+    const countFromResult = (
+        databaseName: "bitmagnet" | "comet",
+        result: PromiseSettledResult<string>
+    ) => {
+        if (result.status === "rejected") {
+            logger.warn("database_overview.torrent_count_failed", {
+                database: databaseName,
+                error: result.reason,
+            });
+            return 0;
+        }
+        return numberFrom(
+            stringFallback(parseTable<{ count: string }>(result.value)[0]?.count, "0")
+        );
+    };
 
-    return { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
+    return {
+        comet: countFromResult("comet", cometResult),
+        bitmagnet: countFromResult("bitmagnet", bitmagnetResult),
+    };
+}
+
+function isHighDeadTupleRow(table: DeadTupleRow): boolean {
+    return (
+        numberFrom(table.physical_bytes) >= HIGH_DEAD_TUPLE_MINIMUM_BYTES &&
+        numberFrom(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
+        numberFrom(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
+    );
 }
 
 /**
@@ -528,7 +548,11 @@ export async function getDatabaseOverview(): Promise<DatabaseOverviewResponse> {
         ORDER BY estimates.n_dead_tup DESC;
     `);
     const deadTupleRows = allDeadTupleRows
-        .toSorted((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
+        .toSorted(
+            (a, b) =>
+                Number(isHighDeadTupleRow(b)) - Number(isHighDeadTupleRow(a)) ||
+                numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup)
+        )
         .slice(0, 25);
 
     // Catalog statistics keep this hourly check bounded; tuple overhead and 20% headroom
@@ -639,11 +663,8 @@ export async function getDatabaseOverview(): Promise<DatabaseOverviewResponse> {
     const slowQueryCount = topQueries.filter(
         (query) => numberFrom(query.mean_exec_time) >= SLOW_QUERY_MEAN_MS
     ).length;
-    const highDeadTupleTableCount = allDeadTupleRows.filter(
-        (table) =>
-            numberFrom(table.physical_bytes) >= HIGH_DEAD_TUPLE_MINIMUM_BYTES &&
-            numberFrom(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
-            numberFrom(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
+    const highDeadTupleTableCount = allDeadTupleRows.filter((row) =>
+        isHighDeadTupleRow(row)
     ).length;
     const maintenanceHintCount =
         slowQueryCount + highDeadTupleTableCount + (requiresBloatReview ? 1 : 0);

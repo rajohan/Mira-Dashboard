@@ -19,7 +19,10 @@ import {
     isBunRuntimeVersion,
     isCurrentBunRuntime,
 } from "./managedBunRuntime.ts";
-import { MANAGED_DASHBOARD_UNIT_ARTIFACTS } from "./managedDashboardUnitPolicy.ts";
+import {
+    MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT,
+    MANAGED_DASHBOARD_UNIT_ARTIFACTS,
+} from "./managedDashboardUnitPolicy.ts";
 
 export { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 
@@ -33,6 +36,7 @@ const RELEASE_STATIC_ARTIFACTS = [
     "backend/config/log-rotation.json",
     "bun.lock",
     "package.json",
+    MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT,
 ] as const;
 const OPTIONAL_RELEASE_STATIC_ARTIFACTS = [...MANAGED_DASHBOARD_UNIT_ARTIFACTS] as const;
 const SAFE_RELEASE_STATIC_ARTIFACTS = [

@@ -145,7 +145,7 @@ describe("immutable release deployment", () => {
             projectRoot: PRODUCTION_PATHS.projectRoot,
             releaseRoot: `${releasesRoot}/current`,
             releasesRoot,
-            runtimeLauncher: `${PRODUCTION_PATHS.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh`,
+            runtimeLauncher: `${releasesRoot}/current/scripts/runManagedDashboardRelease.sh`,
             sourceRoot: PRODUCTION_PATHS.productionCheckoutRoot,
             worktreeRoot: PRODUCTION_PATHS.developmentWorktreeRoot,
         };
@@ -170,7 +170,7 @@ describe("immutable release deployment", () => {
                 `Environment=MIRA_DASHBOARD_PROJECT_ROOT=${PRODUCTION_PATHS.projectRoot}`
             );
             expect(unit).toContain(
-                `${PRODUCTION_PATHS.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh`
+                `${releasesRoot}/current/scripts/runManagedDashboardRelease.sh`
             );
             expect(unit).not.toContain("/home/ubuntu/.bun/bin/bun");
             for (const obsoleteEnvironment of [
@@ -206,6 +206,18 @@ describe("immutable release deployment", () => {
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun --cwd backend dist/resetDashboardPassword.js"
         );
         expect(resetCommand).not.toContain("/home/ubuntu/projects");
+    });
+
+    it("runs both TypeScript build checks through the managed Bun runtime", () => {
+        const rootPackage = JSON.parse(
+            readFileSync(path.resolve(import.meta.dirname, "../../package.json"), "utf8")
+        ) as { scripts?: Record<string, string> };
+
+        for (const scriptName of ["build:frontend", "build:backend"]) {
+            expect(rootPackage.scripts?.[scriptName]).toStartWith(
+                "bun node_modules/typescript/bin/tsc "
+            );
+        }
     });
 
     it("builds in an isolated worktree and atomically publishes only artifacts", async () => {

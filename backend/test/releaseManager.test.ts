@@ -11,6 +11,7 @@ import {
     readlinkSync,
     renameSync,
     rmSync,
+    statSync,
     symlinkSync,
     utimesSync,
     writeFileSync,
@@ -151,8 +152,14 @@ async function createManagedRelease(
     mkdirSync(path.join(releasePath, "backend", "config"), { recursive: true });
     mkdirSync(path.join(releasePath, "backend", "dist"), { recursive: true });
     mkdirSync(path.join(releasePath, "dist", "assets"), { recursive: true });
+    mkdirSync(path.join(releasePath, "scripts"), { recursive: true });
     writeFileSync(path.join(releasePath, "package.json"), "{}\n");
     writeFileSync(path.join(releasePath, "bun.lock"), "root-lock\n");
+    writeFileSync(
+        path.join(releasePath, "scripts", "runManagedDashboardRelease.sh"),
+        '#!/usr/bin/env bash\nexec bun "$@"\n',
+        { mode: 0o755 }
+    );
     writeFileSync(
         path.join(releasePath, "backend", "config", "log-rotation.json"),
         '{"jobs":[]}\n'
@@ -309,6 +316,10 @@ describe("Dashboard immutable release manager", () => {
         const buildRoot = temporaryReleasesRoot();
         await ensureDashboardReleaseLayout(releasesRoot);
         await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        chmodSync(
+            path.join(buildRoot, "scripts", "runManagedDashboardRelease.sh"),
+            0o644
+        );
         await readDashboardReleaseState(releasesRoot);
         const lockFileDescriptor = holdTransitionLock(releasesRoot);
         const { promise: lockContention, resolve: didReachLockContention } =
@@ -345,6 +356,77 @@ describe("Dashboard immutable release manager", () => {
         }
         const release = await publication;
         expect(release.commitSha).toBe(FIRST_COMMIT);
+        expect(
+            statSync(path.join(release.path, "scripts", "runManagedDashboardRelease.sh"))
+                .mode & 0o777
+        ).toBe(0o755);
+    });
+
+    it("repairs launcher permissions when reusing an existing verified release", async () => {
+        const releasesRoot = temporaryReleasesRoot();
+        const buildRoot = temporaryReleasesRoot();
+        await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        const published = await publishVerifiedDashboardRelease(
+            buildRoot,
+            FIRST_COMMIT,
+            releasesRoot
+        );
+        const launcherPath = path.join(
+            published.path,
+            "scripts",
+            "runManagedDashboardRelease.sh"
+        );
+        chmodSync(launcherPath, 0o644);
+
+        const reused = await publishVerifiedDashboardRelease(
+            buildRoot,
+            FIRST_COMMIT,
+            releasesRoot
+        );
+
+        expect(reused.path).toBe(published.path);
+        expect(statSync(launcherPath).mode & 0o777).toBe(0o755);
+    });
+
+    it("repairs launcher permissions after a concurrent publication wins", async () => {
+        const releasesRoot = temporaryReleasesRoot();
+        const buildRoot = temporaryReleasesRoot();
+        await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        const finalPath = managedReleasePath(releasesRoot, FIRST_COMMIT);
+        const launcherPath = path.join(
+            finalPath,
+            "scripts",
+            "runManagedDashboardRelease.sh"
+        );
+        const originalRename = fsp.rename.bind(fsp);
+        const rename = spyOn(fsp, "rename").mockImplementation(
+            async (oldPath, newPath) => {
+                if (
+                    typeof oldPath === "string" &&
+                    oldPath.includes(`.staging-${FIRST_COMMIT}-`) &&
+                    newPath === finalPath
+                ) {
+                    await createReleaseFixture(finalPath, FIRST_COMMIT);
+                    chmodSync(launcherPath, 0o644);
+                    throw Object.assign(new Error("concurrent publication won"), {
+                        code: "EEXIST",
+                    });
+                }
+                return originalRename(oldPath, newPath);
+            }
+        );
+
+        try {
+            const published = await publishVerifiedDashboardRelease(
+                buildRoot,
+                FIRST_COMMIT,
+                releasesRoot
+            );
+            expect(published.path).toBe(finalPath);
+            expect(statSync(launcherPath).mode & 0o777).toBe(0o755);
+        } finally {
+            rename.mockRestore();
+        }
     });
 
     it("activates and rolls back verified releases through relative atomic links", async () => {
@@ -475,6 +557,33 @@ describe("Dashboard immutable release manager", () => {
             `releases/${SECOND_COMMIT}`
         );
         expect(existsSync(path.join(root, "previous"))).toBe(false);
+    });
+
+    it("excludes an unverifiable previous slot and replaces it on activation", async () => {
+        const root = temporaryReleasesRoot();
+        const firstReleasePath = await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await createManagedRelease(root, THIRD_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+        rmSync(path.join(firstReleasePath, "scripts", "runManagedDashboardRelease.sh"));
+
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(state.previous).toBeUndefined();
+
+        const activated = await activateDashboardRelease(
+            THIRD_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
+        expect(activated).toMatchObject({
+            current: { commitSha: THIRD_COMMIT },
+            previous: { commitSha: SECOND_COMMIT },
+        });
+        expect(readlinkSync(path.join(root, "previous"))).toBe(
+            `releases/${SECOND_COMMIT}`
+        );
     });
 
     it("exposes bounded lifecycle command summaries without artifact contents", async () => {

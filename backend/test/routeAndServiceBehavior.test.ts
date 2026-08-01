@@ -26,6 +26,7 @@ import type {
     OpenClawGatewayClientInstance,
     OpenClawGatewayClientOptions,
 } from "../src/lib/openclawGatewayClient.ts";
+import { runWithRequestAuditContext } from "../src/requestAuditContext.ts";
 import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
@@ -997,6 +998,47 @@ describe("backend route and service behavior", () => {
             state: "OPEN",
             title: "Coverage route task",
         });
+
+        const notificationCount = taskNotifications.length;
+        const automatedCreate = await runWithRequestAuditContext(
+            {
+                actor: { id: "task-automation-test", type: "automation" },
+                requestId: "task-automation-request",
+            },
+            () =>
+                taskRoutes["/api/tasks"].POST(
+                    jsonRequest("/api/tasks", {
+                        assignee: "mira-2026",
+                        labels: ["todo"],
+                        title: "Automation task must not enter chat",
+                    })
+                )
+        );
+        const automatedTask = await responseJson(automatedCreate);
+        const automatedTaskNumber = Number(automatedTask.number);
+        expect(taskNotifications).toHaveLength(notificationCount + 1);
+        expect(taskNotifications.at(-1)).toBe(
+            `Task created: #${automatedTaskNumber}. A scoped automation changed this Mira task; review it in Dashboard when the current work is clear.`
+        );
+        expect(taskNotifications.at(-1)).not.toContain(
+            "Automation task must not enter chat"
+        );
+        runWithRequestAuditContext(
+            {
+                actor: { id: "task-automation-test", type: "automation" },
+                requestId: "task-automation-cleanup",
+            },
+            () =>
+                taskRoutes["/api/tasks/:id"].DELETE(
+                    requestWithParameters(`/api/tasks/${automatedTaskNumber}`, {
+                        id: String(automatedTaskNumber),
+                    })
+                )
+        );
+        expect(taskNotifications).toHaveLength(notificationCount + 2);
+        expect(taskNotifications.at(-1)).toBe(
+            `Task deleted: #${automatedTaskNumber}. A scoped automation changed this Mira task; review it in Dashboard when the current work is clear.`
+        );
 
         const enriched = await taskRoutes["/api/tasks/:id"].GET(
             requestWithParameters(`/api/tasks/${id}`, { id: String(id) })
@@ -3200,6 +3242,16 @@ describe("backend route and service behavior", () => {
         );
         expect(badCronToggleValue.status).toBe(400);
 
+        const routeConfusingCronId = await cronRoutes["/api/cron/jobs/:id/run"].POST(
+            requestWithParameters("/api/cron/jobs/victim/delete?/run", {
+                id: "victim/delete?",
+            })
+        );
+        expect(routeConfusingCronId.status).toBe(400);
+        expect(routeConfusingCronId.json()).resolves.toEqual(
+            apiErrorExpectation("Invalid cron job ID", "invalid_cron_job_id")
+        );
+
         const failedCronRun = await cronRoutes["/api/cron/jobs/:id/run"].POST(
             requestWithParameters("/api/cron/jobs/item-cron/run", { id: "item-cron" })
         );
@@ -3595,8 +3647,10 @@ describe("backend route and service behavior", () => {
             lineIds: string[];
         };
         expect(blankSeparatedTailBody.file).toBe("openclaw-2026-06-25.log");
-        expect(blankSeparatedTailBody.content).toContain("older plain tail\n");
-        expect(blankSeparatedTailBody.content).toContain("newest plain tail\n");
+        expect(blankSeparatedTailBody.content).toBe(
+            "older plain tail\n\n\nnewest plain tail\n"
+        );
+        expect(blankSeparatedTailBody.lineIds).toHaveLength(5);
         expect(blankSeparatedTailBody.lineIds).toContain("0");
         expect(blankSeparatedTailBody.lineIds).toContain(
             String(Buffer.byteLength("older plain tail\n") + 70 * 1024)
@@ -5249,6 +5303,28 @@ describe("backend route and service behavior", () => {
             "Synthetic.new usage high (90%)",
             "Synthetic.new usage high (95%)",
         ]);
+        database
+            .prepare(
+                "UPDATE notifications SET is_read = 1 WHERE dedupe_key = 'quota:openrouter:80'"
+            )
+            .run();
+        evaluateQuotaNotifications({
+            ...quotas,
+            checkedAt: checkedAt + 1,
+            openrouter: { ...quotas.openrouter, percentUsed: 70 },
+        });
+        evaluateQuotaNotifications({
+            ...quotas,
+            checkedAt: checkedAt + 2,
+            openrouter: { ...quotas.openrouter, percentUsed: 91 },
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT is_read FROM notifications WHERE dedupe_key = 'quota:openrouter:80'"
+                )
+                .get()
+        ).toEqual({ is_read: 0 });
 
         const systemHostPayload = {
             checkedAt: "2026-06-25T10:00:00.000Z",
@@ -5566,6 +5642,14 @@ fi
             delete process.env[key];
         }
         const codexHome = createTemporaryRoot("mira-quota-codex-home-");
+        const codexConfig =
+            '[projects."/home/ubuntu/projects"]\ntrust_level = "untrusted"\n';
+        writeFileSync(path.join(codexHome, "auth.json"), '{"auth_mode":"test"}\n', {
+            mode: 0o600,
+        });
+        writeFileSync(path.join(codexHome, "config.toml"), codexConfig, {
+            mode: 0o600,
+        });
         process.env.CODEX_BIN = path.join(codexHome, "missing-codex");
         process.env.QUOTAS_CODEX_HOME = codexHome;
 
@@ -5595,6 +5679,9 @@ fi
         };
         expect(metadata.missing).toEqual(
             expect.arrayContaining(["openrouter", "elevenlabs", "synthetic"])
+        );
+        expect(readFileSync(path.join(codexHome, "config.toml"), "utf8")).toBe(
+            codexConfig
         );
     });
 

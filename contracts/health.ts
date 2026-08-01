@@ -50,8 +50,6 @@ export const databaseReadinessSchema = v.strictObject({
 });
 
 const releaseReadinessSchema = v.strictObject({
-    backendCommit: v.string(),
-    frontendCommit: v.string(),
     issue: v.optional(runtimeReleaseIssueSchema),
     manifestFormatVersion: v.optional(finiteNumberSchema),
     ready: v.boolean(),

@@ -5,9 +5,12 @@ import {
     type OpenClawRuntimeSnapshot,
 } from "../../contracts/chat.ts";
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
+import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../contracts/chatCanonicalUtilities.ts";
 import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
 import type { OpenClawChatSnapshotStore } from "../src/chat/openClawChatPersistence.ts";
+import { envelopeBytes } from "../src/chat/openClawChatProviderAdapter.ts";
 import { OpenClawChatRequestBoundaries } from "../src/chat/openClawChatRequestBoundaries.ts";
+import { MAX_BYTES_PER_ACTIVE_RUN } from "../src/chat/openClawChatRetention.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 
 const MAIN = "agent:main:main";
@@ -346,7 +349,8 @@ describe("OpenClaw chat bridge", () => {
             "tool_result",
             "tool_use",
         ];
-        for (let index = 0; index < 66; index += 1) {
+        const itemEventCount = 250;
+        for (let index = 0; index < itemEventCount; index += 1) {
             const type = itemTypes[index % itemTypes.length];
             bridge.recordEvent(
                 "agent",
@@ -380,7 +384,13 @@ describe("OpenClaw chat bridge", () => {
         expect(snapshot.completed).toBe(false);
         expect(thinking).toEqual(thinkingTexts);
         expect(itemToolCount).toBeGreaterThan(0);
-        expect(itemToolCount).toBeLessThan(66);
+        expect(itemToolCount).toBeLessThan(itemEventCount);
+        expect(
+            snapshot.events.reduce(
+                (totalBytes, event) => totalBytes + envelopeBytes(event),
+                0
+            )
+        ).toBeLessThanOrEqual(MAX_BYTES_PER_ACTIVE_RUN);
     });
 
     it("bounds aggregate replay memory across independent sessions", () => {
@@ -1791,7 +1801,7 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
-    it("preserves compacted tool-call arguments when a later result coalesces", () => {
+    it("bounds compacted tool-call arguments while preserving a later result", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(
             "session.tool",
@@ -1823,13 +1833,17 @@ describe("OpenClaw chat bridge", () => {
         const toolEvents = snapshot.events[0]!.canonicalEvents.filter(
             (event) => event.kind === "tool"
         );
-        expect(
-            toolEvents.some(
-                (event) =>
-                    event.message.toolCalls?.[0]?.arguments !== undefined &&
-                    JSON.stringify(event.message.toolCalls[0].arguments).length > 500_000
-            )
-        ).toBe(true);
+        const compactedArguments = toolEvents.find(
+            (event) => event.message.toolCalls?.[0]?.arguments !== undefined
+        )?.message.toolCalls?.[0]?.arguments;
+        const serializedArguments = JSON.stringify(compactedArguments);
+        if (serializedArguments === undefined) {
+            throw new Error("Compacted tool fixture is missing its arguments");
+        }
+        expect(serializedArguments.length).toBeLessThan(
+            MAX_CANONICAL_TOOL_RESULT_CHARACTERS + 100
+        );
+        expect(serializedArguments).toContain("[truncated by Dashboard]");
         expect(
             toolEvents.some(
                 (event) =>

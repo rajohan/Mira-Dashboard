@@ -13,6 +13,9 @@ export const MANAGED_DASHBOARD_UNIT_ARTIFACTS = MANAGED_DASHBOARD_UNIT_NAMES.map
     (unit) => `systemd/${unit}` as const
 );
 
+export const MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT =
+    "scripts/runManagedDashboardRelease.sh" as const;
+
 export const MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT = [
     "NODE_ENV",
     "MIRA_DASHBOARD_PROJECT_ROOT",

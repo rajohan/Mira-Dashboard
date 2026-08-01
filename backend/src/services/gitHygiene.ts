@@ -31,6 +31,7 @@ const DOCKER_SYNC_COMMIT_MESSAGE = "chore: update managed app images";
 const GIT_SYNC_TIMEOUT_MS = 30_000;
 const GIT_PUSH_TIMEOUT_MS = 60_000;
 const GIT_WORKSPACE_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
+const GIT_DISABLED_HOOKS_PATH = "/dev/null";
 const gitSyncLocks = new Map<string, { promise: Promise<void> }>();
 const DOCKER_COMPOSE_FILE_RE =
     /^(?:[^/]+\/)*(?:compose|docker-compose)(?:\.override)?\.ya?ml$/u;
@@ -100,10 +101,25 @@ function literalPathspec(path_: string): string {
     return `:(literal)${path_}`;
 }
 
+function gitEnvironment(): NodeJS.ProcessEnv {
+    const environment = { ...process.env };
+    delete environment.GIT_CONFIG_COUNT;
+    delete environment.GIT_CONFIG_PARAMETERS;
+    for (const key of Object.keys(environment)) {
+        if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/u.test(key)) {
+            delete environment[key];
+        }
+    }
+    environment.GIT_CONFIG_COUNT = "1";
+    environment.GIT_CONFIG_KEY_0 = "core.hooksPath";
+    environment.GIT_CONFIG_VALUE_0 = GIT_DISABLED_HOOKS_PATH;
+    return environment;
+}
+
 async function git(arguments_: string[], options: GitCommandOptions): Promise<string> {
     const result = await runProcess("git", arguments_, {
         cwd: options.cwd,
-        env: process.env,
+        env: gitEnvironment(),
         maxBuffer: 10 * 1024 * 1024,
         signal: options.signal,
         timeoutMs: options.timeoutMs ?? GIT_SYNC_TIMEOUT_MS,
@@ -225,7 +241,7 @@ async function commitAndPushPaths(
             ["diff", "--cached", "--quiet", "--", ...changedPathspecs],
             {
                 cwd: repoPath,
-                env: process.env,
+                env: gitEnvironment(),
                 signal,
                 timeoutMs: GIT_SYNC_TIMEOUT_MS,
             }
@@ -281,7 +297,7 @@ async function inspectUpstream(
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         {
             cwd: repoPath,
-            env: process.env,
+            env: gitEnvironment(),
             signal,
             timeoutMs: GIT_SYNC_TIMEOUT_MS,
         }
@@ -513,8 +529,8 @@ export function registerGitHygieneScheduledJobs(): void {
             enabled: existing?.enabled ?? true,
             scheduleType: existing?.scheduleType ?? job.scheduleType,
             intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
-            timeOfDay: existing?.timeOfDay ?? job.timeOfDay,
-            cronExpression: existing?.cronExpression ?? undefined,
+            timeOfDay: existing ? existing.timeOfDay : job.timeOfDay,
+            cronExpression: existing ? existing.cronExpression : undefined,
         });
         database.run("COMMIT");
     } catch (error) {

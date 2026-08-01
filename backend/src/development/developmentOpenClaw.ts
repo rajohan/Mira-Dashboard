@@ -73,7 +73,7 @@ const SENSITIVE_WORKSPACE_FILE_SUFFIXES = [
 const SENSITIVE_WORKSPACE_PATH_SEGMENT =
     /(?:^|[._-])(?:api[._-]?keys?|credentials?|passwords?|private[._-]?keys?|secrets?|service[._-]?accounts?|tokens?)(?:$|[._-]|\d)/iu;
 const SENSITIVE_AGENT_CONFIG_KEY =
-    /(?:^|[._-])(?:api[._-]?keys?|credentials?|passwords?|secrets?|tokens?)(?:$|[._-]|\d)/iu;
+    /(?:^|[._-])(?:access[._-]?keys?|api[._-]?keys?|authorization|cookies?|credentials?|keys?|passphrases?|passwords?|private[._-]?keys?|raw|seeds?|secrets?|tokens?|webhook[._-]?urls?)(?:$|[._-]|\d)/iu;
 
 export type DevelopmentWorkspaceState = "copied" | "empty" | "reused";
 

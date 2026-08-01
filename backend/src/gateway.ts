@@ -7,6 +7,7 @@ import type { ChatRuntimeMetrics, GatewayMetrics } from "../../contracts/metrics
 import type { Session } from "../../contracts/sessions.ts";
 import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
 import {
+    MAX_DASHBOARD_SOCKET_REQUEST_TIMEOUT_MS,
     parseDashboardSocketRequest,
     readSessionsResponseContainer,
 } from "../../contracts/socket.ts";
@@ -29,6 +30,7 @@ import {
 } from "./lib/openclawGatewayClient.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import {
+    boundedTimestamp,
     nonEmptyEnvironmentFallback,
     stringFallback,
     unknownArray,
@@ -43,6 +45,8 @@ import {
 } from "./services/logStreams.ts";
 
 const logger = createStructuredLogger("gateway");
+const DEFAULT_FORWARDED_GATEWAY_REQUEST_TIMEOUT_MS = 30_000;
+const SESSION_COMPACT_REQUEST_TIMEOUT_MS = 15 * 60_000;
 
 function validateOpenClawRoot(rootPath: string, environmentName: string): string {
     const resolved = Path.resolve(rootPath);
@@ -746,6 +750,94 @@ function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): 
     return gatewayState.client === expectedClient;
 }
 
+function gatewayString(record: Record<string, unknown>, key: string): string | undefined {
+    return typeof record[key] === "string" ? record[key] : undefined;
+}
+
+function gatewayFiniteNumber(
+    record: Record<string, unknown>,
+    key: string
+): number | undefined {
+    const value = record[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function gatewayBoolean(
+    record: Record<string, unknown>,
+    key: string
+): boolean | undefined {
+    return typeof record[key] === "boolean" ? record[key] : undefined;
+}
+
+function gatewaySessionFromRecord(record: Record<string, unknown>): GatewaySession {
+    const thinkingLevels = Array.isArray(record.thinkingLevels)
+        ? record.thinkingLevels.slice(0, 100).flatMap((value) => {
+              const level = asRecord(value);
+              const id = level ? gatewayString(level, "id")?.trim() : undefined;
+              const label = level ? gatewayString(level, "label")?.trim() : undefined;
+              return id && label ? [{ id, label }] : [];
+          })
+        : undefined;
+    const thinkingOptions = Array.isArray(record.thinkingOptions)
+        ? record.thinkingOptions
+              .slice(0, 100)
+              .filter((value): value is string => typeof value === "string")
+              .map((value) => value.trim())
+              .filter(Boolean)
+        : undefined;
+    const fastMode =
+        typeof record.fastMode === "boolean" || record.fastMode === "auto"
+            ? record.fastMode
+            : undefined;
+    const effectiveFastMode =
+        typeof record.effectiveFastMode === "boolean" ||
+        record.effectiveFastMode === "auto"
+            ? record.effectiveFastMode
+            : undefined;
+    const endedAt =
+        typeof record.endedAt === "string" ||
+        (typeof record.endedAt === "number" && Number.isFinite(record.endedAt))
+            ? record.endedAt
+            : undefined;
+    const startedAt =
+        typeof record.startedAt === "string" ||
+        (typeof record.startedAt === "number" && Number.isFinite(record.startedAt))
+            ? record.startedAt
+            : undefined;
+    return {
+        activeRunId: gatewayString(record, "activeRunId"),
+        channel: gatewayString(record, "channel"),
+        contextTokens: gatewayFiniteNumber(record, "contextTokens"),
+        currentRunId: gatewayString(record, "currentRunId"),
+        displayName: gatewayString(record, "displayName"),
+        effectiveFastMode,
+        elevatedLevel: gatewayString(record, "elevatedLevel"),
+        endedAt,
+        fastMode,
+        hasActiveRun: gatewayBoolean(record, "hasActiveRun"),
+        isRunning: gatewayBoolean(record, "isRunning"),
+        key: gatewayString(record, "key"),
+        kind: gatewayString(record, "kind"),
+        label: gatewayString(record, "label"),
+        model: gatewayString(record, "model"),
+        modelProvider: gatewayString(record, "modelProvider"),
+        reasoningLevel: gatewayString(record, "reasoningLevel"),
+        runId: gatewayString(record, "runId"),
+        running: gatewayBoolean(record, "running"),
+        sessionId: gatewayString(record, "sessionId"),
+        startedAt,
+        status: gatewayString(record, "status"),
+        thinkingDefault: gatewayString(record, "thinkingDefault"),
+        thinkingLevel: gatewayString(record, "thinkingLevel"),
+        thinkingLevels,
+        thinkingOptions,
+        totalTokens: gatewayFiniteNumber(record, "totalTokens"),
+        totalTokensFresh: gatewayBoolean(record, "totalTokensFresh"),
+        updatedAt: boundedTimestamp(record.updatedAt),
+        verboseLevel: gatewayString(record, "verboseLevel"),
+    };
+}
+
 /**
  * Normalizes one raw Gateway sessions.list response for Dashboard consumers.
  * @param response Raw Gateway response.
@@ -754,7 +846,10 @@ function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): 
 export function normalizeGatewaySessionList(response: unknown): Session[] {
     const container = readSessionsResponseContainer(response);
     const sessions = container?.sessions ?? [];
-    const defaults = asRecord(container?.defaults) as GatewaySession | undefined;
+    const defaultsRecord = asRecord(container?.defaults);
+    const defaults = defaultsRecord
+        ? gatewaySessionFromRecord(defaultsRecord)
+        : undefined;
     return sessions
         .map((entry) => asRecord(entry))
         .filter(
@@ -763,25 +858,13 @@ export function normalizeGatewaySessionList(response: unknown): Session[] {
                 (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
                 (entry.key === undefined || typeof entry.key === "string") &&
                 (entry.updatedAt === undefined ||
-                    (typeof entry.updatedAt === "number" &&
-                        Number.isFinite(entry.updatedAt)) ||
-                    (typeof entry.updatedAt === "string" &&
-                        !Number.isNaN(Date.parse(entry.updatedAt)))) &&
+                    boundedTimestamp(entry.updatedAt) !== undefined) &&
                 (stringFallback(entry.sessionId).trim() ||
                     stringFallback(entry.key).trim()) !== ""
         )
         .map((entry) => {
-            const session = entry as GatewaySession & {
-                activeRunId?: string | null | undefined;
-                currentRunId?: string | null | undefined;
-                endedAt?: string | number | null | undefined;
-                runId?: string | null | undefined;
-                startedAt?: string | number | null | undefined;
-            };
-            const updatedAt =
-                typeof entry.updatedAt === "string"
-                    ? Date.parse(entry.updatedAt)
-                    : entry.updatedAt;
+            const session = gatewaySessionFromRecord(entry);
+            const updatedAt = boundedTimestamp(entry.updatedAt);
             const shouldApplyDefaults =
                 (!session.model || session.model === defaults?.model) &&
                 (!session.modelProvider ||
@@ -820,13 +903,12 @@ export function normalizeGatewaySessionList(response: unknown): Session[] {
                     session.effectiveFastMode ??
                     matchingDefaults?.effectiveFastMode ??
                     matchingDefaults?.fastMode,
-                activeRunId:
-                    session.activeRunId === null ? undefined : session.activeRunId,
+                activeRunId: entry.activeRunId === null ? undefined : session.activeRunId,
                 currentRunId:
-                    session.currentRunId === null ? undefined : session.currentRunId,
-                endedAt: session.endedAt === null ? undefined : session.endedAt,
-                runId: session.runId === null ? undefined : session.runId,
-                startedAt: session.startedAt === null ? undefined : session.startedAt,
+                    entry.currentRunId === null ? undefined : session.currentRunId,
+                endedAt: entry.endedAt === null ? undefined : session.endedAt,
+                runId: entry.runId === null ? undefined : session.runId,
+                startedAt: entry.startedAt === null ? undefined : session.startedAt,
                 updatedAt:
                     typeof updatedAt === "number" && Number.isFinite(updatedAt)
                         ? updatedAt
@@ -1209,8 +1291,13 @@ async function forwardRequest(
     }
     const activeGateway = gatewayState.client;
     const requestOptions = {
-        timeoutMs,
-        shouldWaitIndefinitely: method === "sessions.compact",
+        timeoutMs:
+            method === "sessions.compact"
+                ? SESSION_COMPACT_REQUEST_TIMEOUT_MS
+                : Math.min(
+                      timeoutMs ?? DEFAULT_FORWARDED_GATEWAY_REQUEST_TIMEOUT_MS,
+                      MAX_DASHBOARD_SOCKET_REQUEST_TIMEOUT_MS
+                  ),
     };
 
     if (clientWs && clientId) {

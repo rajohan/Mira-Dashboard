@@ -186,6 +186,12 @@ const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+const PULL_REQUEST_PAGE_SIZE = 100;
+const MAX_DASHBOARD_PULL_REQUESTS = 500;
+const MAX_DASHBOARD_PULL_REQUEST_PAGES = Math.ceil(
+    MAX_DASHBOARD_PULL_REQUESTS / PULL_REQUEST_PAGE_SIZE
+);
+const MAX_PULL_REQUEST_BODY_LENGTH = 64 * 1024;
 const STACK_MERGE_POLL_INTERVAL_MS = 1000;
 const STACK_MERGE_TIMEOUT_MS = 5 * 60 * 1000;
 const STACK_MERGE_JOB_TIMEOUT_MS = STACK_MERGE_TIMEOUT_MS * 2 + 2 * 60 * 1000;
@@ -863,7 +869,24 @@ function dashboardReleaseSummary(
  * @returns Read the managed production release slots without exposing host paths.
  */
 export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatus> {
-    const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+    let state: Awaited<ReturnType<typeof readDashboardReleaseState>>;
+    try {
+        state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+    } catch (error) {
+        if (
+            process.env.NODE_ENV === "production" ||
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1"
+        ) {
+            throw error;
+        }
+        logger.warn("release_status.isolated_metadata_unavailable", { error });
+        return {
+            rollback: {
+                available: false,
+                reason: "Production release metadata is unavailable in isolated PR dev",
+            },
+        };
+    }
     const current = state.current ? dashboardReleaseSummary(state.current) : undefined;
     const previous = state.previous ? dashboardReleaseSummary(state.previous) : undefined;
     const isRollbackAvailable =
@@ -1040,6 +1063,7 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
 
     return {
         ...rest,
+        body: rest.body?.slice(0, MAX_PULL_REQUEST_BODY_LENGTH),
         reviewerApproved: isPullRequestReviewApproved(pr),
     };
 }
@@ -1920,7 +1944,8 @@ async function listDashboardPullRequestGraphqlRows(
                         }`
         : "";
     const jqParts = [
-        ".data.repository.pullRequests.nodes[]",
+        "$connection.nodes[]",
+        `| .body = ((.body // "")[0:${MAX_PULL_REQUEST_BODY_LENGTH}])`,
         "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
     ];
     if (includeStackMetadata) {
@@ -1929,28 +1954,34 @@ async function listDashboardPullRequestGraphqlRows(
             "| del(.stackEntry)"
         );
     }
-    return runGhJsonLines(
-        [
+    const pullRequests: PullRequestSummary[] = [];
+    const seenCursors = new Set<string>();
+    let endCursor: string | undefined;
+    let pagesRead = 0;
+    while (
+        pagesRead < MAX_DASHBOARD_PULL_REQUEST_PAGES &&
+        pullRequests.length < MAX_DASHBOARD_PULL_REQUESTS
+    ) {
+        pagesRead += 1;
+        const arguments_ = [
             "api",
             "graphql",
-            "--paginate",
             "-F",
             `owner=${repo.owner}`,
             "-F",
             `name=${repo.name}`,
+            "-F",
+            `limit=${PULL_REQUEST_PAGE_SIZE}`,
+            ...(endCursor ? ["-F", `endCursor=${endCursor}`] : []),
             "-f",
-            `query=query($owner: String!, $name: String!, $endCursor: String) {
+            `query=query($owner: String!, $name: String!, $limit: Int!, $endCursor: String) {
             repository(owner: $owner, name: $name) {
                 pullRequests(
-                    first: 100
+                    first: $limit
                     after: $endCursor
                     states: OPEN
                     orderBy: { field: UPDATED_AT, direction: DESC }
                 ) {
-                    pageInfo {
-                        hasNextPage
-                        endCursor
-                    }
                     nodes {
                         number
                         title
@@ -1986,15 +2017,79 @@ async function listDashboardPullRequestGraphqlRows(
                             state
                         }
                     }
+                    pageInfo {
+                        endCursor
+                        hasNextPage
+                    }
                 }
             }
             }`,
             "--jq",
-            jqParts.join(" "),
-        ],
-        parsePullRequestSummary,
-        { timeoutMs: PR_LIST_TIMEOUT_MS }
-    );
+            `.data.repository.pullRequests as $connection | ((${jqParts.join(" ")}), {__miraPageInfo: $connection.pageInfo})`,
+        ];
+        const rows = await runGhJsonLines(arguments_, parsePullRequestGraphqlOutput, {
+            timeoutMs: PR_LIST_TIMEOUT_MS,
+        });
+        const pagePullRequests = rows.flatMap((row) =>
+            row.pullRequest ? [row.pullRequest] : []
+        );
+        pullRequests.push(
+            ...pagePullRequests.slice(
+                0,
+                MAX_DASHBOARD_PULL_REQUESTS - pullRequests.length
+            )
+        );
+        const pageInfoRows = rows.flatMap((row) => (row.pageInfo ? [row.pageInfo] : []));
+        if (pageInfoRows.length > 1) {
+            throw new Error("GitHub returned duplicate pull request page metadata");
+        }
+        const pageInfo = pageInfoRows[0];
+        if (!pageInfo?.hasNextPage) break;
+        if (!pageInfo.endCursor || seenCursors.has(pageInfo.endCursor)) {
+            throw new Error("GitHub returned an invalid pull request page cursor");
+        }
+        if (
+            pullRequests.length >= MAX_DASHBOARD_PULL_REQUESTS ||
+            pagesRead >= MAX_DASHBOARD_PULL_REQUEST_PAGES
+        ) {
+            logger.warn("github.pull_request_list_truncated", {
+                limit: MAX_DASHBOARD_PULL_REQUESTS,
+            });
+            break;
+        }
+        seenCursors.add(pageInfo.endCursor);
+        endCursor = pageInfo.endCursor;
+    }
+    return pullRequests;
+}
+
+interface PullRequestGraphqlOutput {
+    pageInfo?: { endCursor?: string; hasNextPage: boolean };
+    pullRequest?: PullRequestSummary;
+}
+
+function parsePullRequestGraphqlOutput(value: unknown): PullRequestGraphqlOutput {
+    if (isRecord(value) && "__miraPageInfo" in value) {
+        const pageInfo = value.__miraPageInfo;
+        if (!isRecord(pageInfo) || typeof pageInfo.hasNextPage !== "boolean") {
+            throw new TypeError("GitHub pull request page metadata is invalid");
+        }
+        const endCursor = pageInfo.endCursor;
+        if (
+            endCursor !== null &&
+            endCursor !== undefined &&
+            typeof endCursor !== "string"
+        ) {
+            throw new TypeError("GitHub pull request page cursor is invalid");
+        }
+        return {
+            pageInfo: {
+                ...(typeof endCursor === "string" && { endCursor }),
+                hasNextPage: pageInfo.hasNextPage,
+            },
+        };
+    }
+    return { pullRequest: parsePullRequestSummary(value) };
 }
 
 function parseGraphqlPullRequestFieldNames(value: unknown): string[] {
@@ -2992,6 +3087,36 @@ function releaseCutoverShellFunctions(): string[] {
         '  [ "$runtime_revision" = "$bun_version" ] || return 1',
         '  printf "%s" "$runtime_path"',
         "}",
+        "dashboard_listener_identity() {",
+        '  local dashboard_port="$1"',
+        "  local dashboard_properties dashboard_active dashboard_substate dashboard_cgroup dashboard_started",
+        "  local listener_pids listener_pid listener_cgroup current_backend listener_backend",
+        "  dashboard_properties=$(/usr/bin/systemctl --user show mira-dashboard.service --property=ActiveState --property=SubState --property=ControlGroup --property=ExecMainStartTimestampMonotonic --no-pager 2>/dev/null) || return 1",
+        String.raw`  dashboard_active="$(printf "%s\n" "$dashboard_properties" | /usr/bin/sed -n 's/^ActiveState=//p')"`,
+        String.raw`  dashboard_substate="$(printf "%s\n" "$dashboard_properties" | /usr/bin/sed -n 's/^SubState=//p')"`,
+        String.raw`  dashboard_cgroup="$(printf "%s\n" "$dashboard_properties" | /usr/bin/sed -n 's/^ControlGroup=//p')"`,
+        String.raw`  dashboard_started="$(printf "%s\n" "$dashboard_properties" | /usr/bin/sed -n 's/^ExecMainStartTimestampMonotonic=//p')"`,
+        '  [ "$dashboard_active" = active ] || return 1',
+        '  [ "$dashboard_substate" = running ] || return 1',
+        '  case "$dashboard_cgroup" in',
+        "    /*) ;;",
+        "    *) return 1 ;;",
+        "  esac",
+        '  case "$dashboard_started" in',
+        '    ""|0|*[!0-9]*) return 1 ;;',
+        "  esac",
+        "  listener_pids=$(/usr/bin/ss -H -ltnp \"sport = :$dashboard_port\" 2>/dev/null | /usr/bin/grep --only-matching 'pid=[0-9][0-9]*' | /usr/bin/cut --delimiter== --fields=2 | /usr/bin/sort --unique) || return 1",
+        '  case "$listener_pids" in',
+        String.raw`    ""|*$'\n'*|*[!0-9]*) return 1 ;;`,
+        "  esac",
+        '  listener_pid="$listener_pids"',
+        "  listener_cgroup=$(/usr/bin/sed -n 's/^0:://p' \"/proc/$listener_pid/cgroup\" 2>/dev/null) || return 1",
+        '  [ "$listener_cgroup" = "$dashboard_cgroup" ] || return 1',
+        '  current_backend=$(/usr/bin/realpath --canonicalize-existing "$project_root/production/releases/current/backend" 2>/dev/null) || return 1',
+        '  listener_backend=$(/usr/bin/readlink --canonicalize-existing "/proc/$listener_pid/cwd" 2>/dev/null) || return 1',
+        '  [ "$listener_backend" = "$current_backend" ] || return 1',
+        '  printf "%s:%s" "$listener_pid" "$dashboard_started"',
+        "}",
         "worker_identity() {",
         "  worker_properties=$(/usr/bin/systemctl --user show mira-dashboard-worker.service --property=ActiveState --property=SubState --property=MainPID --property=ExecMainStartTimestampMonotonic --no-pager 2>/dev/null) || return 1",
         String.raw`  worker_active="$(printf "%s\n" "$worker_properties" | /usr/bin/sed -n 's/^ActiveState=//p')"`,
@@ -3007,23 +3132,36 @@ function releaseCutoverShellFunctions(): string[] {
         "}",
         "readiness_matches() {",
         '  expected_commit="$1"',
+        '  current_release=$(/usr/bin/realpath --canonicalize-existing "$project_root/production/releases/current" 2>/dev/null) || return 1',
+        '  current_commit=$(/usr/bin/jq --exit-status --raw-output \'.commitSha | select(type == "string" and length == 40)\' "$current_release/release-manifest.json" 2>/dev/null) || return 1',
+        '  case "$current_commit" in "$expected_commit"*) ;; *) return 1 ;; esac',
         '  dashboard_port="$(resolve_dashboard_port)"',
+        '  dashboard_identity_before="$(dashboard_listener_identity "$dashboard_port")" || return 1',
         '  response=$(/usr/bin/curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "http://127.0.0.1:${dashboard_port}/api/health/ready" 2>/dev/null || true)',
-        '  printf "%s" "$response" | /usr/bin/jq --exit-status --arg expected "$expected_commit" \'.status == "isReady" and .checks.release.ready == true and .checks.release.backendCommit == $expected and .checks.release.frontendCommit == $expected and .checks.worker.ready == true\' >/dev/null 2>&1',
+        '  dashboard_identity_after="$(dashboard_listener_identity "$dashboard_port")" || return 1',
+        '  [ "$dashboard_identity_after" = "$dashboard_identity_before" ] || return 1',
+        '  printf "%s" "$response" | /usr/bin/jq --exit-status \'.status == "isReady" and .checks.release.ready == true and .checks.worker.ready == true\' >/dev/null 2>&1',
         "}",
         "ready_for_commit() {",
         '  expected_commit="$1"',
+        '  initial_dashboard_identity=""',
         '  initial_worker_identity=""',
         "  for attempt in {1..30}; do",
         '    if readiness_matches "$expected_commit"; then',
+        '      dashboard_port="$(resolve_dashboard_port)"',
+        '      initial_dashboard_identity="$(dashboard_listener_identity "$dashboard_port" || true)"',
         '      initial_worker_identity="$(worker_identity || true)"',
-        '      [ -n "$initial_worker_identity" ] && break',
+        '      [ -n "$initial_dashboard_identity" ] && [ -n "$initial_worker_identity" ] && break',
         "    fi",
         "    sleep 1",
         "  done",
+        '  [ -n "$initial_dashboard_identity" ] || return 1',
         '  [ -n "$initial_worker_identity" ] || return 1',
         `  sleep ${DEPLOYMENT_WORKER_STABILITY_SECONDS}`,
+        '  dashboard_port="$(resolve_dashboard_port)"',
+        '  current_dashboard_identity="$(dashboard_listener_identity "$dashboard_port" || true)"',
         '  current_worker_identity="$(worker_identity || true)"',
+        '  [ "$current_dashboard_identity" = "$initial_dashboard_identity" ] || return 1',
         '  [ "$current_worker_identity" = "$initial_worker_identity" ] || return 1',
         '  readiness_matches "$expected_commit"',
         "}",
@@ -4265,6 +4403,7 @@ export async function approvePullRequest(
                         : getPullRequest(pullRequest.number, options.signal)
                 )
             );
+            const trustedStackAuthors = resolvePullRequestPreviewAllowedAuthors();
             for (const [index, currentPullRequest] of currentPullRequests.entries()) {
                 const stackPullRequest = stackPullRequests[index];
                 const expectedHead = expectedStackHeads[index];
@@ -4273,6 +4412,19 @@ export async function approvePullRequest(
                     throw Object.assign(
                         new Error(
                             `PR #${currentPullRequest.number} changed after the Delivery confirmation. Refresh before merging the stack`
+                        ),
+                        { statusCode: 409 }
+                    );
+                }
+                if (
+                    !isPullRequestPreviewAuthorAllowed(
+                        currentPullRequest.author?.login,
+                        trustedStackAuthors
+                    )
+                ) {
+                    throw Object.assign(
+                        new Error(
+                            `PR #${currentPullRequest.number} is not authored by a trusted stack contributor and cannot be merged through the stack endpoint`
                         ),
                         { statusCode: 409 }
                     );

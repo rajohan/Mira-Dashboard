@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 
 import type { Server } from "bun";
 
-import { clearSessionCookie, sessionCookie } from "../src/http.ts";
+import {
+    clearPendingLoginCookie,
+    clearSessionCookie,
+    pendingLoginCookie,
+    sessionCookie,
+} from "../src/http.ts";
 
 function serverWithAddress(address: string): Server<unknown> {
     return {
@@ -26,5 +31,19 @@ describe("HTTP cookies", () => {
 
         expect(sessionCookie(request, server, "abc")).toContain("Secure");
         expect(clearSessionCookie(request, server)).toContain("Secure");
+    });
+
+    it("always marks production session cookies as Secure", () => {
+        const request = new Request("http://100.68.236.26:3100/api/auth/login");
+        const server = serverWithAddress("100.68.236.26");
+
+        expect(sessionCookie(request, server, "abc", "production")).toContain("Secure");
+        expect(clearSessionCookie(request, server, "production")).toContain("Secure");
+        expect(pendingLoginCookie(request, server, "pending", "production")).toContain(
+            "Secure"
+        );
+        expect(clearPendingLoginCookie(request, server, "production")).toContain(
+            "Secure"
+        );
     });
 });

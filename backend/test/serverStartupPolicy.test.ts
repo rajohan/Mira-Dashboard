@@ -67,12 +67,9 @@ describe("server start scheduler policy", () => {
     });
 
     it("resolves backend startup entrypoint and gateway token decisions without starting services", async () => {
-        const {
-            isDirectEntrypoint,
-            resolveGatewayToken,
-            shouldStartOnImport,
-            startBackendServerEntrypoint,
-        } = await import("../src/serverStart.ts");
+        const { resolveGatewayToken } = await import("../src/gatewayToken.ts");
+        const { isDirectEntrypoint, shouldStartOnImport, startBackendServerEntrypoint } =
+            await import("../src/serverStart.ts");
 
         expect(
             resolveGatewayToken(

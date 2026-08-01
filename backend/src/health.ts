@@ -93,8 +93,6 @@ export function evaluateReadiness(signals: ReadinessSignals): DashboardReadiness
             database: signals.database,
             frontend: { ready: signals.frontendReady },
             release: {
-                backendCommit: signals.release.backendCommit,
-                frontendCommit: signals.release.frontendCommit,
                 ...(signals.release.issue && { issue: signals.release.issue }),
                 ...(signals.release.manifestFormatVersion !== undefined && {
                     manifestFormatVersion: signals.release.manifestFormatVersion,
