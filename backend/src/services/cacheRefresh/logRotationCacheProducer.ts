@@ -1,6 +1,10 @@
 import { getCacheEntry, parseJsonField } from "../../lib/cacheStore.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
-import { emptyLogRotationState, LOG_ROTATION_STATE_KEY } from "../logRotation/state.ts";
+import {
+    emptyLogRotationState,
+    LOG_ROTATION_STATE_KEY,
+    normalizeLogRotationState,
+} from "../logRotation/state.ts";
 
 export { LOG_ROTATION_STATE_KEY } from "../logRotation/state.ts";
 
@@ -10,17 +14,11 @@ export { LOG_ROTATION_STATE_KEY } from "../logRotation/state.ts";
  */
 export function refreshLogRotationStateCache(): { refreshed: string[] } {
     const existingData = getCacheEntry(LOG_ROTATION_STATE_KEY)?.data;
-    let data: unknown = emptyLogRotationState();
-    let preserveExistingData = false;
-    if (existingData) {
-        const parsed = parseJsonField<unknown>(existingData);
-        if (parsed !== undefined) {
-            data = parsed;
-            preserveExistingData = true;
-        }
-    } else {
-        preserveExistingData = true;
-    }
+    const parsed = existingData ? parseJsonField<unknown>(existingData) : undefined;
+    const data =
+        parsed === undefined
+            ? emptyLogRotationState()
+            : normalizeLogRotationState(parsed);
     writeCacheSuccess({
         key: LOG_ROTATION_STATE_KEY,
         data,
@@ -31,7 +29,6 @@ export function refreshLogRotationStateCache(): { refreshed: string[] } {
             producer: "refreshCacheProducer",
             workflow: "Log Rotation - Foundation",
         },
-        preserveExistingData,
     });
     return { refreshed: [LOG_ROTATION_STATE_KEY] };
 }

@@ -23,6 +23,11 @@ import {
     registerDockerUpdaterServices,
     runDockerUpdaterService,
 } from "../src/services/dockerUpdater.ts";
+import {
+    runScheduledJob,
+    startScheduledJobExecutor,
+    stopScheduledJobExecutor,
+} from "../src/services/scheduledJobs.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 
@@ -390,7 +395,7 @@ describe("Docker updater tag patterns", () => {
         );
     });
 
-    it("registers partial compose discoveries as nonblocking warnings", () => {
+    it("registers partial compose discoveries as nonblocking warnings", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-partial-");
@@ -470,7 +475,8 @@ describe("Docker updater tag patterns", () => {
         const service = services.find((candidate) => candidate.service_name === "web");
         expect(service).toBeDefined();
 
-        expect(runDockerUpdaterService(service!.id)).resolves.toContainEqual(
+        const steps = await runDockerUpdaterService(service!.id);
+        expect(steps).toContainEqual(
             expect.objectContaining({
                 code: "CONFLICT",
                 isOk: false,
@@ -1608,7 +1614,7 @@ describe("Docker updater tag patterns", () => {
         ]);
     });
 
-    it("keeps Docker updater results when the follow-up git sync fails", async () => {
+    it("surfaces follow-up git sync failures in scheduled updater output", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-git-sync-fail-");
@@ -1699,21 +1705,29 @@ describe("Docker updater tag patterns", () => {
             });
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
 
-        const steps = await runDockerUpdaterService();
-
-        expect(steps).toContainEqual(
-            expect.objectContaining({
-                isOk: true,
-                step: "auto-update:unit-git-sync-fail-app/web",
-            })
-        );
-        expect(steps).toContainEqual(
-            expect.objectContaining({
+        registerDockerUpdaterScheduledJobs();
+        startScheduledJobExecutor();
+        try {
+            const run = await runScheduledJob("docker.updater");
+            expect(run.status).toBe("failed");
+            expect(run.message).toContain("git-sync:docker:");
+            expect(run.message).toContain("remote rejected");
+            const steps = run.output.steps as DockerUpdaterStepResult[];
+            expect(steps).toContainEqual(
+                expect.objectContaining({
+                    isOk: true,
+                    step: "auto-update:unit-git-sync-fail-app/web",
+                })
+            );
+            const gitSyncStep = steps.find((step) => step.kind === "git-sync");
+            expect(gitSyncStep).toMatchObject({
                 isOk: false,
                 step: "git-sync:docker",
-                stderr: expect.stringContaining("remote rejected"),
-            })
-        );
+            });
+            expect(gitSyncStep?.stderr).toContain("remote rejected");
+        } finally {
+            await stopScheduledJobExecutor();
+        }
         expect(readFileSync(composePath, "utf8")).toContain(
             "image: ghcr.io/unit/git-sync-fail:1.1.0"
         );

@@ -151,7 +151,7 @@ export function useDockerController() {
         }
     }
 
-    /** Restarts a Docker stack or one service within the stack. */
+    /** Restarts the whole Docker stack. */
     async function handleStackRestart() {
         showActionOutput("Restarting Docker stack...");
         try {

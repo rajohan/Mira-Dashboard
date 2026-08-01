@@ -78,10 +78,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
                 );
             }
             const failed = steps.filter(
-                (step) =>
-                    !step.isOk &&
-                    !isNonblockingRegistrationFailure(step) &&
-                    step.kind !== "git-sync"
+                (step) => !step.isOk && !isNonblockingRegistrationFailure(step)
             );
             if (failed.length > 0) {
                 throw new ScheduledJobActionError(

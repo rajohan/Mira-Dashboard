@@ -160,9 +160,8 @@ describe("guarded writes", () => {
         expect(readTextNoFollowGuarded(guardedPath(source))).resolves.toBe(
             "hello guarded ops"
         );
-        expect(readTextTailNoFollowGuarded(guardedPath(source), 7)).resolves.toBe(
-            "ded ops"
-        );
+        const tail = await readTextTailNoFollowGuarded(guardedPath(source), 7);
+        expect(tail).toBe("ded ops");
 
         const file = await openReadNoFollowNonblockingGuarded(guardedPath(source));
         try {

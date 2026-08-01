@@ -5630,6 +5630,64 @@ fi
         });
     });
 
+    it("normalizes nested log-rotation state during cache refresh", async () => {
+        const timestamp = "2026-08-01T09:00:00.000Z";
+        database
+            .prepare(
+                "INSERT INTO cache_entries (key, data_json, source, updated_at, last_attempt_at, expires_at, status, consecutive_failures, metadata_json) VALUES (?, ?, 'test', ?, ?, ?, 'stale', 0, '{}')"
+            )
+            .run(
+                "log_rotation.state",
+                JSON.stringify({
+                    version: 9,
+                    files: {
+                        "/valid.log": {
+                            ignored: true,
+                            lastArchive: "/valid.log.1",
+                            lastRotatedAt: timestamp,
+                            lastSizeBytes: 42,
+                        },
+                        "/invalid-record.log": "not-an-object",
+                        "/invalid-date.log": { lastRotatedAt: "not-a-date" },
+                        "/invalid-size.log": { lastSizeBytes: -1 },
+                        "/invalid-archive.log": { lastArchive: " " },
+                    },
+                    lastRun: { isOk: true },
+                }),
+                timestamp,
+                timestamp,
+                timestamp
+            );
+
+        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const refreshed = await refreshCacheProducer("log_rotation.state");
+        expect(refreshed).toEqual({
+            refreshed: ["log_rotation.state"],
+        });
+
+        const expectedState = {
+            version: 1,
+            files: {
+                "/valid.log": {
+                    lastArchive: "/valid.log.1",
+                    lastRotatedAt: timestamp,
+                    lastSizeBytes: 42,
+                },
+            },
+            lastRun: { isOk: true },
+        };
+        const row = database
+            .prepare(
+                "SELECT data_json FROM cache_entries WHERE key = 'log_rotation.state'"
+            )
+            .get() as { data_json: string };
+        expect(JSON.parse(row.data_json)).toEqual(expectedState);
+
+        const { readLogRotationState } =
+            await import("../src/services/logRotation/state.ts");
+        expect(readLogRotationState()).toEqual(expectedState);
+    });
+
     it("refreshes quota cache with isolated missing-provider state", async () => {
         for (const key of [
             "OPENROUTER_API_KEY",
