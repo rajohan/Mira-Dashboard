@@ -40,6 +40,7 @@ export interface ChatRuntimeMessageEntry {
 export interface ChatRunState {
     aliases: string[];
     assistant?: ChatHistoryMessage;
+    assistantSequence?: number;
     assistantSource?: ChatTextSource;
     commentary: ChatRuntimeMessageEntry[];
     diagnostics: ChatRuntimeMessageEntry[];
@@ -621,6 +622,7 @@ function applyAssistantEvent(
                       toolResult: incoming.toolResult,
                   }
                 : assistant,
+        assistantSequence: event.sequence,
         assistantSource,
     };
 }
@@ -1072,6 +1074,10 @@ function mergeAcknowledgedRuns(
                   mergeChatStreamText(older.assistant.text, newer.assistant.text)
               )
             : newer.assistant || older.assistant;
+    const assistantSequence = Math.max(
+        existing.assistantSequence ?? -1,
+        optimistic.assistantSequence ?? -1
+    );
     const startedAt = (
         Date.parse(existing.startedAt) <= Date.parse(optimistic.startedAt)
             ? existing
@@ -1111,6 +1117,7 @@ function mergeAcknowledgedRuns(
             providerRunId,
         ]),
         assistant,
+        assistantSequence: assistantSequence === -1 ? undefined : assistantSequence,
         assistantSource: newer.assistantSource || older.assistantSource,
         commentary: mergeRunCommentary(older, newer),
         diagnostics: mergeRunDiagnostics(older, newer),
@@ -1203,22 +1210,43 @@ function applyFinishEvent(
     };
 }
 
+function adjacentCompactionRunEntry(
+    session: ChatSessionRuntimeState,
+    event: ChatRuntimeEvent
+): [string, ChatRunState] | undefined {
+    if (event.kind !== "finish" || event.message || !event.settlesCompactionRunId) {
+        return undefined;
+    }
+    const exactRunKey = matchingRunKey(session, event.settlesCompactionRunId);
+    const exactRun = exactRunKey ? session.runs[exactRunKey] : undefined;
+    if (
+        exactRunKey &&
+        exactRun?.operation === "compact" &&
+        exactRun.lastSequence === session.lastSequence
+    ) {
+        return [exactRunKey, exactRun];
+    }
+    const parentRunKey = event.runId ? matchingRunKey(session, event.runId) : undefined;
+    const parentRun = parentRunKey ? session.runs[parentRunKey] : undefined;
+    if (!parentRun || parentRun.operation === "compact") {
+        return undefined;
+    }
+    const adjacentCompactionRuns = Object.entries(session.runs).filter(
+        ([, run]) =>
+            run.operation === "compact" && run.lastSequence === session.lastSequence
+    );
+    return adjacentCompactionRuns.length === 1 ? adjacentCompactionRuns[0] : undefined;
+}
+
 function settleAdjacentCompactionLifecycle(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
 ): boolean {
-    if (event.kind !== "finish" || event.message || !event.settlesCompactionRunId) {
+    const compactionEntry = adjacentCompactionRunEntry(session, event);
+    if (!compactionEntry || event.kind !== "finish") {
         return false;
     }
-    const runKey = matchingRunKey(session, event.settlesCompactionRunId);
-    const run = runKey ? session.runs[runKey] : undefined;
-    if (
-        !runKey ||
-        run?.operation !== "compact" ||
-        run.lastSequence !== session.lastSequence
-    ) {
-        return false;
-    }
+    const [runKey, run] = compactionEntry;
     if (run.operationPhase === "retrying") {
         session.runs[runKey] = {
             ...run,
@@ -1233,7 +1261,20 @@ function settleAdjacentCompactionLifecycle(
             updatedAt: event.timestamp,
         };
     }
-    return true;
+    return event.outcome === "completed";
+}
+
+function commitChatSession(
+    state: ChatRuntimeState,
+    previousSessionKey: string | undefined,
+    session: ChatSessionRuntimeState
+): ChatRuntimeState {
+    const sessions = { ...state.sessions };
+    if (previousSessionKey && previousSessionKey !== session.sessionKey) {
+        delete sessions[previousSessionKey];
+    }
+    sessions[session.sessionKey] = session;
+    return { ...state, sessions };
 }
 
 /**
@@ -1300,40 +1341,19 @@ export function reduceChatRuntime(
         );
         if (settledAdjacentCompaction) {
             session.lastSequence = normalizedEvent.sequence;
-            const sessions = { ...nextState.sessions };
-            if (previousSessionKey && previousSessionKey !== sessionKey) {
-                delete sessions[previousSessionKey];
-            }
-            nextState = {
-                ...nextState,
-                sessions: { ...sessions, [sessionKey]: session },
-            };
+            nextState = commitChatSession(nextState, previousSessionKey, session);
             continue;
         }
         if (normalizedEvent.kind === "control") {
             session.controls = applyControlEvent(session.controls, normalizedEvent);
             session.lastSequence = normalizedEvent.sequence;
-            const sessions = { ...nextState.sessions };
-            if (previousSessionKey && previousSessionKey !== sessionKey) {
-                delete sessions[previousSessionKey];
-            }
-            nextState = {
-                ...nextState,
-                sessions: { ...sessions, [sessionKey]: session },
-            };
+            nextState = commitChatSession(nextState, previousSessionKey, session);
             continue;
         }
         const resolved = resolveRun(session, normalizedEvent);
         session.lastSequence = normalizedEvent.sequence;
-        const sessions = { ...nextState.sessions };
-        if (previousSessionKey && previousSessionKey !== sessionKey) {
-            delete sessions[previousSessionKey];
-        }
         if (!resolved) {
-            nextState = {
-                ...nextState,
-                sessions: { ...sessions, [sessionKey]: session },
-            };
+            nextState = commitChatSession(nextState, previousSessionKey, session);
             continue;
         }
 
@@ -1350,10 +1370,7 @@ export function reduceChatRuntime(
             lastSequence: normalizedEvent.sequence,
             updatedAt: normalizedEvent.timestamp,
         };
-        nextState = {
-            ...nextState,
-            sessions: { ...sessions, [sessionKey]: session },
-        };
+        nextState = commitChatSession(nextState, previousSessionKey, session);
     }
     return nextState;
 }

@@ -82,6 +82,16 @@ export function isSettlingLifecycleEvent(event: unknown, payload: unknown): bool
     );
 }
 
+export function isSuccessfulLifecycleSettlementEvent(
+    event: unknown,
+    payload: unknown
+): boolean {
+    const record = runtimePayloadView(payload);
+    const stream = (stringField(record, "stream") || "").toLowerCase();
+    const phase = (stringField(record, "phase") || "").toLowerCase();
+    return event === "agent" && stream === "lifecycle" && phase === "end";
+}
+
 /**
  * Identifies provider work that can continue one interrupted conversation.
  * @param event Provider event name.

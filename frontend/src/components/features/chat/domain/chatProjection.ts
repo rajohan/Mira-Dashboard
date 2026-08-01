@@ -569,8 +569,12 @@ function transientMessage(
 
 function assistantRuntimeSequence(run: ChatRunState): number | undefined {
     return run.phase === "active"
-        ? run.lastContentSequence
+        ? (run.assistantSequence ?? run.lastContentSequence)
         : (run.terminalSequence ?? run.lastContentSequence);
+}
+
+function canonicalFinalRuntimeSequence(run: ChatRunState): number | undefined {
+    return run.terminalSequence ?? run.lastContentSequence ?? run.assistantSequence;
 }
 
 function scopeTranscriptUsersToRuns(
@@ -858,22 +862,30 @@ function orderRuntimeMessages(
         const transcriptUsers = runtimeSlots
             .filter((slot) => slot !== promptSlot && slot.sequence === undefined)
             .toSorted((left, right) => left.index - right.index);
+        const trailingAssistantSlots = new Set(
+            sequencedActivity.filter(
+                (slot) =>
+                    isAssistantTextStream(slot.message) &&
+                    !sequencedActivity.some(
+                        (candidate) =>
+                            candidate !== slot &&
+                            !isFinalRunMessage(candidate.message, run) &&
+                            (candidate.sequence! > slot.sequence! ||
+                                (candidate.sequence === slot.sequence &&
+                                    candidate.index > slot.index))
+                    )
+            )
+        );
         const answerSlots = sequencedActivity.filter(
             (slot) =>
-                isFinalRunMessage(slot.message, run) ||
-                isAssistantTextStream(slot.message)
+                isFinalRunMessage(slot.message, run) || trailingAssistantSlots.has(slot)
         );
+        const answerSlotSet = new Set(answerSlots);
         const thinkingSlots = sequencedActivity.filter(
-            (slot) =>
-                !isFinalRunMessage(slot.message, run) &&
-                !isAssistantTextStream(slot.message) &&
-                isThinkingOnlyRunMessage(slot.message)
+            (slot) => !answerSlotSet.has(slot) && isThinkingOnlyRunMessage(slot.message)
         );
         const activitySlots = sequencedActivity.filter(
-            (slot) =>
-                !isFinalRunMessage(slot.message, run) &&
-                !isAssistantTextStream(slot.message) &&
-                !isThinkingOnlyRunMessage(slot.message)
+            (slot) => !answerSlotSet.has(slot) && !isThinkingOnlyRunMessage(slot.message)
         );
         const orderedActivity = insertUsersByTimestamp(activitySlots, transcriptUsers);
         const targetIndexes = runtimeSlots
@@ -1138,19 +1150,15 @@ export function reconcileChatMessages(
         if (finalIndex !== -1) {
             scopeCanonicalResponse(messages, run, segment, finalIndex, exactToolIndex);
             const canonical = messages[finalIndex]!;
+            const runtimeSequence = canonicalFinalRuntimeSequence(run);
             if (run.assistant) {
                 messages[finalIndex] = {
                     ...mergeChatMessageDetails(
                         canonical,
-                        transientMessage(
-                            run.assistant,
-                            run,
-                            "assistant",
-                            assistantRuntimeSequence(run)
-                        )
+                        transientMessage(run.assistant, run, "assistant", runtimeSequence)
                     ),
                     isFinal: canonical.isFinal || run.phase === "completed" || undefined,
-                    runtimeSequence: assistantRuntimeSequence(run),
+                    runtimeSequence,
                 };
             }
             messages.splice(finalIndex, 0, ...diagnostics, ...commentaries);

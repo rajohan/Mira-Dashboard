@@ -738,6 +738,12 @@ describe("chat projection", () => {
             kind: "typing",
             message: { text: "Working" },
         });
+        expect(projectionRowKinds(projection)).toEqual([
+            "question",
+            "I will inspect it.",
+            "tool",
+            "Working",
+        ]);
     });
 
     it("keeps optimistic user rows as deletable messages", () => {
@@ -3670,6 +3676,17 @@ describe("chat projection", () => {
                 mode: "replace",
                 runId: "run-1",
             }),
+            event(24, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
             event(32, {
                 kind: "assistant",
                 message: message("assistant", "answer in progress", "run-1"),
@@ -3690,6 +3707,7 @@ describe("chat projection", () => {
 
         expect(projectionRowKinds(projection)).toEqual([
             "question",
+            "tool",
             "thinking",
             "answer in progress",
         ]);

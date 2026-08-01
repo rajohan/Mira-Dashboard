@@ -187,12 +187,24 @@ const gatewayMetricsState: Omit<GatewayMetrics, "connected" | "pendingRequests">
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
+
+function createChatReplayBridge(store?: SqliteOpenClawChatSnapshotStore) {
+    const bridge = new OpenClawChatBridge(store, {
+        onDeferredEnvelope: (envelope) => {
+            if (chatReplayState.bridge === bridge) {
+                broadcast(envelope);
+            }
+        },
+    });
+    return bridge;
+}
+
 const chatReplayState: {
     bridge: OpenClawChatBridge;
     generation: string;
     scope: string | undefined;
 } = {
-    bridge: new OpenClawChatBridge(),
+    bridge: createChatReplayBridge(),
     generation: Bun.randomUUIDv7(),
     scope: undefined,
 };
@@ -235,7 +247,7 @@ function didSelectChatReplayScope(endpoint: string, token: string): boolean {
     if (!chatReplayState.bridge.flush()) {
         return false;
     }
-    chatReplayState.bridge = new OpenClawChatBridge(
+    chatReplayState.bridge = createChatReplayBridge(
         new SqliteOpenClawChatSnapshotStore(gatewayScope)
     );
     chatReplayState.scope = gatewayScope;
@@ -1719,24 +1731,6 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
 }
 
 /**
- * Appends a durable control notice without creating a human chat turn, then wakes the
- * owning agent through OpenClaw's system-event lane.
- * @param sessionKey Session key value.
- * @param message Control notice to display and deliver.
- */
-async function sendSessionControlEvent(
-    sessionKey: string,
-    message: string
-): Promise<void> {
-    await sendRequestAsync("chat.inject", { message, sessionKey }, { timeoutMs: 10_000 });
-    await sendRequestAsync(
-        "wake",
-        { mode: "now", sessionKey, text: message },
-        { timeoutMs: 10_000 }
-    );
-}
-
-/**
  * Performs abort session run.
  * @param sessionKey Session key value.
  */
@@ -1818,7 +1812,6 @@ export default {
     getMetrics,
     getChatMetrics,
     getGatewayWs,
-    sendSessionControlEvent,
     sendSessionMessage,
     abortSessionRun,
     deleteSession,

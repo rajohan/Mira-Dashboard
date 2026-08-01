@@ -1360,20 +1360,20 @@ describe("chat runtime state", () => {
                 kind: "status",
                 operation: "compact",
                 operationPhase: "active",
-                runId: "compaction:automatic",
+                runId: "compaction:compact-operation",
                 text: "Compacting context",
             }),
             event(48, {
                 kind: "status",
                 operation: "compact",
                 operationPhase: "complete",
-                runId: "compaction:automatic",
+                runId: "compaction:compact-operation",
             }),
             event(64, {
                 kind: "finish",
                 outcome: "completed",
                 runId: "chat-run",
-                settlesCompactionRunId: "compaction:automatic",
+                settlesCompactionRunId: "compaction:chat-run",
             }),
         ]);
 
@@ -1384,9 +1384,49 @@ describe("chat runtime state", () => {
             ]),
             phase: "active",
         });
-        expect(state.sessions[SESSION]?.runs["compaction:automatic"]).toMatchObject({
-            operationPhase: "complete",
-            phase: "completed",
+        expect(
+            state.sessions[SESSION]?.runs["compaction:compact-operation"]
+        ).toMatchObject({ operationPhase: "complete", phase: "completed" });
+    });
+
+    it("applies a failed adjacent compaction lifecycle to the parent run", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "retrying",
+                runId: "compaction:compact-operation",
+                text: "Compacting context",
+            }),
+            event(48, {
+                error: "Compaction failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "chat-run",
+                settlesCompactionRunId: "compaction:chat-run",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            error: "Compaction failed",
+            phase: "error",
+        });
+        expect(
+            state.sessions[SESSION]?.runs["compaction:compact-operation"]
+        ).toMatchObject({
+            error: "Compaction failed",
+            operationPhase: "inactive",
+            phase: "error",
         });
     });
 

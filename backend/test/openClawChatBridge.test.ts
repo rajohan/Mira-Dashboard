@@ -937,6 +937,105 @@ describe("OpenClaw chat bridge", () => {
         expect(bridge.snapshot(MAIN).completed).toBe(true);
     });
 
+    it("terminalizes an auto-compaction settlement when no response resumes", async () => {
+        const deferredEnvelopes: unknown[] = [];
+        const bridge = new OpenClawChatBridge(undefined, {
+            nestedCompactionSettlementGraceMs: 10,
+            onDeferredEnvelope: (envelope) => deferredEnvelopes.push(envelope),
+        });
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "working" },
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end", stream: "lifecycle" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN).completed).toBe(false);
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events.at(-1)).toMatchObject({
+            canonicalEvents: [
+                expect.objectContaining({
+                    kind: "finish",
+                    outcome: "completed",
+                }),
+            ],
+            event: "model.completed",
+            payload: { runId: "parent-run", sessionKey: MAIN },
+        });
+        expect(deferredEnvelopes).toHaveLength(1);
+    });
+
+    it("does let a failed lifecycle after auto-compaction finish its parent run", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "working" },
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    error: "Compaction failed",
+                    phase: "error",
+                    stream: "lifecycle",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events.at(-1)?.canonicalEvents).toContainEqual(
+            expect.objectContaining({
+                error: "Compaction failed",
+                kind: "finish",
+                outcome: "error",
+            })
+        );
+    });
+
     it("keeps an unscoped final visible while dedicated compaction settles", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(
