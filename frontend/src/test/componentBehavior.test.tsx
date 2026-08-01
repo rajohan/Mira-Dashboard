@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { type ReactNode, type RefObject, type SetStateAction, useState } from "react";
 
 import type { Session } from "../../../contracts/sessions";
+import type { TaskUpdate } from "../../../contracts/tasks";
 import { parseJsonText, requestBodyText, requestUrl } from "../../../test/support/fetch";
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
@@ -96,6 +97,7 @@ import { ModelSection } from "../components/features/settings/ModelSection";
 import { SessionSection } from "../components/features/settings/SessionSection";
 import { SkillsSection } from "../components/features/settings/SkillsSection";
 import { ToolSection } from "../components/features/settings/ToolSection";
+import { TaskProgressUpdates } from "../components/features/tasks/TaskProgressUpdates";
 import { Alert } from "../components/ui/Alert";
 import { AppErrorFallback } from "../components/ui/AppErrorFallback";
 import { Badge } from "../components/ui/Badge";
@@ -5921,5 +5923,61 @@ describe("shared component helpers", () => {
         await user.keyboard(" ");
         expect(onDetails).toHaveBeenCalledWith("exited");
         expect(onDetails).toHaveBeenCalledWith("created");
+    });
+
+    it("retains progress drafts after failed submissions and renders unknown authors safely", async () => {
+        const user = userEvent.setup();
+        const addResult = Promise.withResolvers<void>();
+        const editResult = Promise.withResolvers<void>();
+        const onAddUpdate = jest.fn(() => addResult.promise);
+        const onEditUpdate = jest.fn(() => editResult.promise);
+
+        render(
+            <TaskProgressUpdates
+                updates={[
+                    {
+                        id: 0,
+                        taskId: 7,
+                        author: "external-agent",
+                        messageMd: "Original progress",
+                        createdAt: "2026-07-31T08:00:00.000Z",
+                    } as unknown as TaskUpdate,
+                ]}
+                onAddUpdate={onAddUpdate}
+                onDeleteUpdate={jest.fn()}
+                onEditUpdate={onEditUpdate}
+            />
+        );
+
+        expect(screen.getByText(/@external-agent/u)).toBeInTheDocument();
+        expect(
+            screen.queryByRole("link", { name: "@external-agent" })
+        ).not.toBeInTheDocument();
+
+        const addInput = screen.getByLabelText("Add progress update");
+        await user.type(addInput, "Unsaved addition");
+        await user.click(screen.getByRole("button", { name: "Add Update" }));
+        expect(onAddUpdate).toHaveBeenCalledWith("Unsaved addition");
+        expect(screen.getByRole("button", { name: "Adding..." })).toBeDisabled();
+        await act(async () => {
+            addResult.reject(new Error("add update failed"));
+            await Promise.resolve();
+        });
+        expect(await screen.findByText("add update failed")).toBeInTheDocument();
+        expect(addInput).toHaveValue("Unsaved addition");
+
+        await user.click(screen.getByRole("button", { name: "Edit progress update #0" }));
+        const editInput = screen.getByLabelText("Message for progress update #0");
+        await user.clear(editInput);
+        await user.type(editInput, "Unsaved edit");
+        await user.click(screen.getByRole("button", { name: "Save" }));
+        expect(onEditUpdate).toHaveBeenCalledWith(0, "Unsaved edit");
+        expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+        await act(async () => {
+            editResult.reject(new Error("edit update failed"));
+            await Promise.resolve();
+        });
+        expect(await screen.findByText("edit update failed")).toBeInTheDocument();
+        expect(editInput).toHaveValue("Unsaved edit");
     });
 });

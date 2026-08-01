@@ -33,8 +33,8 @@ Mira Dashboard worker                         |
 - Shared UI primitives in `frontend/src/components/ui`.
 - Domain pages in `frontend/src/pages`.
 - Feature components under `frontend/src/components/features`.
-- React Compiler is enabled; avoid routine `useMemo` and `useCallback` unless
-  semantics require stable identity for a third-party contract.
+- React Compiler is enabled; avoid routine `memo`, `useMemo`, and `useCallback`
+  unless semantics require stable identity for a third-party contract.
 
 Primary pages:
 

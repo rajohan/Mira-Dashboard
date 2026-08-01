@@ -130,7 +130,7 @@
                     {
                         "paths": [
                             {
-                                "importNames": ["useCallback", "useMemo"],
+                                "importNames": ["memo", "useCallback", "useMemo"],
                                 "message": "React Compiler owns routine memoization; keep explicit memoization out of application code.",
                                 "name": "react"
                             }

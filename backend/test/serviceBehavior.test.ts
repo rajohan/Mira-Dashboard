@@ -5851,7 +5851,17 @@ fi
             )
             .get() as { data_json: string; metadata_json: string; status: string };
         expect(row.status).toBe("fresh");
-        expect(runProcessSpy).toHaveBeenCalledTimes(2);
+        const initialBashCalls = runProcessSpy.mock.calls.filter(
+            ([file]) => file === "bash"
+        );
+        const initialTmuxCalls = runProcessSpy.mock.calls.filter(
+            ([file]) => file === "tmux"
+        );
+        expect(initialBashCalls).toHaveLength(2);
+        expect(initialTmuxCalls).toHaveLength(2);
+        expect(initialTmuxCalls.map(([, arguments_]) => arguments_.at(-1))).toEqual(
+            initialBashCalls.map((call) => call[2]?.env?.MIRA_QUOTA_CODEX_SESSION)
+        );
         expect(runProcessSpy.mock.calls[0]?.[1]?.[1]).toContain(
             'grep -Eiq "Weekly limit:"'
         );
@@ -5905,7 +5915,12 @@ fi
             ].join("\n"),
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
-        expect(runProcessSpy).toHaveBeenCalledTimes(1);
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "bash")).toHaveLength(
+            1
+        );
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "tmux")).toHaveLength(
+            1
+        );
         const weeklyOnlyQuota = parseJsonText(
             (
                 database
@@ -5931,7 +5946,12 @@ fi
             stdout: "Codex update screen without quota limits",
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
-        expect(runProcessSpy).toHaveBeenCalledTimes(2);
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "bash")).toHaveLength(
+            2
+        );
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "tmux")).toHaveLength(
+            2
+        );
         const repeatedParseFailure = parseJsonText(
             (
                 database
@@ -5950,11 +5970,16 @@ fi
 
         runProcessSpy.mockReset().mockResolvedValue({
             code: 1,
-            stderr: "update failed",
+            stderr: "Account: private@example.test\nupdate failed",
             stdout: "",
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
-        expect(runProcessSpy).toHaveBeenCalledTimes(1);
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "bash")).toHaveLength(
+            1
+        );
+        expect(runProcessSpy.mock.calls.filter(([file]) => file === "tmux")).toHaveLength(
+            1
+        );
         const commandFailure = parseJsonText(
             (
                 database
@@ -8294,6 +8319,7 @@ fi
         const auditorSessions = path.join(agentsRoot, "auditor", "sessions");
         const writerSessions = path.join(agentsRoot, "writer", "sessions");
         const browserSessions = path.join(agentsRoot, "browser", "sessions");
+        const largeTailSessions = path.join(agentsRoot, "large-tail", "sessions");
         const staleSessions = path.join(agentsRoot, "stale", "sessions");
         const responseItemAgents = [
             {
@@ -8327,6 +8353,7 @@ fi
         mkdirSync(auditorSessions, { recursive: true });
         mkdirSync(writerSessions, { recursive: true });
         mkdirSync(browserSessions, { recursive: true });
+        mkdirSync(largeTailSessions, { recursive: true });
         mkdirSync(staleSessions, { recursive: true });
         for (const agent of responseItemAgents) {
             mkdirSync(path.join(agentsRoot, agent.id, "sessions"), { recursive: true });
@@ -8350,6 +8377,7 @@ fi
                         { id: "auditor" },
                         { id: "writer" },
                         { id: "browser" },
+                        { id: "large-tail" },
                         { id: "stale" },
                         ...responseItemAgents.map((agent) => ({ id: agent.id })),
                     ],
@@ -8458,6 +8486,48 @@ fi
             ]
                 .map((entry) => JSON.stringify(entry))
                 .join("\n")
+        );
+        writeFileSync(
+            path.join(largeTailSessions, "session.jsonl"),
+            [
+                JSON.stringify({
+                    message: {
+                        __openclaw: { mirrorIdentity: "large-tail-turn:user" },
+                        content: "Recover task beyond bounded tail",
+                        role: "user",
+                    },
+                    runId: "large-tail-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        __openclaw: { mirrorIdentity: "other-turn:user" },
+                        content: "Do not pair this task with the selected activity",
+                        role: "user",
+                    },
+                    runId: "large-tail-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        content: "x".repeat(2 * 1024 * 1024 + 128 * 1024),
+                        role: "assistant",
+                    },
+                    runId: "large-tail-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        __openclaw: { mirrorIdentity: "large-tail-turn:assistant" },
+                        content: [
+                            {
+                                name: "read",
+                                partialJson: '{"path":"/tmp/large-tail.ts"}',
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "large-tail-run",
+                }),
+            ].join("\n")
         );
         const staleFile = path.join(staleSessions, "session.jsonl");
         writeFileSync(
@@ -8594,6 +8664,7 @@ fi
                 { id: "auditor" },
                 { id: "writer" },
                 { id: "browser" },
+                { id: "large-tail" },
                 { id: "stale" },
                 ...responseItemAgents.map((agent) => ({ id: agent.id })),
             ],
@@ -8646,6 +8717,14 @@ fi
                 currentActivity: "browser navigate https://dashboard.test",
                 currentTask: "Browse dashboard",
                 id: "browser",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "read /tmp/large-tail.ts",
+                currentTask: "Recover task beyond bounded tail",
+                id: "large-tail",
                 status: "active",
             })
         );

@@ -1,37 +1,54 @@
 import { canonicalChatContentFingerprint } from "../../../../../../contracts/chatCanonicalMessage";
 import {
     type ChatHistoryMessage,
-    type ChatMessageSourceReference,
     type ChatRow,
     type ChatVisibilitySettings,
-    mergeChatImages,
-    TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
 import {
     dedupeMessages,
     insertMessagesByTimestamp,
     isRecoveredAssistantText,
     mergeChatMessageDetails,
-    messageDeleteKey,
     messageIdentity,
     messageMediaIdentity,
-    stableChatStringify,
 } from "../chatUtilities";
 import {
     hasPrimaryAnswerContent,
     presentStructuredChatMessages,
     structureChatMessages,
 } from "./chatPresentation";
+import {
+    exactToolIds,
+    exactToolResultIds,
+    type ExactToolMessageIndex,
+    indexExactToolMessages,
+    recoveredDiagnosticIndexes,
+    refreshExactToolCalls,
+    refreshExactToolResults,
+} from "./chatProjectionDiagnostics";
+import {
+    asAssistantToolResultMessage,
+    currentResponseStart,
+    isDashboardRunId,
+    isGatewayRestartContinuation,
+    isRunMatchingMessage,
+    isStandaloneDiagnostic,
+    isUserMessage,
+    messageTimestamp,
+    orderedRuns,
+    projectedMessageDeleteIdentity,
+    projectedMessageRowKey,
+    type ResponseSegment,
+    RUN_START_USER_SKEW_MS,
+    RUNTIME_FINAL_SKEW_MS,
+    RUNTIME_USER_ECHO_WINDOW_MS,
+} from "./chatProjectionIdentity";
 import type {
     ChatRunState,
     ChatRuntimeState,
     ChatSessionRuntimeState,
 } from "./chatState";
 import { findChatSessionRuntimeState } from "./chatState";
-
-const RUN_START_USER_SKEW_MS = 1000;
-const RUNTIME_FINAL_SKEW_MS = 5000;
-const RUNTIME_USER_ECHO_WINDOW_MS = 5000;
 
 export interface ChatProjection {
     activeRuns: ChatRunState[];
@@ -44,420 +61,6 @@ export interface ChatCompactionStatus {
     phase: "active" | "complete";
     text: string;
     timestamp: string;
-}
-
-function orderedRuns(session?: ChatSessionRuntimeState): ChatRunState[] {
-    return Object.values(session?.runs || {}).toSorted((left, right) => {
-        const leftSequence =
-            left.phase === "active"
-                ? left.lastSequence
-                : (left.terminalSequence ?? left.lastSequence);
-        const rightSequence =
-            right.phase === "active"
-                ? right.lastSequence
-                : (right.terminalSequence ?? right.lastSequence);
-        const sequenceDifference = leftSequence - rightSequence;
-        return sequenceDifference || left.runId.localeCompare(right.runId);
-    });
-}
-
-function currentResponseStart(messages: ChatHistoryMessage[]): number {
-    return messages.findLastIndex((message) => message.role.toLowerCase() === "user") + 1;
-}
-
-interface ResponseSegment {
-    end: number;
-    start: number;
-}
-
-function isUserMessage(message: ChatHistoryMessage): boolean {
-    return message.role.toLowerCase() === "user";
-}
-
-function isGatewayRestartContinuation(message: ChatHistoryMessage): boolean {
-    return (
-        isUserMessage(message) &&
-        /^\[System\]\s+Your previous turn was interrupted by a gateway restart\b/iu.test(
-            message.text.trim()
-        )
-    );
-}
-
-function messageTimestamp(message: ChatHistoryMessage): number | undefined {
-    const timestamp = Date.parse(message.timestamp || "");
-    return Number.isNaN(timestamp) ? undefined : timestamp;
-}
-
-function isRunMatchingMessage(run: ChatRunState, message: ChatHistoryMessage): boolean {
-    return Boolean(
-        message.runId &&
-        (message.runId === run.runId || run.aliases.includes(message.runId))
-    );
-}
-
-function isDashboardRunId(runId?: string): boolean {
-    return Boolean(
-        runId?.startsWith("dashboard-chat-") || runId?.startsWith("dashboard-compact-")
-    );
-}
-
-function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
-    const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
-    return Boolean(
-        (message.isToolUse && message.isFinal !== true) ||
-        (hasToolDetails && message.isFinal !== true) ||
-        (message.thinking?.length &&
-            (!message.text.trim() ||
-                TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase())))
-    );
-}
-
-function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined {
-    if (!message.runId || !isStandaloneDiagnostic(message)) {
-        return undefined;
-    }
-    if (message.thinking?.length && !message.toolCalls?.length && !message.toolResult) {
-        return `diagnostic-${message.runId}-thinking`;
-    }
-    const toolCalls = message.toolCalls || [];
-    const toolCallIds = toolCalls
-        .map((toolCall) => toolCall.id)
-        .filter((id): id is string => Boolean(id));
-    const expectedCallRuntimeKey =
-        toolCallIds.length === 1 ? `tool:${toolCallIds[0]}` : undefined;
-    if (
-        toolCalls.length > 0 &&
-        toolCallIds.length === toolCalls.length &&
-        (!message.runtimeKey || message.runtimeKey === expectedCallRuntimeKey)
-    ) {
-        return `diagnostic-${message.runId}-tool-call-${toolCallIds.join(":")}`;
-    }
-    if (
-        toolCalls.length === 0 &&
-        message.toolResult?.id &&
-        (!message.runtimeKey || message.runtimeKey === `tool:${message.toolResult.id}`)
-    ) {
-        return `diagnostic-${message.runId}-tool-result-${message.toolResult.id}`;
-    }
-    const facet = toolCalls.length > 0 ? "tool-call" : "tool-result";
-    if (message.runtimeKey) {
-        const runtimeIdentity = canonicalChatContentFingerprint(message.runtimeKey);
-        return `diagnostic-${message.runId}-${facet}-runtime-${runtimeIdentity}`;
-    }
-    return undefined;
-}
-
-function historyMessageDeleteKey(message: ChatHistoryMessage): string {
-    return messageDeleteKey({
-        ...message,
-        runId: undefined,
-        runtimeKey: undefined,
-    });
-}
-
-/**
- * Gives an optimistic prompt and its history echo one bounded run-independent alias.
- * Two overlapping buckets cover the runtime echo window without hiding the same
- * prompt sent much later. Local rows also carry the no-time alias because Gateway
- * history may omit the provider timestamp together with the run identity.
- * @returns Bounded run-independent aliases for recovered user history.
- */
-function unscopedUserRecoveryDeleteKeys(message: ChatHistoryMessage): string[] {
-    const contentIdentity = canonicalChatContentFingerprint(
-        messageDeleteKey({
-            ...message,
-            runId: undefined,
-            runtimeKey: undefined,
-            timestamp: undefined,
-        })
-    );
-    const timestamp = messageTimestamp(message);
-    const scopes = new Set<string>();
-    if (timestamp === undefined || message.local === true) {
-        scopes.add("no-time");
-    }
-    if (timestamp !== undefined) {
-        const bucketWidth = RUNTIME_USER_ECHO_WINDOW_MS * 2;
-        scopes.add(`time-${Math.floor(timestamp / bucketWidth)}`);
-        scopes.add(
-            `time-${Math.floor((timestamp + RUNTIME_USER_ECHO_WINDOW_MS) / bucketWidth)}`
-        );
-    }
-    return [...scopes].map(
-        (scope) => `chat-user-recovery:v1:${scope}:${contentIdentity}`
-    );
-}
-
-function scopedUserRecoveryDeleteKeys(
-    message: ChatHistoryMessage,
-    runs: ChatRunState[]
-): string[] {
-    const runId = message.runId?.trim();
-    const unscopedKeys = unscopedUserRecoveryDeleteKeys(message);
-    if (!runId) {
-        return unscopedKeys;
-    }
-    const matchingRun = runs.find((run) => isRunMatchingMessage(run, message));
-    const runIds = matchingRun ? [matchingRun.runId, ...matchingRun.aliases] : [runId];
-    return [
-        ...new Set([
-            ...runIds.map((candidateRunId) =>
-                messageDeleteKey({
-                    ...message,
-                    runId: candidateRunId,
-                    runtimeKey: undefined,
-                    timestamp: undefined,
-                })
-            ),
-            ...unscopedKeys,
-        ]),
-    ];
-}
-
-function userMessageDeleteKeys(
-    message: ChatHistoryMessage,
-    runs: ChatRunState[]
-): string[] {
-    const historyKey = historyMessageDeleteKey(message);
-    const recoveryKeys = scopedUserRecoveryDeleteKeys(message, runs);
-    return [
-        historyKey,
-        ...recoveryKeys.filter((recoveryKey) => recoveryKey !== historyKey),
-    ];
-}
-
-function projectedMessageRowKey(message: ChatHistoryMessage): string {
-    if (isUserMessage(message)) {
-        return historyMessageDeleteKey(message);
-    }
-    if (message.intent === "control") {
-        return `control-${
-            message.controlId ||
-            message.runtimeKey ||
-            canonicalChatContentFingerprint(
-                `${message.timestamp || ""}\u0000${message.text}`
-            )
-        }`;
-    }
-    const diagnosticKey = stableDiagnosticRowKey(message);
-    if (diagnosticKey) {
-        return diagnosticKey;
-    }
-    const role = message.role.toLowerCase();
-    if (
-        message.runId &&
-        (role === "assistant" || role === "system") &&
-        hasPrimaryAnswerContent(message)
-    ) {
-        return `response-${message.runId}`;
-    }
-    return message.local === true && message.runId
-        ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
-        : messageDeleteKey(message);
-}
-
-function projectedMessageSourceFacet(message: ChatHistoryMessage): string {
-    if (message.intent) {
-        return message.intent;
-    }
-    const role = message.role.toLowerCase();
-    if (role === "user") {
-        return "user";
-    }
-    if (
-        message.thinking?.length &&
-        !message.toolCalls?.length &&
-        !message.toolResult &&
-        !hasPrimaryAnswerContent(message)
-    ) {
-        return "thinking";
-    }
-    if (message.toolCalls?.length || message.toolResult || message.isToolUse) {
-        return "tool";
-    }
-    return "assistant";
-}
-
-function projectedMessageSources(
-    message: ChatHistoryMessage
-): ChatMessageSourceReference[] {
-    const provenance = message.provenance;
-    if (!provenance) {
-        return [];
-    }
-    const { relatedSources = [], ...primarySource } = provenance;
-    return [primarySource, ...relatedSources];
-}
-
-function projectedMessageSourceDeleteKeys(message: ChatHistoryMessage): string[] {
-    const sourcesByIdentity = new Map<string, ChatMessageSourceReference>();
-    for (const source of projectedMessageSources(message)) {
-        const identity = stableChatStringify({
-            id: source.id,
-            sequence: source.sequence,
-            source: source.source,
-        });
-        if (!sourcesByIdentity.has(identity)) {
-            sourcesByIdentity.set(identity, source);
-        }
-    }
-    const facet = projectedMessageSourceFacet(message);
-    return sourcesByIdentity
-        .entries()
-        .toArray()
-        .toSorted(([, left], [, right]) => {
-            const sequenceDifference =
-                (left.sequence ?? Number.MAX_SAFE_INTEGER) -
-                (right.sequence ?? Number.MAX_SAFE_INTEGER);
-            return (
-                sequenceDifference ||
-                left.source.localeCompare(right.source) ||
-                left.id.localeCompare(right.id)
-            );
-        })
-        .map(
-            ([sourceIdentity]) =>
-                `chat-message-source:v1:${canonicalChatContentFingerprint(
-                    stableChatStringify({ facet, sourceIdentity })
-                )}`
-        );
-}
-
-function hasPositionFallbackHistorySource(message: ChatHistoryMessage): boolean {
-    return projectedMessageSources(message).some(
-        (source) =>
-            source.source === "openclaw-history" &&
-            source.sequence === undefined &&
-            /^openclaw-history:[^:]+:position%3A/iu.test(source.id)
-    );
-}
-
-/**
- * Keeps persisted delete keys valid when runtime reconciliation adds a run id.
- * @returns Projected message delete keys result.
- */
-interface ProjectedMessageDeleteIdentity {
-    baseKeys: string[];
-    persistedKeyCount: number;
-}
-
-function projectedMessageDeleteIdentity(
-    message: ChatHistoryMessage,
-    runs: ChatRunState[]
-): ProjectedMessageDeleteIdentity {
-    const sourceKeys = projectedMessageSourceDeleteKeys(message);
-    const userKeys = isUserMessage(message) ? userMessageDeleteKeys(message, runs) : [];
-    if (sourceKeys.length > 0) {
-        const stableFallbackKey = hasPositionFallbackHistorySource(message)
-            ? projectedMessageRowKey(message)
-            : undefined;
-        const persistedKeys = stableFallbackKey
-            ? [
-                  stableFallbackKey,
-                  ...sourceKeys.filter((key) => key !== stableFallbackKey),
-              ]
-            : sourceKeys;
-        const baseKeys = [
-            ...persistedKeys,
-            ...userKeys.filter((key) => !persistedKeys.includes(key)),
-        ];
-        return {
-            baseKeys,
-            persistedKeyCount: persistedKeys.length,
-        };
-    }
-    if (userKeys.length > 0) {
-        const persistedKeyCount =
-            !message.runId && message.local !== true ? 1 : userKeys.length;
-        return { baseKeys: userKeys, persistedKeyCount };
-    }
-    const currentKey = projectedMessageRowKey(message);
-    if (!message.runId || message.local === true) {
-        return { baseKeys: [currentKey], persistedKeyCount: 1 };
-    }
-    const persistedHistoryKey = historyMessageDeleteKey(message);
-    const baseKeys =
-        currentKey === persistedHistoryKey
-            ? [currentKey]
-            : [currentKey, persistedHistoryKey];
-    return { baseKeys, persistedKeyCount: baseKeys.length };
-}
-
-function asAssistantToolResultMessage(message: ChatHistoryMessage): ChatHistoryMessage {
-    const toolResult = message.toolResult;
-    const isToolResultRole = TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase());
-    if (!toolResult || !isToolResultRole) {
-        return message;
-    }
-
-    const nestedToolResult = {
-        ...toolResult,
-        images: mergeChatImages(toolResult.images, message.images),
-        name: toolResult.name || "tool",
-    };
-    const existingToolCalls = message.toolCalls || [];
-    const matchingNestedResultIndex = existingToolCalls.findIndex((toolCall) => {
-        const nestedResult = toolCall.toolResult;
-        if (!nestedResult) {
-            return false;
-        }
-        if (nestedResult.id || nestedToolResult.id) {
-            return Boolean(
-                nestedResult.id &&
-                nestedToolResult.id &&
-                nestedResult.id === nestedToolResult.id
-            );
-        }
-        return (nestedResult.name || toolCall.name) === nestedToolResult.name;
-    });
-    const matchingCallIndex =
-        matchingNestedResultIndex === -1
-            ? existingToolCalls.findIndex((toolCall) =>
-                  toolCall.id || nestedToolResult.id
-                      ? Boolean(
-                            toolCall.id &&
-                            nestedToolResult.id &&
-                            toolCall.id === nestedToolResult.id
-                        )
-                      : toolCall.name === nestedToolResult.name
-              )
-            : -1;
-    const toolCalls = existingToolCalls.map((toolCall, index) => {
-        if (index === matchingNestedResultIndex) {
-            return {
-                ...toolCall,
-                toolResult: {
-                    ...toolCall.toolResult,
-                    ...nestedToolResult,
-                    images: mergeChatImages(
-                        toolCall.toolResult?.images,
-                        nestedToolResult.images
-                    ),
-                },
-            };
-        }
-        return index === matchingCallIndex
-            ? { ...toolCall, toolResult: nestedToolResult }
-            : toolCall;
-    });
-    if (
-        toolCalls.length === 0 ||
-        (matchingNestedResultIndex === -1 && matchingCallIndex === -1)
-    ) {
-        toolCalls.push({
-            id: nestedToolResult.id,
-            name: nestedToolResult.name,
-            toolResult: nestedToolResult,
-        });
-    }
-    return {
-        ...message,
-        images: [],
-        role: "assistant",
-        text: "",
-        toolCalls,
-        toolResult: undefined,
-    };
 }
 
 function projectedMessageDisplay(message: ChatHistoryMessage): ChatHistoryMessage {
@@ -496,32 +99,6 @@ function canUseDashboardTurn(
         isDashboardRunId(message.runId) &&
         (isRunMatchingMessage(run, message) || !isMatchedToAnotherRun(message, run, runs))
     );
-}
-
-function exactToolIds(message: ChatHistoryMessage): Set<string> {
-    return new Set(
-        [
-            message.toolResult?.id,
-            ...(message.toolCalls || []).flatMap((call) => [
-                call.id,
-                call.toolResult?.id,
-            ]),
-        ].filter((id): id is string => Boolean(id))
-    );
-}
-
-type ExactToolMessageIndex = ReadonlyMap<string, readonly number[]>;
-
-function indexExactToolMessages(messages: ChatHistoryMessage[]): ExactToolMessageIndex {
-    const index = new Map<string, number[]>();
-    for (const [messageIndex, message] of messages.entries()) {
-        for (const id of exactToolIds(message)) {
-            const indexes = index.get(id) || [];
-            indexes.push(messageIndex);
-            index.set(id, indexes);
-        }
-    }
-    return index;
 }
 
 function latestExactToolMessageIndex(
@@ -974,364 +551,6 @@ function scopeCanonicalResponse(
     }
 }
 
-function exactToolResultIds(message: ChatHistoryMessage): Set<string> {
-    return new Set(
-        [
-            message.toolResult?.id,
-            ...(message.toolCalls || []).map((call) => call.toolResult?.id),
-        ].filter((id): id is string => Boolean(id))
-    );
-}
-
-function hasExactToolIdentity(message: ChatHistoryMessage): boolean {
-    return Boolean(
-        message.toolResult?.id ||
-        message.toolCalls?.some((call) => call.id || call.toolResult?.id)
-    );
-}
-
-function mergeExactToolResult(
-    previous: ChatHistoryMessage["toolResult"],
-    current: NonNullable<ChatHistoryMessage["toolResult"]>
-): NonNullable<ChatHistoryMessage["toolResult"]> {
-    if (!previous || !current.isPlaceholder || previous.isPlaceholder) {
-        return current;
-    }
-    return {
-        ...previous,
-        id: current.id || previous.id,
-        isError: current.isError || previous.isError || undefined,
-        isPlaceholder: undefined,
-        name: previous.name || current.name,
-    };
-}
-
-type ExactToolCall = NonNullable<ChatHistoryMessage["toolCalls"]>[number];
-
-function mergeExactToolCall(
-    historyCall: ExactToolCall | undefined,
-    runtimeCall: ExactToolCall,
-    historyResult: ChatHistoryMessage["toolResult"]
-): ExactToolCall {
-    return {
-        ...runtimeCall,
-        ...historyCall,
-        arguments: historyCall?.arguments ?? runtimeCall.arguments,
-        name: historyCall?.name || runtimeCall.name,
-        toolResult: historyResult
-            ? mergeExactToolResult(
-                  historyCall?.toolResult || runtimeCall.toolResult,
-                  historyResult
-              )
-            : historyCall?.toolResult || runtimeCall.toolResult,
-    };
-}
-
-function refreshExactToolCalls(
-    diagnostic: ChatHistoryMessage,
-    messages: ChatHistoryMessage[],
-    exactToolIndex: ExactToolMessageIndex,
-    segment: ResponseSegment,
-    run: ChatRunState
-): void {
-    const runtimeCalls = diagnostic.toolCalls || [];
-    for (const runtimeCall of runtimeCalls) {
-        if (!runtimeCall.id) {
-            continue;
-        }
-        const matchingIndexes = (exactToolIndex.get(runtimeCall.id) || []).filter(
-            (index) => {
-                const candidate = messages[index];
-                const isInResponseSegment = index >= segment.start && index < segment.end;
-                return Boolean(
-                    candidate &&
-                    (isInResponseSegment || isRunMatchingMessage(run, candidate))
-                );
-            }
-        );
-        const callIndex = matchingIndexes.find((index) =>
-            messages[index]?.toolCalls?.some((call) => call.id === runtimeCall.id)
-        );
-        const resultIndex = matchingIndexes.findLast(
-            (index) => messages[index]?.toolResult?.id === runtimeCall.id
-        );
-        const targetIndex = callIndex ?? resultIndex;
-        if (targetIndex === undefined) {
-            continue;
-        }
-        const candidate = messages[targetIndex]!;
-        const toolCalls = [...(candidate.toolCalls || [])];
-        const existingIndex = toolCalls.findIndex((call) => call.id === runtimeCall.id);
-        const historyResult =
-            candidate.toolResult?.id === runtimeCall.id
-                ? candidate.toolResult
-                : toolCalls[existingIndex]?.toolResult;
-        const mergedCall = mergeExactToolCall(
-            toolCalls[existingIndex],
-            runtimeCall,
-            historyResult
-        );
-        if (existingIndex === -1) {
-            toolCalls.push(mergedCall);
-        } else {
-            toolCalls[existingIndex] = mergedCall;
-        }
-        messages[targetIndex] = { ...candidate, toolCalls };
-    }
-}
-
-function refreshExactToolResult(
-    current: NonNullable<ChatHistoryMessage["toolResult"]>,
-    messages: ChatHistoryMessage[],
-    exactToolIndex: ExactToolMessageIndex,
-    segment: ResponseSegment,
-    run: ChatRunState
-): void {
-    const matchingIndexes = exactToolIndex.get(current.id || "") || [];
-    for (const index of matchingIndexes) {
-        const candidate = messages[index];
-        const isInResponseSegment = index >= segment.start && index < segment.end;
-        if (
-            !candidate ||
-            (!isInResponseSegment && !isRunMatchingMessage(run, candidate))
-        ) {
-            continue;
-        }
-        const hasMatchingCall = candidate.toolCalls?.some(
-            (call) => call.id === current.id || call.toolResult?.id === current.id
-        );
-        const hasMatchingResult = candidate.toolResult?.id === current.id;
-        if (hasMatchingCall || hasMatchingResult) {
-            const toolCalls = candidate.toolCalls?.map((call) =>
-                call.id === current.id || call.toolResult?.id === current.id
-                    ? {
-                          ...call,
-                          toolResult: mergeExactToolResult(call.toolResult, current),
-                      }
-                    : call
-            );
-            messages[index] = {
-                ...candidate,
-                toolCalls,
-                toolResult: hasMatchingResult
-                    ? mergeExactToolResult(candidate.toolResult, current)
-                    : candidate.toolResult,
-            };
-        }
-    }
-}
-
-function refreshExactToolResults(
-    diagnostic: ChatHistoryMessage,
-    messages: ChatHistoryMessage[],
-    exactToolIndex: ExactToolMessageIndex,
-    segment: ResponseSegment,
-    run: ChatRunState
-): void {
-    const currentResults = [
-        diagnostic.toolResult,
-        ...(diagnostic.toolCalls || []).map((call) => call.toolResult),
-    ].filter((result): result is NonNullable<ChatHistoryMessage["toolResult"]> =>
-        Boolean(result?.id)
-    );
-    for (const current of currentResults) {
-        refreshExactToolResult(current, messages, exactToolIndex, segment, run);
-    }
-}
-
-function toolResultSignatures(
-    result: NonNullable<ChatHistoryMessage["toolResult"]>
-): string[] {
-    if (result.id) {
-        return [`result-id:${result.id}`];
-    }
-    const payload = stableChatStringify({
-        result: {
-            content: result.content,
-            error: result.isError || false,
-            images: result.images || [],
-            name: result.name || "",
-        },
-    });
-    return [`result-payload:${payload}`];
-}
-
-function toolSignatures(message: ChatHistoryMessage): string[] {
-    const signatures: string[] = [];
-    const nestedResultSignatures: string[] = [];
-    const toolCalls = message.toolCalls || [];
-    for (const call of toolCalls) {
-        signatures.push(
-            call.id
-                ? `call-id:${call.id}`
-                : stableChatStringify({
-                      arguments: call.arguments ?? undefined,
-                      name: call.name,
-                  })
-        );
-        if (call.toolResult) {
-            const result = toolResultSignatures(call.toolResult);
-            signatures.push(...result);
-            nestedResultSignatures.push(...result);
-        }
-    }
-    if (message.toolResult) {
-        for (const signature of toolResultSignatures(message.toolResult)) {
-            if (!nestedResultSignatures.includes(signature)) {
-                signatures.push(signature);
-            }
-        }
-    }
-    return signatures;
-}
-
-function thinkingSignatures(message: ChatHistoryMessage): string[] {
-    return (message.thinking || []).map((block) => block.text);
-}
-
-function diagnosticSignatures(message: ChatHistoryMessage): string[] {
-    return [
-        ...toolSignatures(message).map((signature) => `tool:${signature}`),
-        ...thinkingSignatures(message).map((signature) => `thinking:${signature}`),
-    ];
-}
-
-function cachedDiagnosticSignatures(
-    message: ChatHistoryMessage,
-    cache: Map<ChatHistoryMessage, string[]>
-): string[] {
-    const cached = cache.get(message);
-    if (cached) {
-        return cached;
-    }
-    const signatures = diagnosticSignatures(message);
-    cache.set(message, signatures);
-    return signatures;
-}
-
-function countSignatures(signatures: string[]): Map<string, number> {
-    const counts = new Map<string, number>();
-    for (const signature of signatures) {
-        counts.set(signature, (counts.get(signature) || 0) + 1);
-    }
-    return counts;
-}
-
-function consumeCandidateSignatures(
-    message: ChatHistoryMessage,
-    claimed: ReadonlyMap<string, number>,
-    remaining: Map<string, number>,
-    signatureCache: Map<ChatHistoryMessage, string[]>
-): Map<string, number> {
-    const consumed = new Map<string, number>();
-    const availableSignatures = countSignatures(
-        cachedDiagnosticSignatures(message, signatureCache)
-    );
-    for (const [signature, availableCount] of availableSignatures) {
-        const remainingCount = remaining.get(signature) || 0;
-        const unclaimedCount = availableCount - (claimed.get(signature) || 0);
-        const consumedCount = Math.min(remainingCount, unclaimedCount);
-        if (consumedCount > 0) {
-            remaining.set(signature, remainingCount - consumedCount);
-            consumed.set(signature, consumedCount);
-        }
-    }
-    return consumed;
-}
-
-function requiresSegmentSignatureSearch(message: ChatHistoryMessage): boolean {
-    return Boolean(
-        message.thinking?.length ||
-        (message.toolResult && !message.toolResult.id) ||
-        message.toolCalls?.some(
-            (call) => !call.id || (call.toolResult && !call.toolResult.id)
-        )
-    );
-}
-
-function recoveredDiagnosticIndexes(
-    diagnostic: ChatHistoryMessage,
-    messages: ChatHistoryMessage[],
-    segment: ResponseSegment,
-    run: ChatRunState,
-    claimedSignatures: Map<number, Map<string, number>>,
-    exactToolIndex: ExactToolMessageIndex,
-    signatureCache: Map<ChatHistoryMessage, string[]>
-): number[] | undefined {
-    const hasExactIdentity = hasExactToolIdentity(diagnostic);
-    const diagnosticIds = hasExactIdentity ? exactToolIds(diagnostic) : new Set<string>();
-    const exactCandidateIndexes = new Set(
-        [...diagnosticIds]
-            .flatMap((id) => exactToolIndex.get(id) || [])
-            .filter((index) => {
-                const candidate = messages[index];
-                const isInResponseSegment = index >= segment.start && index < segment.end;
-                return Boolean(
-                    candidate &&
-                    (isInResponseSegment || isRunMatchingMessage(run, candidate))
-                );
-            })
-    );
-    const shouldSearchSegment =
-        !hasExactIdentity || requiresSegmentSignatureSearch(diagnostic);
-    const candidates = shouldSearchSegment
-        ? messages
-              .slice(segment.start, segment.end)
-              .map((message, offset) => ({
-                  index: segment.start + offset,
-                  message,
-              }))
-              .filter(
-                  (candidate) =>
-                      hasExactIdentity ||
-                      !candidate.message.runId ||
-                      isRunMatchingMessage(run, candidate.message)
-              )
-        : [];
-    const candidateIndexes = new Set(candidates.map((candidate) => candidate.index));
-    for (const index of exactCandidateIndexes) {
-        const message = messages[index];
-        if (message && !candidateIndexes.has(index)) {
-            candidates.push({ index, message });
-            candidateIndexes.add(index);
-        }
-    }
-    const expected = cachedDiagnosticSignatures(diagnostic, signatureCache);
-    if (expected.length === 0) {
-        return undefined;
-    }
-    const remaining = countSignatures(expected);
-    const consumedByIndex = new Map<number, Map<string, number>>();
-    for (const candidate of candidates) {
-        const consumed = consumeCandidateSignatures(
-            candidate.message,
-            claimedSignatures.get(candidate.index) || new Map(),
-            remaining,
-            signatureCache
-        );
-        if (consumed.size > 0) {
-            consumedByIndex.set(candidate.index, consumed);
-        }
-    }
-    if (remaining.values().some((count) => count > 0)) {
-        return undefined;
-    }
-    for (const [index, consumed] of consumedByIndex) {
-        const claimed = claimedSignatures.get(index) || new Map<string, number>();
-        for (const [signature, count] of consumed) {
-            claimed.set(signature, (claimed.get(signature) || 0) + count);
-        }
-        claimedSignatures.set(index, claimed);
-    }
-    const recoveredIndexes = new Set(consumedByIndex.keys());
-    if (hasExactIdentity) {
-        for (const index of exactCandidateIndexes) {
-            recoveredIndexes.add(index);
-        }
-    }
-    return [...recoveredIndexes];
-}
-
 function transientMessage(
     message: ChatHistoryMessage,
     run: ChatRunState,
@@ -1501,6 +720,13 @@ function isCompletedHistoryFinal(message: ChatHistoryMessage): boolean {
     );
 }
 
+function isMovableUser(slot: IndexedChatMessage): boolean {
+    return (
+        isUserMessage(slot.message) &&
+        (!slot.message.runId || isDashboardRunId(slot.message.runId))
+    );
+}
+
 /**
  * Restores causal user/tool order after completed restart batches lose runtime replay.
  * @param messages Messages value.
@@ -1538,9 +764,6 @@ function orderCompletedHistoryTurns(
             const prefix = segment.slice(0, promptOffset);
             const prompt = segment[promptOffset]!;
             const turn = segment.slice(promptOffset + 1, -1);
-            const isMovableUser = (slot: IndexedChatMessage) =>
-                isUserMessage(slot.message) &&
-                (!slot.message.runId || isDashboardRunId(slot.message.runId));
             const users = turn.filter((slot) => isMovableUser(slot));
             const thinking = turn.filter((slot) =>
                 isThinkingOnlyRunMessage(slot.message)
