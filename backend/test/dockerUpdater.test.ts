@@ -63,6 +63,15 @@ afterEach(() => {
         .prepare("DELETE FROM scheduled_job_runs WHERE job_id = 'docker.updater'")
         .run();
     database.prepare("DELETE FROM scheduled_jobs WHERE id = 'docker.updater'").run();
+    database
+        .prepare(
+            `DELETE FROM notifications
+             WHERE dedupe_key IN (
+                'docker:updater:git-sync-failed',
+                'docker:updater:git-sync-skipped'
+             )`
+        )
+        .run();
     while (cleanupCallbacks.length > 0) {
         cleanupCallbacks.pop()?.();
     }
@@ -1614,7 +1623,7 @@ describe("Docker updater tag patterns", () => {
         ]);
     });
 
-    it("surfaces follow-up git sync failures in scheduled updater output", async () => {
+    it("keeps follow-up git sync failures nonblocking and notifies operators", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
         const appsRoot = createTemporaryRoot("mira-docker-updater-git-sync-fail-");
@@ -1709,9 +1718,7 @@ describe("Docker updater tag patterns", () => {
         startScheduledJobExecutor();
         try {
             const run = await runScheduledJob("docker.updater");
-            expect(run.status).toBe("failed");
-            expect(run.message).toContain("git-sync:docker:");
-            expect(run.message).toContain("remote rejected");
+            expect(run.status).toBe("success");
             const steps = run.output.steps as DockerUpdaterStepResult[];
             expect(steps).toContainEqual(
                 expect.objectContaining({
@@ -1725,6 +1732,31 @@ describe("Docker updater tag patterns", () => {
                 step: "git-sync:docker",
             });
             expect(gitSyncStep?.stderr).toContain("remote rejected");
+            const notification = database
+                .prepare(
+                    `SELECT title, description, type, metadata_json
+                     FROM notifications
+                     WHERE dedupe_key = 'docker:updater:git-sync-failed'`
+                )
+                .get() as {
+                description: string;
+                metadata_json: string;
+                title: string;
+                type: string;
+            };
+            expect(notification).toMatchObject({
+                title: "Docker updater repository sync failed",
+                type: "error",
+            });
+            expect(notification.description).toContain("remote rejected");
+            const notificationMetadata = JSON.parse(notification.metadata_json) as {
+                stderr: string;
+                step: string;
+            };
+            expect(notificationMetadata).toMatchObject({
+                step: "git-sync:docker",
+            });
+            expect(notificationMetadata.stderr).toContain("remote rejected");
         } finally {
             await stopScheduledJobExecutor();
         }

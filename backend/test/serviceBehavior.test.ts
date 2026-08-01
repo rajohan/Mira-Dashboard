@@ -8319,6 +8319,7 @@ fi
         const auditorSessions = path.join(agentsRoot, "auditor", "sessions");
         const writerSessions = path.join(agentsRoot, "writer", "sessions");
         const browserSessions = path.join(agentsRoot, "browser", "sessions");
+        const largeTailSessions = path.join(agentsRoot, "large-tail", "sessions");
         const staleSessions = path.join(agentsRoot, "stale", "sessions");
         const responseItemAgents = [
             {
@@ -8352,6 +8353,7 @@ fi
         mkdirSync(auditorSessions, { recursive: true });
         mkdirSync(writerSessions, { recursive: true });
         mkdirSync(browserSessions, { recursive: true });
+        mkdirSync(largeTailSessions, { recursive: true });
         mkdirSync(staleSessions, { recursive: true });
         for (const agent of responseItemAgents) {
             mkdirSync(path.join(agentsRoot, agent.id, "sessions"), { recursive: true });
@@ -8375,6 +8377,7 @@ fi
                         { id: "auditor" },
                         { id: "writer" },
                         { id: "browser" },
+                        { id: "large-tail" },
                         { id: "stale" },
                         ...responseItemAgents.map((agent) => ({ id: agent.id })),
                     ],
@@ -8483,6 +8486,38 @@ fi
             ]
                 .map((entry) => JSON.stringify(entry))
                 .join("\n")
+        );
+        writeFileSync(
+            path.join(largeTailSessions, "session.jsonl"),
+            [
+                JSON.stringify({
+                    message: {
+                        content: "Recover task beyond bounded tail",
+                        role: "user",
+                    },
+                    runId: "large-tail-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        content: "x".repeat(2 * 1024 * 1024 + 128 * 1024),
+                        role: "assistant",
+                    },
+                    runId: "large-tail-run",
+                }),
+                JSON.stringify({
+                    message: {
+                        content: [
+                            {
+                                name: "read",
+                                partialJson: '{"path":"/tmp/large-tail.ts"}',
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                    },
+                    runId: "large-tail-run",
+                }),
+            ].join("\n")
         );
         const staleFile = path.join(staleSessions, "session.jsonl");
         writeFileSync(
@@ -8619,6 +8654,7 @@ fi
                 { id: "auditor" },
                 { id: "writer" },
                 { id: "browser" },
+                { id: "large-tail" },
                 { id: "stale" },
                 ...responseItemAgents.map((agent) => ({ id: agent.id })),
             ],
@@ -8671,6 +8707,14 @@ fi
                 currentActivity: "browser navigate https://dashboard.test",
                 currentTask: "Browse dashboard",
                 id: "browser",
+                status: "active",
+            })
+        );
+        expect(statuses).toContainEqual(
+            expect.objectContaining({
+                currentActivity: "read /tmp/large-tail.ts",
+                currentTask: "Recover task beyond bounded tail",
+                id: "large-tail",
                 status: "active",
             })
         );

@@ -29,6 +29,38 @@ function skippedGitSyncDetails(
     }
 }
 
+function notifyGitSyncIssue(step: DockerUpdaterStepResult): void {
+    if (step.kind !== "git-sync") {
+        return;
+    }
+    if (!step.isOk) {
+        createNotificationBestEffort(
+            "Docker updater repository sync failed",
+            step.stderr.trim() || `${step.step} failed without diagnostic output`,
+            "docker:updater:git-sync-failed",
+            "error",
+            {
+                changedPaths: step.changedPaths ?? [],
+                stderr: step.stderr,
+                step: step.step,
+            }
+        );
+        return;
+    }
+
+    const details = skippedGitSyncDetails(step);
+    if (!details) {
+        return;
+    }
+    createNotificationBestEffort(
+        "Docker updater repository sync skipped",
+        String(details.skippedReason),
+        "docker:updater:git-sync-skipped",
+        "error",
+        details
+    );
+}
+
 export function registerDockerUpdaterScheduledJobs(): void {
     const job = {
         id: "docker.updater",
@@ -67,18 +99,13 @@ export function registerDockerUpdaterScheduledJobs(): void {
                 context.protectFromCancellation
             );
             for (const step of steps) {
-                const details = skippedGitSyncDetails(step);
-                if (!details) continue;
-                createNotificationBestEffort(
-                    "Docker updater repository sync skipped",
-                    String(details.skippedReason),
-                    "docker:updater:git-sync-skipped",
-                    "error",
-                    details
-                );
+                notifyGitSyncIssue(step);
             }
             const failed = steps.filter(
-                (step) => !step.isOk && !isNonblockingRegistrationFailure(step)
+                (step) =>
+                    !step.isOk &&
+                    step.kind !== "git-sync" &&
+                    !isNonblockingRegistrationFailure(step)
             );
             if (failed.length > 0) {
                 throw new ScheduledJobActionError(

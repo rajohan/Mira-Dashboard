@@ -5,6 +5,7 @@ import { isPlainRecord } from "../../../../contracts/runtime.ts";
 import {
     guardedPath,
     readdirGuarded,
+    readTextRangeNoFollowGuarded,
     readTextTailNoFollowGuarded,
     statGuarded,
 } from "../../lib/guardedOps.ts";
@@ -13,6 +14,8 @@ import { getSafeAgentActivityRoots, type ActivityLogRoot } from "./agentPaths.ts
 
 const STALE_THRESHOLD = 5 * 60_000;
 const MAX_ACTIVITY_LOG_TAIL_BYTES = 2 * 1024 * 1024;
+const MAX_ACTIVITY_TASK_LOOKBACK_BYTES = 8 * 1024 * 1024;
+const ACTIVITY_TASK_LOOKBACK_OVERLAP_BYTES = 64 * 1024;
 
 // Get activity from a JSONL session file
 /** Captures the latest observed agent activity label and timestamp. */
@@ -410,6 +413,81 @@ function getTrajectoryActivity(entry: unknown): {
     return {};
 }
 
+interface ActivityEntryTask {
+    task: string;
+    turnId: string | undefined;
+}
+
+function getActivityEntryTask(
+    entry: unknown,
+    trajectoryTask: string | undefined
+): ActivityEntryTask | undefined {
+    const turnId = getActivityEntryTurnId(entry);
+    if (trajectoryTask) {
+        const task = cleanTaskText(trajectoryTask);
+        return task ? { task, turnId } : undefined;
+    }
+
+    const record = isPlainRecord(entry) ? entry : {};
+    const messageValue = record.message ?? entry;
+    const message = isPlainRecord(messageValue) ? messageValue : {};
+    if (message.role !== "user" || !message.content) {
+        return undefined;
+    }
+    const text = unknownArray(message.content)
+        .filter(
+            (candidate): candidate is Record<string, unknown> =>
+                isPlainRecord(candidate) && candidate.type === "text"
+        )
+        .map((candidate) => (typeof candidate.text === "string" ? candidate.text : ""))
+        .join(" ");
+    const taskText = typeof message.content === "string" ? message.content : text;
+    const task = cleanTaskText(taskText);
+    return task ? { task, turnId } : undefined;
+}
+
+function findActivityTask(
+    content: string,
+    targetRunId: string | undefined
+): ActivityEntryTask | undefined {
+    const lines = content.trim().split("\n");
+    let fileRunId = targetRunId;
+    for (let index = lines.length - 1; index >= 0; index--) {
+        try {
+            const line = lines[index];
+            if (line === undefined) continue;
+            const entry: unknown = JSON.parse(line);
+            const record = isPlainRecord(entry) ? entry : {};
+            const entryRunId =
+                typeof record.runId === "string" ? record.runId : undefined;
+            if (!fileRunId && entryRunId) {
+                fileRunId = entryRunId;
+            }
+            if (fileRunId && !entryRunId) {
+                continue;
+            }
+            if (fileRunId && entryRunId && entryRunId !== fileRunId) {
+                continue;
+            }
+            if (
+                fileRunId &&
+                entryRunId === fileRunId &&
+                record.type === "session.started"
+            ) {
+                break;
+            }
+
+            const task = getActivityEntryTask(entry, getTrajectoryActivity(entry).task);
+            if (task) {
+                return task;
+            }
+        } catch {
+            // Skip malformed or window-truncated lines.
+        }
+    }
+    return undefined;
+}
+
 /**
  * Reads the newest activity marker from agent session files when live Gateway data is unavailable.
  * @param agentId Agent identifier.
@@ -533,9 +611,12 @@ export async function getLatestActivityFromFile(
 
                     const entryTurnId = getActivityEntryTurnId(entry);
                     const trajectoryActivity = getTrajectoryActivity(entry);
-                    if (!fileTask && trajectoryActivity.task) {
-                        fileTask = cleanTaskText(trajectoryActivity.task);
-                        fileTaskTurnId = entryTurnId;
+                    const entryTask = fileTask
+                        ? undefined
+                        : getActivityEntryTask(entry, trajectoryActivity.task);
+                    if (entryTask) {
+                        fileTask = entryTask.task;
+                        fileTaskTurnId = entryTask.turnId;
                     }
                     if (!fileActivity && trajectoryActivity.activity) {
                         fileActivity = trajectoryActivity.activity;
@@ -548,25 +629,6 @@ export async function getLatestActivityFromFile(
 
                     const messageValue = record.message ?? entry;
                     const message = isPlainRecord(messageValue) ? messageValue : {};
-
-                    // First user message from end = current task
-                    if (!fileTask && message.role === "user" && message.content) {
-                        const text = unknownArray(message.content)
-                            .filter(
-                                (candidate): candidate is Record<string, unknown> =>
-                                    isPlainRecord(candidate) && candidate.type === "text"
-                            )
-                            .map((candidate) =>
-                                typeof candidate.text === "string" ? candidate.text : ""
-                            )
-                            .join(" ");
-                        const taskText =
-                            typeof message.content === "string" ? message.content : text;
-
-                        // Clean metadata and extract actual message
-                        fileTask = cleanTaskText(taskText) || undefined;
-                        fileTaskTurnId = entryTurnId;
-                    }
 
                     // First visible tool use from end = current activity.
                     if (
@@ -597,6 +659,35 @@ export async function getLatestActivityFromFile(
                     }
                 } catch {
                     // Skip malformed lines
+                }
+            }
+
+            if (fileActivity && !fileTask) {
+                try {
+                    const fileSize = statGuarded(guardedPath(file.path)).size;
+                    const tailStart = Math.max(0, fileSize - MAX_ACTIVITY_LOG_TAIL_BYTES);
+                    if (tailStart > 0) {
+                        const lookbackStart = Math.max(
+                            0,
+                            tailStart - MAX_ACTIVITY_TASK_LOOKBACK_BYTES
+                        );
+                        const lookbackEnd = Math.min(
+                            fileSize,
+                            tailStart + ACTIVITY_TASK_LOOKBACK_OVERLAP_BYTES
+                        );
+                        const earlierContent = await readTextRangeNoFollowGuarded(
+                            guardedPath(file.path),
+                            lookbackStart,
+                            lookbackEnd - lookbackStart
+                        );
+                        const earlierTask = findActivityTask(earlierContent, fileRunId);
+                        if (earlierTask) {
+                            fileTask = earlierTask.task;
+                            fileTaskTurnId = earlierTask.turnId;
+                        }
+                    }
+                } catch {
+                    // Preserve the tail-derived activity when bounded task recovery fails.
                 }
             }
 

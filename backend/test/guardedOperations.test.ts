@@ -15,6 +15,7 @@ import {
     readJson5Guarded,
     readTextGuarded,
     readTextNoFollowGuarded,
+    readTextRangeNoFollowGuarded,
     readTextTailNoFollowGuarded,
     statGuarded,
     statGuardedAsync,
@@ -162,6 +163,18 @@ describe("guarded writes", () => {
         );
         const tail = await readTextTailNoFollowGuarded(guardedPath(source), 7);
         expect(tail).toBe("ded ops");
+        expect(readTextRangeNoFollowGuarded(guardedPath(source), 6, 7)).resolves.toBe(
+            "guarded"
+        );
+        expect(readTextRangeNoFollowGuarded(guardedPath(source), 14, 99)).resolves.toBe(
+            "ops"
+        );
+        expect(readTextRangeNoFollowGuarded(guardedPath(source), 99, 7)).resolves.toBe(
+            ""
+        );
+        expect(readTextRangeNoFollowGuarded(guardedPath(source), -1, 7)).rejects.toThrow(
+            "startByte must be a non-negative safe integer"
+        );
 
         const file = await openReadNoFollowNonblockingGuarded(guardedPath(source));
         try {
