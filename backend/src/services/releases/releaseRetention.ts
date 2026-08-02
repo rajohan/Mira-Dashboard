@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { pruneManagedBunRuntimes } from "./managedRuntimeStore.ts";
 import {
     compareStrings,
     RELEASE_COMMIT_SHA_PATTERN,
@@ -20,7 +21,7 @@ import {
     releaseDirectoryIdentity,
     resolveDashboardReleasesRoot,
 } from "./releaseLayout.ts";
-import { hasManagedBunRuntime, pruneManagedBunRuntimes } from "./runtime.ts";
+import { hasManagedBunRuntime } from "./runtime.ts";
 import { syncDirectory } from "./transitionJournal.ts";
 import { withReleaseTransitionLock } from "./transitionLock.ts";
 

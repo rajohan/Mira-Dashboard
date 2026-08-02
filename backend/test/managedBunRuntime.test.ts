@@ -15,13 +15,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+    installManagedBunRuntime,
+    pruneManagedBunRuntimes,
+} from "../src/services/releases/managedRuntimeStore.ts";
+import {
     bunExecutableMatchesRuntime,
     bunExecutableRuntimeIdentity,
     hasManagedBunRuntime,
-    installManagedBunRuntime,
     isBunRuntimeVersion,
     managedBunRuntimeExecutablePath,
-    pruneManagedBunRuntimes,
     requireManagedBunRuntime,
     resolveDashboardReleaseBuildBunExecutable,
 } from "../src/services/releases/runtime.ts";

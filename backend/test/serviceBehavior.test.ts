@@ -24,14 +24,12 @@ import { resolveDashboardProjectPaths } from "../src/lib/dashboardPaths.ts";
 import * as processModule from "../src/lib/processes.ts";
 import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 import { type DashboardSocket } from "../src/services/gateway/dashboardSocket.ts";
+import { installManagedBunRuntime } from "../src/services/releases/managedRuntimeStore.ts";
 import {
     ensureDashboardReleaseLayout,
     managedReleasePath,
 } from "../src/services/releases/releaseLayout.ts";
-import {
-    currentBunRuntimeIdentity,
-    installManagedBunRuntime,
-} from "../src/services/releases/runtime.ts";
+import { currentBunRuntimeIdentity } from "../src/services/releases/runtime.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureRejection } from "./support/rejections.ts";
 import {

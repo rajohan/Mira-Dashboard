@@ -23,13 +23,10 @@ import {
     MANAGED_DASHBOARD_UNITS,
     managedDashboardUnitContract,
 } from "./deployment.ts";
+import { installManagedBunRuntime } from "./managedRuntimeStore.ts";
 import type { ManagedDashboardRelease } from "./managerModel.ts";
 import { loadManagedRelease, resolveDashboardReleasesRoot } from "./releaseLayout.ts";
-import {
-    hasManagedBunRuntime,
-    installManagedBunRuntime,
-    requireManagedBunRuntime,
-} from "./runtime.ts";
+import { hasManagedBunRuntime, requireManagedBunRuntime } from "./runtime.ts";
 import { assertDashboardReleaseRuntimeAvailable } from "./schemaCompatibility.ts";
 
 export async function assertManagedDashboardServiceContract(

@@ -7,6 +7,7 @@ import { resolveDashboardProjectPaths } from "../../lib/dashboardPaths.ts";
 import { runProcess } from "../../lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "../../lib/safePath.ts";
 import { parseSystemdProperties } from "../../lib/systemdProperties.ts";
+import { installManagedBunRuntime } from "./managedRuntimeStore.ts";
 import type {
     DashboardReleaseRetentionResult,
     ManagedDashboardRelease,
@@ -16,7 +17,6 @@ import { publishVerifiedDashboardRelease } from "./releasePublication.ts";
 import { pruneDashboardReleases } from "./releaseRetention.ts";
 import {
     bunExecutableRuntimeIdentity,
-    installManagedBunRuntime,
     requireManagedBunRuntime,
     resolveDashboardReleaseBuildBunExecutable,
     resolveManagedBunRuntimeRoot,

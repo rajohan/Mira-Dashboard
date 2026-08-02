@@ -25,6 +25,7 @@ import {
     type DatabaseMigrationIdentity,
 } from "../src/databaseMigrations/registry.ts";
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
+import { installManagedBunRuntime } from "../src/services/releases/managedRuntimeStore.ts";
 import {
     RELEASE_TRANSITION_LOCK_FILE_NAME,
     RELEASE_TRANSITION_LOCK_PROGRAM,
@@ -57,7 +58,6 @@ import {
 import {
     currentBunRuntimeIdentity,
     hasManagedBunRuntime,
-    installManagedBunRuntime,
 } from "../src/services/releases/runtime.ts";
 import { assertDashboardReleaseRuntimeAvailable } from "../src/services/releases/schemaCompatibility.ts";
 import { assertReleaseTransitionLockCommandSucceeded } from "../src/services/releases/transitionLock.ts";
