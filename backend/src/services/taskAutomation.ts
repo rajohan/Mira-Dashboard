@@ -3,7 +3,7 @@ import type {
     CacheHeartbeatTask,
 } from "../../../contracts/cache.ts";
 import type { CronJob, CronTaskLink } from "../../../contracts/cron.ts";
-import type { JobDisableIntent } from "../../../contracts/jobs.ts";
+import type { JobDisableIntent } from "../../../contracts/jobs/scheduled.ts";
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../contracts/tasks.ts";
 import { database } from "../database/connection.ts";
 import { errorMessage } from "../lib/errors.ts";

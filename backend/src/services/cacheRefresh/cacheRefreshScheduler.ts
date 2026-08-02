@@ -1,4 +1,4 @@
-import type { ScheduledJob } from "../../../../contracts/jobs.ts";
+import type { ScheduledJob } from "../../../../contracts/jobs/scheduled.ts";
 import { database } from "../../database/connection.ts";
 import { invalidateCacheEntry } from "../../lib/cacheStore.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";

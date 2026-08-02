@@ -1,4 +1,4 @@
-import type { JobDisableIntent } from "../../../contracts/jobs.ts";
+import type { JobDisableIntent } from "../../../contracts/jobs/scheduled.ts";
 import { HttpError } from "../http/core.ts";
 
 const disableIntentCommentMaxLength = 1000;

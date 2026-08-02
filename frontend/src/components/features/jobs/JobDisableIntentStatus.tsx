@@ -1,4 +1,4 @@
-import type { JobDisableIntent } from "../../../../../contracts/jobs";
+import type { JobDisableIntent } from "../../../../../contracts/jobs/scheduled";
 import { formatDate } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 

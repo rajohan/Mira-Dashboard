@@ -1,4 +1,4 @@
-import type { JobResourceClass } from "../../../../contracts/jobs.ts";
+import type { JobResourceClass } from "../../../../contracts/jobs/shared.ts";
 import {
     refreshKopiaBackupCache,
     refreshWalgBackupCache,

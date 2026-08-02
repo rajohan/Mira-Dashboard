@@ -7,7 +7,7 @@ import {
     parseCronToggleRequest,
     parseCronUpdateRequest,
 } from "../../../contracts/cron.ts";
-import type { JobDisableIntent } from "../../../contracts/jobs.ts";
+import type { JobDisableIntent } from "../../../contracts/jobs/scheduled.ts";
 import { json } from "../http/core.ts";
 import {
     type ParametersRequest,

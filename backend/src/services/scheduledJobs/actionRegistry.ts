@@ -1,4 +1,4 @@
-import type { ScheduledJob } from "../../../../contracts/jobs.ts";
+import type { ScheduledJob } from "../../../../contracts/jobs/scheduled.ts";
 import { ScheduledJobValidationError } from "./errors.ts";
 
 export interface ScheduledJobActionContext {

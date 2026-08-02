@@ -1,12 +1,14 @@
 import type {
-    JobResourceClass,
     ScheduledJob,
     ScheduledJobPatch,
     ScheduledJobRun,
     ScheduledJobRunStatus,
-    ScheduledJobScheduleType,
     ScheduledJobTriggerType,
-} from "../../../../contracts/jobs.ts";
+} from "../../../../contracts/jobs/scheduled.ts";
+import type {
+    JobResourceClass,
+    ScheduledJobScheduleType,
+} from "../../../../contracts/jobs/shared.ts";
 import { database, sqlNullable } from "../../database/connection.ts";
 import { isJobResourceClass } from "../../lib/jobResources.ts";
 import { parseJobDisableIntent } from "../jobDisableIntent.ts";

@@ -1,7 +1,7 @@
 import type {
     ScheduledJobRun,
     ScheduledJobTriggerType,
-} from "../../../../contracts/jobs.ts";
+} from "../../../../contracts/jobs/scheduled.ts";
 import { database, sqlNullable } from "../../database/connection.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { insertJobExecution } from "../jobExecutionQueue/repository.ts";

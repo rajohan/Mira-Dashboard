@@ -3,9 +3,9 @@ import type {
     JobExecutionCancelResponse,
     JobExecutionResponse,
     JobExecutionsResponse,
-    JobWorkerClaimsMutationResponse,
-} from "../../../contracts/jobs.ts";
-import { parseJobWorkerClaimsPatch } from "../../../contracts/jobs.ts";
+} from "../../../contracts/jobs/executions.ts";
+import type { JobWorkerClaimsMutationResponse } from "../../../contracts/jobs/workerClaims.ts";
+import { parseJobWorkerClaimsPatch } from "../../../contracts/jobs/workerClaims.ts";
 import { json } from "../http/core.ts";
 import {
     type ParametersRequest,

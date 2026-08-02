@@ -1,7 +1,5 @@
-import type {
-    ScheduledJob,
-    ScheduledJobScheduleType,
-} from "../../../../contracts/jobs.ts";
+import type { ScheduledJob } from "../../../../contracts/jobs/scheduled.ts";
+import type { ScheduledJobScheduleType } from "../../../../contracts/jobs/shared.ts";
 import { ScheduledJobValidationError } from "./errors.ts";
 
 const MINIMUM_INTERVAL_SECONDS = 60;

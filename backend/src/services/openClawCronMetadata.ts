@@ -1,4 +1,4 @@
-import type { JobDisableIntent } from "../../../contracts/jobs.ts";
+import type { JobDisableIntent } from "../../../contracts/jobs/scheduled.ts";
 import { database } from "../database/connection.ts";
 import { parseJobDisableIntent } from "./jobDisableIntent.ts";
 

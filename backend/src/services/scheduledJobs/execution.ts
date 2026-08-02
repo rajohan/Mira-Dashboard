@@ -1,4 +1,7 @@
-import type { ScheduledJob, ScheduledJobRun } from "../../../../contracts/jobs.ts";
+import type {
+    ScheduledJob,
+    ScheduledJobRun,
+} from "../../../../contracts/jobs/scheduled.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { withJobResourceClass } from "../../lib/jobResources.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";

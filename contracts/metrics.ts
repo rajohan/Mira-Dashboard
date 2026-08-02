@@ -1,6 +1,6 @@
 import * as v from "valibot";
 
-import { jobExecutionSummarySchema } from "./jobs";
+import { jobExecutionSummarySchema } from "./jobs/executions";
 import { finiteNumberSchema, parseContract } from "./runtime";
 
 const numberRecordSchema = v.record(v.string(), finiteNumberSchema);

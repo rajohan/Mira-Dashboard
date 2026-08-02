@@ -1,5 +1,8 @@
 import type { CronJob } from "../../../../../contracts/cron";
-import type { JobDisableIntent, ScheduledJob } from "../../../../../contracts/jobs";
+import type {
+    JobDisableIntent,
+    ScheduledJob,
+} from "../../../../../contracts/jobs/scheduled";
 
 export type JobsView = "scheduled" | "openclaw";
 export type DisableMode = JobDisableIntent["mode"];

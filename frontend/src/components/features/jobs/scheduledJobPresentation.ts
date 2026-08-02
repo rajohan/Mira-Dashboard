@@ -1,4 +1,7 @@
-import type { ScheduledJob, ScheduledJobRunStatus } from "../../../../../contracts/jobs";
+import type {
+    ScheduledJob,
+    ScheduledJobRunStatus,
+} from "../../../../../contracts/jobs/scheduled";
 import { formatUtcTimeOfDayInAppTimeZone } from "../../../utils/format";
 
 export const scheduleTypeOptions = [

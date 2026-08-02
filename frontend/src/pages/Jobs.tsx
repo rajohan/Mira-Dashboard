@@ -6,7 +6,7 @@ import type {
     JobDisableIntent,
     ScheduledJob,
     ScheduledJobPatch,
-} from "../../../contracts/jobs";
+} from "../../../contracts/jobs/scheduled";
 import { CronJobList } from "../components/features/cron/CronJobList";
 import { CronJobEditor } from "../components/features/jobs/CronJobEditor";
 import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";

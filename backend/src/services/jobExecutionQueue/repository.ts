@@ -1,9 +1,9 @@
+import type { JobExecutionSummary } from "../../../../contracts/jobs/executions.ts";
 import type {
     JobExecutionStatus,
-    JobExecutionSummary,
     JobExecutionTriggerType,
     JobResourceClass,
-} from "../../../../contracts/jobs.ts";
+} from "../../../../contracts/jobs/shared.ts";
 import { database, sqlNullable } from "../../database/connection.ts";
 import { currentRequestAuditContext } from "../../http/requestAuditContext.ts";
 import { isJobResourceClass, jobResourcePriority } from "../../lib/jobResources.ts";

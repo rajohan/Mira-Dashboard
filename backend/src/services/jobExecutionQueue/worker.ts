@@ -1,4 +1,4 @@
-import type { JobExecutionStatus } from "../../../../contracts/jobs.ts";
+import type { JobExecutionStatus } from "../../../../contracts/jobs/shared.ts";
 import { database, sqlNullable } from "../../database/connection.ts";
 import type { AuditOutcome } from "../auditEvents.ts";
 import { getJobWorkerClaimsState } from "../jobWorkerControl.ts";

@@ -25,12 +25,12 @@ import {
 } from "../../../contracts/delivery/pullRequestActions";
 import { parseExecRequest } from "../../../contracts/exec";
 import { parseFileContent, parseFilesResponse } from "../../../contracts/files";
+import { parseJobExecutionsResponse } from "../../../contracts/jobs/executions";
 import {
-    parseJobExecutionsResponse,
-    parseJobWorkerClaimsPatch,
     parseScheduledJobsResponse,
     parseScheduledJobUpdateRequest,
-} from "../../../contracts/jobs";
+} from "../../../contracts/jobs/scheduled";
+import { parseJobWorkerClaimsPatch } from "../../../contracts/jobs/workerClaims";
 import {
     parseLogRotationRunResult,
     parseLogRotationStatus,

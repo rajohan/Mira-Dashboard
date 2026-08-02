@@ -1,7 +1,7 @@
 import { Activity, Clock3, Cpu, Layers3, Pause, Play, XCircle } from "lucide-react";
 import type { ComponentProps } from "react";
 
-import type { JobExecution } from "../../../../../contracts/jobs";
+import type { JobExecution } from "../../../../../contracts/jobs/executions";
 import {
     useCancelJobExecution,
     useJobExecutions,

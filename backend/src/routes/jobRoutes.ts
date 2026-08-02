@@ -4,8 +4,8 @@ import type {
     ScheduledJobRunResponse,
     ScheduledJobRunsResponse,
     ScheduledJobsResponse,
-} from "../../../contracts/jobs.ts";
-import { parseScheduledJobUpdateRequest } from "../../../contracts/jobs.ts";
+} from "../../../contracts/jobs/scheduled.ts";
+import { parseScheduledJobUpdateRequest } from "../../../contracts/jobs/scheduled.ts";
 import { json } from "../http/core.ts";
 import {
     type ParametersRequest,

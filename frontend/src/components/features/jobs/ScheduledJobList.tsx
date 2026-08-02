@@ -1,4 +1,4 @@
-import type { ScheduledJob } from "../../../../../contracts/jobs";
+import type { ScheduledJob } from "../../../../../contracts/jobs/scheduled";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
