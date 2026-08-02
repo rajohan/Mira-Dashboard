@@ -1594,18 +1594,21 @@ export class OpenClawChatBridge {
             retentionPayload || payloadView,
             envelope.canonicalEvents
         );
-        const replayEnvelope =
-            shouldRetainProviderEvent || !resumedCompactionRun
+        const continuationReplayEnvelope = resumedCompactionRun
+            ? {
+                  ...envelope,
+                  canonicalEvents: [],
+                  payload: {
+                      miraReplayMarker: DEFERRED_COMPACTION_CONTINUATION_MARKER,
+                      runId: explicitRunId || resumedCompactionRun.runId,
+                      sessionKey: storageSessionKey,
+                  },
+              }
+            : undefined;
+        let replayEnvelope =
+            shouldRetainProviderEvent || !continuationReplayEnvelope
                 ? envelope
-                : {
-                      ...envelope,
-                      canonicalEvents: [],
-                      payload: {
-                          miraReplayMarker: DEFERRED_COMPACTION_CONTINUATION_MARKER,
-                          runId: explicitRunId || resumedCompactionRun.runId,
-                          sessionKey: storageSessionKey,
-                      },
-                  };
+                : continuationReplayEnvelope;
         const associationBytes = explicitRunId
             ? Buffer.byteLength(
                   JSON.stringify({ runId: explicitRunId, sessionKey: storageSessionKey })
@@ -1627,7 +1630,11 @@ export class OpenClawChatBridge {
             }
             return [];
         }
-        const serializedBytes = Buffer.byteLength(JSON.stringify(replayEnvelope));
+        let serializedBytes = Buffer.byteLength(JSON.stringify(replayEnvelope));
+        if (serializedBytes > MAX_BYTES_PER_EVENT && continuationReplayEnvelope) {
+            replayEnvelope = continuationReplayEnvelope;
+            serializedBytes = Buffer.byteLength(JSON.stringify(replayEnvelope));
+        }
         let retainedEnvelope: OpenClawRuntimeEnvelope | undefined;
         if (isTerminal) {
             retainedEnvelope = boundedCanonicalRuntimeEnvelope(
@@ -2072,7 +2079,7 @@ export class OpenClawChatBridge {
      * Allows one interrupted conversation to resume under a fresh provider run ID.
      * @param disconnectedAt Disconnected at timestamp.
      */
-    markGatewayDisconnected(disconnectedAt = Date.now()): void {
+    markGatewayDisconnected(disconnectedAt = this.#now()): void {
         this.#gatewayConnected = false;
         for (const [sessionKey, runs] of this.#runsBySession) {
             const interruptedRuns = runs

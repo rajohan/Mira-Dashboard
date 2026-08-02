@@ -660,13 +660,18 @@ describe("gateway behavior", () => {
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
+        const markGatewayDisconnected = jest.spyOn(
+            OpenClawChatBridge.prototype,
+            "markGatewayDisconnected"
+        );
         cleanupCallbacks.push(
             gatewayModule.setGatewayRootsForTests({
                 dashboardOpenClawHome: dashboardHome,
                 openClawHome: openclawHome,
             }),
             gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
-            () => gateway.shutdown()
+            () => gateway.shutdown(),
+            () => markGatewayDisconnected.mockRestore()
         );
         const socket = new FakeDashboardSocket();
         gateway.handleDashboardClient(socket);
@@ -683,6 +688,7 @@ describe("gateway behavior", () => {
             },
         });
         gateway.shutdown();
+        expect(markGatewayDisconnected).toHaveBeenCalledTimes(1);
 
         socket.sent.length = 0;
         gateway.init("reconnect-replay-token");

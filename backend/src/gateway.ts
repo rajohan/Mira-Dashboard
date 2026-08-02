@@ -1784,6 +1784,9 @@ async function request(
 function shutdown(): void {
     const previousGatewayClient = gatewayState.client;
     const wasConnected = gatewayState.isConnected;
+    if (wasConnected) {
+        chatReplayState.bridge.markGatewayDisconnected();
+    }
     try {
         previousGatewayClient?.stop();
     } catch (error) {

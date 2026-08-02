@@ -18,7 +18,11 @@ import {
     mergeChatImages,
     mergeChatMessageProvenance,
 } from "../chatTypes";
-import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
+import {
+    messageDeleteKey,
+    stableChatStringify,
+    stripEquivalentChatTextPrefix,
+} from "../chatUtilities";
 
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";
@@ -639,7 +643,7 @@ function applyAssistantSegment(
     const startsNewSegment =
         previousSegments.length === 0 ||
         run.lastContentKind !== "assistant" ||
-        latestAssistantBoundarySequence(run) > (run.assistantSequence ?? -1);
+        (run.assistantBoundarySequence ?? -1) > (run.assistantSequence ?? -1);
     const previousSegment = startsNewSegment ? undefined : previousSegments.at(-1);
     if (event.mode === "replace") {
         const sealedText = (
@@ -647,8 +651,9 @@ function applyAssistantSegment(
         )
             .map((entry) => entry.message.text)
             .join("");
-        if (sealedText && contribution.startsWith(sealedText)) {
-            contribution = contribution.slice(sealedText.length);
+        if (sealedText) {
+            contribution =
+                stripEquivalentChatTextPrefix(contribution, sealedText) ?? contribution;
         }
     }
     let segmentText = contribution;
@@ -1240,8 +1245,8 @@ function mergeAcknowledgedRuns(
         optimistic.assistantSequence ?? -1
     );
     const assistantBoundarySequence = Math.max(
-        existing.assistantBoundarySequence ?? -1,
-        optimistic.assistantBoundarySequence ?? -1
+        latestAssistantBoundarySequence(existing),
+        latestAssistantBoundarySequence(optimistic)
     );
     const startedAt = (
         Date.parse(existing.startedAt) <= Date.parse(optimistic.startedAt)
@@ -1432,7 +1437,12 @@ function adjacentCompactionRunEntry(
     return adjacentCompactionRuns.length === 1 ? adjacentCompactionRuns[0] : undefined;
 }
 
-function settleAdjacentCompactionLifecycle(
+/**
+ * Consumes a successful nested lifecycle so it cannot terminalize the parent run.
+ * Failed lifecycles update the compaction row but continue into the parent reducer.
+ * @returns Whether the nested lifecycle event was consumed.
+ */
+function consumeAdjacentCompactionLifecycle(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
 ): boolean {
@@ -1530,11 +1540,11 @@ export function reduceChatRuntime(
                   ),
               }
             : { controls: [], lastSequence: -1, runs: {}, sessionKey };
-        const settledAdjacentCompaction = settleAdjacentCompactionLifecycle(
+        const consumedAdjacentCompaction = consumeAdjacentCompactionLifecycle(
             session,
             normalizedEvent
         );
-        if (settledAdjacentCompaction) {
+        if (consumedAdjacentCompaction) {
             session.lastSequence = normalizedEvent.sequence;
             nextState = commitChatSession(nextState, previousSessionKey, session);
             continue;
