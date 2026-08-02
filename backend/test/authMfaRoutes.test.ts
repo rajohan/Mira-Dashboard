@@ -8,7 +8,7 @@ import type {
 import type { Server } from "bun";
 import { generate } from "otplib";
 
-import type { WebAuthnCredential } from "../../contracts/accountSecurity.ts";
+import type { WebAuthnCredential } from "../../contracts/accountSecurity/summary.ts";
 import {
     createSession,
     getAuthSessionFromSessionId,

@@ -1,7 +1,5 @@
-import type {
-    AccountSecuritySummary,
-    DashboardMfaMethod as MfaLoginMethod,
-} from "../../../../contracts/accountSecurity.ts";
+import type { DashboardMfaMethod as MfaLoginMethod } from "../../../../contracts/accountSecurity/methods.ts";
+import type { AccountSecuritySummary } from "../../../../contracts/accountSecurity/summary.ts";
 import { database } from "../../database/connection.ts";
 
 interface WebAuthnFactorSummaryRow {

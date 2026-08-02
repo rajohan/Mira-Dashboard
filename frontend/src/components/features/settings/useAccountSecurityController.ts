@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { TotpEnrollment } from "../../../../../contracts/accountSecurity";
+import type { TotpEnrollment } from "../../../../../contracts/accountSecurity/responses";
 import {
     useAccountSecurity,
     useChangePassword,

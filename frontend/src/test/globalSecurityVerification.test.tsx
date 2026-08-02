@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import type { AccountSecuritySummary } from "../../../contracts/accountSecurity";
+import type { AccountSecuritySummary } from "../../../contracts/accountSecurity/summary";
 import { parseJsonText, requestUrl } from "../../../test/support/fetch";
 import { GlobalSecurityVerification } from "../components/features/settings/GlobalSecurityVerification";
 import { accountSecurityKeys } from "../hooks/useAccountSecurity";

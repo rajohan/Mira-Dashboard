@@ -4,11 +4,8 @@ import type {
 } from "@simplewebauthn/browser";
 import * as v from "valibot";
 
-import {
-    DASHBOARD_AUTH_METHODS,
-    DASHBOARD_MFA_METHODS,
-    mfaCodeRequestSchema,
-} from "./accountSecurity";
+import { DASHBOARD_AUTH_METHODS, DASHBOARD_MFA_METHODS } from "./accountSecurity/methods";
+import { mfaCodeRequestSchema } from "./accountSecurity/requests";
 import {
     finiteNumberSchema,
     parseContract,

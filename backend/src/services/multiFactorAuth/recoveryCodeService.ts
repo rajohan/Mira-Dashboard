@@ -1,4 +1,4 @@
-import type { FactorConfirmation } from "../../../../contracts/accountSecurity.ts";
+import type { FactorConfirmation } from "../../../../contracts/accountSecurity/responses.ts";
 import { database } from "../../database/connection.ts";
 import { randomHex } from "../mfaCrypto.ts";
 

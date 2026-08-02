@@ -1,11 +1,9 @@
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import type { Server } from "bun";
 
-import type {
-    AccountSecuritySummary,
-    DashboardMfaMethod,
-    MfaStepUpResponse,
-} from "../../../../contracts/accountSecurity.ts";
+import type { DashboardMfaMethod } from "../../../../contracts/accountSecurity/methods.ts";
+import type { MfaStepUpResponse } from "../../../../contracts/accountSecurity/responses.ts";
+import type { AccountSecuritySummary } from "../../../../contracts/accountSecurity/summary.ts";
 import type { ContractParser } from "../../../../contracts/runtime.ts";
 import { rotateSession } from "../../auth/sessionMutations.ts";
 import {

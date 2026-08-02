@@ -3,7 +3,7 @@ import type { Server } from "bun";
 import {
     parseMfaCodeRequest,
     parseWebAuthnAuthenticationRequest,
-} from "../../../../contracts/accountSecurity.ts";
+} from "../../../../contracts/accountSecurity/requests.ts";
 import { json } from "../../http/core.ts";
 import { routeFailureResponse } from "../../http/routeSupport.ts";
 import {

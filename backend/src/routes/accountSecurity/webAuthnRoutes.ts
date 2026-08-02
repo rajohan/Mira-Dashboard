@@ -1,7 +1,7 @@
 import type { Server } from "bun";
 
-import type { WebAuthnRegistrationResponse } from "../../../../contracts/accountSecurity.ts";
-import { parseWebAuthnRegistrationRequest } from "../../../../contracts/accountSecurity.ts";
+import { parseWebAuthnRegistrationRequest } from "../../../../contracts/accountSecurity/requests.ts";
+import type { WebAuthnRegistrationResponse } from "../../../../contracts/accountSecurity/responses.ts";
 import { hasRecentMfaVerification } from "../../auth/sessionPolicy.ts";
 import { json } from "../../http/core.ts";
 import { type ParametersRequest, routeFailureResponse } from "../../http/routeSupport.ts";

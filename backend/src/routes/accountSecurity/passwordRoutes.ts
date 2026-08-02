@@ -1,10 +1,10 @@
 import type { Server } from "bun";
 
-import type { PasswordReauthenticationResponse } from "../../../../contracts/accountSecurity.ts";
 import {
     parseAccountPasswordRequest,
     parsePasswordChangeRequest,
-} from "../../../../contracts/accountSecurity.ts";
+} from "../../../../contracts/accountSecurity/requests.ts";
+import type { PasswordReauthenticationResponse } from "../../../../contracts/accountSecurity/responses.ts";
 import {
     changePasswordAndRotateSession,
     rotateSession,

@@ -1,4 +1,4 @@
-import type { DashboardAuthMethod } from "../../../contracts/accountSecurity.ts";
+import type { DashboardAuthMethod } from "../../../contracts/accountSecurity/methods.ts";
 import type { DashboardUser } from "../../../contracts/auth.ts";
 
 export interface SessionRow extends DashboardUser {

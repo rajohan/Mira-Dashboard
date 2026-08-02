@@ -1,4 +1,4 @@
-import type { DashboardMfaMethod as MfaLoginMethod } from "../../../../contracts/accountSecurity.ts";
+import type { DashboardMfaMethod as MfaLoginMethod } from "../../../../contracts/accountSecurity/methods.ts";
 import { database, sqlNullable } from "../../database/connection.ts";
 import { areTimingSafeHashesEqual, randomHex, sha256Hex } from "../mfaCrypto.ts";
 

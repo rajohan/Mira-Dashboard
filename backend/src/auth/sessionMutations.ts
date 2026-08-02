@@ -1,4 +1,4 @@
-import type { DashboardAuthMethod } from "../../../contracts/accountSecurity.ts";
+import type { DashboardAuthMethod } from "../../../contracts/accountSecurity/methods.ts";
 import { database } from "../database/connection.ts";
 import { getAuthSessionFromSessionId, insertSession } from "./sessionRepository.ts";
 import { parseSessionToken } from "./sessionToken.ts";

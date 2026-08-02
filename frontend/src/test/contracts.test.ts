@@ -1,13 +1,13 @@
 import { describe, expect, it } from "bun:test";
 
+import { parseTotpEnrollmentRequest } from "../../../contracts/accountSecurity/requests";
 import {
-    parseAccountSecuritySummary,
     parseMfaStepUpResponse,
     parsePasswordReauthenticationResponse,
-    parseTotpEnrollmentRequest,
     parseTotpConfirmationResponse,
     parseWebAuthnRegistrationResponse,
-} from "../../../contracts/accountSecurity";
+} from "../../../contracts/accountSecurity/responses";
+import { parseAccountSecuritySummary } from "../../../contracts/accountSecurity/summary";
 import { parseApiErrorResponse } from "../../../contracts/apiErrors";
 import { parseBackupStatusResponse } from "../../../contracts/backups";
 import { canonicalChatImageDisplayUrl } from "../../../contracts/chat/canonicalImageUrls";

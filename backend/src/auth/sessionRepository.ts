@@ -1,7 +1,5 @@
-import type {
-    DashboardAuthMethod,
-    DashboardAuthSession,
-} from "../../../contracts/accountSecurity.ts";
+import type { DashboardAuthMethod } from "../../../contracts/accountSecurity/methods.ts";
+import type { DashboardAuthSession } from "../../../contracts/accountSecurity/summary.ts";
 import type { DashboardUser } from "../../../contracts/auth.ts";
 import { database, sqlNullable } from "../database/connection.ts";
 import { sessionIdleTtlMs } from "./sessionPolicy.ts";

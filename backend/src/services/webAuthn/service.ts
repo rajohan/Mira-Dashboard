@@ -9,10 +9,8 @@ import {
     verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 
-import type {
-    FactorConfirmation,
-    WebAuthnCredential as WebAuthnFactorSummary,
-} from "../../../../contracts/accountSecurity.ts";
+import type { FactorConfirmation } from "../../../../contracts/accountSecurity/responses.ts";
+import type { WebAuthnCredential as WebAuthnFactorSummary } from "../../../../contracts/accountSecurity/summary.ts";
 import { database } from "../../database/connection.ts";
 import { normalizeFactorLabel } from "../multiFactorAuth/factorIdentity.ts";
 import { totalConfirmedFactorCount } from "../multiFactorAuth/factorInventory.ts";

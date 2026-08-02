@@ -1,10 +1,10 @@
 import type { Server } from "bun";
 
-import type { TotpConfirmationResponse } from "../../../../contracts/accountSecurity.ts";
 import {
     parseTotpConfirmationRequest,
     parseTotpEnrollmentRequest,
-} from "../../../../contracts/accountSecurity.ts";
+} from "../../../../contracts/accountSecurity/requests.ts";
+import type { TotpConfirmationResponse } from "../../../../contracts/accountSecurity/responses.ts";
 import { hasRecentMfaVerification } from "../../auth/sessionPolicy.ts";
 import { json } from "../../http/core.ts";
 import { type ParametersRequest, routeFailureResponse } from "../../http/routeSupport.ts";

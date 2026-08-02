@@ -3,8 +3,8 @@ import { generateSecret, generateURI, verify } from "otplib";
 import type {
     FactorConfirmation,
     TotpEnrollment,
-    TotpFactor as TotpFactorSummary,
-} from "../../../../contracts/accountSecurity.ts";
+} from "../../../../contracts/accountSecurity/responses.ts";
+import type { TotpFactor as TotpFactorSummary } from "../../../../contracts/accountSecurity/summary.ts";
 import { database } from "../../database/connection.ts";
 import {
     decryptStoredSecret,
