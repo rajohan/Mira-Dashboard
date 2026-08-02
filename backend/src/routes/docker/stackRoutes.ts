@@ -1,4 +1,4 @@
-import { parseDockerStackActionRequest } from "../../../../contracts/docker.ts";
+import { parseDockerStackActionRequest } from "../../../../contracts/docker/operations.ts";
 import { json } from "../../http/core.ts";
 import { outputString, runQueuedDockerAction } from "./mutationExecution.ts";
 import { readDockerJson } from "./request.ts";

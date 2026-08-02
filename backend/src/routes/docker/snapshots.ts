@@ -1,4 +1,4 @@
-import { parseDockerSummaryCache } from "../../../../contracts/docker.ts";
+import { parseDockerSummaryCache } from "../../../../contracts/docker/summary.ts";
 import { json, jsonWithEtag } from "../../http/core.ts";
 import { getCacheEntry } from "../../lib/cacheStore.ts";
 import { CoalescedSnapshot } from "../../lib/coalescedSnapshot.ts";

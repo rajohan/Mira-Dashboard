@@ -9,7 +9,7 @@ import {
 import { FileText, RotateCcw, SquareTerminal } from "lucide-react";
 import { useState } from "react";
 
-import type { DockerContainer } from "../../../../../contracts/docker";
+import type { DockerContainer } from "../../../../../contracts/docker/inventory";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";

@@ -1,7 +1,5 @@
-import {
-    type DockerContainersResponse,
-    parseDockerContainerActionRequest,
-} from "../../../../contracts/docker.ts";
+import { type DockerContainersResponse } from "../../../../contracts/docker/inventory.ts";
+import { parseDockerContainerActionRequest } from "../../../../contracts/docker/operations.ts";
 import { json } from "../../http/core.ts";
 import { routeFailureResponse } from "../../http/routeSupport.ts";
 import { isDevelopmentSafeMode } from "../../requestPolicy/evaluator.ts";

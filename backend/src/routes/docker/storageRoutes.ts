@@ -1,4 +1,4 @@
-import { parseDockerPruneRequest } from "../../../../contracts/docker.ts";
+import { parseDockerPruneRequest } from "../../../../contracts/docker/operations.ts";
 import { json } from "../../http/core.ts";
 import { getImages, getVolumes } from "../../services/docker/inventory.ts";
 import { outputString, runQueuedDockerAction } from "./mutationExecution.ts";

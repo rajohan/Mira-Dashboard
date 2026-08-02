@@ -1,4 +1,4 @@
-import { parseDockerExecStartRequest } from "../../../../contracts/docker.ts";
+import { parseDockerExecStartRequest } from "../../../../contracts/docker/operations.ts";
 import { database } from "../../database/connection.ts";
 import { json } from "../../http/core.ts";
 import { routeErrorResponse, routeFailureResponse } from "../../http/routeSupport.ts";
