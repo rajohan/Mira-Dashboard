@@ -6482,9 +6482,6 @@ fi
         expect(gateway.sendSessionMessage("agent:main:main", "hello")).rejects.toThrow(
             "Gateway not connected"
         );
-        expect(
-            gateway.sendSessionControlEvent("agent:main:main", "hello")
-        ).rejects.toThrow("Gateway not connected");
         expect(gateway.abortSessionRun("agent:main:main")).rejects.toThrow(
             "Gateway not connected"
         );

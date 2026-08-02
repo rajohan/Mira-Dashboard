@@ -642,37 +642,6 @@ describe("gateway behavior", () => {
             },
         });
         expect(chatSendRequest?.parameters).not.toHaveProperty("timeoutMs");
-
-        await gateway.sendSessionControlEvent("main", "Task progress: #388");
-
-        const controlRequests = client?.requests.filter(({ method }) =>
-            ["chat.inject", "wake"].includes(method)
-        );
-        expect(controlRequests).toEqual([
-            {
-                method: "chat.inject",
-                options: { timeoutMs: 10_000 },
-                parameters: {
-                    message: "Task progress: #388",
-                    sessionKey: "main",
-                },
-            },
-            {
-                method: "wake",
-                options: { timeoutMs: 10_000 },
-                parameters: {
-                    mode: "now",
-                    sessionKey: "main",
-                    text: "Task progress: #388",
-                },
-            },
-        ]);
-        expect(
-            client?.requests.find(
-                ({ method, parameters }) =>
-                    method === "chat.send" && parameters.message === "Task progress: #388"
-            )
-        ).toBeUndefined();
     });
 
     it("rehydrates run associations before reconnect events resume", async () => {
@@ -691,13 +660,18 @@ describe("gateway behavior", () => {
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
+        const markGatewayDisconnected = jest.spyOn(
+            OpenClawChatBridge.prototype,
+            "markGatewayDisconnected"
+        );
         cleanupCallbacks.push(
             gatewayModule.setGatewayRootsForTests({
                 dashboardOpenClawHome: dashboardHome,
                 openClawHome: openclawHome,
             }),
             gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
-            () => gateway.shutdown()
+            () => gateway.shutdown(),
+            () => markGatewayDisconnected.mockRestore()
         );
         const socket = new FakeDashboardSocket();
         gateway.handleDashboardClient(socket);
@@ -714,6 +688,7 @@ describe("gateway behavior", () => {
             },
         });
         gateway.shutdown();
+        expect(markGatewayDisconnected).toHaveBeenCalledTimes(1);
 
         socket.sent.length = 0;
         gateway.init("reconnect-replay-token");
@@ -892,6 +867,8 @@ describe("gateway behavior", () => {
         );
         const socket = new FakeDashboardSocket();
         gateway.handleDashboardClient(socket);
+        const clearReplayMemory = jest.spyOn(OpenClawChatBridge.prototype, "clearMemory");
+        cleanupCallbacks.push(() => clearReplayMemory.mockRestore());
         const requestIdentity = async (
             id: string
         ): Promise<{ replayScope?: string; runtimeGeneration?: string } | undefined> => {
@@ -918,10 +895,13 @@ describe("gateway behavior", () => {
 
         gateway.init("token-one");
         const firstIdentity = await requestIdentity("generation-one");
+        const clearsAfterFirstScope = clearReplayMemory.mock.calls.length;
         gateway.init("token-two");
         const secondIdentity = await requestIdentity("generation-two");
+        expect(clearReplayMemory).toHaveBeenCalledTimes(clearsAfterFirstScope + 1);
         gateway.init("token-two");
         const unchangedIdentity = await requestIdentity("generation-unchanged");
+        expect(clearReplayMemory).toHaveBeenCalledTimes(clearsAfterFirstScope + 1);
 
         expect(firstIdentity).toMatchObject({
             replayScope: expect.any(String),

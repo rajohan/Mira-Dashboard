@@ -818,6 +818,53 @@ export function isRecoveredAssistantText(left: string, right: string): boolean {
     );
 }
 
+const CHAT_TEXT_GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
+
+function normalizedChatTextPrefix(text: string): string {
+    return text.normalize("NFKC").replaceAll(/\s+/gu, " ");
+}
+
+/**
+ * Removes a semantically equivalent prefix while preserving the original remainder.
+ * This tolerates Unicode normalization and collapsed whitespace from provider finals.
+ * @param text Full provider text.
+ * @param prefix Previously sealed assistant text.
+ * @returns The untouched remainder, or undefined when the prefix does not match.
+ */
+export function stripEquivalentChatTextPrefix(
+    text: string,
+    prefix: string
+): string | undefined {
+    if (text.startsWith(prefix)) {
+        return text.slice(prefix.length);
+    }
+    const normalizedPrefix = normalizedChatTextPrefix(prefix);
+    if (!normalizedPrefix) {
+        return undefined;
+    }
+    let normalizedCandidate = "";
+    for (const part of CHAT_TEXT_GRAPHEME_SEGMENTER.segment(text)) {
+        const normalizedPart = normalizedChatTextPrefix(part.segment);
+        normalizedCandidate +=
+            normalizedCandidate.endsWith(" ") && normalizedPart.startsWith(" ")
+                ? normalizedPart.slice(1)
+                : normalizedPart;
+        if (!normalizedPrefix.startsWith(normalizedCandidate)) {
+            return undefined;
+        }
+        if (normalizedCandidate === normalizedPrefix) {
+            let end = part.index + part.segment.length;
+            if (normalizedPrefix.endsWith(" ")) {
+                end += text.slice(end).match(/^\s+/u)?.[0].length ?? 0;
+            }
+            return text.slice(end);
+        }
+    }
+    return undefined;
+}
+
 /**
  * Performs dedupe messages.
  * @param messages Messages value.

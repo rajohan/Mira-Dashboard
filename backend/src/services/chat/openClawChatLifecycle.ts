@@ -82,6 +82,25 @@ export function isSettlingLifecycleEvent(event: unknown, payload: unknown): bool
     );
 }
 
+export function isSuccessfulLifecycleSettlementEvent(
+    event: unknown,
+    payload: unknown
+): boolean {
+    const record = runtimePayloadView(payload);
+    const stream = (stringField(record, "stream") || "").toLowerCase();
+    const phase = (stringField(record, "phase") || "").toLowerCase();
+    const status = (stringField(record, "status") || "").toLowerCase();
+    const explicitError =
+        stringField(record, "errorMessage") ||
+        stringField(record, "promptError") ||
+        stringField(record, "error");
+    const isFailed =
+        Boolean(explicitError) ||
+        record?.aborted === true ||
+        TERMINAL_FAILURE_STATES.has(status);
+    return event === "agent" && stream === "lifecycle" && phase === "end" && !isFailed;
+}
+
 /**
  * Identifies provider work that can continue one interrupted conversation.
  * @param event Provider event name.
