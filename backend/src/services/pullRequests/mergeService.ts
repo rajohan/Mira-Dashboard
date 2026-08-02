@@ -4,11 +4,9 @@ import type {
     WorktreeCleanupResult,
 } from "../../../../contracts/delivery/previews.ts";
 import type {
-    GitHubAsyncPullRequestMergeResult,
     GitHubPullRequestStackResource,
     PullRequestExpectedHead,
 } from "../../../../contracts/delivery/pullRequests.ts";
-import { parseGitHubAsyncPullRequestMergeResult } from "../../../../contracts/delivery/pullRequests.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { cleanupClosedPullRequestPreview } from "../pullRequestPreviews/host.ts";
 import {
@@ -22,14 +20,10 @@ import {
     releaseDeploymentLock,
 } from "./deploymentLock.ts";
 import { startDeployLatest } from "./deploymentService.ts";
-import {
-    parseRepoParts,
-    runCommand,
-    runGhJson,
-    runGhJsonWithResultBody,
-} from "./githubCommandClient.ts";
+import { runCommand } from "./githubCommandClient.ts";
 import { getPullRequest, getPullRequestState } from "./githubPullRequestListing.ts";
 import {
+    mergePullRequestStack,
     requirePullRequestStack,
     requireStandalonePullRequest,
 } from "./githubStackClient.ts";
@@ -115,104 +109,6 @@ function pullRequestStackQueuedMessage(
     return willDeploy
         ? `${queued}. Delivery retained every worktree and will not auto-deploy; deploy latest main after GitHub finishes the queue`
         : `${queued}. Delivery retained every worktree because GitHub has not confirmed the PRs merged`;
-}
-
-const STACK_MERGE_POLL_INTERVAL_MS = 1000;
-const STACK_MERGE_TIMEOUT_MS = 5 * 60 * 1000;
-export const STACK_MERGE_JOB_TIMEOUT_MS = STACK_MERGE_TIMEOUT_MS * 2 + 2 * 60 * 1000;
-
-async function mergePullRequestStack(
-    number: number,
-    expectedHeadSha: string,
-    signal?: AbortSignal
-): Promise<GitHubAsyncPullRequestMergeResult> {
-    if (!FULL_COMMIT_SHA_PATTERN.test(expectedHeadSha)) {
-        throw Object.assign(
-            new TypeError("Stack merge requires a full lowercase pull request head SHA"),
-            { statusCode: 400 }
-        );
-    }
-    const repo = parseRepoParts(DASHBOARD_REPO);
-    // Keep both the local refetch and GitHub's request-side SHA precondition:
-    // neither a stale Delivery page nor a push in the final request window may
-    // merge a different selected head than the one the user confirmed.
-    // A command failure is intentionally not reconciled from PR state alone:
-    // without a successful response, Delivery cannot attribute an external
-    // merge to this exact-head request and must retain worktrees/deploy state.
-    let result = await runGhJsonWithResultBody(
-        [
-            "api",
-            "-X",
-            "PUT",
-            `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async`,
-            "-F",
-            "merge_method=squash",
-            "-F",
-            "merge_action=default",
-            "-f",
-            `sha=${expectedHeadSha}`,
-        ],
-        parseGitHubAsyncPullRequestMergeResult,
-        signal,
-        STACK_MERGE_TIMEOUT_MS
-    );
-    if (
-        result.details.expected_head_sha &&
-        result.details.expected_head_sha !== expectedHeadSha
-    ) {
-        throw Object.assign(
-            new Error(
-                `PR #${number} changed while GitHub accepted the stack merge. Verify the stack state before retrying`
-            ),
-            { statusCode: 409 }
-        );
-    }
-    if (
-        result.status === "pending" &&
-        (result.details.expected_head_sha !== expectedHeadSha ||
-            result.details.merge_action !== "default" ||
-            result.details.merge_method !== "squash")
-    ) {
-        throw Object.assign(
-            new Error(
-                `PR #${number} already has an incompatible pending stack merge request`
-            ),
-            { statusCode: 409 }
-        );
-    }
-
-    const deadline = Date.now() + STACK_MERGE_TIMEOUT_MS;
-    while (result.status === "pending") {
-        const uuid = result.details.uuid;
-        if (!uuid) {
-            throw new Error("GitHub stack merge returned pending without a result id");
-        }
-        const remainingBeforePoll = deadline - Date.now();
-        if (remainingBeforePoll <= 0) {
-            throw new Error(`GitHub stack merge for PR #${number} timed out`);
-        }
-        signal?.throwIfAborted();
-        await Bun.sleep(Math.min(STACK_MERGE_POLL_INTERVAL_MS, remainingBeforePoll));
-        signal?.throwIfAborted();
-        const remainingRequestTime = deadline - Date.now();
-        if (remainingRequestTime <= 0) {
-            throw new Error(`GitHub stack merge for PR #${number} timed out`);
-        }
-        result = await runGhJson(
-            [
-                "api",
-                `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async/${uuid}`,
-            ],
-            parseGitHubAsyncPullRequestMergeResult,
-            signal,
-            Math.min(60_000, remainingRequestTime)
-        );
-    }
-
-    if (result.status === "failed") {
-        throw Object.assign(new Error(result.details.message), { statusCode: 409 });
-    }
-    return result;
 }
 
 export interface PullRequestApprovalExecutionOptions {

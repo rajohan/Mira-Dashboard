@@ -1,22 +1,122 @@
 import type {
+    GitHubAsyncPullRequestMergeResult,
     GitHubPullRequestStackResource,
     PullRequestStack,
     PullRequestSummary,
 } from "../../../../contracts/delivery/pullRequests.ts";
 import {
+    parseGitHubAsyncPullRequestMergeResult,
     parseGitHubPullRequestStackResource,
     parseGitHubPullRequestStacks,
 } from "../../../../contracts/delivery/pullRequests.ts";
 import { DASHBOARD_REPO, DEFAULT_BASE } from "./config.ts";
 import {
     GitHubRestApiError,
+    parseRepoParts,
     pullRequestStacksEndpoint,
     runGhJson,
+    runGhJsonWithResultBody,
     runGhRestJson,
 } from "./githubCommandClient.ts";
 import { listDashboardPullRequests } from "./githubPullRequestListing.ts";
 import { validateDashboardStackMembership } from "./reviewPolicy.ts";
-import { isRecord } from "./support.ts";
+import { FULL_COMMIT_SHA_PATTERN, isRecord } from "./support.ts";
+
+const STACK_MERGE_POLL_INTERVAL_MS = 1000;
+const STACK_MERGE_TIMEOUT_MS = 5 * 60 * 1000;
+export const STACK_MERGE_JOB_TIMEOUT_MS = STACK_MERGE_TIMEOUT_MS * 2 + 2 * 60 * 1000;
+
+/** Submits an exact-head native stack merge and waits for GitHub's terminal result. */
+export async function mergePullRequestStack(
+    number: number,
+    expectedHeadSha: string,
+    signal?: AbortSignal
+): Promise<GitHubAsyncPullRequestMergeResult> {
+    if (!FULL_COMMIT_SHA_PATTERN.test(expectedHeadSha)) {
+        throw Object.assign(
+            new TypeError("Stack merge requires a full lowercase pull request head SHA"),
+            { statusCode: 400 }
+        );
+    }
+    const repo = parseRepoParts(DASHBOARD_REPO);
+    // Keep both the local refetch in the merge service and GitHub's request-side
+    // SHA precondition. A command failure is intentionally not reconciled from
+    // PR state alone because it cannot be attributed to this exact-head request.
+    let result = await runGhJsonWithResultBody(
+        [
+            "api",
+            "-X",
+            "PUT",
+            `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async`,
+            "-F",
+            "merge_method=squash",
+            "-F",
+            "merge_action=default",
+            "-f",
+            `sha=${expectedHeadSha}`,
+        ],
+        parseGitHubAsyncPullRequestMergeResult,
+        signal,
+        STACK_MERGE_TIMEOUT_MS
+    );
+    if (
+        result.details.expected_head_sha &&
+        result.details.expected_head_sha !== expectedHeadSha
+    ) {
+        throw Object.assign(
+            new Error(
+                `PR #${number} changed while GitHub accepted the stack merge. Verify the stack state before retrying`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    if (
+        result.status === "pending" &&
+        (result.details.expected_head_sha !== expectedHeadSha ||
+            result.details.merge_action !== "default" ||
+            result.details.merge_method !== "squash")
+    ) {
+        throw Object.assign(
+            new Error(
+                `PR #${number} already has an incompatible pending stack merge request`
+            ),
+            { statusCode: 409 }
+        );
+    }
+
+    const deadline = Date.now() + STACK_MERGE_TIMEOUT_MS;
+    while (result.status === "pending") {
+        const uuid = result.details.uuid;
+        if (!uuid) {
+            throw new Error("GitHub stack merge returned pending without a result id");
+        }
+        const remainingBeforePoll = deadline - Date.now();
+        if (remainingBeforePoll <= 0) {
+            throw new Error(`GitHub stack merge for PR #${number} timed out`);
+        }
+        signal?.throwIfAborted();
+        await Bun.sleep(Math.min(STACK_MERGE_POLL_INTERVAL_MS, remainingBeforePoll));
+        signal?.throwIfAborted();
+        const remainingRequestTime = deadline - Date.now();
+        if (remainingRequestTime <= 0) {
+            throw new Error(`GitHub stack merge for PR #${number} timed out`);
+        }
+        result = await runGhJson(
+            [
+                "api",
+                `repos/${repo.owner}/${repo.name}/pulls/${number}/merge-async/${uuid}`,
+            ],
+            parseGitHubAsyncPullRequestMergeResult,
+            signal,
+            Math.min(60_000, remainingRequestTime)
+        );
+    }
+
+    if (result.status === "failed") {
+        throw Object.assign(new Error(result.details.message), { statusCode: 409 });
+    }
+    return result;
+}
 
 /** Validates that a selected pull request belongs to the requested preview scope. */
 export async function validatePullRequestPreviewScope(

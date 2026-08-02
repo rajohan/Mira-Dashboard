@@ -25,12 +25,11 @@ import {
 } from "./deploymentLock.ts";
 import { registerDeploymentExecutionActions } from "./deploymentService.ts";
 import { validatePrNumber } from "./githubPullRequestListing.ts";
-import { createPullRequestStack } from "./githubStackClient.ts";
 import {
-    approvePullRequest,
-    requireExpectedStackHeads,
+    createPullRequestStack,
     STACK_MERGE_JOB_TIMEOUT_MS,
-} from "./mergeService.ts";
+} from "./githubStackClient.ts";
+import { approvePullRequest, requireExpectedStackHeads } from "./mergeService.ts";
 import { FULL_COMMIT_SHA_PATTERN } from "./support.ts";
 
 function queuedPullRequestResult<T>(execution: JobExecutionRecord): T {
