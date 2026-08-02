@@ -1,26 +1,16 @@
-import { useLiveQuery } from "@tanstack/react-db";
-import { useNavigate, useSearch } from "@tanstack/react-router";
 import { AlertCircle, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { Session } from "../../../contracts/sessions";
-import { sessionsCollection } from "../collections/sessions";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
-    addDeletedMessageKeys,
     chatFastModePatchValue,
     isSessionActive,
-    readDeletedMessageKeys,
-    readStoredChatDiagnosticVisibility,
-    writeDeletedMessageKeys,
-    writeStoredChatDiagnosticVisibility,
 } from "../components/features/chat/chatPageUtilities";
 import { type ChatPreviewItem } from "../components/features/chat/chatTypes";
 import { createChatVisibility as createRuntimeVisibility } from "../components/features/chat/domain/chatPresentation";
-import { isSameChatSession } from "../components/features/chat/domain/chatState";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
 import { useCanonicalChatProjection } from "../components/features/chat/useCanonicalChatProjection";
@@ -29,87 +19,37 @@ import {
     projectChatActivityRows,
     useChatCompactionIndicator,
 } from "../components/features/chat/useChatCompactionIndicator";
+import { useChatDiagnostics } from "../components/features/chat/useChatDiagnostics";
 import { useChatHistory } from "../components/features/chat/useChatHistory";
 import { useChatInputMedia } from "../components/features/chat/useChatInputMedia";
+import { useChatMessageControls } from "../components/features/chat/useChatMessageControls";
 import { useChatModels } from "../components/features/chat/useChatModels";
 import { useChatRuntime } from "../components/features/chat/useChatRuntime";
 import { useChatScroll } from "../components/features/chat/useChatScroll";
+import { useChatSessionSelection } from "../components/features/chat/useChatSessionSelection";
 import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
-import { useAgentsStatus } from "../hooks/useAgents";
-import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
-import {
-    formatSessionType,
-    sortSessionsByTypeAndActivity,
-} from "../utils/sessionUtilities";
-
-/**
- * Normalizes chat agent IDs for case-insensitive session bucketing.
- * @param agentId Agent identifier.
- * @returns Normalized chat agent IDs for case-insensitive session bucketing.
- */
-function normalizeChatAgentId(agentId: string): string {
-    return agentId.toLowerCase();
-}
-
-/**
- * Returns the top-level chat agent bucket for a session.
- * @returns the top-level chat agent bucket for a session.
- */
-function getChatAgentId(session: Session): string {
-    const sessionKey = typeof session.key === "string" ? session.key : "";
-    const [scope = "", agentId] = sessionKey.split(":", 2);
-
-    if (agentId && scope.toLowerCase() === "agent") {
-        return normalizeChatAgentId(agentId);
-    }
-
-    return normalizeChatAgentId(session.agentType || session.type || "unknown");
-}
-
-/**
- * Returns whether a live session has a usable key.
- * @returns Whether a live session has a usable key.
- */
-function hasSessionKey(session: Session): boolean {
-    return typeof session.key === "string" && session.key.length > 0;
-}
-
-/**
- * Formats the session label inside a selected chat agent bucket.
- * @returns Formatted the session label inside a selected chat agent bucket.
- */
-function formatChatSessionLabel(session: Session, agentId: string): string {
-    const sessionKey = session.key;
-    const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");
-    if (
-        keyAgentId &&
-        scope.toLowerCase() === "agent" &&
-        normalizeChatAgentId(keyAgentId) === agentId
-    ) {
-        return sessionParts.join(":") || sessionKey;
-    }
-
-    return session.displayLabel || session.label || session.displayName || sessionKey;
-}
 
 /**
  * Renders the chat UI.
  * @returns Rendered the chat UI.
  */
 export function Chat() {
-    const navigate = useNavigate();
-    const search = useSearch({ strict: false });
-    const requestedSessionKey = search.session?.trim() || "";
     const transport = useOpenClawChatTransport();
-    const { hasConfirmedSessionList } = useOpenClawSocket();
     const { error, isConnected } = transport;
-    const availableSessionKeysRef = useRef<Set<string>>(new Set());
+    const {
+        agentOptions,
+        requestedSessionKey,
+        selectedAgentId,
+        selectedSession,
+        selectedSessionKey,
+        selectedSessionUpdatedAt,
+        selectAgent,
+        selectSession,
+        sessionOptions,
+    } = useChatSessionSelection();
     const selectedSessionKeyRef = useRef("");
     const shouldStickToBottomRef = useRef(true);
-    const resetConfirmResolverRef = useRef<((wasConfirmed: boolean) => void) | undefined>(
-        undefined
-    );
 
     const [draft, setDraft] = useState("");
     const [isAtBottom, setIsAtBottom] = useState(true);
@@ -117,57 +57,39 @@ export function Chat() {
     const [dismissedTransportError, setDismissedTransportError] = useState<
         string | undefined
     >();
-    const [deletedMessageKeys, setDeletedMessageKeys] = useState<Set<string>>(
-        () => new Set()
-    );
-    const [pendingDeleteMessageKeys, setPendingDeleteMessageKeys] = useState<string[]>(
-        []
-    );
-    const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | undefined>();
-    const [showThinkingOutput, setShowThinkingOutput] = useState(
-        () => readStoredChatDiagnosticVisibility().thinking
-    );
-    const [showToolOutput, setShowToolOutput] = useState(
-        () => readStoredChatDiagnosticVisibility().tools
-    );
-    const [shouldExpandToolDetails, setShouldExpandToolDetails] = useState(
-        () => readStoredChatDiagnosticVisibility().toolDetailsExpanded
-    );
-    const [toolDetailExpansionOverrides, setToolDetailExpansionOverrides] = useState<
-        Map<string, boolean>
-    >(() => new Map());
-    const [keepThinkingAfterFinal, setKeepThinkingAfterFinal] = useState(
-        () => readStoredChatDiagnosticVisibility().keepThinkingAfterFinal
-    );
     const [observedTransportError, setObservedTransportError] = useState(error);
-    const [transientSessionKey, setTransientSessionKey] = useState(requestedSessionKey);
+    const diagnostics = useChatDiagnostics(selectedSessionKey, requestedSessionKey);
+    const messageControls = useChatMessageControls(
+        selectedSessionKey,
+        requestedSessionKey
+    );
+    const {
+        keepThinkingAfterFinal,
+        setKeepThinkingAfterFinal,
+        setShowThinkingOutput,
+        setShowToolOutput,
+        shouldExpandToolDetails,
+        showThinkingOutput,
+        showToolOutput,
+        toggleAllToolDetails,
+        toggleToolDetails,
+        toolDetailExpansionOverrides,
+    } = diagnostics;
+    const {
+        cancelMessageDeletion,
+        closeResetConfirmation,
+        confirmMessageDeletion,
+        confirmResetSession,
+        deletedMessageKeys,
+        isDeleteConfirmationOpen,
+        isResetConfirmOpen,
+        requestMessageDeletion,
+    } = messageControls;
 
     if (observedTransportError !== error) {
         setObservedTransportError(error);
         setDismissedTransportError(undefined);
-    }
-
-    const { data: sessions } = useLiveQuery((query) =>
-        query.from({ session: sessionsCollection })
-    );
-    const { data: agentsStatus } = useAgentsStatus();
-    const agents = agentsStatus?.agents || [];
-    const sortedSessions = sortSessionsByTypeAndActivity(sessions ?? []);
-    const firstAvailableSessionKey =
-        sortedSessions.find((session) => hasSessionKey(session))?.key ?? "";
-    const isRequestedSessionAvailable = sortedSessions.some(
-        (session) => session.key === requestedSessionKey && hasSessionKey(session)
-    );
-    const selectedSessionKey = requestedSessionKey || firstAvailableSessionKey;
-
-    if (transientSessionKey !== selectedSessionKey) {
-        setTransientSessionKey(selectedSessionKey);
-        setDeletedMessageKeys(
-            selectedSessionKey ? readDeletedMessageKeys(selectedSessionKey) : new Set()
-        );
-        setPendingDeleteMessageKeys([]);
-        setToolDetailExpansionOverrides(new Map());
     }
 
     const inputMedia = useChatInputMedia({
@@ -218,17 +140,6 @@ export function Chat() {
         selectedSessionKeyRef.current = selectedSessionKey;
     }, [selectedSessionKey]);
 
-    const sessionMap = new Map(sortedSessions.map((session) => [session.key, session]));
-    const selectedSessionUpdatedAt = selectedSessionKey
-        ? sessionMap.get(selectedSessionKey)?.updatedAt
-        : undefined;
-    const selectedSession = selectedSessionKey
-        ? sessionMap.get(selectedSessionKey) || undefined
-        : undefined;
-    const selectedAgentId = selectedSession ? getChatAgentId(selectedSession) : "";
-    const sessionsForSelectedAgent = selectedAgentId
-        ? sortedSessions.filter((session) => getChatAgentId(session) === selectedAgentId)
-        : sortedSessions;
     const history = useChatHistory({
         isConnected,
         onError: setSendError,
@@ -283,136 +194,6 @@ export function Chat() {
         virtualizer: messagesVirtualizer,
     } = scroll;
 
-    const selectSession = (sessionKey: string) => {
-        void navigate({
-            to: "/chat",
-            search: sessionKey ? { session: sessionKey } : {},
-            replace: true,
-        });
-    };
-
-    useEffect(() => {
-        const availableSessionKeys = new Set(
-            (sessions ?? [])
-                .filter((session) => hasSessionKey(session))
-                .map((session) => session.key)
-        );
-        const wasRequestedSessionAvailable = Boolean(
-            requestedSessionKey &&
-            availableSessionKeysRef.current.has(requestedSessionKey)
-        );
-        availableSessionKeysRef.current = availableSessionKeys;
-
-        if (!requestedSessionKey) {
-            if (firstAvailableSessionKey) {
-                void navigate({
-                    replace: true,
-                    search: { session: firstAvailableSessionKey },
-                    to: "/chat",
-                });
-            }
-            return;
-        }
-        if (
-            !hasConfirmedSessionList ||
-            isRequestedSessionAvailable ||
-            !wasRequestedSessionAvailable
-        ) {
-            return;
-        }
-        void navigate({
-            replace: true,
-            search: firstAvailableSessionKey ? { session: firstAvailableSessionKey } : {},
-            to: "/chat",
-        });
-    }, [
-        firstAvailableSessionKey,
-        hasConfirmedSessionList,
-        isRequestedSessionAvailable,
-        navigate,
-        requestedSessionKey,
-        sessions,
-    ]);
-
-    useEffect(() => {
-        writeStoredChatDiagnosticVisibility({
-            keepThinkingAfterFinal,
-            thinking: showThinkingOutput,
-            toolDetailsExpanded: shouldExpandToolDetails,
-            tools: showToolOutput,
-        });
-    }, [
-        keepThinkingAfterFinal,
-        shouldExpandToolDetails,
-        showThinkingOutput,
-        showToolOutput,
-    ]);
-
-    const handleToggleToolDetails = (toolKey: string) => {
-        setToolDetailExpansionOverrides((current) => {
-            const next = new Map(current);
-            const isExpanded = current.get(toolKey) ?? shouldExpandToolDetails;
-            next.set(toolKey, !isExpanded);
-            return next;
-        });
-    };
-
-    const handleToggleAllToolDetails = () => {
-        setShouldExpandToolDetails((current) => !current);
-        setToolDetailExpansionOverrides(new Map());
-    };
-
-    const sessionOptions = sessionsForSelectedAgent
-        .filter((session) => hasSessionKey(session))
-        .map((session) => ({
-            value: session.key,
-            label: formatChatSessionLabel(session, selectedAgentId),
-            description: `${formatSessionType(session)} · ${session.model || "Unknown"}`,
-        }));
-
-    const selectableSessions = sortedSessions.filter((session) => hasSessionKey(session));
-    const agentSessionCounts = new Map<string, number>();
-    for (const session of selectableSessions) {
-        const agentId = getChatAgentId(session);
-        agentSessionCounts.set(agentId, (agentSessionCounts.get(agentId) || 0) + 1);
-    }
-
-    const agentOptions = [...agentSessionCounts].map(([agentId, count]) => {
-        const agent = agents.find((entry) => normalizeChatAgentId(entry.id) === agentId);
-        return {
-            value: agentId,
-            label: agentId,
-            description: `${count} session${count === 1 ? "" : "s"}${agent?.status ? ` · ${agent.status}` : ""}`,
-        };
-    });
-
-    /**
-     * Selects newest/default session for selected agent.
-     * @param agentId Agent identifier.
-     */
-    const handleSelectAgent = (agentId: string) => {
-        if (agentId === selectedAgentId) {
-            return;
-        }
-
-        const agentSession = agents.find(
-            (agent) => normalizeChatAgentId(agent.id) === agentId
-        )?.sessionKey;
-        const nextSession =
-            sortedSessions.find(
-                (session) =>
-                    hasSessionKey(session) &&
-                    isSameChatSession(session.key, agentSession) &&
-                    getChatAgentId(session) === agentId
-            ) ||
-            sortedSessions.find(
-                (session) => hasSessionKey(session) && getChatAgentId(session) === agentId
-            );
-        if (nextSession) {
-            selectSession(nextSession.key);
-        }
-    };
-
     const slashCommandSuggestions = buildSlashCommandSuggestions(draft, chatModelOptions);
 
     /**
@@ -422,54 +203,6 @@ export function Chat() {
     const applySlashSuggestion = (value: string) => {
         setDraft(value);
     };
-
-    /**
-     * Responds to delete message events.
-     * @param messageKey Message key value.
-     * @param deleteKeys Delete keys value.
-     */
-    const handleDeleteMessage = (messageKey: string, deleteKeys?: readonly string[]) => {
-        setPendingDeleteMessageKeys(deleteKeys?.length ? [...deleteKeys] : [messageKey]);
-    };
-
-    /** Performs confirm delete message. */
-    const confirmDeleteMessage = () => {
-        if (!selectedSessionKey || pendingDeleteMessageKeys.length === 0) {
-            return;
-        }
-
-        setDeletedMessageKeys((wasPrevious) => {
-            const next = addDeletedMessageKeys(wasPrevious, pendingDeleteMessageKeys);
-            writeDeletedMessageKeys(selectedSessionKey, next);
-            return next;
-        });
-        setPendingDeleteMessageKeys([]);
-    };
-
-    /**
-     * Resolves a pending reset confirmation and hides the modal.
-     * @param wasConfirmed Whether was confirmed.
-     */
-    const closeResetConfirm = (wasConfirmed: boolean) => {
-        resetConfirmResolverRef.current?.(wasConfirmed);
-        resetConfirmResolverRef.current = undefined;
-        setIsResetConfirmOpen(false);
-    };
-
-    /** Opens the reset confirmation modal and resolves with the user's choice. */
-    const confirmResetSession = () =>
-        new Promise<boolean>((resolve) => {
-            resetConfirmResolverRef.current?.(false);
-            resetConfirmResolverRef.current = resolve;
-            setIsResetConfirmOpen(true);
-        });
-
-    useEffect(() => {
-        return () => {
-            resetConfirmResolverRef.current?.(false);
-            resetConfirmResolverRef.current = undefined;
-        };
-    }, []);
 
     const actions = useChatActions({
         activeRunCount: projection.activeRuns.length,
@@ -521,7 +254,7 @@ export function Chat() {
                         selectedSessionKey={selectedSessionKey}
                         sessionOptions={sessionOptions}
                         agentOptions={agentOptions}
-                        onSelectAgent={handleSelectAgent}
+                        onSelectAgent={selectAgent}
                         onSelectSession={selectSession}
                     />
 
@@ -541,10 +274,10 @@ export function Chat() {
                         onScroll={handleMessagesScroll}
                         onUserScrollIntent={handleUserScrollIntent}
                         onTtsError={setSendError}
-                        onDeleteMessage={handleDeleteMessage}
+                        onDeleteMessage={requestMessageDeletion}
                         shouldExpandToolDetails={shouldExpandToolDetails}
                         toolDetailExpansionOverrides={toolDetailExpansionOverrides}
-                        onToggleToolDetails={handleToggleToolDetails}
+                        onToggleToolDetails={toggleToolDetails}
                     />
 
                     {visibleError && (
@@ -616,7 +349,7 @@ export function Chat() {
                         onToggleRecording={() => void handleToggleRecording()}
                         onToggleThinking={() => setShowThinkingOutput((value) => !value)}
                         onToggleTools={() => setShowToolOutput((value) => !value)}
-                        onToggleToolDetailsExpansion={handleToggleAllToolDetails}
+                        onToggleToolDetailsExpansion={toggleAllToolDetails}
                         onToggleKeepThinkingAfterFinal={() => {
                             if (!showThinkingOutput) {
                                 return;
@@ -646,13 +379,13 @@ export function Chat() {
             />
 
             <ConfirmModal
-                isOpen={pendingDeleteMessageKeys.length > 0}
+                isOpen={isDeleteConfirmationOpen}
                 title="Delete message"
                 message="Delete this message from your chat view?"
                 confirmLabel="Delete"
                 danger
-                onCancel={() => setPendingDeleteMessageKeys([])}
-                onConfirm={confirmDeleteMessage}
+                onCancel={cancelMessageDeletion}
+                onConfirm={confirmMessageDeletion}
             />
 
             <ConfirmModal
@@ -661,8 +394,8 @@ export function Chat() {
                 message="Reset this chat session? This clears the session history/transcript for the selected target."
                 confirmLabel="Reset"
                 danger
-                onCancel={() => closeResetConfirm(false)}
-                onConfirm={() => closeResetConfirm(true)}
+                onCancel={() => closeResetConfirmation(false)}
+                onConfirm={() => closeResetConfirmation(true)}
             />
         </div>
     );
