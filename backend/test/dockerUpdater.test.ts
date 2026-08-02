@@ -14,12 +14,12 @@ import { requestUrl } from "../../test/support/fetch.ts";
 import { database } from "../src/database/connection.ts";
 import * as processModule from "../src/lib/processes.ts";
 import { registerDockerUpdaterServices } from "../src/services/dockerUpdater/composeDiscovery.ts";
+import { pollDockerUpdaterRegistries } from "../src/services/dockerUpdater/registryPolling.ts";
+import { registerDockerUpdaterScheduledJobs } from "../src/services/dockerUpdater/scheduler.ts";
 import {
     isSafeTagPatternMatch,
     isSafeTagRegexPattern,
-} from "../src/services/dockerUpdater/registryClient.ts";
-import { pollDockerUpdaterRegistries } from "../src/services/dockerUpdater/registryPolling.ts";
-import { registerDockerUpdaterScheduledJobs } from "../src/services/dockerUpdater/scheduler.ts";
+} from "../src/services/dockerUpdater/tagPolicy.ts";
 import { type DockerUpdaterStepResult } from "../src/services/dockerUpdater/types.ts";
 import {
     isNonblockingRegistrationFailure,
