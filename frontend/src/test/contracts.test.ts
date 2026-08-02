@@ -10,7 +10,7 @@ import {
 } from "../../../contracts/accountSecurity";
 import { parseApiErrorResponse } from "../../../contracts/apiErrors";
 import { parseBackupStatusResponse } from "../../../contracts/backups";
-import { canonicalChatImageDisplayUrl } from "../../../contracts/chat/canonicalMessage";
+import { canonicalChatImageDisplayUrl } from "../../../contracts/chat/canonicalImageUrls";
 import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
 import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
 import {

@@ -1,16 +1,20 @@
 import { describe, expect, it } from "bun:test";
 
 import {
-    canonicalChatImageDisplayUrl,
-    canonicalChatLocalMediaPathFromUrl,
-    extractCanonicalChatImages,
     extractCanonicalChatToolCalls,
+    normalizeCanonicalChatText,
+} from "../../contracts/chat/canonicalContentBlocks";
+import {
+    extractCanonicalChatImages,
     MAX_CANONICAL_CHAT_IMAGE_DATA_CHARACTERS,
     MAX_CANONICAL_CHAT_IMAGES,
     MAX_CANONICAL_CHAT_TOTAL_IMAGE_DATA_CHARACTERS,
     mergeCanonicalChatImages,
-    normalizeCanonicalChatText,
-} from "../../contracts/chat/canonicalMessage";
+} from "../../contracts/chat/canonicalImages";
+import {
+    canonicalChatImageDisplayUrl,
+    canonicalChatLocalMediaPathFromUrl,
+} from "../../contracts/chat/canonicalImageUrls";
 import {
     boundCanonicalChatToolValue,
     MAX_CANONICAL_CHAT_TEXT_CHARACTERS,

@@ -1,4 +1,4 @@
-import { normalizeCanonicalChatImage } from "../../../../../../contracts/chat/canonicalMessage";
+import { normalizeCanonicalChatImage } from "../../../../../../contracts/chat/canonicalImages";
 import { normalizeChatMimeType } from "./identity";
 import type { ChatImageBlock } from "./types";
 

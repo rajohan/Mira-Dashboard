@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
+import { summarizeCanonicalChatValueForFingerprint } from "../../../contracts/chat/canonicalContentIdentity";
 import {
     parseCanonicalChatHistoryMessageResult,
     parseCanonicalChatHistoryPage,
 } from "../../../contracts/chat/canonicalHistory";
-import { summarizeCanonicalChatValueForFingerprint } from "../../../contracts/chat/canonicalMessage";
 import {
     canonicalizeOpenClawHistoryMessageResult,
     canonicalizeOpenClawHistoryPage,

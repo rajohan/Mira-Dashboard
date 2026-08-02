@@ -1,4 +1,4 @@
-import { canonicalChatContentFingerprint } from "../../../../../../contracts/chat/canonicalMessage";
+import { canonicalChatContentFingerprint } from "../../../../../../contracts/chat/canonicalContentIdentity";
 import { messageDeleteKey, stableChatStringify } from "../chatMessageIdentity";
 import {
     type ChatHistoryMessage,

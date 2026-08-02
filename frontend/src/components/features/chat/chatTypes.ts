@@ -2,7 +2,7 @@ import type {
     CanonicalChatEvent,
     CanonicalChatProviderMetadata,
 } from "../../../../../contracts/chat/canonical";
-import { extractCanonicalChatImages } from "../../../../../contracts/chat/canonicalMessage";
+import { extractCanonicalChatImages } from "../../../../../contracts/chat/canonicalImages";
 import type { ChatTransportAttachment } from "../../../../../contracts/chat/transport";
 import { normalizeChatMimeType } from "./media/identity";
 import { mergeChatImages } from "./media/merge";

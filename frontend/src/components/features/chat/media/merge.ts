@@ -1,4 +1,4 @@
-import { mergeCanonicalChatImages } from "../../../../../../contracts/chat/canonicalMessage";
+import { mergeCanonicalChatImages } from "../../../../../../contracts/chat/canonicalImages";
 import { chatAttachmentIdentity } from "./identity";
 import type { ChatAttachmentDisplay, ChatImageBlock } from "./types";
 

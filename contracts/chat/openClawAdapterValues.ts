@@ -1,5 +1,5 @@
 import type { CanonicalChatMessage } from "./canonical";
-import { normalizeCanonicalChatText } from "./canonicalMessage";
+import { normalizeCanonicalChatText } from "./canonicalContentBlocks";
 import {
     boundCanonicalChatToolValue,
     canonicalIsoString,

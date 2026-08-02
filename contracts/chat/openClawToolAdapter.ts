@@ -1,5 +1,5 @@
 import type { CanonicalChatMessage, CanonicalChatOperationPhase } from "./canonical";
-import { extractCanonicalChatImages, mergeCanonicalChatImages } from "./canonicalMessage";
+import { extractCanonicalChatImages, mergeCanonicalChatImages } from "./canonicalImages";
 import {
     boundCanonicalChatToolValue,
     MAX_CANONICAL_TOOL_RESULT_CHARACTERS,

@@ -1,4 +1,4 @@
-import { canonicalChatContentFingerprint } from "../../../../../../contracts/chat/canonicalMessage";
+import { canonicalChatContentFingerprint } from "../../../../../../contracts/chat/canonicalContentIdentity";
 import { mergeChatMessageDetails } from "../chatMessageIdentity";
 import { dedupeMessages } from "../chatMessageReconciliation";
 import {

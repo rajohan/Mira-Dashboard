@@ -5,7 +5,7 @@ import type {
 import {
     canonicalChatContentFingerprint,
     summarizeCanonicalChatValueForFingerprint,
-} from "../../../../../../contracts/chat/canonicalMessage";
+} from "../../../../../../contracts/chat/canonicalContentIdentity";
 import {
     CANONICAL_CHAT_TURN_SCHEMA_VERSION,
     parseCanonicalChatTurns,

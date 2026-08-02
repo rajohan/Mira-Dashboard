@@ -6,15 +6,19 @@ import {
 } from "./canonical";
 import {
     canonicalChatAttachmentKind,
+    mergeCanonicalChatAttachments,
+} from "./canonicalAttachments";
+import {
+    extractCanonicalChatThinking,
+    extractCanonicalChatToolCalls,
+    normalizeCanonicalChatText,
+} from "./canonicalContentBlocks";
+import { canonicalizeCanonicalChatMedia } from "./canonicalImages";
+import {
     canonicalChatImageDisplayUrl,
     canonicalChatLocalMediaPathFromUrl,
     canonicalChatPortableDashboardMediaUrl,
-    canonicalizeCanonicalChatMedia,
-    extractCanonicalChatThinking,
-    extractCanonicalChatToolCalls,
-    mergeCanonicalChatAttachments,
-    normalizeCanonicalChatText,
-} from "./canonicalMessage";
+} from "./canonicalImageUrls";
 import {
     canonicalIsoString,
     MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
