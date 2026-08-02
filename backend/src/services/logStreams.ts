@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { DashboardSocket } from "../dashboardSocket.ts";
-import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
+import { guardedPath } from "../lib/guardedOps/core.ts";
+import { openReadNoFollowNonblockingGuarded } from "../lib/guardedOps/read.ts";
 import {
     formatOpenClawLogDate,
     logUnavailableReason,
@@ -10,6 +10,7 @@ import {
 } from "../lib/logRoots.ts";
 import { lineEntriesFromLogRead, type LogRead } from "../lib/logTail.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { type DashboardSocket } from "./gateway/dashboardSocket.ts";
 
 const logger = createStructuredLogger("openclaw-log-stream");
 

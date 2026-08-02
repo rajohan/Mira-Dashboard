@@ -3,12 +3,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { copyGuarded, copyNoFollowGuarded } from "../src/lib/guardedOps/copy.ts";
+import { guardedPath, mkdirGuarded } from "../src/lib/guardedOps/core.ts";
 import {
-    copyGuarded,
-    copyNoFollowGuarded,
-    guardedPath,
     lstatGuarded,
-    mkdirGuarded,
     openReadNoFollowNonblockingGuarded,
     readdirGuarded,
     readdirGuardedAsync,
@@ -19,11 +17,13 @@ import {
     readTextTailNoFollowGuarded,
     statGuarded,
     statGuardedAsync,
+} from "../src/lib/guardedOps/read.ts";
+import {
     writeTextGuarded,
     writeTextNoFollowAnchoredGuarded,
     writeTextNoFollowExclusiveGuarded,
     writeTextNoFollowGuarded,
-} from "../src/lib/guardedOps.ts";
+} from "../src/lib/guardedOps/write.ts";
 import { captureRejection } from "./support/rejections.ts";
 
 const testState = { temporaryRoot: "" };

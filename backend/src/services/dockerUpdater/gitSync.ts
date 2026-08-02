@@ -1,4 +1,4 @@
-import { syncDockerUpdaterChanges } from "../gitHygiene.ts";
+import { syncDockerUpdaterChanges } from "../gitHygiene/dockerSync.ts";
 import { caughtMessage } from "./support.ts";
 import type { DockerUpdaterStepResult } from "./types.ts";
 

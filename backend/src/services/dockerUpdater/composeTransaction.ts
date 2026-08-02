@@ -5,10 +5,9 @@ import { YAML } from "bun";
 
 import { runProcess } from "../../lib/processes.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
-import { dirtyDockerUpdaterPaths } from "../gitHygiene.ts";
+import { dirtyDockerUpdaterPaths } from "../gitHygiene/dockerSync.ts";
+import { composeCommandPath, composeFileServiceImageField } from "./composeIncludes.ts";
 import {
-    composeCommandPath,
-    composeFileServiceImageField,
     getComposeCommand,
     getComposeCommandPaths,
     managedComposePath,

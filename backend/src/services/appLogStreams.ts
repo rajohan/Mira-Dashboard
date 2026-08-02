@@ -1,5 +1,5 @@
-import type { DashboardSocket } from "../dashboardSocket.ts";
 import { subscribeToStructuredLogs } from "../lib/structuredLogger.ts";
+import { type DashboardSocket } from "./gateway/dashboardSocket.ts";
 
 const dashboardLogSubscriptions = new Map<DashboardSocket, () => void>();
 

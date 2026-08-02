@@ -9,8 +9,9 @@ import {
     type TotpEnrollmentRequest,
     type WebAuthnAuthenticationRequest,
     type WebAuthnRegistrationRequest,
+} from "../../../contracts/accountSecurity/requests";
+import {
     parseAccountSecurityMutationResponse,
-    parseAccountSecuritySummary,
     parseMfaStepUpResponse,
     parsePasswordChangeResponse,
     parsePasswordReauthenticationResponse,
@@ -21,7 +22,8 @@ import {
     parseTotpEnrollmentResponse,
     parseWebAuthnRegistrationOptionsResponse,
     parseWebAuthnRegistrationResponse,
-} from "../../../contracts/accountSecurity";
+} from "../../../contracts/accountSecurity/responses";
+import { parseAccountSecuritySummary } from "../../../contracts/accountSecurity/summary";
 import { parseWebAuthnOptionsResponse } from "../../../contracts/auth";
 import { handleUnauthorizedSession, notifyAuthSessionRotated } from "../lib/authBoundary";
 import { authActions, useAuthSessionId, useAuthUser } from "../stores/authStore";

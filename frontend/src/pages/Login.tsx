@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { KeyRound, ShieldCheck, Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { DashboardMfaMethod } from "../../../contracts/accountSecurity";
+import type { DashboardMfaMethod } from "../../../contracts/accountSecurity/methods";
 import {
     type AuthBootstrapResponse,
     type FirstUserRegistrationRequest,

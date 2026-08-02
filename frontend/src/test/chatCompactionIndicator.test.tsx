@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { act, renderHook } from "@testing-library/react";
 
-import type { ChatCompactionStatus } from "../components/features/chat/domain/chatProjection";
+import { type ChatCompactionStatus } from "../components/features/chat/domain/chatProjection";
 import {
     projectChatActivityRows,
     useChatCompactionIndicator,

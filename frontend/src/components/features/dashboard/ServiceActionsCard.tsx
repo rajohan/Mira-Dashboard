@@ -2,14 +2,9 @@ import { AlertTriangle, Loader2, Play, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { parseSystemHostSummary } from "../../../../../contracts/system";
-import type { OpsActionDefinition } from "../../../hooks";
-import {
-    OPS_ACTIONS,
-    useCacheEntry,
-    useExecJob,
-    useRefreshCacheEntry,
-    useStartOpsAction,
-} from "../../../hooks";
+import { useCacheEntry, useRefreshCacheEntry } from "../../../hooks/useCache";
+import { type OpsActionDefinition } from "../../../hooks/useOpsActions";
+import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "../../../hooks/useOpsActions";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";

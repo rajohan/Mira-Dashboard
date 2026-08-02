@@ -2,7 +2,7 @@ import FS from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
-import { guardedPath, mkdirGuarded } from "../../lib/guardedOps.ts";
+import { guardedPath, mkdirGuarded } from "../../lib/guardedOps/core.ts";
 import { safePathWithinRoot } from "../../lib/safePath.ts";
 
 export { prepareSafeWriteTargetWithinRoot as prepareAgentMetadataDirectoryForWrite } from "../../lib/safePath.ts";

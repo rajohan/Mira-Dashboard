@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { JobResourceClass } from "../../../contracts/jobs.ts";
+import type { JobResourceClass } from "../../../contracts/jobs/shared.ts";
 
 export const jobResourceClasses = [
     "interactive",

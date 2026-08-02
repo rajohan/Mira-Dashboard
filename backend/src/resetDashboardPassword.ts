@@ -1,7 +1,7 @@
 import readline from "node:readline";
 
-import { hashPassword } from "./auth.ts";
-import { database } from "./database.ts";
+import { hashPassword } from "./auth/userRepository.ts";
+import { database } from "./database/connection.ts";
 import { writeCliError, writeCliOutput, writeCliPrompt } from "./lib/cliOutput.ts";
 import { writeAuditEvent } from "./services/auditEvents.ts";
 import { normalizeLoginPassword } from "./services/authenticationRequest.ts";

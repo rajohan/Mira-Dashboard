@@ -1,3 +1,10 @@
+import { parseDashboardRollbackRequest } from "../../../contracts/delivery/deployments.ts";
+import { parsePullRequestPreviewStartRequest } from "../../../contracts/delivery/previews.ts";
+import {
+    parsePullRequestApproveRequest,
+    parsePullRequestRejectRequest,
+    parsePullRequestStackCreateRequest,
+} from "../../../contracts/delivery/pullRequestActions.ts";
 import type {
     DashboardReleaseStatusResponse,
     DeploymentActionResponse,
@@ -7,41 +14,38 @@ import type {
     PullRequestPreviewMutationResponse,
     PullRequestPreviewResponse,
     PullRequestsResponse,
-} from "../../../contracts/delivery.ts";
-import {
-    parseDashboardRollbackRequest,
-    parsePullRequestApproveRequest,
-    parsePullRequestPreviewStartRequest,
-    parsePullRequestRejectRequest,
-    parsePullRequestStackCreateRequest,
-} from "../../../contracts/delivery.ts";
-import { json, jsonWithEtag } from "../http.ts";
-import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
+} from "../../../contracts/delivery/responses.ts";
+import { json, jsonWithEtag } from "../http/core.ts";
 import {
     type ParametersRequest,
     readApiJsonOrError,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import {
     getPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
-} from "../services/pullRequestPreviews.ts";
+} from "../services/pullRequestPreviews/service.ts";
+import { readDeploymentJobs } from "../services/pullRequests/deploymentJobRepository.ts";
 import {
-    getDashboardReleaseStatus,
-    getProductionCheckoutStatus,
-    listDashboardPullRequests,
     prepareAndStartDeployLatest,
     prepareAndStartRollback,
-    readDeploymentJobs,
+} from "../services/pullRequests/deploymentService.ts";
+import {
     runPullRequestApproval,
     runPullRequestBranchUpdate,
     runPullRequestRejection,
     runPullRequestReviewApproval,
     runPullRequestStackCreation,
+} from "../services/pullRequests/executionActions.ts";
+import {
+    listDashboardPullRequests,
     validatePrNumber,
-} from "../services/pullRequests.ts";
+} from "../services/pullRequests/githubPullRequestListing.ts";
+import { getDashboardReleaseStatus } from "../services/pullRequests/releaseStatus.ts";
+import { getProductionCheckoutStatus } from "../services/pullRequests/worktreeManager.ts";
 
 function routeError(error: unknown, fallback = "Pull request route failed"): Response {
     return routeErrorResponse(undefined, error, {

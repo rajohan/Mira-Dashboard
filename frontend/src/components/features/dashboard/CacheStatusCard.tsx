@@ -1,6 +1,6 @@
 import { DatabaseZap, Loader2, RefreshCw } from "lucide-react";
 
-import { useCacheStatus, useRefreshCacheEntry } from "../../../hooks";
+import { useCacheStatus, useRefreshCacheEntry } from "../../../hooks/useCache";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";

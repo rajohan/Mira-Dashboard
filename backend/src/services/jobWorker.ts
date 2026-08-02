@@ -1,28 +1,28 @@
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { registerBackupScheduledJobs } from "./backups.ts";
+import { registerBackupScheduledJobs } from "./backups/scheduling.ts";
 import {
-    DATABASE_SUMMARY_KEY,
     enqueueDatabaseSummaryRefresh,
     registerCacheRefreshScheduledJobs,
-} from "./cacheRefresh.ts";
+} from "./cacheRefresh/cacheRefreshScheduler.ts";
+import { DATABASE_SUMMARY_KEY } from "./cacheRefresh/databaseSummaryCacheProducer.ts";
 import {
     startCacheRefreshMetricsSession,
     stopCacheRefreshMetricsSession,
 } from "./cacheRefreshMetrics.ts";
 import { registerDockerExecutionActions } from "./dockerActions.ts";
-import { registerDockerUpdaterScheduledJobs } from "./dockerUpdater.ts";
+import { registerDockerUpdaterScheduledJobs } from "./dockerUpdater/scheduler.ts";
 import { registerExecExecutionActions } from "./execJobs.ts";
-import { registerGitHygieneScheduledJobs } from "./gitHygiene.ts";
-import { registerLogRotationScheduledJobs } from "./logRotation.ts";
+import { registerGitHygieneScheduledJobs } from "./gitHygiene/scheduler.ts";
+import { registerLogRotationScheduledJobs } from "./logRotation/scheduler.ts";
 import { registerOpenClawExecutionActions } from "./openclawActions.ts";
-import { registerPullRequestPreviewExecutionActions } from "./pullRequestPreviews.ts";
-import { registerPullRequestExecutionActions } from "./pullRequests.ts";
+import { registerPullRequestPreviewExecutionActions } from "./pullRequestPreviews/service.ts";
+import { registerPullRequestExecutionActions } from "./pullRequests/executionActions.ts";
 import {
     startScheduledJobExecutor,
     startScheduledJobScheduler,
     stopScheduledJobExecutor,
     stopScheduledJobScheduler,
-} from "./scheduledJobs.ts";
+} from "./scheduledJobs/runtime.ts";
 import { registerSqliteMaintenanceScheduledJob } from "./sqliteMaintenance.ts";
 
 const logger = createStructuredLogger("job-worker");

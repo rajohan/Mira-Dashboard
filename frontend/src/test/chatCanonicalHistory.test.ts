@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test";
 
+import { summarizeCanonicalChatValueForFingerprint } from "../../../contracts/chat/canonicalContentIdentity";
+import {
+    parseCanonicalChatHistoryMessageResult,
+    parseCanonicalChatHistoryPage,
+} from "../../../contracts/chat/canonicalHistory";
 import {
     canonicalizeOpenClawHistoryMessageResult,
     canonicalizeOpenClawHistoryPage,
 } from "../../../contracts/chat/openClawHistoryPageAdapter";
-import {
-    parseCanonicalChatHistoryMessageResult,
-    parseCanonicalChatHistoryPage,
-} from "../../../contracts/chatCanonicalHistory";
-import { summarizeCanonicalChatValueForFingerprint } from "../../../contracts/chatCanonicalMessage";
 
 const SESSION = "agent:main:format-probe";
 

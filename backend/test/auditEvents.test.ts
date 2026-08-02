@@ -1,16 +1,14 @@
 import { describe, expect, it } from "bun:test";
 
-import { database } from "../src/database.ts";
-import { runWithRequestAuditContext } from "../src/requestAuditContext.ts";
+import { database } from "../src/database/connection.ts";
+import { runWithRequestAuditContext } from "../src/http/requestAuditContext.ts";
 import {
     auditProvenanceForTarget,
     listAuditEvents,
     writeAuditEvent,
 } from "../src/services/auditEvents.ts";
-import {
-    finishJobExecution,
-    insertJobExecution,
-} from "../src/services/jobExecutionQueue.ts";
+import { insertJobExecution } from "../src/services/jobExecutionQueue/repository.ts";
+import { finishJobExecution } from "../src/services/jobExecutionQueue/worker.ts";
 
 describe("append-only audit events", () => {
     it("redacts bounded metadata and rejects mutation or replacement", () => {

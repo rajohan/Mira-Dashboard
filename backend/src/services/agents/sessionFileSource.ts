@@ -1,6 +1,7 @@
 import Path from "node:path";
 
-import { guardedPath, readTextNoFollowGuarded } from "../../lib/guardedOps.ts";
+import { guardedPath } from "../../lib/guardedOps/core.ts";
+import { readTextNoFollowGuarded } from "../../lib/guardedOps/read.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { getSafeAgentSessionsDirectory } from "./agentPaths.ts";
 

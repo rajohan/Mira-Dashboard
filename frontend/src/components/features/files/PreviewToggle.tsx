@@ -1,6 +1,6 @@
 import { Code, Eye } from "lucide-react";
 
-import { Button } from "../../../components/ui/Button";
+import { Button } from "../../ui/Button";
 
 /** Provides props for preview toggle. */
 interface PreviewToggleProperties {

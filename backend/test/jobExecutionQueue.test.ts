@@ -3,41 +3,47 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { database } from "../src/database.ts";
+import { database } from "../src/database/connection.ts";
 import {
     scopedJobProcessCommand,
     scopedJobProcessEnvironment,
     withJobResourceClass,
 } from "../src/lib/jobResources.ts";
 import {
-    cancelJobExecution,
-    claimNextJobExecution,
-    didHeartbeatJobWorker,
     enqueueJobExecution,
-    finishJobExecution,
     getJobExecution,
     getJobExecutionSummary,
     insertJobExecution,
     isJobWorkerReleaseReady,
+} from "../src/services/jobExecutionQueue/repository.ts";
+import {
+    cancelJobExecution,
+    claimNextJobExecution,
+    didHeartbeatJobWorker,
+    finishJobExecution,
     protectRunningJobExecutionFromCancellation,
     recoverExpiredJobExecutions,
     registerJobWorker,
     unregisterJobWorker,
-} from "../src/services/jobExecutionQueue.ts";
+} from "../src/services/jobExecutionQueue/worker.ts";
 import { setJobWorkerClaimsPaused } from "../src/services/jobWorkerControl.ts";
 import { waitForJobExecution } from "../src/services/queuedJobExecution.ts";
 import {
-    enqueueScheduledJob,
-    reconcileOrphanedDeploymentCutovers,
-    recoverOrphanedScheduledJobRuns,
     registerScheduledJobAction,
-    removeScheduledJobsNotInAction,
     ScheduledJobActionError,
-    startScheduledJobExecutor,
-    stopScheduledJobExecutor,
+} from "../src/services/scheduledJobs/actionRegistry.ts";
+import { enqueueScheduledJob } from "../src/services/scheduledJobs/enqueue.ts";
+import {
+    removeScheduledJobsNotInAction,
     updateScheduledJob,
     upsertScheduledJob,
-} from "../src/services/scheduledJobs.ts";
+} from "../src/services/scheduledJobs/repository.ts";
+import {
+    reconcileOrphanedDeploymentCutovers,
+    recoverOrphanedScheduledJobRuns,
+    startScheduledJobExecutor,
+    stopScheduledJobExecutor,
+} from "../src/services/scheduledJobs/runtime.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const testJobIds = new Set<string>();

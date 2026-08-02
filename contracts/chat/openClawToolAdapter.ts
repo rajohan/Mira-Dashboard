@@ -1,14 +1,11 @@
-import type { CanonicalChatMessage, CanonicalChatOperationPhase } from "../chatCanonical";
-import {
-    extractCanonicalChatImages,
-    mergeCanonicalChatImages,
-} from "../chatCanonicalMessage";
+import type { CanonicalChatMessage, CanonicalChatOperationPhase } from "./canonical";
+import { extractCanonicalChatImages, mergeCanonicalChatImages } from "./canonicalImages";
 import {
     boundCanonicalChatToolValue,
     MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
     stableCanonicalChatStringify,
     truncateCanonicalChatText,
-} from "../chatCanonicalUtilities";
+} from "./canonicalUtilities";
 import {
     argumentDetail,
     asRecord,

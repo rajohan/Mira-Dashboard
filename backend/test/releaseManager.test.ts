@@ -23,36 +23,44 @@ import path from "node:path";
 import {
     databaseMigrationIdentities,
     type DatabaseMigrationIdentity,
-} from "../src/databaseMigrations/index.ts";
-import {
-    currentBunRuntimeIdentity,
-    hasManagedBunRuntime,
-    installManagedBunRuntime,
-} from "../src/managedBunRuntime.ts";
+} from "../src/databaseMigrations/registry.ts";
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
+import { installManagedBunRuntime } from "../src/services/releases/managedRuntimeStore.ts";
+import {
+    RELEASE_TRANSITION_LOCK_FILE_NAME,
+    RELEASE_TRANSITION_LOCK_PROGRAM,
+} from "../src/services/releases/managerModel.ts";
+import {
+    loadReleaseManifest,
+    writeReleaseManifest,
+} from "../src/services/releases/manifestArtifacts.ts";
+import { parseReleaseManifest } from "../src/services/releases/manifestParser.ts";
+import {
+    databaseMigrationInventorySha256,
+    RELEASE_MANIFEST_FILE_NAME,
+} from "../src/services/releases/manifestPolicy.ts";
 import {
     activateDashboardRelease,
-    assertDashboardReleaseRuntimeAvailable,
-    assertReleaseTransitionLockCommandSucceeded,
+    readDashboardReleaseState,
+} from "../src/services/releases/releaseActivation.ts";
+import {
     ensureDashboardReleaseLayout,
     loadManagedRelease,
     managedReleasePath,
-    pruneDashboardReleases,
-    publishVerifiedDashboardRelease,
-    readDashboardReleaseState,
-    RELEASE_TRANSITION_LOCK_FILE_NAME,
-    RELEASE_TRANSITION_LOCK_PROGRAM,
     resolveDashboardReleasesRoot,
+} from "../src/services/releases/releaseLayout.ts";
+import { publishVerifiedDashboardRelease } from "../src/services/releases/releasePublication.ts";
+import { pruneDashboardReleases } from "../src/services/releases/releaseRetention.ts";
+import {
     restoreDashboardReleaseAfterFailedActivation,
     rollbackDashboardRelease,
-} from "../src/releaseManager.ts";
+} from "../src/services/releases/releaseRollback.ts";
 import {
-    databaseMigrationInventorySha256,
-    loadReleaseManifest,
-    parseReleaseManifest,
-    RELEASE_MANIFEST_FILE_NAME,
-    writeReleaseManifest,
-} from "../src/releaseManifest.ts";
+    currentBunRuntimeIdentity,
+    hasManagedBunRuntime,
+} from "../src/services/releases/runtime.ts";
+import { assertDashboardReleaseRuntimeAvailable } from "../src/services/releases/schemaCompatibility.ts";
+import { assertReleaseTransitionLockCommandSucceeded } from "../src/services/releases/transitionLock.ts";
 import { captureRejection } from "./support/rejections.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 

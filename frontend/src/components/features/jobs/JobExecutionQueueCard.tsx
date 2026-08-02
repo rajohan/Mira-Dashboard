@@ -1,12 +1,12 @@
 import { Activity, Clock3, Cpu, Layers3, Pause, Play, XCircle } from "lucide-react";
 import type { ComponentProps } from "react";
 
-import type { JobExecution } from "../../../../../contracts/jobs";
+import type { JobExecution } from "../../../../../contracts/jobs/executions";
 import {
     useCancelJobExecution,
     useJobExecutions,
     useSetJobWorkerClaimsPaused,
-} from "../../../hooks";
+} from "../../../hooks/useJobExecutions";
 import { messageFromError } from "../../../lib/errorMessage";
 import { cn } from "../../../utils/cn";
 import { formatDate, formatDuration } from "../../../utils/format";

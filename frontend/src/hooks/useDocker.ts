@@ -2,26 +2,30 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { cacheRefreshResponseParser } from "../../../contracts/cache";
 import {
-    type DockerContainerAction,
-    type DockerContainerActionRequest,
     type DockerContainerDetails,
     type DockerContainersResponse,
+    parseDockerContainerDetails,
+    parseDockerContainerLogsResponse,
+    parseDockerContainersResponse,
+} from "../../../contracts/docker/inventory";
+import {
+    type DockerContainerAction,
+    type DockerContainerActionRequest,
     type DockerExecStartRequest,
     type DockerExecJob,
     type DockerPruneRequest,
     type DockerStackActionRequest,
-    parseDockerContainerDetails,
-    parseDockerContainerLogsResponse,
-    parseDockerContainersResponse,
     parseDockerExecJob,
     parseDockerExecStartResponse,
-    parseDockerManualUpdateResult,
     parseDockerOutputResponse,
     parseDockerPruneResponse,
     parseDockerSuccessResponse,
-    parseDockerSummaryCache,
+} from "../../../contracts/docker/operations";
+import { parseDockerSummaryCache } from "../../../contracts/docker/summary";
+import {
+    parseDockerManualUpdateResult,
     parseDockerUpdaterRunResult,
-} from "../../../contracts/docker";
+} from "../../../contracts/docker/updater";
 import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiDeleteParsed, apiFetchParsed, apiPostParsed } from "./useApi";
 import { cacheKeys, useCacheEntry } from "./useCache";

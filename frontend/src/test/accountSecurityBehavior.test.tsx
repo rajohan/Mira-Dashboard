@@ -5,7 +5,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 
-import type { AccountSecuritySummary } from "../../../contracts/accountSecurity";
+import type { AccountSecuritySummary } from "../../../contracts/accountSecurity/summary";
 import { parseJsonText, requestUrl } from "../../../test/support/fetch";
 import { AccountSecuritySection } from "../components/features/settings/AccountSecuritySection";
 import {

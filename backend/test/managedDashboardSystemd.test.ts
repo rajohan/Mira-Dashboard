@@ -13,11 +13,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+    loadManagedRelease,
+    managedReleasePath,
+} from "../src/services/releases/releaseLayout.ts";
+import {
     type ManagedDashboardSystemdCommandRunner,
     prepareManagedDashboardUnits,
-} from "../src/managedDashboardSystemd.ts";
-import { MANAGED_DASHBOARD_UNIT_NAMES } from "../src/managedDashboardUnitPolicy.ts";
-import { loadManagedRelease, managedReleasePath } from "../src/releaseManager.ts";
+} from "../src/services/releases/systemd.ts";
+import { MANAGED_DASHBOARD_UNIT_NAMES } from "../src/services/releases/systemdPolicy.ts";
 import { captureRejection } from "./support/rejections.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 

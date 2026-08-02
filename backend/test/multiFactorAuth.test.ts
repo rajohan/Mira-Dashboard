@@ -3,20 +3,18 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { Server } from "bun";
 import { generate } from "otplib";
 
+import { changePasswordAndRotateSession } from "../src/auth/sessionMutations.ts";
 import {
-    changePasswordAndRotateSession,
     createSession,
-    createUser,
-    findUserById,
     getAuthSessionFromSessionId,
-    verifyPassword,
-} from "../src/auth.ts";
-import { database } from "../src/database.ts";
+} from "../src/auth/sessionRepository.ts";
+import { createUser, findUserById, verifyPassword } from "../src/auth/userRepository.ts";
+import { database } from "../src/database/connection.ts";
 import {
     requiresRecentMfa,
     resetRequestPolicyForTests,
     withRequestPolicy,
-} from "../src/requestPolicy.ts";
+} from "../src/requestPolicy/evaluator.ts";
 import { accountSecurityRoutes } from "../src/routes/accountSecurityRoutes.ts";
 import {
     authenticationThrottleStatus,
@@ -32,16 +30,21 @@ import {
 } from "../src/services/configRedaction.ts";
 import { decryptStoredSecret, encryptStoredSecret } from "../src/services/mfaCrypto.ts";
 import {
-    confirmTotpEnrollment,
     consumePendingLogin,
     createPendingLogin,
-    createTotpEnrollment,
     getPendingLogin,
+} from "../src/services/multiFactorAuth/pendingLoginService.ts";
+import { verifyRecoveryCodeForUser } from "../src/services/multiFactorAuth/recoveryCodeService.ts";
+import {
+    confirmTotpEnrollment,
+    createTotpEnrollment,
     validateTotpStorageConfig,
-    verifyRecoveryCodeForUser,
     verifyTotpForUser,
-} from "../src/services/multiFactorAuth.ts";
-import { didRemoveWebAuthnCredential, webAuthnConfig } from "../src/services/webAuthn.ts";
+} from "../src/services/multiFactorAuth/totpFactorService.ts";
+import {
+    didRemoveWebAuthnCredential,
+    webAuthnConfig,
+} from "../src/services/webAuthn/service.ts";
 
 const USER_PREFIX = "mfa-test-";
 const originalSecretEncryptionKey = process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;

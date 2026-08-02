@@ -1,14 +1,14 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 
+import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeSnapshot,
-} from "../../contracts/chat.ts";
-import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
-import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/chat/openClawChatPersistence.ts";
-import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
-import { database, enableRequiredWalJournalMode } from "../src/database.ts";
+} from "../../contracts/chat/transport.ts";
+import { database, enableRequiredWalJournalMode } from "../src/database/connection.ts";
+import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/services/chat/openClawChatPersistence.ts";
+import { SqliteOpenClawChatSnapshotStore } from "../src/services/chat/openClawChatSnapshotStore.ts";
 
 function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnapshot {
     return {

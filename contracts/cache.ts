@@ -1,11 +1,11 @@
 import * as v from "valibot";
 
+import { jobDisableIntentSchema } from "./jobs/scheduled";
 import {
-    jobDisableIntentSchema,
     jobExecutionStatusSchema,
     jobExecutionTriggerTypeSchema,
     jobResourceClassSchema,
-} from "./jobs";
+} from "./jobs/shared";
 import type { ContractParser } from "./runtime";
 import {
     finiteNumberSchema,

@@ -8,8 +8,8 @@ import {
 import {
     parseJobExecutionCancelResponse,
     parseJobExecutionsResponse,
-    parseJobWorkerClaimsMutationResponse,
-} from "../../../contracts/jobs";
+} from "../../../contracts/jobs/executions";
+import { parseJobWorkerClaimsMutationResponse } from "../../../contracts/jobs/workerClaims";
 import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchParsed, apiPatchParsed, apiPostParsed } from "./useApi";
 

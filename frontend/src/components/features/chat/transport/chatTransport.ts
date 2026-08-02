@@ -3,9 +3,9 @@ import type {
     ChatSendResponse,
     ChatSessionPreferences,
     OpenClawRuntimeSnapshot,
-} from "../../../../../../contracts/chat";
+} from "../../../../../../contracts/chat/transport";
+import type { ChatModelOption } from "../chatSettings";
 import type { ChatHistoryMessage } from "../chatTypes";
-import type { ChatModelOption } from "../chatUtilities";
 import type { ChatRuntimeEvent } from "../domain/chatState";
 
 export interface ChatRuntimeSnapshot {

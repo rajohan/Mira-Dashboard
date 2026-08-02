@@ -2,10 +2,8 @@ import { describe, expect, it } from "bun:test";
 
 import { canonicalizeOpenClawHistoryPage } from "../../../contracts/chat/openClawHistoryPageAdapter";
 import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
-import {
-    assembleCanonicalChatTurns,
-    projectCanonicalChat,
-} from "../components/features/chat/domain/chatCanonicalProjection";
+import { projectCanonicalChat } from "../components/features/chat/domain/chatCanonicalProjection";
+import { assembleCanonicalChatTurns } from "../components/features/chat/domain/chatCanonicalTurns";
 import { createChatVisibility } from "../components/features/chat/domain/chatPresentation";
 import { renderChatProjectionRows } from "../components/features/chat/domain/chatProjection";
 import {

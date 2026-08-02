@@ -7,7 +7,7 @@ import {
     useRecoveryStepUp,
     useTotpStepUp,
     useWebAuthnStepUp,
-} from "../../../hooks";
+} from "../../../hooks/useAccountSecurity";
 import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../../../lib/authBoundary";
 import { messageFromError } from "../../../lib/errorMessage";
 import { subscribeToGlobalEvent } from "../../../lib/globalEvents";

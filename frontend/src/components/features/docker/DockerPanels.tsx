@@ -3,9 +3,11 @@ import { Boxes } from "lucide-react";
 import type {
     DockerContainer,
     DockerContainerDetails,
+} from "../../../../../contracts/docker/inventory";
+import type {
     DockerUpdaterEvent,
     DockerUpdaterService,
-} from "../../../../../contracts/docker";
+} from "../../../../../contracts/docker/updater";
 import { messageFromError } from "../../../lib/errorMessage";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";

@@ -1,11 +1,11 @@
 import { errorMessage } from "../lib/errors.ts";
 import {
-    cancelJobExecution,
     enqueueJobExecution,
     type EnqueueJobExecutionInput,
     getJobExecution,
     type JobExecutionRecord,
-} from "./jobExecutionQueue.ts";
+} from "./jobExecutionQueue/repository.ts";
+import { cancelJobExecution } from "./jobExecutionQueue/worker.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1000;

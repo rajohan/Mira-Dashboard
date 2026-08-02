@@ -1,5 +1,7 @@
 import { unknownArray } from "../../lib/values.ts";
-import { asRecord, parseImageReference } from "./support.ts";
+import { imageRegistry, servicePlatform } from "./imageReference.ts";
+import { asRecord } from "./support.ts";
+import { compareTags, isTagMatch, shouldNeedFullTagScan } from "./tagPolicy.ts";
 import type {
     JsonRecord,
     ManagedServiceRow,
@@ -241,15 +243,6 @@ function isGhcrRepo(repo: string): boolean {
     return repo.startsWith("ghcr.io/");
 }
 
-export function imageRegistry(repo: string): string {
-    const first = repo.split("/", 1)[0] || "";
-    const registry =
-        first === "localhost" || first.includes(".") || first.includes(":")
-            ? first
-            : "docker.io";
-    return registry === "index.docker.io" ? "docker.io" : registry;
-}
-
 function stripRegistry(repo: string) {
     if (isGhcrRepo(repo)) {
         return repo.replace(/^ghcr\.io\//u, "");
@@ -261,155 +254,6 @@ function stripRegistry(repo: string) {
         return repo.replace(/^(?:index\.)?docker\.io\//u, "");
     }
     return repo;
-}
-
-function isTagMatch(service: ManagedServiceRow, tag: string): boolean {
-    if (!service.tag_match_pattern) {
-        return tag === service.current_tag;
-    }
-    if (service.tag_match_type === "regex") {
-        return isSafeTagPatternMatch(service.tag_match_pattern, tag);
-    }
-    return tag === service.tag_match_pattern;
-}
-
-type SafeTagPatternPart = { kind: "digits" } | { kind: "literal"; value: string };
-
-function parseSafeTagRegexPattern(pattern: string): SafeTagPatternPart[] | undefined {
-    if (pattern.length === 0 || pattern.length > 128) {
-        return undefined;
-    }
-    if (!pattern.startsWith("^") || !pattern.endsWith("$")) {
-        return undefined;
-    }
-
-    let body = pattern.slice(1);
-    while (body.endsWith("$")) {
-        body = body.slice(0, -1);
-    }
-    if (!body) {
-        return undefined;
-    }
-
-    const parts: SafeTagPatternPart[] = [];
-    for (let index = 0; index < body.length; index += 1) {
-        const character = body[index];
-        if (character === undefined) {
-            return undefined;
-        }
-        if (character === "\\") {
-            const escaped = body[index + 1];
-            if (!escaped) {
-                return undefined;
-            }
-            if (escaped === "d" && body[index + 2] === "+") {
-                if (parts.at(-1)?.kind === "digits") {
-                    return undefined;
-                }
-                parts.push({ kind: "digits" });
-                index += 2;
-                if (/^\d$/u.test(body[index + 1] ?? "")) {
-                    return undefined;
-                }
-                continue;
-            }
-            if (/^[-.+_]$/u.test(escaped)) {
-                parts.push({ kind: "literal", value: escaped });
-                index += 1;
-                continue;
-            }
-            return undefined;
-        }
-        if (character === "[") {
-            const closeIndex = body.indexOf("]", index + 1);
-            if (closeIndex === -1 || body[closeIndex + 1] !== "+") {
-                return undefined;
-            }
-            const characterClass = body.slice(index + 1, closeIndex);
-            if (characterClass !== "0-9" && characterClass !== String.raw`\d`) {
-                return undefined;
-            }
-            if (parts.at(-1)?.kind === "digits") {
-                return undefined;
-            }
-            parts.push({ kind: "digits" });
-            index = closeIndex + 1;
-            if (/^\d$/u.test(body[index + 1] ?? "")) {
-                return undefined;
-            }
-            continue;
-        }
-        if (/^[A-Za-z0-9_-]$/u.test(character)) {
-            if (/^\d$/u.test(character) && parts.at(-1)?.kind === "digits") {
-                return undefined;
-            }
-            parts.push({ kind: "literal", value: character });
-            continue;
-        }
-        return undefined;
-    }
-    return parts;
-}
-
-export function isSafeTagRegexPattern(pattern: string): boolean {
-    return parseSafeTagRegexPattern(pattern) !== undefined;
-}
-
-export function isSafeTagPatternMatch(pattern: string, tag: string): boolean {
-    const parts = parseSafeTagRegexPattern(pattern);
-    if (!parts) {
-        return false;
-    }
-
-    let offset = 0;
-    for (const part of parts) {
-        if (part.kind === "literal") {
-            if (tag[offset] !== part.value) {
-                return false;
-            }
-            offset += 1;
-            continue;
-        }
-
-        const digitStart = offset;
-        while (offset < tag.length && /\d/u.test(tag[offset] ?? "")) {
-            offset += 1;
-        }
-        if (offset === digitStart) {
-            return false;
-        }
-    }
-    return offset === tag.length;
-}
-
-function shouldNeedFullTagScan(service: ManagedServiceRow): boolean {
-    if (service.tag_match_type !== "regex" || !service.tag_match_pattern) {
-        return false;
-    }
-    return isSafeTagRegexPattern(service.tag_match_pattern);
-}
-
-function compareTags(a: string, b: string): number {
-    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
-}
-
-function hostDockerPlatform(): string {
-    const arch = process.arch === "x64" ? "amd64" : process.arch;
-    return `linux/${arch}`;
-}
-
-export function servicePlatform(service: ManagedServiceRow): string {
-    let metadata: JsonRecord;
-    try {
-        metadata = asRecord(
-            service.metadata_json ? JSON.parse(service.metadata_json) : {}
-        );
-    } catch {
-        metadata = {};
-    }
-    return typeof metadata.platform === "string" && metadata.platform
-        ? metadata.platform
-        : hostDockerPlatform();
 }
 
 function isImageMatchPlatform(image: JsonRecord, platform: string): boolean {
@@ -527,30 +371,4 @@ export async function lookupLatest(service: ManagedServiceRow, signal?: AbortSig
         };
     }
     return lookupRegistryV2(service, signal);
-}
-
-export function hasUpdate(service: ManagedServiceRow): boolean {
-    if (service.pin_mode === "digest") {
-        return Boolean(
-            service.latest_digest &&
-            (!service.current_digest || service.latest_digest !== service.current_digest)
-        );
-    }
-    return Boolean(
-        (service.latest_tag &&
-            (!service.current_tag || service.latest_tag !== service.current_tag)) ||
-        (service.latest_digest &&
-            (!service.current_digest || service.latest_digest !== service.current_digest))
-    );
-}
-
-export function buildTargetImageReference(service: ManagedServiceRow): string {
-    const parsed = parseImageReference(service.compose_image_ref || service.image_repo);
-    if (service.pin_mode === "digest" && service.latest_digest) {
-        const tag = service.latest_tag || parsed.tag;
-        return tag
-            ? `${parsed.repo}:${tag}@${service.latest_digest}`
-            : `${parsed.repo}@${service.latest_digest}`;
-    }
-    return `${parsed.repo}:${service.latest_tag || service.current_tag || "latest"}`;
 }

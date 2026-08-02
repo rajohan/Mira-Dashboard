@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type {
-    OpenClawGatewayClientInstance,
-    OpenClawGatewayClientOptions,
-} from "../src/lib/openclawGatewayClient.ts";
+import {
+    type OpenClawGatewayClientInstance,
+    type OpenClawGatewayClientOptions,
+} from "../src/lib/openclawGatewayClient/client.ts";
 import {
     MAX_CLIENT_PENDING_REQUESTS,
     type PullRequestPreviewGatewayProxy,

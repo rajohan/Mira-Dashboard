@@ -1,4 +1,4 @@
-import { database } from "../database.ts";
+import { database } from "../database/connection.ts";
 
 /**
  * Keeps production writes paused while a detached release guardian owns cutover.

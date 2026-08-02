@@ -10,7 +10,7 @@ import {
     runProductionBootstrapCommand,
 } from "../../scripts/productionBootstrap.ts";
 import { dashboardProjectPaths } from "../src/lib/dashboardPaths.ts";
-import { MANAGED_DASHBOARD_UNIT_NAMES } from "../src/managedDashboardUnitPolicy.ts";
+import { MANAGED_DASHBOARD_UNIT_NAMES } from "../src/services/releases/systemdPolicy.ts";
 import { captureRejection } from "./support/rejections.ts";
 
 const COMMIT_SHA = "a".repeat(40);

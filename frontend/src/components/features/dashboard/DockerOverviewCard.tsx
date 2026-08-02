@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import {
     type DockerSummaryCache,
     parseDockerSummaryCache,
-} from "../../../../../contracts/docker";
+} from "../../../../../contracts/docker/summary";
 import { useCacheEntry } from "../../../hooks/useCache";
 import { Card } from "../../ui/Card";
 import { formatBytes } from "../docker/dockerFormatters";

@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { writeReleaseManifest } from "../backend/src/releaseManifest.ts";
+import { writeReleaseManifest } from "../backend/src/services/releases/manifestArtifacts.ts";
 
 const releaseRoot = path.resolve(import.meta.dirname, "..");
 const manifest = await writeReleaseManifest({ releaseRoot });

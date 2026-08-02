@@ -5,15 +5,15 @@ import {
     type SessionListResponse,
     type SessionStats,
 } from "../../../contracts/sessions.ts";
-import gateway from "../gateway.ts";
-import { json } from "../http.ts";
-import { stringFallback } from "../lib/values.ts";
+import { json } from "../http/core.ts";
 import {
     type ParametersRequest,
     readApiJsonOrError,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { stringFallback } from "../lib/values.ts";
+import gateway from "../services/gateway/runtime.ts";
 
 function isValidSessionKey(sessionKey: string): boolean {
     return sessionKey.length > 0;

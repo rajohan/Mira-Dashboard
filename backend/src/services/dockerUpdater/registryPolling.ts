@@ -1,8 +1,10 @@
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
+import { imageRegistry } from "./imageReference.ts";
 import { createNotificationBestEffort } from "./notifications.ts";
-import { hasUpdate, imageRegistry, lookupLatest } from "./registryClient.ts";
+import { lookupLatest } from "./registryClient.ts";
 import { insertEventBestEffort } from "./repository.ts";
 import { caughtMessage, nowIso, serviceLabel } from "./support.ts";
+import { hasUpdate } from "./tagPolicy.ts";
 import {
     type DockerUpdaterStepResult,
     type ManagedServiceRow,

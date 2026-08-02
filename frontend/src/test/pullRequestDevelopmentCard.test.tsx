@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from "bun:test";
 
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import type { PullRequestPreviewStatus } from "../../../contracts/delivery";
+import type { PullRequestPreviewStatus } from "../../../contracts/delivery/previews";
 import { PullRequestDevelopmentCard } from "../components/features/delivery/PullRequestDevelopmentCard";
 
 function preview(

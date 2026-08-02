@@ -1,12 +1,12 @@
-import { canonicalChatContentFingerprint } from "../../../../../../contracts/chatCanonicalMessage";
+import { canonicalChatContentFingerprint } from "../../../../../../contracts/chat/canonicalContentIdentity";
+import { messageDeleteKey, stableChatStringify } from "../chatMessageIdentity";
 import {
     type ChatHistoryMessage,
     type ChatMessageSourceReference,
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
-import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
-import { hasPrimaryAnswerContent } from "./chatPresentation";
+import { hasPrimaryAnswerContent } from "./chatAnswerContent";
 import type { ChatRunState, ChatSessionRuntimeState } from "./chatState";
 
 export const RUN_START_USER_SKEW_MS = 1000;

@@ -6,7 +6,7 @@ import {
     parseCronJobsResponse,
     parseCronMutationResponse,
 } from "../../../contracts/cron";
-import type { JobDisableIntent } from "../../../contracts/jobs";
+import type { JobDisableIntent } from "../../../contracts/jobs/scheduled";
 import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchParsed, apiPostParsed } from "./useApi";
 

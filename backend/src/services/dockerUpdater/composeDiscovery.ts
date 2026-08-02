@@ -3,12 +3,12 @@ import path from "node:path";
 
 import { YAML } from "bun";
 
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { stringFallback } from "../../lib/values.ts";
 import { getDockerAppsRoot, managedComposePath } from "./composeProject.ts";
-import { isSafeTagRegexPattern } from "./registryClient.ts";
 import { caughtMessage, nowIso, parseImageReference } from "./support.ts";
+import { isSafeTagRegexPattern } from "./tagPolicy.ts";
 import type { DiscoveredComposeService, DockerUpdaterStepResult } from "./types.ts";
 
 const logger = createStructuredLogger("docker-updater");

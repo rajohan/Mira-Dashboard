@@ -1,25 +1,6 @@
-import type { CronJob } from "../../../../../contracts/cron";
-import type { JobDisableIntent, ScheduledJob } from "../../../../../contracts/jobs";
+import type { ScheduledJob } from "../../../../../contracts/jobs/scheduled";
 
 export type JobsView = "scheduled" | "openclaw";
-export type DisableMode = JobDisableIntent["mode"];
-export type DisableCandidate =
-    | { kind: "cron"; job: CronJob }
-    | { kind: "scheduled"; job: ScheduledJob };
-
-export const disableModeOptions = [
-    {
-        value: "until",
-        label: "Until a date",
-        description: "Heartbeat warns again after this time",
-    },
-    {
-        value: "indefinite",
-        label: "Indefinitely",
-        description:
-            "Heartbeat stays quiet until this annotation changes or the job is enabled",
-    },
-];
 
 /**
  * Reads the initially selected jobs view from the current URL.

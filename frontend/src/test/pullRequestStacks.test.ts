@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import type { PullRequestSummary } from "../../../contracts/delivery";
+import type { PullRequestSummary } from "../../../contracts/delivery/pullRequests";
 import {
     derivePullRequestStackCandidates,
     groupNativePullRequestStacks,

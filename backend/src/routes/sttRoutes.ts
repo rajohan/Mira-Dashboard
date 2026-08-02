@@ -1,8 +1,13 @@
 import type { SpeechTranscriptionResponse } from "../../../contracts/stt.ts";
-import { HttpError, json, readRequestBytes, readResponseTextFallback } from "../http.ts";
+import {
+    HttpError,
+    json,
+    readRequestBytes,
+    readResponseTextFallback,
+} from "../http/core.ts";
+import { routeFailureResponse } from "../http/routeSupport.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { stringFallback } from "../lib/values.ts";
-import { routeFailureResponse } from "../routeSupport.ts";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const ELEVENLABS_TIMEOUT_MS = 60_000;

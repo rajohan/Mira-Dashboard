@@ -1,31 +1,30 @@
 import { describe, expect, it } from "bun:test";
 
+import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
-} from "../../contracts/chat.ts";
-import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
+} from "../../contracts/chat/transport.ts";
 import {
     isSameSessionKey,
     OpenClawChatIdentityRegistry,
-    sessionMessageRunId,
-} from "../src/chat/openClawChatIdentity.ts";
+} from "../src/services/chat/openClawChatIdentity.ts";
 import {
     isTerminalEvent,
     runtimeSessionBoundary,
-} from "../src/chat/openClawChatLifecycle.ts";
-import { OpenClawChatRuntimeMetricsRecorder } from "../src/chat/openClawChatMetrics.ts";
+} from "../src/services/chat/openClawChatLifecycle.ts";
+import { OpenClawChatRuntimeMetricsRecorder } from "../src/services/chat/openClawChatMetrics.ts";
 import {
     OpenClawChatPersistenceCoordinator,
     type OpenClawChatSnapshotStore,
-} from "../src/chat/openClawChatPersistence.ts";
+} from "../src/services/chat/openClawChatPersistence.ts";
 import {
     runtimePayloadView,
     sessionMessageRole,
     sessionMessageStopReason,
     withRuntimeIdentity,
-} from "../src/chat/openClawChatProviderAdapter.ts";
+} from "../src/services/chat/openClawChatProviderAdapter.ts";
 import {
     boundedCanonicalRuntimeEnvelope,
     compactCompletedRun,
@@ -33,7 +32,8 @@ import {
     shouldRetainRuntimeEvent,
     snapshotFromRetainedRuns,
     type RetainedRun,
-} from "../src/chat/openClawChatRetention.ts";
+} from "../src/services/chat/openClawChatRetention.ts";
+import { sessionMessageRunId } from "../src/services/chat/openClawChatRunIdentity.ts";
 
 function envelope(
     event: string,

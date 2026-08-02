@@ -1,7 +1,7 @@
 import { parseTextToSpeechRequest } from "../../../contracts/tts.ts";
-import { readResponseTextFallback } from "../http.ts";
+import { readResponseTextFallback } from "../http/core.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../http/routeSupport.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
 
 const ELEVENLABS_TTS_TIMEOUT_MS = 60_000;
 const ELEVENLABS_TTS_MODEL = "eleven_turbo_v2_5";

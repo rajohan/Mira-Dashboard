@@ -1,4 +1,4 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { nonEmptyEnvironmentFallback } from "../../lib/values.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
 import {

@@ -1,4 +1,4 @@
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { caughtMessage, nowIso, serviceLabel } from "./support.ts";
 import type { ManagedServiceRow } from "./types.ts";

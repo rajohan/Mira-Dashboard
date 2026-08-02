@@ -11,23 +11,27 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { databaseMigrationIdentities } from "../src/databaseMigrations/index.ts";
-import { currentBunRuntimeIdentity } from "../src/managedBunRuntime.ts";
+import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "../src/database/schemaCompatibility.ts";
+import { databaseMigrationIdentities } from "../src/databaseMigrations/registry.ts";
 import {
     createReleaseManifest,
-    DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
-    databaseMigrationInventorySha256,
-    getRuntimeReleaseIdentity,
-    invalidateRuntimeReleaseIdentityCache,
     loadReleaseManifest,
-    loadRuntimeReleaseIdentity,
-    parseReleaseManifest,
+    verifyReleaseArtifacts,
+    writeReleaseManifest,
+} from "../src/services/releases/manifestArtifacts.ts";
+import { parseReleaseManifest } from "../src/services/releases/manifestParser.ts";
+import {
+    databaseMigrationInventorySha256,
     RELEASE_MANIFEST_FILE_NAME,
     RELEASE_MANIFEST_FORMAT_VERSION,
     requireRunnableReleaseCommit,
-    verifyReleaseArtifacts,
-    writeReleaseManifest,
-} from "../src/releaseManifest.ts";
+} from "../src/services/releases/manifestPolicy.ts";
+import { currentBunRuntimeIdentity } from "../src/services/releases/runtime.ts";
+import {
+    getRuntimeReleaseIdentity,
+    invalidateRuntimeReleaseIdentityCache,
+    loadRuntimeReleaseIdentity,
+} from "../src/services/releases/runtimeReleaseIdentity.ts";
 import { captureRejection } from "./support/rejections.ts";
 
 const temporaryRoots: string[] = [];

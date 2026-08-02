@@ -1,6 +1,6 @@
 import * as v from "valibot";
 
-import { jobDisableIntentRequestSchema, jobDisableIntentSchema } from "./jobs";
+import { jobDisableIntentRequestSchema, jobDisableIntentSchema } from "./jobs/scheduled";
 import {
     jsonObjectSchema,
     nonNegativeIntegerSchema,

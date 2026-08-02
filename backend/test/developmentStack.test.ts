@@ -14,14 +14,14 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { developmentBackendEnvironment } from "../src/development/developmentEnvironment.ts";
 import { prepareDevelopmentOpenClawSnapshot } from "../src/development/developmentOpenClaw.ts";
+import { runDevelopmentStack } from "../src/development/developmentRuntime.ts";
+import { resolveDevelopmentStackConfig } from "../src/development/developmentStackConfig.ts";
 import {
-    developmentBackendEnvironment,
     prepareDevelopmentState,
     resetDevelopmentState,
-    resolveDevelopmentStackConfig,
-    runDevelopmentStack,
-} from "../src/development/developmentStack.ts";
+} from "../src/development/developmentState.ts";
 import { enableStructuredLogOutputForTests } from "../src/lib/structuredLogger.ts";
 import { httpOrigin } from "./support/httpUrls.ts";
 

@@ -1,0 +1,365 @@
+import { createHash } from "node:crypto";
+
+import type { Server } from "bun";
+
+import type { DashboardUser } from "../../../contracts/auth.ts";
+import { getAuthSessionFromSessionId } from "../auth/sessionRepository.ts";
+import { type AuthSession } from "../auth/sessionTypes.ts";
+import { byteStreamReader } from "../lib/byteStreams.ts";
+
+const DEFAULT_COOKIE_NAMESPACE = "mira_dashboard";
+const COOKIE_NAMESPACE_PATTERN = /^[a-z0-9_]{1,48}$/u;
+
+/**
+ * Resolves stable cookie names so dev and production sessions can share a host safely.
+ * @returns Resolved stable cookie names so dev and production sessions can share a host safely.
+ */
+export function resolveDashboardCookieNames(
+    environment: Record<string, string | undefined> = process.env
+): { pendingLogin: string; session: string } {
+    const namespace =
+        environment.NODE_ENV === "production"
+            ? DEFAULT_COOKIE_NAMESPACE
+            : environment.MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE?.trim() ||
+              DEFAULT_COOKIE_NAMESPACE;
+    if (!COOKIE_NAMESPACE_PATTERN.test(namespace)) {
+        throw new TypeError(
+            "MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE must contain 1-48 lowercase letters, digits, or underscores"
+        );
+    }
+    return {
+        pendingLogin: `${namespace}_pending_login`,
+        session: `${namespace}_session`,
+    };
+}
+
+const { pendingLogin: PENDING_LOGIN_COOKIE, session: SESSION_COOKIE } =
+    resolveDashboardCookieNames();
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const PENDING_LOGIN_TTL_MS = 5 * 60_000;
+const DEFAULT_JSON_BODY_LIMIT = 2 * 1024 * 1024;
+const TRUSTED_PROXY_IPS = new Set(
+    (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+);
+const configuredDashboardOrigins = new Set(
+    (process.env.MIRA_DASHBOARD_ALLOWED_ORIGINS || "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+);
+type HeaderInput = Headers | Record<string, string> | Array<[string, string]>;
+
+interface BunResponseInit {
+    headers?: HeaderInput;
+    status?: number;
+    statusText?: string;
+}
+
+export function json(data: unknown, init: BunResponseInit = {}): Response {
+    const headers = new Headers(init.headers);
+    headers.set("Content-Type", "application/json");
+    return Response.json(data, { ...init, headers });
+}
+
+function hasMatchingEtag(request: Request, etag: string): boolean {
+    const candidates = request.headers.get("if-none-match");
+    if (!candidates) return false;
+    const normalizedEtag = etag.replace(/^W\//u, "");
+    return candidates.split(",").some((candidate) => {
+        const normalizedCandidate = candidate.trim().replace(/^W\//u, "");
+        return normalizedCandidate === "*" || normalizedCandidate === normalizedEtag;
+    });
+}
+
+/**
+ * Serves private JSON with a strong validator so repeated polling can reuse the
+ * browser's response body even when it still revalidates with the backend.
+ * @returns Json with etag result.
+ */
+export function jsonWithEtag(
+    request: Request,
+    data: unknown,
+    init: BunResponseInit = {}
+): Response {
+    const body = JSON.stringify(data);
+    const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
+    const headers = new Headers(init.headers);
+    headers.set("Cache-Control", "private, no-cache");
+    headers.set("Content-Type", "application/json");
+    headers.set("ETag", etag);
+    headers.set("Vary", "Cookie, Authorization");
+    if (hasMatchingEtag(request, etag)) {
+        return new Response(undefined, { ...init, headers, status: 304 });
+    }
+    return new Response(body, { ...init, headers });
+}
+
+export function text(
+    body: string,
+    {
+        contentType = "text/plain",
+        ...init
+    }: BunResponseInit & { contentType?: string } = {}
+): Response {
+    const headers = new Headers(init.headers);
+    headers.set("Content-Type", contentType);
+    return new Response(body, { ...init, headers });
+}
+
+export class HttpError extends Error {
+    readonly statusCode: number;
+
+    constructor(message: string, statusCode: number) {
+        super(message);
+        this.statusCode = statusCode;
+    }
+}
+
+export async function readRequestBytes(
+    request: Request,
+    maxBytes: number
+): Promise<Buffer> {
+    const contentLength = request.headers.get("content-length");
+    if (contentLength) {
+        const size = Number(contentLength);
+        if (Number.isFinite(size) && size > maxBytes) {
+            throw new HttpError("Request body too large", 413);
+        }
+    }
+
+    const reader = byteStreamReader(request.body);
+    if (!reader) return Buffer.alloc(0);
+
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > maxBytes) {
+                throw new HttpError("Request body too large", 413);
+            }
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    return Buffer.concat(chunks, total);
+}
+
+export async function readJson<T>(
+    request: Request,
+    options: { maxBytes?: number } = {}
+): Promise<T> {
+    const body = await readRequestBytes(
+        request,
+        options.maxBytes ?? DEFAULT_JSON_BODY_LIMIT
+    );
+    try {
+        return JSON.parse(body.toString("utf8")) as T;
+    } catch {
+        throw new HttpError("Invalid JSON", 400);
+    }
+}
+
+export async function readResponseTextFallback(response: Response): Promise<string> {
+    try {
+        return await response.text();
+    } catch {
+        return "";
+    }
+}
+
+export function requestIp(request: Request, server: Server<unknown>): string | undefined {
+    return server.requestIP(request)?.address;
+}
+
+export function isLoopbackAddress(address?: string): boolean {
+    return Boolean(address && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address));
+}
+
+export function isTrustedProxyAddress(address?: string): boolean {
+    return (
+        isLoopbackAddress(address) || Boolean(address && TRUSTED_PROXY_IPS.has(address))
+    );
+}
+
+export function isAllowedDashboardOrigin(request: Request): boolean {
+    const origin = request.headers.get("origin");
+    if (!origin) return true;
+    try {
+        const parsedOrigin = new URL(origin);
+        const requestUrl = new URL(request.url);
+        return (
+            parsedOrigin.origin === requestUrl.origin ||
+            configuredDashboardOrigins.has(parsedOrigin.origin)
+        );
+    } catch {
+        return false;
+    }
+}
+
+function cookieValue(request: Request, name: string): string | undefined {
+    const cookieHeader = request.headers.get("cookie");
+    if (!cookieHeader) {
+        return undefined;
+    }
+    for (const part of cookieHeader.split(";")) {
+        const trimmed = part.trim();
+        if (trimmed.startsWith(`${name}=`)) {
+            try {
+                return decodeURIComponent(trimmed.slice(name.length + 1));
+            } catch {
+                return undefined;
+            }
+        }
+    }
+    return undefined;
+}
+
+export function sessionIdFromCookie(request: Request): string | undefined {
+    return cookieValue(request, SESSION_COOKIE);
+}
+
+export function pendingLoginFromCookie(request: Request): string | undefined {
+    return cookieValue(request, PENDING_LOGIN_COOKIE);
+}
+
+/**
+ * Resolves the full browser session and only touches idle activity on explicit UI activity.
+ * @returns Resolved the full browser session and only touches idle activity on explicit UI activity.
+ */
+export function authSession(request: Request): AuthSession | undefined {
+    const sessionId = sessionIdFromCookie(request);
+    return sessionId
+        ? getAuthSessionFromSessionId(sessionId, {
+              touchActivity: request.headers.get("x-mira-user-activity")?.trim() === "1",
+          })
+        : undefined;
+}
+
+export function authUser(request: Request): DashboardUser | undefined {
+    const session = authSession(request);
+    return session ? { id: session.id, username: session.username } : undefined;
+}
+
+export function isSecureRequest(request: Request, server: Server<unknown>): boolean {
+    try {
+        if (new URL(request.url).protocol === "https:") {
+            return true;
+        }
+    } catch {
+        return false;
+    }
+    const forwardedProtocol = request.headers.get("x-forwarded-proto");
+    const peerAddress = requestIp(request, server);
+    return Boolean(
+        forwardedProtocol &&
+        isTrustedProxyAddress(peerAddress) &&
+        forwardedProtocol.split(",", 1)[0]?.trim() === "https"
+    );
+}
+
+function shouldUseSecureCookies(
+    request: Request,
+    server: Server<unknown>,
+    environment = process.env.NODE_ENV
+): boolean {
+    return environment === "production" || isSecureRequest(request, server);
+}
+
+export function sessionCookie(
+    request: Request,
+    server: Server<unknown>,
+    sessionId: string,
+    environment = process.env.NODE_ENV
+): string {
+    const cookieParts = [
+        `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}`,
+        "Path=/",
+        "HttpOnly",
+        "SameSite=Strict",
+        `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+    ];
+    if (shouldUseSecureCookies(request, server, environment)) {
+        cookieParts.push("Secure");
+    }
+    return cookieParts.join("; ");
+}
+
+export function clearSessionCookie(
+    request: Request,
+    server: Server<unknown>,
+    environment = process.env.NODE_ENV
+): string {
+    const cookieParts = [
+        `${SESSION_COOKIE}=`,
+        "Path=/",
+        "HttpOnly",
+        "SameSite=Strict",
+        "Max-Age=0",
+    ];
+    if (shouldUseSecureCookies(request, server, environment)) {
+        cookieParts.push("Secure");
+    }
+    return cookieParts.join("; ");
+}
+
+export function pendingLoginCookie(
+    request: Request,
+    server: Server<unknown>,
+    pendingLogin: string,
+    environment = process.env.NODE_ENV
+): string {
+    const cookieParts = [
+        `${PENDING_LOGIN_COOKIE}=${encodeURIComponent(pendingLogin)}`,
+        "Path=/api/auth",
+        "HttpOnly",
+        "SameSite=Strict",
+        `Max-Age=${Math.floor(PENDING_LOGIN_TTL_MS / 1000)}`,
+    ];
+    if (shouldUseSecureCookies(request, server, environment)) {
+        cookieParts.push("Secure");
+    }
+    return cookieParts.join("; ");
+}
+
+export function clearPendingLoginCookie(
+    request: Request,
+    server: Server<unknown>,
+    environment = process.env.NODE_ENV
+): string {
+    const cookieParts = [
+        `${PENDING_LOGIN_COOKIE}=`,
+        "Path=/api/auth",
+        "HttpOnly",
+        "SameSite=Strict",
+        "Max-Age=0",
+    ];
+    if (shouldUseSecureCookies(request, server, environment)) {
+        cookieParts.push("Secure");
+    }
+    return cookieParts.join("; ");
+}
+
+export function withCookie(response: Response, cookie: string): Response {
+    return withCookies(response, [cookie]);
+}
+
+export function withCookies(response: Response, cookies: string[]): Response {
+    const headers = new Headers(response.headers);
+    headers.delete("Set-Cookie");
+    for (const cookie of cookies) {
+        headers.append("Set-Cookie", cookie);
+    }
+    return new Response(response.body, {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+    });
+}

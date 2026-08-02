@@ -1,7 +1,8 @@
-import type {
-    CanonicalChatMessage,
-    CanonicalChatProviderMetadata,
-} from "../chatCanonical";
+import type { CanonicalChatMessage, CanonicalChatProviderMetadata } from "./canonical";
+import {
+    canonicalChatContentFingerprint,
+    summarizeCanonicalChatValueForFingerprint,
+} from "./canonicalContentIdentity";
 import {
     CANONICAL_CHAT_HISTORY_SCHEMA_VERSION,
     parseCanonicalChatHistoryMessageResult,
@@ -9,12 +10,8 @@ import {
     type CanonicalChatHistoryMessageResult,
     type CanonicalChatHistoryPage,
     type CanonicalChatHistoryRow,
-} from "../chatCanonicalHistory";
-import {
-    canonicalChatContentFingerprint,
-    summarizeCanonicalChatValueForFingerprint,
-} from "../chatCanonicalMessage";
-import { stableCanonicalChatStringify } from "../chatCanonicalUtilities";
+} from "./canonicalHistory";
+import { stableCanonicalChatStringify } from "./canonicalUtilities";
 import {
     normalizeOpenClawHistoryMessage,
     type RawOpenClawHistoryMessage,

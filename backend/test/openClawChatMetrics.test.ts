@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { OpenClawChatRuntimeMetricsRecorder } from "../src/chat/openClawChatMetrics.ts";
+import { OpenClawChatRuntimeMetricsRecorder } from "../src/services/chat/openClawChatMetrics.ts";
 
 describe("OpenClaw chat runtime observability", () => {
     it("measures bounded replay gauges, limit evictions, and rolling store writes", () => {

@@ -1,11 +1,13 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
+import {
+    registerScheduledJobAction,
+    ScheduledJobActionError,
+} from "../scheduledJobs/actionRegistry.ts";
 import {
     getScheduledJob,
-    registerScheduledJobAction,
     removeScheduledJobsNotInAction,
-    ScheduledJobActionError,
     upsertScheduledJob,
-} from "../scheduledJobs.ts";
+} from "../scheduledJobs/repository.ts";
 import { createNotificationBestEffort } from "./notifications.ts";
 import type { DockerUpdaterStepResult } from "./types.ts";
 import {

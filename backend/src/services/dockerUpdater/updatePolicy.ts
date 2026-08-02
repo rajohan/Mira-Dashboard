@@ -1,10 +1,11 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { registerDockerUpdaterServices } from "./composeDiscovery.ts";
 import { syncDockerUpdaterChangesBestEffort } from "./gitSync.ts";
-import { hasUpdate, imageRegistry } from "./registryClient.ts";
+import { imageRegistry } from "./imageReference.ts";
 import { pollDockerUpdaterRegistries } from "./registryPolling.ts";
 import { applyServiceUpdate, pruneDanglingImagesBestEffort } from "./serviceUpdate.ts";
 import { serviceLabel } from "./support.ts";
+import { hasUpdate } from "./tagPolicy.ts";
 import {
     type DockerUpdaterStepResult,
     type ManagedServiceRow,

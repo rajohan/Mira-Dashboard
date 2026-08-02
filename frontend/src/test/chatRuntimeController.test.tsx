@@ -2,11 +2,11 @@ import { describe, expect, it, jest } from "bun:test";
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 
-import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
-import type { ChatRuntimeEvent } from "../components/features/chat/domain/chatState";
-import type {
-    ChatRuntimeSnapshot as VersionedChatRuntimeSnapshot,
-    ChatTransport,
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat/transport";
+import { type ChatRuntimeEvent } from "../components/features/chat/domain/chatState";
+import {
+    type ChatRuntimeSnapshot as VersionedChatRuntimeSnapshot,
+    type ChatTransport,
 } from "../components/features/chat/transport/chatTransport";
 import { useChatRuntime } from "../components/features/chat/useChatRuntime";
 

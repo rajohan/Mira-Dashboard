@@ -3,23 +3,27 @@ import {
     type CanonicalChatImage,
     type CanonicalChatMessage,
     type CanonicalChatToolResult,
-} from "../chatCanonical";
+} from "./canonical";
 import {
     canonicalChatAttachmentKind,
+    mergeCanonicalChatAttachments,
+} from "./canonicalAttachments";
+import {
+    extractCanonicalChatThinking,
+    extractCanonicalChatToolCalls,
+    normalizeCanonicalChatText,
+} from "./canonicalContentBlocks";
+import { canonicalizeCanonicalChatMedia } from "./canonicalImages";
+import {
     canonicalChatImageDisplayUrl,
     canonicalChatLocalMediaPathFromUrl,
     canonicalChatPortableDashboardMediaUrl,
-    canonicalizeCanonicalChatMedia,
-    extractCanonicalChatThinking,
-    extractCanonicalChatToolCalls,
-    mergeCanonicalChatAttachments,
-    normalizeCanonicalChatText,
-} from "../chatCanonicalMessage";
+} from "./canonicalImageUrls";
 import {
     canonicalIsoString,
     MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
     truncateCanonicalChatText,
-} from "../chatCanonicalUtilities";
+} from "./canonicalUtilities";
 
 const REMOTE_MEDIA_PROTOCOLS = new Set(["http:", "https:"]);
 

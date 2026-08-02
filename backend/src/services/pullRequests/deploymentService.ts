@@ -1,39 +1,38 @@
-import type { DeploymentJob } from "../../../../contracts/delivery.ts";
-import { database } from "../../database.ts";
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
+import { database } from "../../database/connection.ts";
 import { errorMessage } from "../../lib/errors.ts";
-import { stageDashboardRelease } from "../../releaseDeployment.ts";
-import {
-    assertDashboardReleaseRuntimeAvailable,
-    readDashboardReleaseState,
-    resolveDashboardReleasesRoot,
-} from "../../releaseManager.ts";
-import { enqueueJobExecution } from "../jobExecutionQueue.ts";
-import {
-    registerDeploymentCutoverRecoveryHandler,
-    registerScheduledJobAction,
-    ScheduledJobActionError,
-} from "../scheduledJobs.ts";
-import { getDashboardRoot, getDashboardWorktreeRoot } from "./config.ts";
-import {
-    acquireDeploymentLock,
-    createDeploymentCutoverContext,
-    type DeploymentCutoverContext,
-    readDeploymentJob,
-    refreshDeploymentHeartbeat,
-    registerPullRequestJobLifecycleHandlers,
-    releaseDeploymentLock,
-    rollbackIneligibilityReason,
-    writeDeploymentJob,
-} from "./deploymentRepository.ts";
-import { runCommand } from "./githubClient.ts";
+import { enqueueJobExecution } from "../jobExecutionQueue/repository.ts";
+import { DEPLOYMENT_WORKER_STABILITY_SECONDS } from "../releases/cutoverCommands.ts";
 import {
     assertManagedDashboardServiceContract,
-    DEPLOYMENT_WORKER_STABILITY_SECONDS,
-    didScheduleOrphanedReleaseCutoverRecovery,
     ensureManagedRuntimeForRelease,
     scheduleReleaseCutover,
     scheduleReleaseRollback,
-} from "./releaseCutover.ts";
+} from "../releases/cutoverOperations.ts";
+import { didScheduleOrphanedReleaseCutoverRecovery } from "../releases/cutoverRecovery.ts";
+import { stageDashboardRelease } from "../releases/deployment.ts";
+import { readDashboardReleaseState } from "../releases/releaseActivation.ts";
+import { resolveDashboardReleasesRoot } from "../releases/releaseLayout.ts";
+import { assertDashboardReleaseRuntimeAvailable } from "../releases/schemaCompatibility.ts";
+import {
+    registerScheduledJobAction,
+    ScheduledJobActionError,
+} from "../scheduledJobs/actionRegistry.ts";
+import { registerDeploymentCutoverRecoveryHandler } from "../scheduledJobs/runtime.ts";
+import { getDashboardRoot, getDashboardWorktreeRoot } from "./config.ts";
+import {
+    createDeploymentCutoverContext,
+    type DeploymentCutoverContext,
+} from "./deploymentCutoverContext.ts";
+import { readDeploymentJob, writeDeploymentJob } from "./deploymentJobRepository.ts";
+import {
+    acquireDeploymentLock,
+    refreshDeploymentHeartbeat,
+    registerPullRequestJobLifecycleHandlers,
+    releaseDeploymentLock,
+} from "./deploymentLock.ts";
+import { runCommand } from "./githubCommandClient.ts";
+import { rollbackIneligibilityReason } from "./releaseStatus.ts";
 import {
     dateToISOString,
     FULL_COMMIT_SHA_PATTERN,

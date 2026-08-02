@@ -19,7 +19,7 @@ async function importDatabaseInChild(databasePath: string): Promise<{
     stderr: string;
 }> {
     const databaseModuleUrl = pathToFileURL(
-        path.resolve(import.meta.dirname, "../src/database.ts")
+        path.resolve(import.meta.dirname, "../src/database/connection.ts")
     ).href;
     const child = Bun.spawn({
         cmd: [
@@ -48,7 +48,7 @@ async function closeAndReuseDatabaseInChild(databasePath: string): Promise<{
     stderr: string;
 }> {
     const databaseModuleUrl = pathToFileURL(
-        path.resolve(import.meta.dirname, "../src/database.ts")
+        path.resolve(import.meta.dirname, "../src/database/connection.ts")
     ).href;
     const child = Bun.spawn({
         cmd: [
@@ -106,7 +106,7 @@ async function runProductionModeTestWithoutPreload(
     fixturePath: string
 ): Promise<{ exitCode: number; stderr: string }> {
     const databaseModuleUrl = pathToFileURL(
-        path.resolve(import.meta.dirname, "../src/database.ts")
+        path.resolve(import.meta.dirname, "../src/database/connection.ts")
     ).href;
     await writeFile(
         fixturePath,

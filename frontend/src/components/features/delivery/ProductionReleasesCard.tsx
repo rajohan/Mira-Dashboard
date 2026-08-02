@@ -5,7 +5,7 @@ import type {
     DashboardReleaseStatus,
     DashboardReleaseSummary,
     ProductionCheckoutStatus,
-} from "../../../../../contracts/delivery";
+} from "../../../../../contracts/delivery/deployments";
 import { messageFromError } from "../../../lib/errorMessage";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";

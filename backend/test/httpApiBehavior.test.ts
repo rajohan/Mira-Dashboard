@@ -39,9 +39,15 @@ const TEST_ENV_KEYS = [
 async function ensureAuthenticatedTestSession(): Promise<void> {
     if (testState.sessionToken) return;
 
-    const { createSession, createUser, findUserByUsername } =
-        await import("../src/auth.ts");
-    const { database } = await import("../src/database.ts");
+    const { createSession, createUser, findUserByUsername } = await Promise.all([
+        import("../src/auth/sessionRepository.ts"),
+        import("../src/auth/userRepository.ts"),
+    ]).then(([module0, module1]) => ({
+        createSession: module0.createSession,
+        createUser: module1.createUser,
+        findUserByUsername: module1.findUserByUsername,
+    }));
+    const { database } = await import("../src/database/connection.ts");
     const username = "functional-test-user";
     const user =
         findUserByUsername(username) ??
@@ -271,7 +277,7 @@ async function withTestScheduledExecutor<T>(
     operation: () => Promise<T>
 ): Promise<T> {
     const { startScheduledJobExecutor, stopScheduledJobExecutor } =
-        await import("../src/services/scheduledJobs.ts");
+        await import("../src/services/scheduledJobs/runtime.ts");
     registerActions();
     startScheduledJobExecutor();
     try {
@@ -340,7 +346,7 @@ describe("Mira Dashboard backend integration", () => {
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = composeWrapper;
         process.env.TRUST_PROXY = "false";
 
-        const serverModule = await import("../src/server.ts");
+        const serverModule = await import("../src/server/app.ts");
         testState.server = await createTestServer(serverModule.createServer);
         testState.baseUrl = `http://127.0.0.1:${testState.server.port}`;
     });
@@ -348,7 +354,7 @@ describe("Mira Dashboard backend integration", () => {
     afterAll(async () => {
         const server = testState.server;
         await server?.stop(true);
-        const { closeDatabaseForTests } = await import("../src/database.ts");
+        const { closeDatabaseForTests } = await import("../src/database/connection.ts");
         closeDatabaseForTests();
         for (const key of TEST_ENV_KEYS) {
             const originalValue = testState.originalEnv[key];
@@ -1155,9 +1161,10 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("reports cache heartbeat entries and individual cache state", async () => {
-        const { database } = await import("../src/database.ts");
+        const { database } = await import("../src/database/connection.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
-        const { writeCacheFailure } = await import("../src/services/cacheRefresh.ts");
+        const { writeCacheFailure } =
+            await import("../src/services/cacheRefresh/cacheEntryFailure.ts");
         database
             .prepare(
                 `INSERT INTO cache_entries (
@@ -1683,8 +1690,13 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("lists, updates, runs, and reports scheduled jobs through the API", async () => {
-        const { registerScheduledJobAction, upsertScheduledJob } =
-            await import("../src/services/scheduledJobs.ts");
+        const { registerScheduledJobAction, upsertScheduledJob } = await Promise.all([
+            import("../src/services/scheduledJobs/actionRegistry.ts"),
+            import("../src/services/scheduledJobs/repository.ts"),
+        ]).then(([module0, module1]) => ({
+            registerScheduledJobAction: module0.registerScheduledJobAction,
+            upsertScheduledJob: module1.upsertScheduledJob,
+        }));
         registerScheduledJobAction("test.functional", () => ({
             result: "ran from integration test",
         }));
@@ -1930,7 +1942,7 @@ describe("Mira Dashboard backend integration", () => {
             message: "body.patch: must be an object",
         });
 
-        const { database, sqlNullable } = await import("../src/database.ts");
+        const { database, sqlNullable } = await import("../src/database/connection.ts");
         database
             .prepare(
                 `
@@ -2096,7 +2108,7 @@ describe("Mira Dashboard backend integration", () => {
         expect(walg.body).toEqual({});
 
         const { registerBackupScheduledJobs } =
-            await import("../src/services/backups.ts");
+            await import("../src/services/backups/scheduling.ts");
         const clearKopia = await withTestScheduledExecutor(
             registerBackupScheduledJobs,
             () =>
@@ -2124,8 +2136,8 @@ describe("Mira Dashboard backend integration", () => {
 
     it("maps deployment rows into recent pull request deployment summaries", async () => {
         const [{ database, sqlNullable }, { readDeploymentJobs }] = await Promise.all([
-            import("../src/database.ts"),
-            import("../src/services/pullRequests.ts"),
+            import("../src/database/connection.ts"),
+            import("../src/services/pullRequests/deploymentJobRepository.ts"),
         ]);
         database.prepare("DELETE FROM deployment_jobs").run();
         database
@@ -2285,7 +2297,7 @@ describe("Mira Dashboard backend integration", () => {
         expect(metrics.body.system.hostname.length).toBeGreaterThan(0);
         expect(metrics.body.tokens.total).toBe(0);
 
-        const { database } = await import("../src/database.ts");
+        const { database } = await import("../src/database/connection.ts");
         database.prepare("DELETE FROM cache_entries WHERE key = ?").run("moltbook.home");
         const missingMoltbook = await api<ApiErrorResponse>("/api/moltbook/home");
         expect(missingMoltbook.status).toBe(503);

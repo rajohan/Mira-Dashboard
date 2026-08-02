@@ -1,11 +1,11 @@
 import type { BackupType } from "../../../contracts/backups.ts";
-import { json } from "../http.ts";
-import { routeErrorResponse } from "../routeSupport.ts";
+import { json } from "../http/core.ts";
+import { routeErrorResponse } from "../http/routeSupport.ts";
 import {
     clearPersistedBackupAttention,
     getPersistedBackupJob,
     queueManualBackup,
-} from "../services/backups.ts";
+} from "../services/backups/scheduling.ts";
 
 function backupResponseError(error: unknown, fallback: string): Response {
     return routeErrorResponse(undefined, error, {

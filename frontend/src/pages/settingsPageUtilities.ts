@@ -1,5 +1,5 @@
 import type { OpenClawConfig } from "../../../contracts/openClawConfig";
-import type { ChannelSummary } from "../components/features/settings/ChannelSection";
+import { type ChannelSummary } from "../components/features/settings/ChannelSection";
 
 export type TimerRef = { current: ReturnType<typeof setTimeout> | undefined };
 

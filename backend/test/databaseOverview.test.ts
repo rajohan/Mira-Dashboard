@@ -194,14 +194,14 @@ describe("database overview service", () => {
             writeFakeDocker(path.join(temporaryRoot, "docker"));
             const invocationLog = path.join(temporaryRoot, "invocations.log");
             const { getDatabaseOverview } =
-                await import("../src/services/databaseOverview.ts");
+                await import("../src/services/databaseOverview/service.ts");
             process.env.PATH = `${temporaryRoot}${path.delimiter}${originalPath ?? ""}`;
             process.env.DATABASE_HOST = "postgres";
             process.env.DATABASE_PORT = "5432";
             process.env.FAKE_DOCKER_INVOCATION_LOG = invocationLog;
             process.env.PGBOUNCER_HOST = "pgbouncer";
             process.env.PGBOUNCER_PORT = "6432";
-            const { database } = await import("../src/database.ts");
+            const { database } = await import("../src/database/connection.ts");
             database
                 .prepare("DELETE FROM scheduled_jobs WHERE id = 'database.maintenance'")
                 .run();
@@ -335,7 +335,7 @@ describe("database overview service", () => {
     });
 
     it("requests review for lifecycle failures and only material compaction states", async () => {
-        const { database } = await import("../src/database.ts");
+        const { database } = await import("../src/database/connection.ts");
         const { getDashboardSqliteOverview, sqliteReusableSpaceAttention } =
             await import("../src/services/sqliteOverview.ts");
         const now = new Date("2026-07-23T12:00:00.000Z");
@@ -430,7 +430,7 @@ describe("database overview service", () => {
     });
 
     it("maps database overview service failures to a generic route error", async () => {
-        const serviceModule = await import("../src/services/databaseOverview.ts");
+        const serviceModule = await import("../src/services/databaseOverview/service.ts");
         const databaseError = new Error("connection failed") as Error & {
             code?: string;
         };
@@ -466,8 +466,8 @@ describe("database overview service", () => {
 
     it("refreshes isolated SQLite metrics without replacing copied host metrics", async () => {
         const { getIsolatedDatabaseOverview } =
-            await import("../src/services/databaseOverview.ts");
-        const { database } = await import("../src/database.ts");
+            await import("../src/services/databaseOverview/service.ts");
+        const { database } = await import("../src/database/connection.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const snapshot = {
             checkedAt: "2026-07-26T20:00:00.000Z",

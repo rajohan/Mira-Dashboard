@@ -1,12 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { ScheduledJobPatch, ScheduledJobRun } from "../../../contracts/jobs";
+import type {
+    ScheduledJobPatch,
+    ScheduledJobRun,
+} from "../../../contracts/jobs/scheduled";
 import {
     parseScheduledJobMutationResponse,
     parseScheduledJobRunResponse,
     parseScheduledJobRunsResponse,
     parseScheduledJobsResponse,
-} from "../../../contracts/jobs";
+} from "../../../contracts/jobs/scheduled";
 import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchParsed, apiPatchParsed, apiPostParsed } from "./useApi";
 import {

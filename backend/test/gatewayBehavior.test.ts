@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
-import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
-import type { DashboardSocket } from "../src/dashboardSocket.ts";
-import type {
-    OpenClawGatewayClientInstance,
-    OpenClawGatewayClientOptions,
-    OpenClawGatewayRequestOptions,
-} from "../src/lib/openclawGatewayClient.ts";
+import {
+    type OpenClawGatewayClientInstance,
+    type OpenClawGatewayClientOptions,
+    type OpenClawGatewayRequestOptions,
+} from "../src/lib/openclawGatewayClient/client.ts";
 import { structuredLog } from "../src/lib/structuredLogger.ts";
+import { OpenClawChatBridge } from "../src/services/chat/openClawChatBridge.ts";
+import { type DashboardSocket } from "../src/services/gateway/dashboardSocket.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
@@ -329,7 +329,8 @@ afterEach(() => {
 
 describe("gateway behavior", () => {
     it("normalizes every supported sessions.list response wrapper", async () => {
-        const { normalizeGatewaySessionList } = await import("../src/gateway.ts");
+        const { normalizeGatewaySessionList } =
+            await import("../src/services/gateway/sessionProjection.ts");
         const session = {
             key: "agent:wrapped:subagent:test",
             sessionId: "wrapped-session",
@@ -409,7 +410,7 @@ describe("gateway behavior", () => {
         process.env.OPENCLAW_HOME = openclawHome;
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(
@@ -444,7 +445,7 @@ describe("gateway behavior", () => {
         process.env.OPENCLAW_HOME = openclawHome;
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(
@@ -480,7 +481,7 @@ describe("gateway behavior", () => {
         process.env.OPENCLAW_HOME = openclawHome;
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(
@@ -609,7 +610,7 @@ describe("gateway behavior", () => {
         process.env.OPENCLAW_HOME = openclawHome;
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(
@@ -657,7 +658,7 @@ describe("gateway behavior", () => {
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
         process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-reconnect.test";
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         const markGatewayDisconnected = jest.spyOn(
@@ -735,7 +736,7 @@ describe("gateway behavior", () => {
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
         process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-live-reconnect.test";
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(
@@ -854,7 +855,7 @@ describe("gateway behavior", () => {
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
         process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-generation.test";
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(
@@ -935,7 +936,7 @@ describe("gateway behavior", () => {
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
         process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-replay-scope-close.test";
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(
@@ -1007,7 +1008,7 @@ describe("gateway behavior", () => {
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
         process.env.OPENCLAW_GATEWAY_URL = "ws://gateway.test";
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         gateway.shutdown();
         cleanupCallbacks.push(

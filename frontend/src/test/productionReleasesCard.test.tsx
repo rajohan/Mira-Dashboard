@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from "bun:test";
 
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import type { DashboardReleaseStatus } from "../../../contracts/delivery";
+import type { DashboardReleaseStatus } from "../../../contracts/delivery/deployments";
 import { ProductionReleasesCard } from "../components/features/delivery/ProductionReleasesCard";
 
 const CURRENT_COMMIT = "a".repeat(40);

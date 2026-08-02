@@ -3,14 +3,14 @@ import type {
     AgentTaskHistoryResponse,
 } from "../../../contracts/agents.ts";
 import { parseAgentMetadataUpdateRequest } from "../../../contracts/agents.ts";
-import { HttpError, json } from "../http.ts";
-import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
+import { HttpError, json } from "../http/core.ts";
 import {
     type ParametersRequest,
     readApiJsonOrError,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import {
     buildAgentStatuses,
     buildSingleAgentStatus,
@@ -19,7 +19,7 @@ import {
     isValidAgentId,
     parseAgentsConfig,
     updateAgentCurrentTask,
-} from "../services/agents.ts";
+} from "../services/agents/statusService.ts";
 
 function agentError(error: unknown, fallback = "Agent route failed"): Response {
     return routeErrorResponse(undefined, error, {

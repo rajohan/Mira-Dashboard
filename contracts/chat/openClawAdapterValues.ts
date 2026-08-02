@@ -1,5 +1,5 @@
-import type { CanonicalChatMessage } from "../chatCanonical";
-import { normalizeCanonicalChatText } from "../chatCanonicalMessage";
+import type { CanonicalChatMessage } from "./canonical";
+import { normalizeCanonicalChatText } from "./canonicalContentBlocks";
 import {
     boundCanonicalChatToolValue,
     canonicalIsoString,
@@ -7,7 +7,7 @@ import {
     serializeCanonicalChatValue,
     truncateCanonicalChatText,
     uniqueCanonicalChatIds,
-} from "../chatCanonicalUtilities";
+} from "./canonicalUtilities";
 import {
     normalizeOpenClawHistoryMessage,
     type RawOpenClawHistoryMessage,

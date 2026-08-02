@@ -9,7 +9,7 @@ import {
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import type { DockerVolume } from "../../../../../contracts/docker";
+import type { DockerVolume } from "../../../../../contracts/docker/inventory";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";

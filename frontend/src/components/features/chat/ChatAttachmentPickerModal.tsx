@@ -15,13 +15,13 @@ import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
 import { Modal } from "../../ui/Modal";
 import { AttachmentPreviewContent } from "./AttachmentPreviewModal";
-import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import {
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     hasFilesInDataTransfer,
     previewFromSendAttachment,
-} from "./chatUtilities";
+} from "./chatAttachmentUtilities";
+import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 
 interface ChatAttachmentPickerModalProperties {
     attachments: ChatSendAttachment[];

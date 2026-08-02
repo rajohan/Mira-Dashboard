@@ -11,13 +11,6 @@ import { parseSpeechTranscriptionResponse } from "../../../../../contracts/stt";
 import { apiErrorFromResponse } from "../../../lib/apiError";
 import { messageFromError } from "../../../lib/errorMessage";
 import { formatSize } from "../../../utils/format";
-import { supportedAudioRecordingMimeType } from "./chatPageUtilities";
-import {
-    attachmentKind,
-    type ChatAttachmentError,
-    type ChatAttachmentInputSource,
-    type ChatSendAttachment,
-} from "./chatTypes";
 import {
     dataUrlToBase64,
     displayMimeType,
@@ -26,7 +19,14 @@ import {
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     readFileAsDataUrl,
-} from "./chatUtilities";
+} from "./chatAttachmentUtilities";
+import { supportedAudioRecordingMimeType } from "./chatPageUtilities";
+import {
+    attachmentKind,
+    type ChatAttachmentError,
+    type ChatAttachmentInputSource,
+    type ChatSendAttachment,
+} from "./chatTypes";
 
 interface ChatInputMediaOptions {
     onError: (error?: string) => void;

@@ -1,4 +1,4 @@
-import type { ChatModelOption } from "./chatUtilities";
+import type { ChatModelOption } from "./chatSettings";
 
 /** Represents slash command definition. */
 export interface SlashCommandDefinition {

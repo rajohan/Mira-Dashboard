@@ -21,7 +21,8 @@ import {
     parseSystemHostSummary,
     type SystemHostSummary,
 } from "../../../../contracts/system";
-import { DELIVERY_NAV_REFRESH_MS, useCacheEntry, usePullRequests } from "../../hooks";
+import { useCacheEntry } from "../../hooks/useCache";
+import { DELIVERY_NAV_REFRESH_MS, usePullRequests } from "../../hooks/useDelivery";
 import { preloadRouteModule } from "../../lib/routeModules";
 import { cn } from "../../utils/cn";
 import { AppHeader } from "./AppHeader";

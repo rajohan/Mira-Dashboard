@@ -7,16 +7,16 @@ import {
     parseCronToggleRequest,
     parseCronUpdateRequest,
 } from "../../../contracts/cron.ts";
-import type { JobDisableIntent } from "../../../contracts/jobs.ts";
-import gateway from "../gateway.ts";
-import { json } from "../http.ts";
-import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import type { JobDisableIntent } from "../../../contracts/jobs/scheduled.ts";
+import { json } from "../http/core.ts";
 import {
     type ParametersRequest,
     readApiJsonOrError,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import gateway from "../services/gateway/runtime.ts";
 import { assertJobDisableIntentIsCurrent } from "../services/jobDisableIntent.ts";
 import {
     getOpenClawCronDisableIntent,

@@ -7,7 +7,7 @@ import {
     clearSessionCookie,
     pendingLoginCookie,
     sessionCookie,
-} from "../src/http.ts";
+} from "../src/http/core.ts";
 
 function serverWithAddress(address: string): Server<unknown> {
     return {

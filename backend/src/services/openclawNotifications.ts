@@ -1,5 +1,5 @@
 import type { OpenClawVersionSummary } from "../../../contracts/system.ts";
-import { database, sqlNullable } from "../database.ts";
+import { database, sqlNullable } from "../database/connection.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
 

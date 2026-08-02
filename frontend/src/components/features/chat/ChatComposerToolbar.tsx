@@ -20,11 +20,7 @@ import type { ReactNode } from "react";
 import type { Session } from "../../../../../contracts/sessions";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
-import {
-    chatSpeedOptions,
-    chatThinkingOptions,
-    selectedChatSpeed,
-} from "./chatUtilities";
+import { chatSpeedOptions, chatThinkingOptions, selectedChatSpeed } from "./chatSettings";
 
 const CHAT_EMOJIS = [
     "😀",

@@ -1,7 +1,7 @@
 import type { Session } from "../../../../../contracts/sessions";
 import { timestampFromDateString } from "../../../utils/date";
+import { mergeWithRecentOptimisticMessages } from "./chatMessageReconciliation";
 import type { ChatHistoryMessage } from "./chatTypes";
-import { mergeWithRecentOptimisticMessages } from "./chatUtilities";
 
 const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
     "mira-dashboard-chat-diagnostic-visibility";

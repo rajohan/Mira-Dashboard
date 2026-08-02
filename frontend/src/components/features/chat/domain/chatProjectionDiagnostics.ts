@@ -1,5 +1,5 @@
+import { stableChatStringify } from "../chatMessageIdentity";
 import type { ChatHistoryMessage } from "../chatTypes";
-import { stableChatStringify } from "../chatUtilities";
 import { isRunMatchingMessage, type ResponseSegment } from "./chatProjectionIdentity";
 import type { ChatRunState } from "./chatState";
 

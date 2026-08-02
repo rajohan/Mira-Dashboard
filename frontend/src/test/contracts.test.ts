@@ -1,36 +1,36 @@
 import { describe, expect, it } from "bun:test";
 
+import { parseTotpEnrollmentRequest } from "../../../contracts/accountSecurity/requests";
 import {
-    parseAccountSecuritySummary,
     parseMfaStepUpResponse,
     parsePasswordReauthenticationResponse,
-    parseTotpEnrollmentRequest,
     parseTotpConfirmationResponse,
     parseWebAuthnRegistrationResponse,
-} from "../../../contracts/accountSecurity";
+} from "../../../contracts/accountSecurity/responses";
+import { parseAccountSecuritySummary } from "../../../contracts/accountSecurity/summary";
 import { parseApiErrorResponse } from "../../../contracts/apiErrors";
 import { parseBackupStatusResponse } from "../../../contracts/backups";
+import { canonicalChatImageDisplayUrl } from "../../../contracts/chat/canonicalImageUrls";
+import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
+import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
 import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     parseOpenClawRuntimeEnvelope,
     parseOpenClawRuntimeSnapshot,
-} from "../../../contracts/chat";
-import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
-import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
-import { canonicalChatImageDisplayUrl } from "../../../contracts/chatCanonicalMessage";
+} from "../../../contracts/chat/transport";
+import { parsePullRequestPreviewStartRequest } from "../../../contracts/delivery/previews";
 import {
     parsePullRequestApproveRequest,
-    parsePullRequestPreviewStartRequest,
     parsePullRequestStackCreateRequest,
-} from "../../../contracts/delivery";
+} from "../../../contracts/delivery/pullRequestActions";
 import { parseExecRequest } from "../../../contracts/exec";
 import { parseFileContent, parseFilesResponse } from "../../../contracts/files";
+import { parseJobExecutionsResponse } from "../../../contracts/jobs/executions";
 import {
-    parseJobExecutionsResponse,
-    parseJobWorkerClaimsPatch,
     parseScheduledJobsResponse,
     parseScheduledJobUpdateRequest,
-} from "../../../contracts/jobs";
+} from "../../../contracts/jobs/scheduled";
+import { parseJobWorkerClaimsPatch } from "../../../contracts/jobs/workerClaims";
 import {
     parseLogRotationRunResult,
     parseLogRotationStatus,

@@ -6,17 +6,17 @@ import type { Session } from "../../../../../contracts/sessions";
 import { formatSize } from "../../../utils/format";
 import { Textarea } from "../../ui/Textarea";
 import { ChatAttachmentPickerModal } from "./ChatAttachmentPickerModal";
+import {
+    CHAT_ATTACHMENT_ACCEPT,
+    previewFromSendAttachment,
+} from "./chatAttachmentUtilities";
 import { ChatComposerToolbar, PanelHeader } from "./ChatComposerToolbar";
+import { type ChatModelOption } from "./chatSettings";
 import type {
     ChatAttachmentInputSource,
     ChatPreviewItem,
     ChatSendAttachment,
 } from "./chatTypes";
-import {
-    CHAT_ATTACHMENT_ACCEPT,
-    type ChatModelOption,
-    previewFromSendAttachment,
-} from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
 import { useChatComposerController } from "./useChatComposerController";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, jest } from "bun:test";
 
-import gateway from "../src/gateway.ts";
+import gateway from "../src/services/gateway/runtime.ts";
 import {
     getOpenClawCronListSnapshot,
     normalizeOpenClawCronJobs,

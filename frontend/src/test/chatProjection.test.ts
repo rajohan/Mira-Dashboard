@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
-import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import {
     messageDeleteKey,
     stableChatStringify,
-} from "../components/features/chat/chatUtilities";
+} from "../components/features/chat/chatMessageIdentity";
+import { type ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import { projectCanonicalChat } from "../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,

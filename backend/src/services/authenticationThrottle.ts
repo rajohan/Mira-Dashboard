@@ -1,4 +1,4 @@
-import { database, sqlNullable } from "../database.ts";
+import { database, sqlNullable } from "../database/connection.ts";
 import { sha256Hex } from "./mfaCrypto.ts";
 
 const FAILURE_WINDOW_MS = 60 * 60_000;

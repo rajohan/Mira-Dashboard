@@ -1,5 +1,5 @@
 import type { AgentTaskHistoryItem } from "../../../../contracts/agents.ts";
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 
 const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 

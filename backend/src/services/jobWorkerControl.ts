@@ -1,4 +1,4 @@
-import { database } from "../database.ts";
+import { database } from "../database/connection.ts";
 
 export interface JobWorkerClaimsState {
     paused: boolean;

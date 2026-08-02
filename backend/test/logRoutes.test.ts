@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { formatOpenClawLogDate } from "../src/lib/logRoots.ts";
-import { logRoutes, readDashboardJournal } from "../src/routes/logRoutes.ts";
+import { logRoutes } from "../src/routes/logRoutes.ts";
+import { readDashboardJournal } from "../src/routes/logRoutes/dashboard.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 

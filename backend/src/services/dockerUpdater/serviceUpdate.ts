@@ -1,18 +1,15 @@
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { runProcess } from "../../lib/processes.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {
     applyComposeUpdateUnlocked,
     withComposeUpdateLock,
 } from "./composeTransaction.ts";
+import { buildTargetImageReference, servicePlatform } from "./imageReference.ts";
 import { createNotificationBestEffort } from "./notifications.ts";
-import {
-    buildTargetImageReference,
-    hasUpdate,
-    servicePlatform,
-} from "./registryClient.ts";
 import { insertEventBestEffort } from "./repository.ts";
 import { caughtMessage, getDockerBin, nowIso, serviceLabel } from "./support.ts";
+import { hasUpdate } from "./tagPolicy.ts";
 import {
     type DockerUpdaterStepResult,
     type ManagedServiceRow,
