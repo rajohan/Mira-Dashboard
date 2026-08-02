@@ -65,7 +65,7 @@ async function rejectionMessage(promise: Promise<unknown>): Promise<string> {
 }
 
 describe("log routes", () => {
-    it("parses fixed Dashboard journal output and stable line identifiers", async () => {
+    it("queries only Dashboard Bun processes and parses stable journal identifiers", async () => {
         const runner = jest.fn(() =>
             Promise.resolve({
                 code: 0,
@@ -100,6 +100,7 @@ describe("log routes", () => {
                 "mira-dashboard.service",
                 "--unit",
                 "mira-dashboard-worker.service",
+                "_COMM=bun",
             ],
             {
                 maxBuffer: 8 * 1024 * 1024,
