@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { getProcessReleaseRoot } from "./releaseManifest.ts";
+import { getProcessReleaseRoot } from "./services/releases/manifest.ts";
 
 export function resolveFrontendPath(
     environment: Record<string, string | undefined> = process.env,

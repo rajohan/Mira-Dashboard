@@ -28,7 +28,7 @@ import {
     currentBunRuntimeIdentity,
     hasManagedBunRuntime,
     installManagedBunRuntime,
-} from "../src/managedBunRuntime.ts";
+} from "../src/services/releases/runtime.ts";
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import {
     activateDashboardRelease,
@@ -45,14 +45,14 @@ import {
     resolveDashboardReleasesRoot,
     restoreDashboardReleaseAfterFailedActivation,
     rollbackDashboardRelease,
-} from "../src/releaseManager.ts";
+} from "../src/services/releases/manager.ts";
 import {
     databaseMigrationInventorySha256,
     loadReleaseManifest,
     parseReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
     writeReleaseManifest,
-} from "../src/releaseManifest.ts";
+} from "../src/services/releases/manifest.ts";
 import { captureRejection } from "./support/rejections.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 

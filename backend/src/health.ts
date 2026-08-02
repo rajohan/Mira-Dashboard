@@ -15,7 +15,7 @@ import { isFrontendIndexReady } from "./frontendAssets.ts";
 import gateway from "./gateway.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import { getAppObservabilityMetrics } from "./observability.ts";
-import { getRuntimeReleaseIdentity } from "./releaseManifest.ts";
+import { getRuntimeReleaseIdentity } from "./services/releases/manifest.ts";
 import {
     getJobExecutionSummary,
     isJobWorkerReleaseReady,

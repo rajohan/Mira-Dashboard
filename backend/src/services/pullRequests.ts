@@ -11,11 +11,11 @@ import { parseGitHubAsyncPullRequestMergeResult } from "../../../contracts/deliv
 import type { ScheduledJob } from "../../../contracts/jobs.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { enqueueJobExecution, type JobExecutionRecord } from "./jobExecutionQueue.ts";
-import { cleanupClosedPullRequestPreview } from "./pullRequestPreviewHost.ts";
+import { cleanupClosedPullRequestPreview } from "./pullRequestPreviews/host.ts";
 import {
     isPullRequestPreviewAuthorAllowed,
     resolvePullRequestPreviewAllowedAuthors,
-} from "./pullRequestPreviewPolicy.ts";
+} from "./pullRequestPreviews/policy.ts";
 import { DASHBOARD_REPO, DEFAULT_BASE } from "./pullRequests/config.ts";
 import {
     acquireDeploymentLock,

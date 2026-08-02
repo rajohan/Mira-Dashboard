@@ -8,7 +8,7 @@ import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
-} from "../releaseManager.ts";
+} from "./releases/manager.ts";
 import { createVerifiedSqliteBackup, pruneSqliteBackups } from "../sqliteBackup.ts";
 import {
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS,

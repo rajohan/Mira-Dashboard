@@ -1,20 +1,14 @@
 import type {
-    JobResourceClass,
     ScheduledJob,
-    ScheduledJobPatch,
     ScheduledJobRun,
-    ScheduledJobRunStatus,
-    ScheduledJobScheduleType,
     ScheduledJobTriggerType,
 } from "../../../contracts/jobs.ts";
 import type { SchedulerMetrics } from "../../../contracts/metrics.ts";
 import { database, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
-import { isJobResourceClass, withJobResourceClass } from "../lib/jobResources.ts";
+import { withJobResourceClass } from "../lib/jobResources.ts";
 import { runWithLogContext } from "../lib/logContext.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { parseSystemdProperties } from "../lib/systemdProperties.ts";
-import { parseJobDisableIntent } from "./jobDisableIntent.ts";
 import {
     claimNextJobExecution,
     didHeartbeatJobWorker,
@@ -31,6 +25,51 @@ import {
     updateJobExecutionOutput,
 } from "./jobExecutionQueue.ts";
 import { waitForJobExecution } from "./queuedJobExecution.ts";
+import {
+    registeredScheduledJobAction,
+    ScheduledJobActionError,
+    type ScheduledJobActionContext,
+    type ScheduledJobActionRegistration,
+    ScheduledJobInterruptionError,
+} from "./scheduledJobs/actionRegistry.ts";
+import { ScheduledJobValidationError } from "./scheduledJobs/errors.ts";
+import {
+    DeploymentCutoverReconciler,
+    type DeploymentCutoverRecoveryHandler,
+    type DeploymentGuardianStateReader,
+} from "./scheduledJobs/deploymentCutoverReconciler.ts";
+import { calculateNextRunAt } from "./scheduledJobs/schedule.ts";
+import {
+    getScheduledJob,
+    insertScheduledRun,
+    scheduledRunById,
+} from "./scheduledJobs/repository.ts";
+
+export {
+    isScheduledJobValidationError,
+    ScheduledJobValidationError,
+} from "./scheduledJobs/errors.ts";
+export { calculateNextRunAt } from "./scheduledJobs/schedule.ts";
+export {
+    getScheduledJob,
+    listScheduledJobRuns,
+    listScheduledJobs,
+    removeScheduledJobsNotInAction,
+    type ScheduledJobDefinition,
+    updateScheduledJob,
+    upsertScheduledJob,
+} from "./scheduledJobs/repository.ts";
+export {
+    registerScheduledJobAction,
+    ScheduledJobActionError,
+    type ScheduledJobActionContext,
+    type ScheduledJobActionHandler,
+    type ScheduledJobActionOptions,
+} from "./scheduledJobs/actionRegistry.ts";
+export type {
+    DeploymentCutoverRecoveryHandler,
+    OrphanedDeploymentCutover,
+} from "./scheduledJobs/deploymentCutoverReconciler.ts";
 
 const logger = createStructuredLogger("scheduled-jobs");
 
@@ -39,51 +78,25 @@ function dateToISOString(date: Date): string {
 }
 
 const schedulerTickMs = 30_000;
-const defaultScheduledJobRunTimeoutMs = 5 * 60 * 1000;
-const minimumIntervalSeconds = 60;
-const latestRunsJobIdChunkSize = 900;
 const executorTickMs = 1000;
 const executorHeartbeatMs = 1000;
 const executorCapacity = 1;
-const deploymentCutoverReconcileIntervalMs = 5000;
-const deploymentCutoverMaximumUnknownMs = 10 * 60 * 1000;
 const interruptedHandlerGraceMs = 30_000;
 const RELEASE_COMMIT_PATTERN = /^(?:[\da-f]{8,40}|development)$/u;
-const FULL_RELEASE_COMMIT_PATTERN = /^[\da-f]{40}$/u;
-const DEPLOYMENT_GUARDIAN_UNIT_PREFIX = "mira-dashboard-deploy-";
-const DEPLOYMENT_RECOVERY_UNIT_PREFIX = "mira-dashboard-deploy-recovery-";
-const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
-const interruptedHandlerSettled = new WeakMap<
-    ScheduledJobInterruptionError,
-    Promise<unknown>
->();
 const activeExecutionControllers = new Map<string, AbortController>();
 const activeExecutionRuns = new Map<string, Promise<void>>();
-
-type DeploymentGuardianState = "active" | "inactive" | "unknown";
-type DeploymentGuardianStateReader = (jobId: string) => DeploymentGuardianState;
-export interface OrphanedDeploymentCutover {
-    candidateCommit?: string;
-    id: string;
-    updatedAt: string;
-}
-export type DeploymentCutoverRecoveryHandler = (
-    cutover: OrphanedDeploymentCutover
-) => boolean;
+const deploymentCutoverReconciler = new DeploymentCutoverReconciler();
 
 const scheduledJobRuntimeState: {
     scheduler: NodeJS.Timeout | undefined;
     executor: NodeJS.Timeout | undefined;
     workerHeartbeat: NodeJS.Timeout | undefined;
     executorClaimPauseGeneration: number;
-    deploymentCutoverRecoveryHandler: DeploymentCutoverRecoveryHandler | undefined;
     isSchedulerTickRunning: boolean;
     isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
     lastSchedulerTickAt: string | undefined;
     lastSchedulerTickDurationMs: number;
-    missingCutoverRecoveryWarningKey: string | undefined;
-    nextDeploymentCutoverReconcileAt: number;
     schedulerQueueFailures: number;
     schedulerTickFailures: number;
     schedulerTicks: number;
@@ -93,786 +106,23 @@ const scheduledJobRuntimeState: {
     executor: undefined,
     workerHeartbeat: undefined,
     executorClaimPauseGeneration: 0,
-    deploymentCutoverRecoveryHandler: undefined,
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
     lastSchedulerTickAt: undefined,
     lastSchedulerTickDurationMs: 0,
-    missingCutoverRecoveryWarningKey: undefined,
-    nextDeploymentCutoverReconcileAt: 0,
     schedulerQueueFailures: 0,
     schedulerTickFailures: 0,
     schedulerTicks: 0,
     workerId: "",
 };
 
-export interface ScheduledJobActionContext {
-    executionId: string;
-    pauseWorkerClaims: () => () => void;
-    protectFromCancellation: () => void;
-    updateOutput: (output: Record<string, unknown>) => void;
-}
-export type ScheduledJobActionHandler = (
-    job: ScheduledJob,
-    signal: AbortSignal | undefined,
-    context: ScheduledJobActionContext
-) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
-
-export interface ScheduledJobActionOptions {
-    timeoutMs?: number;
-}
-
-interface ScheduledJobActionRegistration {
-    handler: ScheduledJobActionHandler;
-    timeoutMs?: number;
-}
-
-/** Allows an action failure to persist structured output with the failed run. */
-export class ScheduledJobActionError extends Error {
-    readonly output: Record<string, unknown>;
-
-    constructor(message: string, output: Record<string, unknown>) {
-        super(message);
-        this.name = "ScheduledJobActionError";
-        this.output = output;
-    }
-}
-
-class ScheduledJobInterruptionError extends Error {
-    constructor(message: string, handlerSettled: Promise<unknown>) {
-        super(message);
-        interruptedHandlerSettled.set(this, handlerSettled);
-    }
-
-    getHandlerSettled(): Promise<unknown> {
-        return interruptedHandlerSettled.get(this)!;
-    }
-}
-
-export interface ScheduledJobDefinition {
-    id: string;
-    name: string;
-    description?: string;
-    enabled?: boolean;
-    scheduleType: ScheduledJobScheduleType;
-    intervalSeconds?: number;
-    timeOfDay?: string | undefined;
-    cronExpression?: string | undefined;
-    actionKey: string;
-    actionPayload?: Record<string, unknown>;
-    resourceClass?: JobResourceClass;
-    timeoutMs?: number;
-}
-
-interface ScheduledJobRow {
-    id: string;
-    name: string;
-    description: string;
-    enabled: number;
-    schedule_type: string;
-    interval_seconds: number;
-    time_of_day: string | null | undefined;
-    cron_expression: string | null | undefined;
-    action_key: string;
-    action_payload_json: string;
-    disable_intent_json: string | null | undefined;
-    next_run_at: string | null | undefined;
-    created_at: string;
-    updated_at: string;
-    resource_class?: string | null;
-    timeout_ms?: number | null;
-}
-
-interface ScheduledJobRunRow {
-    id: number;
-    job_id: string;
-    status: string;
-    trigger_type: string;
-    started_at: string;
-    finished_at: string | null | undefined;
-    message: string | null | undefined;
-    output_json: string;
-    execution_id?: string | null;
-    execution_queued_at?: string | null;
-    execution_resource_class?: string | null;
-    execution_cancel_requested_at?: string | null;
-    execution_cancellable?: number | null;
-}
-
-export class ScheduledJobValidationError extends Error {
-    declare statusCode: number;
-
-    constructor(message: string) {
-        super(message);
-        this.name = "ScheduledJobValidationError";
-        this.statusCode = 400;
-    }
-}
-
-function fromSqlNullable<T>(value: T | null | undefined): T | undefined {
-    return value ?? undefined;
-}
-
-export function isScheduledJobValidationError(
-    error: unknown
-): error is ScheduledJobValidationError {
-    return error instanceof ScheduledJobValidationError;
-}
-
 function nowIso(): string {
     return dateToISOString(new Date());
 }
 
-function parseJsonObject(value: string): Record<string, unknown> {
-    try {
-        const parsed = JSON.parse(value) as unknown;
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-            ? (parsed as Record<string, unknown>)
-            : {};
-    } catch {
-        return {};
-    }
-}
-
-function assertValidId(id: string): void {
-    if (!/^[a-z0-9][a-z0-9._-]{1,79}$/u.test(id)) {
-        throw new ScheduledJobValidationError("Job id is invalid");
-    }
-}
-
-function assertValidActionKey(actionKey: string): void {
-    if (!/^[a-z][a-z0-9.-]{1,79}$/u.test(actionKey)) {
-        throw new ScheduledJobValidationError("Job action key is invalid");
-    }
-}
-
-function assertValidSchedule(
-    scheduleType: ScheduledJobScheduleType,
-    intervalSeconds: number,
-    timeOfDay: string | undefined,
-    cronExpression: string | undefined
-): void {
-    if (scheduleType === "interval") {
-        if (
-            !Number.isSafeInteger(intervalSeconds) ||
-            intervalSeconds < minimumIntervalSeconds
-        ) {
-            throw new ScheduledJobValidationError(
-                `Interval must be at least ${minimumIntervalSeconds} seconds`
-            );
-        }
-        return;
-    }
-
-    if (scheduleType === "daily") {
-        if (!timeOfDay || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDay)) {
-            throw new ScheduledJobValidationError("Daily jobs require HH:MM timeOfDay");
-        }
-        return;
-    }
-
-    if (!cronExpression || !parseCronExpression(cronExpression)) {
-        throw new ScheduledJobValidationError("Cron jobs require a valid cronExpression");
-    }
-}
-
-function parseCronField(
-    field: string,
-    minimum: number,
-    maximum: number
-): Set<number> | undefined {
-    const values = new Set<number>();
-    for (const part of field.split(",")) {
-        if (!part) {
-            return undefined;
-        }
-        const stepPieces = part.split("/");
-        if (stepPieces.length > 2) {
-            return undefined;
-        }
-        const [rangePart = "", stepPart] = stepPieces;
-        const step = stepPart === undefined ? 1 : Number(stepPart);
-        if (!Number.isSafeInteger(step) || step < 1) {
-            return undefined;
-        }
-        const rangePieces = rangePart.split("-");
-        if (rangePieces.length > 2) {
-            return undefined;
-        }
-        let start: number;
-        let end: number;
-        if (rangePart === "*") {
-            start = minimum;
-            end = maximum;
-        } else if (rangePart.includes("-")) {
-            const [rawStart, rawEnd] = rangePieces;
-            if (
-                rawStart === undefined ||
-                rawStart === "" ||
-                rawEnd === undefined ||
-                rawEnd === ""
-            ) {
-                return undefined;
-            }
-            start = Number(rawStart);
-            end = Number(rawEnd);
-        } else {
-            if (rangePart === "") {
-                return undefined;
-            }
-            start = Number(rangePart);
-            end = stepPart === undefined ? Number(rangePart) : maximum;
-        }
-        if (
-            !Number.isSafeInteger(start) ||
-            !Number.isSafeInteger(end) ||
-            start < minimum ||
-            end > maximum ||
-            start > end
-        ) {
-            return undefined;
-        }
-        for (let value = start; value <= end; value += step) {
-            values.add(value);
-        }
-    }
-    return values;
-}
-
-function isCronFieldWildcard(
-    values: Set<number>,
-    minimum: number,
-    maximum: number
-): boolean {
-    for (let value = minimum; value <= maximum; value += 1) {
-        if (!values.has(value)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-function parseCronExpression(expression: string):
-    | undefined
-    | {
-          minutes: Set<number>;
-          hours: Set<number>;
-          daysOfMonth: Set<number>;
-          months: Set<number>;
-          daysOfWeek: Set<number>;
-          dayOfMonthWildcard: boolean;
-          dayOfWeekWildcard: boolean;
-      } {
-    const fields = expression.trim().split(/\s+/u);
-    if (fields.length !== 5) {
-        return undefined;
-    }
-    const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
-    if (
-        minute === undefined ||
-        hour === undefined ||
-        dayOfMonth === undefined ||
-        month === undefined ||
-        dayOfWeek === undefined
-    ) {
-        return undefined;
-    }
-    const minutes = parseCronField(minute, 0, 59);
-    const hours = parseCronField(hour, 0, 23);
-    const daysOfMonth = parseCronField(dayOfMonth, 1, 31);
-    const months = parseCronField(month, 1, 12);
-    const daysOfWeek = parseCronField(dayOfWeek, 0, 7);
-    if (!minutes || !hours || !daysOfMonth || !months || !daysOfWeek) {
-        return undefined;
-    }
-    if (daysOfWeek.has(7)) {
-        daysOfWeek.add(0);
-        daysOfWeek.delete(7);
-    }
-    return {
-        minutes,
-        hours,
-        daysOfMonth,
-        months,
-        daysOfWeek,
-        dayOfMonthWildcard: isCronFieldWildcard(daysOfMonth, 1, 31),
-        dayOfWeekWildcard: isCronFieldWildcard(daysOfWeek, 0, 6),
-    };
-}
-
-function isCronDayMatch(
-    cron: NonNullable<ReturnType<typeof parseCronExpression>>,
-    day: Date
-): boolean {
-    const dayOfMonthMatches = cron.daysOfMonth.has(day.getUTCDate());
-    const dayOfWeekMatches = cron.daysOfWeek.has(day.getUTCDay());
-    if (!cron.dayOfMonthWildcard && !cron.dayOfWeekWildcard) {
-        return dayOfMonthMatches || dayOfWeekMatches;
-    }
-    return dayOfMonthMatches && dayOfWeekMatches;
-}
-
-function nextCronRun(now: Date, expression: string): Date {
-    const cron = parseCronExpression(expression);
-    if (!cron) {
-        throw new ScheduledJobValidationError("Cron jobs require a valid cronExpression");
-    }
-    const next = new Date(now);
-    next.setUTCSeconds(0, 0);
-    next.setUTCMinutes(next.getUTCMinutes() + 1);
-    const maximumAttempts = 5 * 366 * 24 * 60;
-    for (let index = 0; index < maximumAttempts; index += 1) {
-        if (
-            cron.minutes.has(next.getUTCMinutes()) &&
-            cron.hours.has(next.getUTCHours()) &&
-            cron.months.has(next.getUTCMonth() + 1) &&
-            isCronDayMatch(cron, next)
-        ) {
-            return next;
-        }
-        next.setUTCMinutes(next.getUTCMinutes() + 1);
-    }
-    throw new ScheduledJobValidationError("Cron expression has no upcoming run");
-}
-
-function nextDailyRun(now: Date, timeOfDay: string): Date {
-    const [hour = "0", minute = "0"] = timeOfDay.split(":", 2);
-    const next = new Date(
-        Date.UTC(
-            now.getUTCFullYear(),
-            now.getUTCMonth(),
-            now.getUTCDate(),
-            Number(hour),
-            Number(minute),
-            0,
-            0
-        )
-    );
-    if (next.getTime() <= now.getTime()) {
-        next.setUTCDate(next.getUTCDate() + 1);
-    }
-    return next;
-}
-
-export function calculateNextRunAt(
-    job: Pick<
-        ScheduledJob,
-        "enabled" | "intervalSeconds" | "scheduleType" | "timeOfDay"
-    > &
-        Pick<Partial<ScheduledJob>, "cronExpression">,
-    from = new Date()
-): string | undefined {
-    if (!job.enabled) {
-        return undefined;
-    }
-    if (job.scheduleType === "daily" && job.timeOfDay) {
-        return nextDailyRun(from, job.timeOfDay).toISOString();
-    }
-    if (job.scheduleType === "cron" && job.cronExpression) {
-        return nextCronRun(from, job.cronExpression).toISOString();
-    }
-    return dateToISOString(new Date(from.getTime() + job.intervalSeconds * 1000));
-}
-
-function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | undefined {
-    if (!row) {
-        return undefined;
-    }
-    const resourceClass = isJobResourceClass(row.execution_resource_class)
-        ? row.execution_resource_class
-        : "light";
-    return {
-        id: row.id,
-        jobId: row.job_id,
-        status: row.status as ScheduledJobRunStatus,
-        triggerType: row.trigger_type as ScheduledJobTriggerType,
-        startedAt: row.started_at,
-        finishedAt: fromSqlNullable(row.finished_at),
-        message: fromSqlNullable(row.message),
-        output: parseJsonObject(row.output_json),
-        executionId: fromSqlNullable(row.execution_id),
-        queuedAt: fromSqlNullable(row.execution_queued_at) ?? row.started_at,
-        resourceClass,
-        cancelRequestedAt: fromSqlNullable(row.execution_cancel_requested_at),
-        cancellable: row.execution_cancellable !== 0,
-    };
-}
-
-function addLatestRunByJobId(
-    runs: Map<string, ScheduledJobRun>,
-    row: ScheduledJobRunRow
-): void {
-    if (runs.has(row.job_id)) {
-        return;
-    }
-
-    const run = mapRun(row);
-    if (run) {
-        runs.set(row.job_id, run);
-    }
-}
-
-function latestRunsByJobId(jobIds: string[]): Map<string, ScheduledJobRun> {
-    if (jobIds.length === 0) {
-        return new Map();
-    }
-    const runs = new Map<string, ScheduledJobRun>();
-    for (let index = 0; index < jobIds.length; index += latestRunsJobIdChunkSize) {
-        const chunk = jobIds.slice(index, index + latestRunsJobIdChunkSize);
-        const placeholders = chunk.map(() => "?").join(",");
-        const rows = database
-            .prepare(
-                `SELECT *
-                 FROM (
-                     SELECT
-                         run.*,
-                         execution.id AS execution_id,
-                         execution.queued_at AS execution_queued_at,
-                         execution.resource_class AS execution_resource_class,
-                         execution.cancel_requested_at AS execution_cancel_requested_at,
-                         execution.cancellable AS execution_cancellable,
-                         ROW_NUMBER() OVER (
-                             PARTITION BY run.job_id
-                             ORDER BY run.started_at DESC, run.id DESC
-                         ) AS row_number
-                     FROM scheduled_job_runs run
-                     LEFT JOIN job_executions execution
-                       ON execution.scheduled_run_id = run.id
-                     WHERE run.job_id IN (${placeholders})
-                 )
-                 WHERE row_number = 1
-                 ORDER BY job_id, started_at DESC, id DESC`
-            )
-            .all(...chunk) as unknown as ScheduledJobRunRow[];
-        for (const row of rows) {
-            addLatestRunByJobId(runs, row);
-        }
-    }
-    return runs;
-}
-
-function mapJob(
-    row: ScheduledJobRow,
-    latestRuns = latestRunsByJobId([row.id])
-): ScheduledJob {
-    return {
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        enabled: row.enabled === 1,
-        scheduleType: row.schedule_type as ScheduledJobScheduleType,
-        intervalSeconds: row.interval_seconds,
-        timeOfDay: fromSqlNullable(row.time_of_day),
-        cronExpression: fromSqlNullable(row.cron_expression),
-        actionKey: row.action_key,
-        actionPayload: parseJsonObject(row.action_payload_json),
-        disableIntent: parseJobDisableIntent(row.disable_intent_json),
-        nextRunAt: fromSqlNullable(row.next_run_at),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        lastRun: latestRuns.get(row.id) ?? undefined,
-        resourceClass: isJobResourceClass(row.resource_class)
-            ? row.resource_class
-            : "light",
-        timeoutMs:
-            typeof row.timeout_ms === "number" && row.timeout_ms > 0
-                ? row.timeout_ms
-                : defaultScheduledJobRunTimeoutMs,
-        isQueued: latestRuns.get(row.id)?.status === "queued",
-        isRunning: latestRuns.get(row.id)?.status === "running",
-    };
-}
-
-export function registerScheduledJobAction(
-    actionKey: string,
-    handler: ScheduledJobActionHandler,
-    options: ScheduledJobActionOptions = {}
-): void {
-    assertValidActionKey(actionKey);
-    assertValidActionTimeoutMs(options.timeoutMs);
-    actionHandlers.set(actionKey, {
-        handler,
-        timeoutMs: options.timeoutMs,
-    });
-}
-
-function assertValidActionTimeoutMs(timeoutMs: number | undefined): void {
-    if (timeoutMs === undefined) {
-        return;
-    }
-    if (
-        !Number.isFinite(timeoutMs) ||
-        !Number.isSafeInteger(timeoutMs) ||
-        timeoutMs < 1 ||
-        timeoutMs > 2_147_483_647
-    ) {
-        throw new ScheduledJobValidationError(
-            "Scheduled job action timeout must be an integer between 1 and 2147483647"
-        );
-    }
-}
-
-export function upsertScheduledJob(definition: ScheduledJobDefinition): ScheduledJob {
-    assertValidId(definition.id);
-    assertValidActionKey(definition.actionKey);
-    const existing = getScheduledJob(definition.id);
-    const enabled = definition.enabled ?? existing?.enabled ?? false;
-    const scheduleType = definition.scheduleType ?? existing?.scheduleType;
-    const intervalSeconds =
-        definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
-    const timeOfDay =
-        definition.timeOfDay === undefined
-            ? (existing?.timeOfDay ?? undefined)
-            : definition.timeOfDay;
-    const cronExpression =
-        definition.cronExpression === undefined
-            ? (existing?.cronExpression ?? undefined)
-            : definition.cronExpression;
-    assertValidSchedule(scheduleType, intervalSeconds, timeOfDay, cronExpression);
-
-    const timestamp = nowIso();
-    const isScheduleChanged =
-        !existing ||
-        existing.enabled !== enabled ||
-        existing.scheduleType !== scheduleType ||
-        existing.intervalSeconds !== intervalSeconds ||
-        existing.timeOfDay !== timeOfDay ||
-        existing.cronExpression !== cronExpression;
-    const nextRunAt = isScheduleChanged
-        ? calculateNextRunAt(
-              { cronExpression, enabled, intervalSeconds, scheduleType, timeOfDay },
-              new Date(timestamp)
-          )
-        : existing.nextRunAt;
-    const resourceClass = definition.resourceClass ?? "light";
-    const timeoutMs =
-        definition.timeoutMs ??
-        actionHandlers.get(definition.actionKey)?.timeoutMs ??
-        defaultScheduledJobRunTimeoutMs;
-    assertValidActionTimeoutMs(timeoutMs);
-    database
-        .prepare(
-            `INSERT INTO scheduled_jobs (
-            id, name, description, enabled, schedule_type, interval_seconds,
-            time_of_day, cron_expression, action_key, action_payload_json, next_run_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            description = excluded.description,
-            enabled = excluded.enabled,
-            schedule_type = excluded.schedule_type,
-            interval_seconds = excluded.interval_seconds,
-            time_of_day = excluded.time_of_day,
-            cron_expression = excluded.cron_expression,
-            action_key = excluded.action_key,
-            action_payload_json = excluded.action_payload_json,
-            next_run_at = excluded.next_run_at,
-            updated_at = excluded.updated_at`
-        )
-        .run(
-            definition.id,
-            definition.name,
-            definition.description ?? "",
-            enabled ? 1 : 0,
-            scheduleType,
-            intervalSeconds,
-            sqlNullable(timeOfDay),
-            sqlNullable(cronExpression),
-            definition.actionKey,
-            JSON.stringify(definition.actionPayload ?? {}),
-            sqlNullable(nextRunAt),
-            existing?.createdAt ?? timestamp,
-            timestamp
-        );
-    database
-        .prepare(
-            `INSERT INTO scheduled_job_execution_policies (
-                job_id, resource_class, timeout_ms, updated_at
-             ) VALUES (?, ?, ?, ?)
-             ON CONFLICT(job_id) DO UPDATE SET
-                 resource_class = excluded.resource_class,
-                 timeout_ms = excluded.timeout_ms,
-                 updated_at = excluded.updated_at`
-        )
-        .run(definition.id, resourceClass, timeoutMs, timestamp);
-    return getScheduledJob(definition.id) as ScheduledJob;
-}
-
-export function listScheduledJobs(): ScheduledJob[] {
-    const rows = database
-        .prepare(
-            `SELECT job.*, policy.resource_class, policy.timeout_ms
-             FROM scheduled_jobs job
-             LEFT JOIN scheduled_job_execution_policies policy ON policy.job_id = job.id
-             ORDER BY job.name COLLATE NOCASE, job.id`
-        )
-        .all() as unknown as ScheduledJobRow[];
-    const latestRuns = latestRunsByJobId(rows.map((row) => row.id));
-    return rows.map((row) => mapJob(row, latestRuns));
-}
-
-export function getScheduledJob(id: string): ScheduledJob | undefined {
-    const row = database
-        .prepare(
-            `SELECT job.*, policy.resource_class, policy.timeout_ms
-             FROM scheduled_jobs job
-             LEFT JOIN scheduled_job_execution_policies policy ON policy.job_id = job.id
-             WHERE job.id = ?`
-        )
-        .get(id) as ScheduledJobRow | undefined;
-    return row ? mapJob(row) : undefined;
-}
-
-export function listScheduledJobRuns(id: string, limit = 20): ScheduledJobRun[] {
-    assertValidId(id);
-    const normalizedLimit =
-        Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 100) : 20;
-    return (
-        database
-            .prepare(
-                `SELECT run.*,
-                        execution.id AS execution_id,
-                        execution.queued_at AS execution_queued_at,
-                        execution.resource_class AS execution_resource_class,
-                        execution.cancel_requested_at AS execution_cancel_requested_at,
-                        execution.cancellable AS execution_cancellable
-                 FROM scheduled_job_runs run
-                 LEFT JOIN job_executions execution
-                   ON execution.scheduled_run_id = run.id
-                 WHERE run.job_id = ?
-                 ORDER BY run.started_at DESC, run.id DESC
-                 LIMIT ?`
-            )
-            .all(id, normalizedLimit) as unknown as ScheduledJobRunRow[]
-    )
-        .map((row) => mapRun(row))
-        .filter((run): run is ScheduledJobRun => run !== undefined);
-}
-
-export function removeScheduledJobsNotInAction(
-    actionKey: string,
-    registeredIds: readonly string[]
-): void {
-    assertValidActionKey(actionKey);
-    for (const id of registeredIds) {
-        assertValidId(id);
-    }
-    if (registeredIds.length === 0) {
-        database
-            .prepare("DELETE FROM scheduled_jobs WHERE action_key = ?")
-            .run(actionKey);
-        return;
-    }
-    const placeholders = registeredIds.map(() => "?").join(",");
-    database
-        .prepare(
-            `DELETE FROM scheduled_jobs
-         WHERE action_key = ?
-           AND id NOT IN (${placeholders})`
-        )
-        .run(actionKey, ...registeredIds);
-}
-
-export function updateScheduledJob(
-    id: string,
-    patch: ScheduledJobPatch
-): ScheduledJob | undefined {
-    const existing = getScheduledJob(id);
-    if (!existing) {
-        return undefined;
-    }
-    const next = {
-        disableIntent:
-            patch.enabled === true || patch.disableIntent === null
-                ? undefined
-                : (patch.disableIntent ?? existing.disableIntent),
-        enabled: patch.enabled ?? existing.enabled,
-        scheduleType: patch.scheduleType ?? existing.scheduleType,
-        intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
-        timeOfDay:
-            patch.timeOfDay === undefined
-                ? existing.timeOfDay
-                : (patch.timeOfDay ?? undefined),
-        cronExpression:
-            patch.cronExpression === undefined
-                ? existing.cronExpression
-                : (patch.cronExpression ?? undefined),
-    };
-    assertValidSchedule(
-        next.scheduleType,
-        next.intervalSeconds,
-        next.timeOfDay,
-        next.cronExpression
-    );
-    const timestamp = nowIso();
-    const isScheduleChanged =
-        existing.enabled !== next.enabled ||
-        existing.scheduleType !== next.scheduleType ||
-        existing.intervalSeconds !== next.intervalSeconds ||
-        existing.timeOfDay !== next.timeOfDay ||
-        existing.cronExpression !== next.cronExpression;
-    const nextRunAt = isScheduleChanged
-        ? calculateNextRunAt(next, new Date(timestamp))
-        : existing.nextRunAt;
-    database
-        .prepare(
-            `UPDATE scheduled_jobs
-         SET enabled = ?, schedule_type = ?, interval_seconds = ?, time_of_day = ?, cron_expression = ?,
-             disable_intent_json = ?, next_run_at = ?, updated_at = ?
-         WHERE id = ?`
-        )
-        .run(
-            next.enabled ? 1 : 0,
-            next.scheduleType,
-            next.intervalSeconds,
-            sqlNullable(next.timeOfDay),
-            sqlNullable(next.cronExpression),
-            sqlNullable(
-                next.disableIntent ? JSON.stringify(next.disableIntent) : undefined
-            ),
-            sqlNullable(nextRunAt),
-            timestamp,
-            id
-        );
-    return getScheduledJob(id);
-}
-
 interface EnqueueScheduledJobOptions {
     availableAt?: string;
-}
-
-function scheduledRunById(id: number): ScheduledJobRun | undefined {
-    const row = database
-        .prepare(
-            `SELECT run.*,
-                    execution.id AS execution_id,
-                    execution.queued_at AS execution_queued_at,
-                    execution.resource_class AS execution_resource_class,
-                    execution.cancel_requested_at AS execution_cancel_requested_at,
-                    execution.cancellable AS execution_cancellable
-             FROM scheduled_job_runs run
-             LEFT JOIN job_executions execution ON execution.scheduled_run_id = run.id
-             WHERE run.id = ?`
-        )
-        .get(id) as ScheduledJobRunRow | undefined;
-    return mapRun(row);
-}
-
-function insertScheduledRun(
-    jobId: string,
-    triggerType: ScheduledJobTriggerType,
-    status: "queued" | "running",
-    timestamp: string
-): number {
-    const result = database
-        .prepare(
-            `INSERT INTO scheduled_job_runs (
-                job_id, status, trigger_type, started_at, output_json
-            ) VALUES (?, ?, ?, ?, '{}')`
-        )
-        .run(jobId, status, triggerType, timestamp);
-    return Number(result.lastInsertRowid);
 }
 
 function isActiveExecutionConflict(error: unknown): boolean {
@@ -951,7 +201,7 @@ export async function runScheduledJob(
 ): Promise<ScheduledJobRun> {
     const job = getScheduledJob(id);
     if (!job) throw jobStatusError("Scheduled job not found", 404);
-    const action = actionHandlers.get(job.actionKey);
+    const action = registeredScheduledJobAction(job.actionKey);
     if (!action && triggerType === "manual") {
         throw new ScheduledJobValidationError(
             `No scheduled job action registered for ${job.actionKey}`
@@ -1021,7 +271,7 @@ async function executeClaimedJobExecution(
               timeoutMs: execution.timeoutMs,
               updatedAt: execution.startedAt ?? execution.queuedAt,
           };
-    const action = actionHandlers.get(execution.actionKey);
+    const action = registeredScheduledJobAction(execution.actionKey);
     const controller = new AbortController();
     const abortFromSignal = () => controller.abort();
     signal?.addEventListener("abort", abortFromSignal, { once: true });
@@ -1249,247 +499,32 @@ function pauseExecutorClaims(): () => void {
 function resetExecutorClaimPause(): void {
     scheduledJobRuntimeState.executorClaimPauseGeneration += 1;
     scheduledJobRuntimeState.isExecutorClaimingPaused = false;
-    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = undefined;
-    scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt = 0;
-}
-
-type SystemdUnitState = DeploymentGuardianState | "missing";
-
-function readSystemdUnitState(unit: string): SystemdUnitState {
-    const result = Bun.spawnSync({
-        cmd: [
-            "systemctl",
-            "--user",
-            "show",
-            unit,
-            "--property=ActiveState",
-            "--property=LoadState",
-            "--no-pager",
-        ],
-        env: process.env,
-        stderr: "pipe",
-        stdin: "ignore",
-        stdout: "pipe",
-    });
-    const stderr = new TextDecoder().decode(result.stderr).trim();
-    if (result.exitCode !== 0) {
-        logger.warn("scheduled_jobs.systemd_unit_inspection_failed", {
-            exitCode: result.exitCode,
-            stderr,
-            unit,
-        });
-        return "unknown";
-    }
-    if (stderr) {
-        logger.warn("scheduled_jobs.systemd_unit_diagnostics", {
-            stderr,
-            unit,
-        });
-    }
-    const properties = parseSystemdProperties(
-        new TextDecoder().decode(result.stdout).trim()
-    );
-    if (properties.get("LoadState") === "not-found") {
-        return "missing";
-    }
-    if (properties.get("LoadState") !== "loaded") {
-        return "unknown";
-    }
-    const state = properties.get("ActiveState");
-    if (state && ["active", "activating", "deactivating", "reloading"].includes(state)) {
-        return "active";
-    }
-    if (state && ["inactive", "failed"].includes(state)) {
-        return "inactive";
-    }
-    return "unknown";
-}
-
-function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
-    const guardian = readSystemdUnitState(
-        `${DEPLOYMENT_GUARDIAN_UNIT_PREFIX}${jobId}.service`
-    );
-    if (guardian === "active") {
-        return "active";
-    }
-    const recovery = readSystemdUnitState(
-        `${DEPLOYMENT_RECOVERY_UNIT_PREFIX}${jobId}.service`
-    );
-    if (recovery === "active") {
-        return "active";
-    }
-    if (guardian === "unknown" || recovery === "unknown") {
-        return "unknown";
-    }
-    return "inactive";
-}
-
-function isDeploymentCutoverReconciliationExpired(
-    updatedAt: string,
-    timestamp: string
-): boolean {
-    const updatedAtMs = Date.parse(updatedAt);
-    const timestampMs = Date.parse(timestamp);
-    return (
-        !Number.isFinite(updatedAtMs) ||
-        !Number.isFinite(timestampMs) ||
-        timestampMs - updatedAtMs >= deploymentCutoverMaximumUnknownMs
-    );
-}
-
-function didTerminalizeUnrecoverableDeploymentCutover(
-    cutover: OrphanedDeploymentCutover,
-    timestamp: string
-): boolean {
-    const terminalize = database.transaction(() => {
-        const result = database
-            .prepare(
-                `UPDATE deployment_jobs
-                 SET status = 'failed',
-                     updated_at = ?,
-                     note = ?
-                 WHERE id = ?
-                   AND status = 'verifying'`
-            )
-            .run(
-                timestamp,
-                "Interrupted deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
-                cutover.id
-            );
-        if (result.changes === 0) {
-            return false;
-        }
-        database
-            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
-            .run(cutover.id);
-        return true;
-    });
-    const didTerminalize = terminalize();
-    if (didTerminalize) {
-        logger.warn("scheduled_jobs.deployment_cutover_terminalized", {
-            candidateCommit: cutover.candidateCommit,
-            cutoverId: cutover.id,
-        });
-    }
-    return didTerminalize;
+    deploymentCutoverReconciler.reset();
 }
 
 export function reconcileOrphanedDeploymentCutovers(
     timestamp = nowIso(),
-    readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState,
+    readGuardianState?: DeploymentGuardianStateReader,
     ...recoveryHandlerOverride: [
         recoverCutover?: DeploymentCutoverRecoveryHandler | undefined,
     ]
 ): number {
-    const recoverCutover =
-        recoveryHandlerOverride.length === 0
-            ? scheduledJobRuntimeState.deploymentCutoverRecoveryHandler
-            : recoveryHandlerOverride[0];
-    const pendingRows = database
-        .query(
-            `SELECT id, commit_sha AS candidateCommit, updated_at AS updatedAt
-             FROM deployment_jobs
-             WHERE status = 'verifying'`
-        )
-        .all() as Array<{
-        candidateCommit: string | null;
-        id: string;
-        updatedAt: string;
-    }>;
-    const pending: OrphanedDeploymentCutover[] = pendingRows.map((row) => ({
-        ...(row.candidateCommit && { candidateCommit: row.candidateCommit }),
-        id: row.id,
-        updatedAt: row.updatedAt,
-    }));
-    let reconciled = 0;
-    const cutoversMissingRecoveryHandler: string[] = [];
-    for (const cutover of pending) {
-        let state: DeploymentGuardianState = "unknown";
-        try {
-            state = readGuardianState(cutover.id);
-        } catch (error) {
-            logger.warn("scheduled_jobs.deployment_guardian_inspection_failed", {
-                cutoverId: cutover.id,
-                error,
-            });
-        }
-        const shouldRecover =
-            state === "inactive" ||
-            (state === "unknown" &&
-                isDeploymentCutoverReconciliationExpired(cutover.updatedAt, timestamp));
-        if (!shouldRecover) {
-            continue;
-        }
-        if (
-            !cutover.candidateCommit ||
-            !FULL_RELEASE_COMMIT_PATTERN.test(cutover.candidateCommit)
-        ) {
-            if (didTerminalizeUnrecoverableDeploymentCutover(cutover, timestamp)) {
-                reconciled += 1;
-            }
-            continue;
-        }
-        if (!recoverCutover) {
-            cutoversMissingRecoveryHandler.push(cutover.id);
-            continue;
-        }
-        try {
-            if (recoverCutover(cutover)) {
-                reconciled += 1;
-            }
-        } catch (error) {
-            logger.warn("scheduled_jobs.orphaned_deployment_rollback_failed", {
-                cutoverId: cutover.id,
-                error,
-            });
-        }
-    }
-    const sortedMissingHandlerIds = cutoversMissingRecoveryHandler.toSorted(
-        (left, right) => left.localeCompare(right)
+    return deploymentCutoverReconciler.reconcile(
+        timestamp,
+        readGuardianState,
+        ...recoveryHandlerOverride
     );
-    const warningKey = sortedMissingHandlerIds.join(",");
-    if (
-        warningKey &&
-        scheduledJobRuntimeState.missingCutoverRecoveryWarningKey !== warningKey
-    ) {
-        logger.warn("scheduled_jobs.deployment_recovery_handler_missing", {
-            cutoverIds: sortedMissingHandlerIds,
-        });
-    }
-    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = warningKey || undefined;
-    return reconciled;
 }
 
 /** Registers the detached rollback scheduler used for orphaned release cutovers. */
 export function registerDeploymentCutoverRecoveryHandler(
     didScheduleRecovery: DeploymentCutoverRecoveryHandler
 ): void {
-    scheduledJobRuntimeState.deploymentCutoverRecoveryHandler = didScheduleRecovery;
-    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = undefined;
+    deploymentCutoverReconciler.registerRecoveryHandler(didScheduleRecovery);
 }
 
 function hasPendingDeploymentCutover(): boolean {
-    const now = Date.now();
-    if (now >= scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt) {
-        scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt =
-            now + deploymentCutoverReconcileIntervalMs;
-        const reconciled = reconcileOrphanedDeploymentCutovers();
-        if (reconciled > 0) {
-            logger.warn("scheduled_jobs.deployment_cutovers_reconciled", {
-                reconciled,
-            });
-        }
-    }
-    return Boolean(
-        database
-            .query(
-                `SELECT 1
-                 FROM deployment_jobs
-                 WHERE status = 'verifying'
-                 LIMIT 1`
-            )
-            .get()
-    );
+    return deploymentCutoverReconciler.hasPending();
 }
 
 function executorTick(): void {

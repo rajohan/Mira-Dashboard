@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { databaseMigrationIdentities } from "../src/databaseMigrations/index.ts";
-import { currentBunRuntimeIdentity } from "../src/managedBunRuntime.ts";
+import { currentBunRuntimeIdentity } from "../src/services/releases/runtime.ts";
 import {
     createReleaseManifest,
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
@@ -27,7 +27,7 @@ import {
     requireRunnableReleaseCommit,
     verifyReleaseArtifacts,
     writeReleaseManifest,
-} from "../src/releaseManifest.ts";
+} from "../src/services/releases/manifest.ts";
 import { captureRejection } from "./support/rejections.ts";
 
 const temporaryRoots: string[] = [];

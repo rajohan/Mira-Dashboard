@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
-import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
+import { OpenClawChatBridge } from "../src/services/chat/openClawChatBridge.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import type {
     OpenClawGatewayClientInstance,

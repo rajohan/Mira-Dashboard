@@ -10,7 +10,7 @@ import {
     type ManagedDashboardRelease,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
-} from "../../releaseManager.ts";
+} from "../releases/manager.ts";
 import {
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS,
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL,

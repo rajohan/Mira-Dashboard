@@ -15,7 +15,7 @@ import {
     resolveDashboardProjectPathsForRuntime,
     resolveDashboardRuntimePath,
 } from "../src/lib/dashboardPaths.ts";
-import { currentBunRuntimeIdentity } from "../src/managedBunRuntime.ts";
+import { currentBunRuntimeIdentity } from "../src/services/releases/runtime.ts";
 import {
     assertManagedDashboardUnitProperties,
     type DashboardReleaseCommandRunner,
@@ -24,8 +24,8 @@ import {
     managedDashboardUnitContract,
     runReleaseDeploymentCommand,
     stageDashboardRelease,
-} from "../src/releaseDeployment.ts";
-import { managedReleasePath } from "../src/releaseManager.ts";
+} from "../src/services/releases/deployment.ts";
+import { managedReleasePath } from "../src/services/releases/manager.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const COMMIT_SHA = "a".repeat(40);

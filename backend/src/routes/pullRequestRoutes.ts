@@ -27,7 +27,7 @@ import {
     getPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
-} from "../services/pullRequestPreviews.ts";
+} from "../services/pullRequestPreviews/service.ts";
 import {
     getDashboardReleaseStatus,
     getProductionCheckoutStatus,

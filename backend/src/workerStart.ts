@@ -3,7 +3,7 @@ import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import {
     getRuntimeReleaseIdentity,
     requireRunnableReleaseCommit,
-} from "./releaseManifest.ts";
+} from "./services/releases/manifest.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
 
 const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;

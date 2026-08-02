@@ -60,7 +60,7 @@ import { dashboardJobProfile } from "../src/services/jobWorker.ts";
 import {
     parsePullRequestPreviewStatus,
     pullRequestPreviewCandidate,
-} from "../src/services/pullRequestPreviews.ts";
+} from "../src/services/pullRequestPreviews/service.ts";
 import {
     getResolvedRoots,
     parsePublicGithubPullRequests,

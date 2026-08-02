@@ -10,22 +10,22 @@ import {
     isSameSessionKey,
     OpenClawChatIdentityRegistry,
     sessionMessageRunId,
-} from "../src/chat/openClawChatIdentity.ts";
+} from "../src/services/chat/openClawChatIdentity.ts";
 import {
     isTerminalEvent,
     runtimeSessionBoundary,
-} from "../src/chat/openClawChatLifecycle.ts";
-import { OpenClawChatRuntimeMetricsRecorder } from "../src/chat/openClawChatMetrics.ts";
+} from "../src/services/chat/openClawChatLifecycle.ts";
+import { OpenClawChatRuntimeMetricsRecorder } from "../src/services/chat/openClawChatMetrics.ts";
 import {
     OpenClawChatPersistenceCoordinator,
     type OpenClawChatSnapshotStore,
-} from "../src/chat/openClawChatPersistence.ts";
+} from "../src/services/chat/openClawChatPersistence.ts";
 import {
     runtimePayloadView,
     sessionMessageRole,
     sessionMessageStopReason,
     withRuntimeIdentity,
-} from "../src/chat/openClawChatProviderAdapter.ts";
+} from "../src/services/chat/openClawChatProviderAdapter.ts";
 import {
     boundedCanonicalRuntimeEnvelope,
     compactCompletedRun,
@@ -33,7 +33,7 @@ import {
     shouldRetainRuntimeEvent,
     snapshotFromRetainedRuns,
     type RetainedRun,
-} from "../src/chat/openClawChatRetention.ts";
+} from "../src/services/chat/openClawChatRetention.ts";
 
 function envelope(
     event: string,

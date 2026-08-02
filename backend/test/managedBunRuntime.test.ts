@@ -24,7 +24,7 @@ import {
     pruneManagedBunRuntimes,
     requireManagedBunRuntime,
     resolveDashboardReleaseBuildBunExecutable,
-} from "../src/managedBunRuntime.ts";
+} from "../src/services/releases/runtime.ts";
 
 const temporaryRoots: string[] = [];
 

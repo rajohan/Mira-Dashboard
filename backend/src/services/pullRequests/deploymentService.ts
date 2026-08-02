@@ -1,12 +1,12 @@
 import type { DeploymentJob } from "../../../../contracts/delivery.ts";
 import { database } from "../../database.ts";
 import { errorMessage } from "../../lib/errors.ts";
-import { stageDashboardRelease } from "../../releaseDeployment.ts";
+import { stageDashboardRelease } from "../releases/deployment.ts";
 import {
     assertDashboardReleaseRuntimeAvailable,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
-} from "../../releaseManager.ts";
+} from "../releases/manager.ts";
 import { enqueueJobExecution } from "../jobExecutionQueue.ts";
 import {
     registerDeploymentCutoverRecoveryHandler,
@@ -33,7 +33,7 @@ import {
     ensureManagedRuntimeForRelease,
     scheduleReleaseCutover,
     scheduleReleaseRollback,
-} from "./releaseCutover.ts";
+} from "../releases/cutover.ts";
 import {
     dateToISOString,
     FULL_COMMIT_SHA_PATTERN,

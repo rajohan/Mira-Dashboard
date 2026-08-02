@@ -2,14 +2,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { databaseMigrations } from "../../src/databaseMigrations/index.ts";
-import { currentBunRuntimeIdentity } from "../../src/managedBunRuntime.ts";
+import { currentBunRuntimeIdentity } from "../../src/services/releases/runtime.ts";
 import {
     databaseMigrationInventorySha256,
     loadReleaseManifest,
     parseReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
     writeReleaseManifest,
-} from "../../src/releaseManifest.ts";
+} from "../../src/services/releases/manifest.ts";
 
 interface ReleaseFixtureOptions {
     builtAt?: Date;

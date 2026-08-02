@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { currentBunRuntimeIdentity } from "../backend/src/managedBunRuntime.ts";
+import { currentBunRuntimeIdentity } from "../backend/src/services/releases/runtime.ts";
 import { resolveBuildSourceIdentity } from "./buildSourceIdentity.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");

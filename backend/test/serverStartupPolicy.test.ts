@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { Server } from "bun";
 
-import * as releaseManifestModule from "../src/releaseManifest.ts";
+import * as releaseManifestModule from "../src/services/releases/manifest.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 

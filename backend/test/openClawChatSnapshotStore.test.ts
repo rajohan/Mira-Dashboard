@@ -6,8 +6,8 @@ import {
     type OpenClawRuntimeSnapshot,
 } from "../../contracts/chat.ts";
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
-import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/chat/openClawChatPersistence.ts";
-import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
+import { MAX_CHAT_RUNTIME_SESSIONS } from "../src/services/chat/openClawChatPersistence.ts";
+import { SqliteOpenClawChatSnapshotStore } from "../src/services/chat/openClawChatSnapshotStore.ts";
 import { database, enableRequiredWalJournalMode } from "../src/database.ts";
 
 function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnapshot {

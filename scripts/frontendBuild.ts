@@ -3,7 +3,7 @@ import path from "node:path";
 
 import tailwindPlugin from "bun-plugin-tailwind";
 
-import { currentBunRuntimeIdentity } from "../backend/src/managedBunRuntime.ts";
+import { currentBunRuntimeIdentity } from "../backend/src/services/releases/runtime.ts";
 import {
     isReleaseBuildCommit,
     resolveBuildSourceIdentity,

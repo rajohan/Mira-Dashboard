@@ -26,11 +26,11 @@ import * as processModule from "../src/lib/processes.ts";
 import {
     currentBunRuntimeIdentity,
     installManagedBunRuntime,
-} from "../src/managedBunRuntime.ts";
+} from "../src/services/releases/runtime.ts";
 import {
     ensureDashboardReleaseLayout,
     managedReleasePath,
-} from "../src/releaseManager.ts";
+} from "../src/services/releases/manager.ts";
 import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureRejection } from "./support/rejections.ts";

@@ -5,7 +5,7 @@ import type {
 import {
     isPullRequestPreviewAuthorAllowed,
     resolvePullRequestPreviewAllowedAuthors,
-} from "../pullRequestPreviewPolicy.ts";
+} from "../pullRequestPreviews/policy.ts";
 import { DEFAULT_BASE, DEFAULT_REVIEWER_AUTHOR } from "./config.ts";
 import { FULL_COMMIT_SHA_PATTERN, MAX_PULL_REQUEST_BODY_LENGTH } from "./support.ts";
 

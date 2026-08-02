@@ -15,7 +15,7 @@ import { registerExecExecutionActions } from "./execJobs.ts";
 import { registerGitHygieneScheduledJobs } from "./gitHygiene.ts";
 import { registerLogRotationScheduledJobs } from "./logRotation.ts";
 import { registerOpenClawExecutionActions } from "./openclawActions.ts";
-import { registerPullRequestPreviewExecutionActions } from "./pullRequestPreviews.ts";
+import { registerPullRequestPreviewExecutionActions } from "./pullRequestPreviews/service.ts";
 import { registerPullRequestExecutionActions } from "./pullRequests.ts";
 import {
     startScheduledJobExecutor,

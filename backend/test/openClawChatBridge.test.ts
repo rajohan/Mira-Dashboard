@@ -6,12 +6,12 @@ import {
 } from "../../contracts/chat.ts";
 import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../contracts/chatCanonicalUtilities.ts";
-import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
-import type { OpenClawChatSnapshotStore } from "../src/chat/openClawChatPersistence.ts";
-import { envelopeBytes } from "../src/chat/openClawChatProviderAdapter.ts";
-import { OpenClawChatRequestBoundaries } from "../src/chat/openClawChatRequestBoundaries.ts";
-import { MAX_BYTES_PER_ACTIVE_RUN } from "../src/chat/openClawChatRetention.ts";
-import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
+import { OpenClawChatBridge } from "../src/services/chat/openClawChatBridge.ts";
+import type { OpenClawChatSnapshotStore } from "../src/services/chat/openClawChatPersistence.ts";
+import { envelopeBytes } from "../src/services/chat/openClawChatProviderAdapter.ts";
+import { OpenClawChatRequestBoundaries } from "../src/services/chat/openClawChatRequestBoundaries.ts";
+import { MAX_BYTES_PER_ACTIVE_RUN } from "../src/services/chat/openClawChatRetention.ts";
+import { SqliteOpenClawChatSnapshotStore } from "../src/services/chat/openClawChatSnapshotStore.ts";
 
 const MAIN = "agent:main:main";
 

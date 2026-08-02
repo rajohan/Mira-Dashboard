@@ -1,28 +1,16 @@
-import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
-import {
-    canonicalizeOpenClawHistoryMessageResult,
-    canonicalizeOpenClawHistoryPage,
-} from "../../contracts/chat/openClawHistoryPageAdapter.ts";
 import type { ChatRuntimeMetrics, GatewayMetrics } from "../../contracts/metrics.ts";
 import type { Session } from "../../contracts/sessions.ts";
 import type { DashboardSettingsResponse } from "../../contracts/settings.ts";
-import {
-    MAX_DASHBOARD_SOCKET_REQUEST_TIMEOUT_MS,
-    parseDashboardSocketRequest,
-    readSessionsResponseContainer,
-} from "../../contracts/socket.ts";
-import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
-import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
+import { OpenClawChatBridge } from "./services/chat/openClawChatBridge.ts";
+import { SqliteOpenClawChatSnapshotStore } from "./services/chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import {
     resolveDashboardProjectPathsForRuntime,
     resolveDashboardRuntimePath,
 } from "./lib/dashboardPaths.ts";
-import { errorMessage } from "./lib/errors.ts";
-import { hashedLogCorrelation, runWithLogContext } from "./lib/logContext.ts";
 import {
     type DeviceIdentity,
     loadOrCreateDeviceIdentity,
@@ -32,25 +20,15 @@ import {
     type OpenClawGatewayRequestOptions,
 } from "./lib/openclawGatewayClient.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
-import {
-    boundedTimestamp,
-    nonEmptyEnvironmentFallback,
-    stringFallback,
-    unknownArray,
-} from "./lib/values.ts";
-import {
-    subscribeToDashboardLogs,
-    unsubscribeFromDashboardLogs,
-} from "./services/appLogStreams.ts";
-import {
-    subscribeToLogs as logsSubscribe,
-    unsubscribeFromLogs as logsUnsubscribe,
-} from "./services/logStreams.ts";
+import { nonEmptyEnvironmentFallback } from "./lib/values.ts";
+import { GatewayDashboardClientHub } from "./services/gateway/dashboardClientHub.ts";
+import { GatewayRequestForwarder } from "./services/gateway/requestForwarder.ts";
+import { normalizeGatewaySessionList } from "./services/gateway/sessionProjection.ts";
+import { OpenClawTranscriptImageHydrator } from "./services/gateway/transcriptImageHydrator.ts";
+
+export { normalizeGatewaySessionList } from "./services/gateway/sessionProjection.ts";
 
 const logger = createStructuredLogger("gateway");
-const DEFAULT_FORWARDED_GATEWAY_REQUEST_TIMEOUT_MS = 30_000;
-const SESSION_COMPACT_REQUEST_TIMEOUT_MS = 15 * 60_000;
-
 function validateOpenClawRoot(rootPath: string, environmentName: string): string {
     const resolved = Path.resolve(rootPath);
     if (!Path.isAbsolute(rootPath) || resolved === Path.parse(resolved).root) {
@@ -93,88 +71,16 @@ function loadOrCreateDashboardDeviceIdentity(
     }
 }
 
-/** Represents gateway session. */
-interface GatewaySession {
-    sessionId?: string;
-    key?: string;
-    kind?: string;
-    model?: string;
-    modelProvider?: string;
-    totalTokens?: number;
-    contextTokens?: number;
-    updatedAt?: number;
-    displayName?: string;
-    label?: string;
-    channel?: string;
-    status?: string;
-    endedAt?: string | number | undefined;
-    startedAt?: string | number | undefined;
-    runId?: string | undefined;
-    activeRunId?: string | undefined;
-    currentRunId?: string | undefined;
-    hasActiveRun?: boolean;
-    isRunning?: boolean;
-    running?: boolean;
-    thinkingLevel?: string;
-    thinkingLevels?: Array<{ id: string; label: string }>;
-    thinkingOptions?: string[];
-    thinkingDefault?: string;
-    fastMode?: boolean | "auto";
-    effectiveFastMode?: boolean | "auto";
-    verboseLevel?: string;
-    reasoningLevel?: string;
-    elevatedLevel?: string;
-    totalTokensFresh?: boolean;
-}
-
-/** Represents pending request. */
-interface PendingRequest {
-    clientWs: DashboardSocket;
-    clientId: string;
-    method?: string;
-}
-
-/** Represents the chat history payload. */
-interface ChatHistoryPayload {
-    sessionKey?: string;
-    sessionId?: string;
-    messages?: unknown[];
-}
-
-/** Represents chat image block record. */
-interface ChatImageBlockRecord {
-    type?: string;
-    text?: string;
-    data?: string;
-    mimeType?: string;
-    source?: {
-        media_type?: string;
-        data?: string;
-        omitted?: boolean;
-    };
-    omitted?: boolean;
-}
-
-/** Represents raw transcript image message. */
-interface RawTranscriptImageMessage {
-    role: string;
-    text: string;
-    timestamp?: number;
-    images: ChatImageBlockRecord[];
-}
-
 const gatewayState: {
     client: OpenClawGatewayClientInstance | undefined;
     sessions: Session[];
     isConnected: boolean;
-    requestId: number;
     currentToken: string | undefined;
     connectError: string | undefined;
 } = {
     client: undefined,
     sessions: [],
     isConnected: false,
-    requestId: 1000,
     currentToken: undefined,
     connectError: undefined,
 };
@@ -185,8 +91,6 @@ const gatewayMetricsState: Omit<GatewayMetrics, "connected" | "pendingRequests">
     reconnects: 0,
 };
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
-const subscribers = new Set<DashboardSocket>();
-const pendingRequests = new Map<string, PendingRequest>();
 const chatReplayState: {
     bridge: OpenClawChatBridge;
     generation: string;
@@ -213,6 +117,34 @@ const gatewayRuntime = {
         "OPENCLAW_HOME"
     ),
 };
+const transcriptImageHydrator = new OpenClawTranscriptImageHydrator({
+    resolveOpenClawHome: () => gatewayRuntime.openClawHome,
+    resolveSessionId: (sessionKey) =>
+        gatewayState.sessions.find((entry) => entry.key === sessionKey)?.id,
+});
+const requestForwarder = new GatewayRequestForwarder({
+    broadcast,
+    publishSessions: publishGatewaySessions,
+    readActiveClient: () =>
+        gatewayState.isConnected ? gatewayState.client : undefined,
+    readChatBridge: () => chatReplayState.bridge,
+    refreshSessionsAfterRequest,
+    transcriptImageHydrator,
+});
+const dashboardClientHub = new GatewayDashboardClientHub({
+    forwardRequest: (method, parameters, clientWs, clientId, timeoutMs) =>
+        requestForwarder.forward(method, parameters, clientWs, clientId, timeoutMs),
+    readRuntimeSnapshot: (sessionKey) => ({
+        ...chatReplayState.bridge.snapshot(sessionKey),
+        replayScope: chatReplayState.scope,
+        runtimeGeneration: chatReplayState.generation,
+    }),
+    readState: () => ({
+        gatewayConnected: gatewayState.isConnected,
+        sessions: gatewayState.sessions,
+    }),
+    removePendingRequests: (client) => requestForwarder.removePendingRequests(client),
+});
 
 function chatReplayGatewayScope(endpoint: string, token: string): string {
     const credentialFingerprint = new Bun.CryptoHasher("sha256")
@@ -274,30 +206,6 @@ export function setGatewayRootsForTests(roots: {
     };
 }
 
-function sendPendingRequestError(pending: PendingRequest, error: string): void {
-    try {
-        if (pending.clientWs.isOpen()) {
-            pending.clientWs.send(
-                JSON.stringify({
-                    type: "response",
-                    id: pending.clientId,
-                    isOk: false,
-                    error,
-                })
-            );
-        }
-    } catch {
-        // Ignore reply write failures; the client is already gone.
-    }
-}
-
-function failPendingRequests(error: string): void {
-    for (const pending of pendingRequests.values()) {
-        sendPendingRequestError(pending, error);
-    }
-    pendingRequests.clear();
-}
-
 async function refreshSessionsAfterRequest(
     activeGateway: OpenClawGatewayClientInstance
 ): Promise<void> {
@@ -309,290 +217,11 @@ async function refreshSessionsAfterRequest(
 }
 
 /**
- * Performs transform session.
- * @returns Transform session result.
- */
-function transformSession(session: GatewaySession): Session {
-    let type = "UNKNOWN";
-    let agentType = "";
-    const key = session.key || "";
-    const keyParts = key.split(":");
-
-    if (keyParts.length >= 2) {
-        agentType = stringFallback(keyParts[1]);
-    }
-
-    let hookName = "";
-    if (key.includes(":hook:")) {
-        type = "HOOK";
-        const hookIndex = keyParts.indexOf("hook");
-        const nextHookPart = keyParts.at(hookIndex + 1);
-        if (hookIndex !== -1 && nextHookPart) {
-            hookName = stringFallback(nextHookPart);
-        }
-    } else if (key.includes(":cron:")) {
-        type = "CRON";
-    } else if (key.includes(":subagent:")) {
-        type = "SUBAGENT";
-    } else if (key.startsWith("agent:main:")) {
-        type = "MAIN";
-    } else if (key.startsWith("agent:")) {
-        type = "SUBAGENT";
-    }
-
-    let displayLabel = session.label || "";
-    if (!displayLabel && type === "HOOK" && hookName) {
-        displayLabel = hookName.charAt(0).toUpperCase() + hookName.slice(1);
-    }
-    if (!displayLabel && type === "SUBAGENT" && agentType) {
-        displayLabel = agentType.charAt(0).toUpperCase() + agentType.slice(1);
-    }
-
-    const createdAtDate =
-        session.updatedAt == undefined ? undefined : new Date(session.updatedAt);
-    const createdAt = createdAtDate ? createdAtDate.toISOString() : undefined;
-
-    return {
-        id: session.sessionId || session.key || "unknown",
-        ...(session.sessionId && { sessionId: session.sessionId }),
-        key: session.key || "",
-        type,
-        agentType,
-        hookName,
-        kind: session.kind,
-        model: session.model || "Unknown",
-        modelProvider: session.modelProvider,
-        tokenCount: session.totalTokens || 0,
-        maxTokens: session.contextTokens || 0,
-        createdAt,
-        updatedAt: session.updatedAt,
-        displayName: session.displayName || "",
-        label: session.label || "",
-        displayLabel,
-        channel: session.channel || "unknown",
-        status: session.status,
-        endedAt: session.endedAt,
-        startedAt: session.startedAt,
-        runId: session.runId,
-        activeRunId: session.activeRunId,
-        currentRunId: session.currentRunId,
-        hasActiveRun: session.hasActiveRun,
-        isRunning: session.isRunning,
-        running: session.running,
-        thinkingLevel: session.thinkingLevel,
-        thinkingLevels: session.thinkingLevels,
-        thinkingOptions: session.thinkingOptions,
-        thinkingDefault: session.thinkingDefault,
-        fastMode: session.fastMode,
-        effectiveFastMode: session.effectiveFastMode,
-        verboseLevel: session.verboseLevel,
-        reasoningLevel: session.reasoningLevel,
-        elevatedLevel: session.elevatedLevel,
-        totalTokensFresh: session.totalTokensFresh,
-    };
-}
-
-/**
  * Performs broadcast.
  * @param message Message to process.
  */
 function broadcast(message: unknown): void {
-    const data = JSON.stringify(message);
-    for (const ws of subscribers) {
-        try {
-            if (ws.isOpen()) {
-                ws.send(data);
-            }
-        } catch {
-            // Ignore errors from closed connections
-        }
-    }
-}
-
-/**
- * Performs as record.
- * @param value Value to process.
- * @returns As record result.
- */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-    return value && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : undefined;
-}
-
-/**
- * Performs image block has omitted data.
- * @returns Image block has omitted data result.
- */
-function hasImageBlockOmittedData(block: Record<string, unknown>): boolean {
-    if (block.type !== "image") {
-        return false;
-    }
-
-    if (typeof block.data === "string" && block.data.trim()) {
-        return false;
-    }
-
-    const source = asRecord(block.source);
-    return block.omitted === true || source?.omitted === true || !source?.data;
-}
-
-/**
- * Normalizes one raw transcript image block.
- *
- * @param value - Raw content block.
- * @returns Canonical image block, or `undefined` when no image data is present.
- */
-function normalizeTranscriptImageBlock(value: unknown): ChatImageBlockRecord | undefined {
-    const block = asRecord(value);
-    if (block?.type !== "image") {
-        return undefined;
-    }
-    const source = asRecord(block.source);
-    let data = typeof source?.data === "string" ? source.data : undefined;
-    if (typeof block.data === "string" && block.data.trim().length > 0) {
-        data = block.data;
-    }
-    if (!data?.trim()) {
-        return undefined;
-    }
-    let mimeType =
-        typeof source?.media_type === "string" ? source.media_type : "image/jpeg";
-    if (typeof block.mimeType === "string") {
-        mimeType = block.mimeType;
-    }
-    return { data, mimeType, type: "image" };
-}
-
-/**
- * Normalizes message text.
- * @param content Content value.
- * @returns Normalized message text.
- */
-function normalizeMessageText(content: unknown): string {
-    if (typeof content === "string") {
-        return content.trim();
-    }
-
-    if (!Array.isArray(content)) {
-        return "";
-    }
-
-    return content
-        .map((block) => {
-            if (typeof block === "string") {
-                return block;
-            }
-
-            const record = asRecord(block);
-            return typeof record?.text === "string" ? record.text : "";
-        })
-        .filter(Boolean)
-        .join("\n\n")
-        .trim();
-}
-
-/**
- * Normalizes timestamp.
- * @param value Value to process.
- * @returns Normalized timestamp.
- */
-function normalizeTimestamp(value: unknown): number | undefined {
-    if (typeof value === "number" && Number.isFinite(value)) {
-        return value;
-    }
-
-    if (typeof value === "string") {
-        const parsed = Date.parse(value);
-        return Number.isFinite(parsed) ? parsed : undefined;
-    }
-
-    return undefined;
-}
-
-/**
- * Returns transcript path.
- * @param root Root value.
- * @param candidate Candidate value.
- * @returns transcript path.
- */
-function isPathInsideRoot(root: string, candidate: string): boolean {
-    const relativePath = Path.relative(root, candidate);
-    return !relativePath.startsWith("..") && !Path.isAbsolute(relativePath);
-}
-
-/**
- * Returns candidate when it stays inside root.
- * @param root Root value.
- * @param candidate Candidate value.
- * @returns candidate when it stays inside root.
- */
-function resolvePathInsideRoot(root: string, candidate: string): string | undefined {
-    return isPathInsideRoot(root, candidate) ? candidate : undefined;
-}
-
-/**
- * Returns transcript path.
- * @param sessionKey Session key value.
- * @param sessionId Session identifier.
- * @returns transcript path.
- */
-function getTranscriptPath(sessionKey: string, sessionId?: string): string | undefined {
-    const parts = sessionKey.split(":");
-    if (parts[0]?.toLowerCase() !== "agent") {
-        return undefined;
-    }
-
-    if (!sessionId) {
-        const session = gatewayState.sessions.find((entry) => entry.key === sessionKey);
-        sessionId = session?.id;
-    }
-    if (!sessionId || sessionId === "unknown") {
-        return undefined;
-    }
-
-    const agentId = parts[1];
-    const safeAgentPathSegment = /^[A-Za-z0-9._-]+$/u;
-    const safeSessionPathSegment = /^[A-Za-z0-9:._-]+$/u;
-    if (
-        !agentId ||
-        agentId === "." ||
-        agentId === ".." ||
-        !safeAgentPathSegment.test(agentId) ||
-        !safeSessionPathSegment.test(sessionId)
-    ) {
-        return undefined;
-    }
-
-    const openClawRoot = Path.resolve(gatewayRuntime.openClawHome);
-    const agentDirectory = Path.resolve(openClawRoot, "agents", agentId);
-    const agentsSessionsRoot = Path.resolve(agentDirectory, "sessions");
-    const transcriptPath = Path.resolve(agentsSessionsRoot, `${sessionId}.jsonl`);
-    let realOpenClawRoot: string;
-    let realAgentsSessionsRoot: string;
-    let realTranscriptPath: string;
-    try {
-        realOpenClawRoot = fs.realpathSync(openClawRoot);
-        const realAgentDirectory = fs.realpathSync(agentDirectory);
-        if (realAgentDirectory !== Path.resolve(realOpenClawRoot, "agents", agentId)) {
-            return undefined;
-        }
-        realAgentsSessionsRoot = fs.realpathSync(
-            Path.resolve(realAgentDirectory, "sessions")
-        );
-        if (!realAgentsSessionsRoot.startsWith(`${realAgentDirectory}${Path.sep}`)) {
-            return undefined;
-        }
-        realTranscriptPath = fs.realpathSync(transcriptPath);
-    } catch {
-        return undefined;
-    }
-
-    if (!realTranscriptPath.startsWith(`${realAgentsSessionsRoot}${Path.sep}`)) {
-        return undefined;
-    }
-
-    return resolvePathInsideRoot(realOpenClawRoot, realTranscriptPath);
+    dashboardClientHub.broadcast(message);
 }
 
 /**
@@ -604,352 +233,8 @@ function shouldRetrySessionIndexSubscription(attempt: number): boolean {
     return attempt < 3;
 }
 
-/**
- * Performs read raw transcript image messages.
- * @param sessionKey Session key value.
- * @param sessionId Session identifier.
- * @returns Read raw transcript image messages result.
- */
-async function readRawTranscriptImageMessages(
-    sessionKey: string,
-    sessionId?: string
-): Promise<RawTranscriptImageMessage[]> {
-    const transcriptPath = getTranscriptPath(sessionKey, sessionId);
-    if (!transcriptPath) {
-        return [];
-    }
-
-    let raw: string;
-    try {
-        raw = await Bun.file(transcriptPath).text();
-    } catch {
-        return [];
-    }
-
-    const messages: RawTranscriptImageMessage[] = [];
-    for (const line of raw.split("\n")) {
-        if (!line.trim() || !line.includes('"type":"image"')) {
-            continue;
-        }
-
-        try {
-            const parsed = JSON.parse(line) as { timestamp?: unknown; message?: unknown };
-            const message = asRecord(parsed.message);
-            if (!message) {
-                continue;
-            }
-
-            const content = unknownArray(message.content);
-            if (content.length === 0) {
-                continue;
-            }
-
-            const images = content
-                .map((block) => normalizeTranscriptImageBlock(block))
-                .filter((block): block is ChatImageBlockRecord => block !== undefined);
-            if (images.length === 0) {
-                continue;
-            }
-
-            messages.push({
-                role: typeof message.role === "string" ? message.role : "unknown",
-                text: normalizeMessageText(content),
-                timestamp:
-                    normalizeTimestamp(message.timestamp) ??
-                    normalizeTimestamp(parsed.timestamp),
-                images,
-            });
-        } catch {
-            // Ignore malformed transcript lines.
-        }
-    }
-
-    return messages;
-}
-
-/**
- * Performs hydrate omitted chat history images.
- * @param payload Request or event payload.
- * @param requestedSessionKey Requested session key value.
- * @returns Hydrate omitted chat history images result.
- */
-async function hydrateOmittedChatHistoryImages(
-    payload: unknown,
-    requestedSessionKey?: string
-): Promise<unknown> {
-    const history = asRecord(payload) as ChatHistoryPayload | undefined;
-    const sessionKey = history?.sessionKey || requestedSessionKey;
-
-    if (!history || !sessionKey || !Array.isArray(history.messages)) {
-        return payload;
-    }
-
-    const rawImageMessages = await readRawTranscriptImageMessages(
-        sessionKey,
-        history.sessionId
-    );
-    if (rawImageMessages.length === 0) {
-        return payload;
-    }
-
-    let rawCursor = 0;
-    history.messages = history.messages.map((message) => {
-        const record = asRecord(message);
-        if (!record || !Array.isArray(record.content)) {
-            return message;
-        }
-
-        const omittedImageIndexes = record.content
-            .map((block, index) => ({ block: asRecord(block), index }))
-            .filter(({ block }) => block && hasImageBlockOmittedData(block));
-        if (omittedImageIndexes.length === 0) {
-            return message;
-        }
-        const role = typeof record.role === "string" ? record.role : "unknown";
-        const text = normalizeMessageText(record.content);
-        const timestamp = normalizeTimestamp(record.timestamp);
-        const rawMatchIndex = rawImageMessages.findIndex((candidate, index) => {
-            if (index < rawCursor || candidate.role !== role) {
-                return false;
-            }
-
-            const isTimestampMatches =
-                timestamp === undefined ||
-                candidate.timestamp === undefined ||
-                Math.abs(candidate.timestamp - timestamp) < 5000;
-            const textMatches =
-                !text ||
-                !candidate.text ||
-                candidate.text === text ||
-                candidate.text.endsWith(text) ||
-                candidate.text.includes(text);
-            return isTimestampMatches && textMatches;
-        });
-        if (rawMatchIndex === -1) {
-            return message;
-        }
-
-        rawCursor = rawMatchIndex + 1;
-        const rawImages = rawImageMessages[rawMatchIndex]!.images;
-        let imageCursor = 0;
-        return {
-            ...record,
-            content: unknownArray(record.content).map((block) => {
-                const blockRecord = asRecord(block);
-                if (!blockRecord || !hasImageBlockOmittedData(blockRecord)) {
-                    return block;
-                }
-
-                const rawImage = rawImages[imageCursor++];
-                return rawImage || block;
-            }),
-        };
-    });
-
-    return history;
-}
-
-/**
- * Rehydrates omitted image blocks in one `chat.message.get` response.
- * @param payload Raw full-message response.
- * @param requestedSessionKey Requested session key.
- * @returns Response with transcript-backed image data when available.
- */
-async function hydrateOmittedChatMessageImages(
-    payload: unknown,
-    requestedSessionKey?: string
-): Promise<unknown> {
-    const result = asRecord(payload);
-    if (!result || !asRecord(result.message)) {
-        return payload;
-    }
-    const hydratedHistory = asRecord(
-        await hydrateOmittedChatHistoryImages(
-            {
-                messages: [result.message],
-                sessionId:
-                    typeof result.sessionId === "string" ? result.sessionId : undefined,
-                sessionKey:
-                    typeof result.sessionKey === "string"
-                        ? result.sessionKey
-                        : requestedSessionKey,
-            },
-            requestedSessionKey
-        )
-    ) as ChatHistoryPayload | undefined;
-    const hydratedMessage = hydratedHistory?.messages?.[0];
-    return hydratedMessage ? { ...result, message: hydratedMessage } : payload;
-}
-
 function isCurrentGatewayClient(expectedClient: OpenClawGatewayClientInstance): boolean {
     return gatewayState.client === expectedClient;
-}
-
-function gatewayString(record: Record<string, unknown>, key: string): string | undefined {
-    return typeof record[key] === "string" ? record[key] : undefined;
-}
-
-function gatewayFiniteNumber(
-    record: Record<string, unknown>,
-    key: string
-): number | undefined {
-    const value = record[key];
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function gatewayBoolean(
-    record: Record<string, unknown>,
-    key: string
-): boolean | undefined {
-    return typeof record[key] === "boolean" ? record[key] : undefined;
-}
-
-function gatewaySessionFromRecord(record: Record<string, unknown>): GatewaySession {
-    const thinkingLevels = Array.isArray(record.thinkingLevels)
-        ? record.thinkingLevels.slice(0, 100).flatMap((value) => {
-              const level = asRecord(value);
-              const id = level ? gatewayString(level, "id")?.trim() : undefined;
-              const label = level ? gatewayString(level, "label")?.trim() : undefined;
-              return id && label ? [{ id, label }] : [];
-          })
-        : undefined;
-    const thinkingOptions = Array.isArray(record.thinkingOptions)
-        ? record.thinkingOptions
-              .slice(0, 100)
-              .filter((value): value is string => typeof value === "string")
-              .map((value) => value.trim())
-              .filter(Boolean)
-        : undefined;
-    const fastMode =
-        typeof record.fastMode === "boolean" || record.fastMode === "auto"
-            ? record.fastMode
-            : undefined;
-    const effectiveFastMode =
-        typeof record.effectiveFastMode === "boolean" ||
-        record.effectiveFastMode === "auto"
-            ? record.effectiveFastMode
-            : undefined;
-    const endedAt =
-        typeof record.endedAt === "string" ||
-        (typeof record.endedAt === "number" && Number.isFinite(record.endedAt))
-            ? record.endedAt
-            : undefined;
-    const startedAt =
-        typeof record.startedAt === "string" ||
-        (typeof record.startedAt === "number" && Number.isFinite(record.startedAt))
-            ? record.startedAt
-            : undefined;
-    return {
-        activeRunId: gatewayString(record, "activeRunId"),
-        channel: gatewayString(record, "channel"),
-        contextTokens: gatewayFiniteNumber(record, "contextTokens"),
-        currentRunId: gatewayString(record, "currentRunId"),
-        displayName: gatewayString(record, "displayName"),
-        effectiveFastMode,
-        elevatedLevel: gatewayString(record, "elevatedLevel"),
-        endedAt,
-        fastMode,
-        hasActiveRun: gatewayBoolean(record, "hasActiveRun"),
-        isRunning: gatewayBoolean(record, "isRunning"),
-        key: gatewayString(record, "key"),
-        kind: gatewayString(record, "kind"),
-        label: gatewayString(record, "label"),
-        model: gatewayString(record, "model"),
-        modelProvider: gatewayString(record, "modelProvider"),
-        reasoningLevel: gatewayString(record, "reasoningLevel"),
-        runId: gatewayString(record, "runId"),
-        running: gatewayBoolean(record, "running"),
-        sessionId: gatewayString(record, "sessionId"),
-        startedAt,
-        status: gatewayString(record, "status"),
-        thinkingDefault: gatewayString(record, "thinkingDefault"),
-        thinkingLevel: gatewayString(record, "thinkingLevel"),
-        thinkingLevels,
-        thinkingOptions,
-        totalTokens: gatewayFiniteNumber(record, "totalTokens"),
-        totalTokensFresh: gatewayBoolean(record, "totalTokensFresh"),
-        updatedAt: boundedTimestamp(record.updatedAt),
-        verboseLevel: gatewayString(record, "verboseLevel"),
-    };
-}
-
-/**
- * Normalizes one raw Gateway sessions.list response for Dashboard consumers.
- * @param response Raw Gateway response.
- * @returns Valid Dashboard session rows.
- */
-export function normalizeGatewaySessionList(response: unknown): Session[] {
-    const container = readSessionsResponseContainer(response);
-    const sessions = container?.sessions ?? [];
-    const defaultsRecord = asRecord(container?.defaults);
-    const defaults = defaultsRecord
-        ? gatewaySessionFromRecord(defaultsRecord)
-        : undefined;
-    return sessions
-        .map((entry) => asRecord(entry))
-        .filter(
-            (entry): entry is Record<string, unknown> =>
-                entry !== undefined &&
-                (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
-                (entry.key === undefined || typeof entry.key === "string") &&
-                (entry.updatedAt === undefined ||
-                    boundedTimestamp(entry.updatedAt) !== undefined) &&
-                (stringFallback(entry.sessionId).trim() ||
-                    stringFallback(entry.key).trim()) !== ""
-        )
-        .map((entry) => {
-            const session = gatewaySessionFromRecord(entry);
-            const updatedAt = boundedTimestamp(entry.updatedAt);
-            const shouldApplyDefaults =
-                (!session.model || session.model === defaults?.model) &&
-                (!session.modelProvider ||
-                    !defaults?.modelProvider ||
-                    session.modelProvider === defaults.modelProvider);
-            const matchingDefaults = shouldApplyDefaults ? defaults : undefined;
-            const hasSessionThinkingChoices = Boolean(
-                session.thinkingLevels?.length || session.thinkingOptions?.length
-            );
-            let thinkingLevels = hasSessionThinkingChoices
-                ? undefined
-                : matchingDefaults?.thinkingLevels;
-            if (session.thinkingLevels?.length) {
-                thinkingLevels = session.thinkingLevels;
-            }
-            let thinkingOptions = hasSessionThinkingChoices
-                ? undefined
-                : matchingDefaults?.thinkingOptions;
-            if (session.thinkingOptions?.length) {
-                thinkingOptions = session.thinkingOptions;
-            }
-            return transformSession({
-                ...matchingDefaults,
-                ...session,
-                model: session.model?.trim() ? session.model : matchingDefaults?.model,
-                modelProvider: session.modelProvider?.trim()
-                    ? session.modelProvider
-                    : matchingDefaults?.modelProvider,
-                contextTokens: session.contextTokens ?? matchingDefaults?.contextTokens,
-                thinkingDefault:
-                    session.thinkingDefault ?? matchingDefaults?.thinkingDefault,
-                thinkingLevels,
-                thinkingOptions,
-                fastMode: session.fastMode,
-                effectiveFastMode:
-                    session.effectiveFastMode ??
-                    matchingDefaults?.effectiveFastMode ??
-                    matchingDefaults?.fastMode,
-                activeRunId: entry.activeRunId === null ? undefined : session.activeRunId,
-                currentRunId:
-                    entry.currentRunId === null ? undefined : session.currentRunId,
-                endedAt: entry.endedAt === null ? undefined : session.endedAt,
-                runId: entry.runId === null ? undefined : session.runId,
-                startedAt: entry.startedAt === null ? undefined : session.startedAt,
-                updatedAt:
-                    typeof updatedAt === "number" && Number.isFinite(updatedAt)
-                        ? updatedAt
-                        : undefined,
-            });
-        });
 }
 
 /**
@@ -1031,7 +316,7 @@ function init(token: string): void {
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     gatewayState.connectError = undefined;
-    failPendingRequests("Gateway disconnected");
+    requestForwarder.failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
     gatewayState.currentToken = token;
     const thisReplayBridge = chatReplayState.bridge;
@@ -1132,7 +417,7 @@ function init(token: string): void {
         gatewayState.sessions = [];
         thisReplayBridge.markGatewayDisconnected();
         thisReplayBridge.flush();
-        failPendingRequests("Gateway disconnected");
+        requestForwarder.failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
     const thisGatewayClient = new gatewayRuntime.clientConstructor({
@@ -1216,416 +501,9 @@ async function initAndWait(token: string): Promise<void> {
     await waitForConnection(token);
 }
 
-function captureChatSendRequestBoundary(
-    method: string,
-    parameters: Record<string, unknown>
-): number | undefined {
-    if (method !== "chat.send") {
-        return undefined;
-    }
-    return chatReplayState.bridge.captureRequestBoundary(
-        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined,
-        typeof parameters.idempotencyKey === "string"
-            ? parameters.idempotencyKey
-            : undefined
-    );
-}
-
-async function requestWithReplayBoundaryInContext(
-    client: OpenClawGatewayClientInstance,
-    method: string,
-    parameters: Record<string, unknown>,
-    options?: OpenClawGatewayRequestOptions
-): Promise<unknown> {
-    let requestBoundary: number | undefined;
-    let didCaptureRequestBoundary = false;
-    try {
-        requestBoundary = captureChatSendRequestBoundary(method, parameters);
-        didCaptureRequestBoundary = method === "chat.send";
-        const payload = await client.request(method, parameters, options);
-        const identityEnvelope = chatReplayState.bridge.handleSuccessfulRequest(
-            method,
-            parameters,
-            payload,
-            requestBoundary
-        );
-        if (identityEnvelope) {
-            broadcast(identityEnvelope);
-        }
-        return payload;
-    } catch (error) {
-        if (didCaptureRequestBoundary) {
-            chatReplayState.bridge.handleFailedRequest(
-                method,
-                parameters,
-                requestBoundary
-            );
-        }
-        throw error;
-    }
-}
-
-/**
- * Extracts a session identifier suitable for request correlation.
- *
- * @param method - OpenClaw Gateway method name.
- * @param parameters - Gateway request parameters.
- * @returns Session identifier, when the request carries one.
- */
-function gatewaySessionIdentifier(
-    method: string,
-    parameters: Record<string, unknown>
-): string | undefined {
-    if (typeof parameters.sessionKey === "string") {
-        return parameters.sessionKey;
-    }
-    if (typeof parameters.sessionId === "string") {
-        return parameters.sessionId;
-    }
-    if (typeof parameters.key === "string" && method.startsWith("sessions.")) {
-        return parameters.key;
-    }
-    return undefined;
-}
-
-async function requestWithReplayBoundary(
-    client: OpenClawGatewayClientInstance,
-    method: string,
-    parameters: Record<string, unknown>,
-    options?: OpenClawGatewayRequestOptions
-): Promise<unknown> {
-    const sessionIdentifier = gatewaySessionIdentifier(method, parameters);
-    return runWithLogContext(
-        {
-            ...(sessionIdentifier && {
-                sessionId: hashedLogCorrelation("openclaw-session", sessionIdentifier),
-            }),
-        },
-        () => requestWithReplayBoundaryInContext(client, method, parameters, options)
-    );
-}
-
-/**
- * Performs forward request.
- * @param method Method value.
- * @param parameters Parameters value.
- * @param clientWs Client ws value.
- * @param clientId Client identifier.
- * @param timeoutMs Timeout duration in milliseconds.
- * @returns Forward request result.
- */
-async function forwardRequest(
-    method: string,
-    parameters: Record<string, unknown>,
-    clientWs?: DashboardSocket,
-    clientId?: string,
-    timeoutMs?: number
-): Promise<boolean> {
-    if (!gatewayState.client || !gatewayState.isConnected) {
-        return false;
-    }
-    const activeGateway = gatewayState.client;
-    const requestOptions = {
-        timeoutMs:
-            method === "sessions.compact"
-                ? SESSION_COMPACT_REQUEST_TIMEOUT_MS
-                : Math.min(
-                      timeoutMs ?? DEFAULT_FORWARDED_GATEWAY_REQUEST_TIMEOUT_MS,
-                      MAX_DASHBOARD_SOCKET_REQUEST_TIMEOUT_MS
-                  ),
-    };
-
-    if (clientWs && clientId) {
-        const id = String(++gatewayState.requestId);
-        pendingRequests.set(id, { clientWs, clientId, method });
-
-        try {
-            let payload = await requestWithReplayBoundary(
-                activeGateway,
-                method,
-                parameters,
-                requestOptions
-            );
-            let normalizedSessions: Session[] | undefined;
-            if (method === "chat.history") {
-                payload = await hydrateOmittedChatHistoryImages(
-                    payload,
-                    typeof parameters.sessionKey === "string"
-                        ? parameters.sessionKey
-                        : undefined
-                );
-                payload = canonicalizeOpenClawHistoryPage(payload, {
-                    messageId:
-                        typeof parameters.messageId === "string"
-                            ? parameters.messageId
-                            : undefined,
-                    offset:
-                        typeof parameters.offset === "number" &&
-                        Number.isSafeInteger(parameters.offset) &&
-                        parameters.offset >= 0
-                            ? parameters.offset
-                            : 0,
-                    sessionKey:
-                        typeof parameters.sessionKey === "string"
-                            ? parameters.sessionKey
-                            : "",
-                });
-            } else if (method === "chat.message.get") {
-                const requestedSessionKey =
-                    typeof parameters.sessionKey === "string"
-                        ? parameters.sessionKey
-                        : undefined;
-                payload = await hydrateOmittedChatMessageImages(
-                    payload,
-                    requestedSessionKey
-                );
-                payload = canonicalizeOpenClawHistoryMessageResult(payload, {
-                    messageId:
-                        typeof parameters.messageId === "string"
-                            ? parameters.messageId
-                            : "",
-                    sessionKey: requestedSessionKey ?? "",
-                });
-            } else if (method === "sessions.list") {
-                normalizedSessions = normalizeGatewaySessionList(payload);
-                payload = { sessions: normalizedSessions };
-            }
-            const pending = pendingRequests.get(id);
-            pendingRequests.delete(id);
-            try {
-                if (pending?.clientWs.isOpen()) {
-                    pending.clientWs.send(
-                        JSON.stringify({
-                            type: "response",
-                            id: pending.clientId,
-                            isOk: true,
-                            payload,
-                        })
-                    );
-                }
-            } catch {
-                // Ignore reply write failures; the Gateway call already succeeded.
-            }
-            if (normalizedSessions) {
-                publishGatewaySessions(activeGateway, normalizedSessions);
-            } else if (method.startsWith("sessions.")) {
-                await refreshSessionsAfterRequest(activeGateway);
-            }
-        } catch (error) {
-            const pending = pendingRequests.get(id);
-            pendingRequests.delete(id);
-            if (pending) {
-                sendPendingRequestError(
-                    pending,
-                    errorMessage(error, "Gateway request failed")
-                );
-            }
-        }
-        return true;
-    }
-
-    try {
-        const payload = await requestWithReplayBoundary(
-            activeGateway,
-            method,
-            parameters,
-            requestOptions
-        );
-        if (method === "sessions.list") {
-            publishGatewaySessions(activeGateway, normalizeGatewaySessionList(payload));
-        } else if (method.startsWith("sessions.")) {
-            await refreshSessionsAfterRequest(activeGateway);
-        }
-        return true;
-    } catch {
-        return false;
-    }
-}
-
 /** Processes Gateway WebSocket client events. */
 function handleDashboardClient(ws: DashboardSocket): void {
-    const cleanupClient = () => {
-        subscribers.delete(ws);
-        unsubscribeFromDashboardLogs(ws);
-        logsUnsubscribe(ws);
-        for (const [id, pending] of pendingRequests) {
-            if (pending.clientWs === ws) {
-                pendingRequests.delete(id);
-            }
-        }
-    };
-
-    ws.onError((error) => {
-        logger.error("gateway.client_socket_failed", { error });
-        cleanupClient();
-    });
-
-    subscribers.add(ws);
-    try {
-        ws.send(
-            JSON.stringify({
-                type: "state",
-                gatewayConnected: gatewayState.isConnected,
-                sessions: gatewayState.sessions,
-            })
-        );
-    } catch (error) {
-        logger.error("gateway.initial_client_state_send_failed", { error });
-        cleanupClient();
-        ws.close();
-        return;
-    }
-
-    ws.onMessage((data) => {
-        void (async () => {
-            try {
-                const message = parseDashboardSocketRequest(JSON.parse(data.toString()));
-                if (message.type === "subscribe" && message.channel === "logs") {
-                    logsSubscribe(ws);
-                    return;
-                }
-                if (message.type === "unsubscribe" && message.channel === "logs") {
-                    logsUnsubscribe(ws);
-                    return;
-                }
-                if (
-                    message.type === "subscribe" &&
-                    message.channel === "dashboard-logs"
-                ) {
-                    subscribeToDashboardLogs(ws);
-                    return;
-                }
-                if (
-                    message.type === "unsubscribe" &&
-                    message.channel === "dashboard-logs"
-                ) {
-                    unsubscribeFromDashboardLogs(ws);
-                    return;
-                }
-
-                if (
-                    (message.type === "request" || message.type === "req") &&
-                    message.method === "subscribe" &&
-                    message.params?.channel === "logs"
-                ) {
-                    logsSubscribe(ws);
-                    if (message.id) {
-                        ws.send(
-                            JSON.stringify({
-                                type: "response",
-                                id: message.id,
-                                isOk: true,
-                            })
-                        );
-                    }
-                    return;
-                }
-
-                if (
-                    (message.type === "request" || message.type === "req") &&
-                    message.method === "subscribe" &&
-                    message.params?.channel === "dashboard-logs"
-                ) {
-                    subscribeToDashboardLogs(ws);
-                    if (message.id) {
-                        ws.send(
-                            JSON.stringify({
-                                type: "response",
-                                id: message.id,
-                                isOk: true,
-                            })
-                        );
-                    }
-                    return;
-                }
-
-                if (
-                    (message.type === "request" || message.type === "req") &&
-                    message.method === "unsubscribe" &&
-                    message.params?.channel === "dashboard-logs"
-                ) {
-                    unsubscribeFromDashboardLogs(ws);
-                    if (message.id) {
-                        ws.send(
-                            JSON.stringify({
-                                type: "response",
-                                id: message.id,
-                                isOk: true,
-                            })
-                        );
-                    }
-                    return;
-                }
-
-                if (
-                    (message.type === "request" || message.type === "req") &&
-                    message.method === "unsubscribe" &&
-                    message.params?.channel === "logs"
-                ) {
-                    logsUnsubscribe(ws);
-                    if (message.id) {
-                        ws.send(
-                            JSON.stringify({
-                                type: "response",
-                                id: message.id,
-                                isOk: true,
-                            })
-                        );
-                    }
-                    return;
-                }
-                if (
-                    (message.type === "request" || message.type === "req") &&
-                    message.method
-                ) {
-                    if (message.method === "chat.runtimeSnapshot") {
-                        if (message.id && ws.isOpen()) {
-                            const sessionKey =
-                                typeof message.params?.sessionKey === "string"
-                                    ? message.params.sessionKey
-                                    : "";
-                            ws.send(
-                                JSON.stringify({
-                                    type: "response",
-                                    id: message.id,
-                                    isOk: true,
-                                    payload: {
-                                        ...chatReplayState.bridge.snapshot(sessionKey),
-                                        replayScope: chatReplayState.scope,
-                                        runtimeGeneration: chatReplayState.generation,
-                                    },
-                                })
-                            );
-                        }
-                        return;
-                    }
-                    const isOk = await forwardRequest(
-                        message.method,
-                        message.params || {},
-                        ws,
-                        message.id,
-                        message.timeoutMs
-                    );
-                    if (!isOk && message.id && ws.isOpen()) {
-                        ws.send(
-                            JSON.stringify({
-                                type: "response",
-                                id: message.id,
-                                isOk: false,
-                                error: "Gateway not connected",
-                            })
-                        );
-                    }
-                }
-            } catch (error) {
-                logger.error("gateway.client_message_failed", { error });
-            }
-        })();
-    });
-
-    ws.onClose(() => {
-        cleanupClient();
-    });
+    dashboardClientHub.handle(ws);
 }
 
 /**
@@ -1664,7 +542,8 @@ function getMetrics(): GatewayMetrics {
         ...gatewayMetricsState,
         connected: gatewayState.isConnected,
         pendingRequests:
-            gatewayState.client?.pendingRequestCount?.() ?? pendingRequests.size,
+            gatewayState.client?.pendingRequestCount?.() ??
+            requestForwarder.pendingRequestCount,
     };
 }
 
@@ -1697,7 +576,7 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    return requestWithReplayBoundary(gatewayState.client, method, parameters, options);
+    return requestForwarder.request(gatewayState.client, method, parameters, options);
 }
 
 /**
@@ -1802,7 +681,7 @@ function shutdown(): void {
     gatewayState.sessions = [];
     gatewayState.currentToken = undefined;
     chatReplayState.bridge.clearMemory();
-    failPendingRequests("Gateway disconnected");
+    requestForwarder.failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }
 
