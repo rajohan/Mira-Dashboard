@@ -64,22 +64,25 @@ export function runtimeStreamDrafts(
     }
 
     if (stream === "assistant") {
+        const delta = rawString(data.delta);
         const text =
-            rawString(data.delta) ||
+            delta ||
             rawString(data.text) ||
             rawString(data.deltaText) ||
             rawString(data.summary) ||
             rawString(data.content) ||
             "";
         if (text) {
+            const message = normalizeAssistant(text, common.runId);
             drafts.push({
                 ...common,
                 kind: "assistant",
                 message: {
-                    ...normalizeAssistant(text, common.runId),
+                    ...message,
                     content: "",
+                    text: delta ?? message.text,
                 },
-                mode: rawString(data.delta) ? "append" : "merge",
+                mode: delta ? "append" : "merge",
                 source: "runtime" as CanonicalChatTextSource,
             });
         }
