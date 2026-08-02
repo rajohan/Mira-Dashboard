@@ -1,4 +1,3 @@
-import FS from "node:fs";
 import Path from "node:path";
 
 import type {
@@ -6,31 +5,13 @@ import type {
     AgentMetadata,
     AgentsConfig,
 } from "../../../contracts/agents.ts";
-import { database } from "../database.ts";
-import {
-    guardedPath,
-    readTextNoFollowGuarded,
-    writeTextNoFollowGuarded,
-} from "../lib/guardedOps.ts";
-import { safePathWithinRoot } from "../lib/safePath.ts";
-import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { guardedPath, readTextNoFollowGuarded } from "../lib/guardedOps.ts";
 import { boundedTimestamp } from "../lib/values.ts";
 import {
     getLatestActivityFromFile,
     getSessionFileModificationTime,
 } from "./agents/activityFileSource.ts";
-import {
-    assertOpenedDirectoryMatches,
-    ensureRealAgentsDirectory,
-    getAgentsDirectory,
-    getOpenclawRoot,
-    getSafeAgentSessionsDirectory,
-    isProcfsAvailable,
-    isValidAgentId,
-    mkdirChildDirectoryFromVerifiedParent,
-    prepareAgentMetadataDirectoryForWrite,
-    realExistingChildDirectoryFromVerifiedParent,
-} from "./agents/agentPaths.ts";
+import { getSafeAgentSessionsDirectory } from "./agents/agentPaths.ts";
 import { getActiveHistoryTask } from "./agents/agentTaskHistory.ts";
 import {
     type GatewaySessionSummary,
@@ -46,8 +27,8 @@ export {
     getLatestCompletedTasks,
 } from "./agents/agentTaskHistory.ts";
 export { isProcfsAvailable, isValidAgentId } from "./agents/agentPaths.ts";
-
-const logger = createStructuredLogger("agents");
+export { parseAgentsConfig } from "./agents/configSource.ts";
+export { updateAgentCurrentTask } from "./agents/currentTaskService.ts";
 
 const ACTIVE_THRESHOLD = 20_000; // < 20s = active (tool/activity)
 const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
@@ -100,130 +81,10 @@ function resolveConfiguredModelName(
  * Returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure.
  * @returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure.
  */
-function nowIso(): string {
-    const now = new Date();
-    return now.toISOString();
-}
 
 function timestampToIso(timestamp: number): string {
     const date = new Date(timestamp);
     return date.toISOString();
-}
-
-async function updateAgentMetadataFromVerifiedDirectory({
-    realMetadataDirectory,
-    realExpectedSessionsDirectory,
-    agentId,
-    currentTask,
-}: {
-    realMetadataDirectory: string;
-    realExpectedSessionsDirectory: string;
-    agentId: string;
-    currentTask: string;
-}): Promise<{ metadata: AgentMetadata; safeTask: string; ts: string }> {
-    const metadataDirectoryFd = FS.openSync(
-        Buffer.from(realMetadataDirectory),
-        FS.constants.O_DIRECTORY | FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
-    );
-    try {
-        assertOpenedDirectoryMatches(metadataDirectoryFd, realExpectedSessionsDirectory);
-        const safeMetadataPath = isProcfsAvailable()
-            ? Path.join("/proc/self/fd", String(metadataDirectoryFd), "metadata.json")
-            : Path.join(realMetadataDirectory, "metadata.json");
-
-        let metadata: AgentMetadata = {};
-        try {
-            const metadataText = await readTextNoFollowGuarded(
-                guardedPath(safeMetadataPath)
-            );
-            let parsedMetadata: unknown;
-            try {
-                parsedMetadata = Bun.JSON5.parse(metadataText);
-            } catch (parseError) {
-                logger.warn("agents.metadata_invalid", {
-                    agentId,
-                    error: parseError,
-                    path: Path.join(realMetadataDirectory, "metadata.json"),
-                });
-                parsedMetadata = {};
-            }
-            metadata =
-                parsedMetadata &&
-                typeof parsedMetadata === "object" &&
-                !Array.isArray(parsedMetadata)
-                    ? parsedMetadata
-                    : {};
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                throw error;
-            }
-        }
-
-        const safeTask = currentTask.trim().slice(0, 100);
-        const ts = nowIso();
-
-        if (safeTask.length > 0) {
-            metadata.currentTask = safeTask;
-        }
-        metadata.updatedAt = ts;
-
-        assertOpenedDirectoryMatches(metadataDirectoryFd, realExpectedSessionsDirectory);
-        await writeTextNoFollowGuarded(
-            guardedPath(safeMetadataPath),
-            JSON.stringify(metadata, undefined, 2)
-        );
-
-        return { metadata, safeTask, ts };
-    } finally {
-        FS.closeSync(metadataDirectoryFd);
-    }
-}
-
-/**
- * Reads the configured OpenClaw agent list from a guarded configuration file.
- * @returns Parsed agent configuration, or undefined when unavailable or unsafe.
- */
-export function parseAgentsConfig(): AgentsConfig | undefined {
-    const configPath = Path.join(getOpenclawRoot(), "openclaw.json");
-
-    try {
-        if (!FS.existsSync(configPath)) {
-            return undefined;
-        }
-
-        const configStat = FS.lstatSync(configPath);
-        if (configStat.isSymbolicLink() || configStat.nlink > 1) {
-            return undefined;
-        }
-        const realRoot = FS.realpathSync(getOpenclawRoot());
-        const realPath = FS.realpathSync(configPath);
-        if (realPath !== realRoot && !realPath.startsWith(`${realRoot}${Path.sep}`)) {
-            return undefined;
-        }
-
-        const fd = FS.openSync(
-            Buffer.from(realPath),
-            FS.constants.O_RDONLY | FS.constants.O_NOFOLLOW
-        );
-        let content: string;
-        try {
-            content = FS.readFileSync(fd, "utf8");
-        } finally {
-            FS.closeSync(fd);
-        }
-        const parsed = Bun.JSON5.parse(content) as { agents?: AgentsConfig };
-
-        if (parsed.agents && Array.isArray(parsed.agents.list)) {
-            return parsed.agents;
-        }
-        return undefined;
-    } catch (error) {
-        logger.error("agents.openclaw_config_parse_failed", {
-            error,
-            path: configPath,
-        });
-        return undefined;
-    }
 }
 
 // Read agent metadata file for current task
@@ -527,154 +388,4 @@ function normalizeGatewaySessionModel(model: string | undefined): string | undef
         return undefined;
     }
     return model;
-}
-
-export async function updateAgentCurrentTask(
-    agentId: string,
-    currentTask: unknown
-): Promise<AgentMetadata> {
-    if (!isValidAgentId(agentId)) {
-        throw Object.assign(new Error("Invalid agent ID"), { statusCode: 400 });
-    }
-    if (typeof currentTask !== "string" || currentTask.trim().length === 0) {
-        throw Object.assign(new Error("Provide currentTask"), { statusCode: 400 });
-    }
-
-    const metadataPath = safePathWithinRoot(
-        Path.join(agentId, "sessions", "metadata.json"),
-        getAgentsDirectory()
-    );
-    if (!metadataPath) {
-        throw Object.assign(new Error("Invalid agent ID"), { statusCode: 400 });
-    }
-    const metadataDirectory = Path.dirname(metadataPath);
-    const realAgentsDirectory = ensureRealAgentsDirectory();
-    if (!realAgentsDirectory) {
-        throw Object.assign(new Error("Invalid agent metadata path"), {
-            statusCode: 400,
-        });
-    }
-
-    const agentsDirectory = getAgentsDirectory();
-    const expectedSessionsDirectory = Path.join(agentsDirectory, agentId, "sessions");
-    const canonicalExpectedSessionsDirectory = Path.join(
-        realAgentsDirectory,
-        agentId,
-        "sessions"
-    );
-    const safeSessionsDirectory = prepareAgentMetadataDirectoryForWrite(
-        expectedSessionsDirectory,
-        agentsDirectory
-    );
-    if (safeSessionsDirectory !== canonicalExpectedSessionsDirectory) {
-        throw Object.assign(new Error("Invalid agent metadata path"), {
-            statusCode: 400,
-        });
-    }
-
-    const expectedSessionsParent = Path.dirname(safeSessionsDirectory);
-    let realExpectedSessionsParent: string;
-    try {
-        mkdirChildDirectoryFromVerifiedParent(realAgentsDirectory, agentId);
-        realExpectedSessionsParent = FS.realpathSync(expectedSessionsParent);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-            realExpectedSessionsParent = realExistingChildDirectoryFromVerifiedParent(
-                realAgentsDirectory,
-                agentId
-            );
-        } else {
-            throw error;
-        }
-    }
-    if (
-        realExpectedSessionsParent !== Path.dirname(canonicalExpectedSessionsDirectory) ||
-        !FS.statSync(realExpectedSessionsParent).isDirectory()
-    ) {
-        throw Object.assign(new Error("Invalid agent metadata path"), {
-            statusCode: 400,
-        });
-    }
-
-    let realExpectedSessionsDirectory: string;
-    try {
-        mkdirChildDirectoryFromVerifiedParent(realExpectedSessionsParent, "sessions");
-        realExpectedSessionsDirectory = FS.realpathSync(expectedSessionsDirectory);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOTSUP") {
-            realExpectedSessionsDirectory = realExistingChildDirectoryFromVerifiedParent(
-                realExpectedSessionsParent,
-                "sessions"
-            );
-        } else {
-            throw error;
-        }
-    }
-
-    const realMetadataDirectory = FS.realpathSync(metadataDirectory);
-    if (
-        realMetadataDirectory !== realExpectedSessionsDirectory ||
-        realExpectedSessionsDirectory !== canonicalExpectedSessionsDirectory ||
-        !FS.statSync(realExpectedSessionsDirectory).isDirectory() ||
-        !FS.statSync(realMetadataDirectory).isDirectory()
-    ) {
-        throw Object.assign(new Error("Invalid agent metadata path"), {
-            statusCode: 400,
-        });
-    }
-
-    const { metadata, safeTask, ts } = await updateAgentMetadataFromVerifiedDirectory({
-        agentId,
-        currentTask,
-        realExpectedSessionsDirectory,
-        realMetadataDirectory,
-    });
-
-    try {
-        if (safeTask && safeTask.length > 0) {
-            database.run("BEGIN IMMEDIATE");
-            const currentActive = getActiveHistoryTask(agentId);
-            if (!currentActive) {
-                database
-                    .prepare(
-                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                         VALUES (?, ?, 'active', ?, ?)`
-                    )
-                    .run(agentId, safeTask, ts, ts);
-            } else if (currentActive.task === safeTask) {
-                database
-                    .prepare(
-                        `UPDATE agent_task_history SET last_activity_at = ? WHERE id = ?`
-                    )
-                    .run(ts, currentActive.id);
-            } else {
-                database
-                    .prepare(
-                        `UPDATE agent_task_history
-                         SET status = 'completed', completed_at = ?, last_activity_at = ?
-                         WHERE id = ?`
-                    )
-                    .run(ts, ts, currentActive.id);
-
-                database
-                    .prepare(
-                        `INSERT INTO agent_task_history (agent_id, task, status, started_at, last_activity_at)
-                         VALUES (?, ?, 'active', ?, ?)`
-                    )
-                    .run(agentId, safeTask, ts, ts);
-            }
-            database.run("COMMIT");
-        }
-    } catch (error) {
-        try {
-            database.run("ROLLBACK");
-        } catch (rollbackError) {
-            logger.error("agents.task_history_sync_rollback_failed", {
-                error: rollbackError,
-            });
-        }
-        logger.error("agents.task_history_sync_failed", { error });
-    }
-
-    return metadata;
 }
