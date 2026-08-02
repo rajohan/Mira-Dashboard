@@ -1,18 +1,30 @@
-import {
-    createPrivateKey,
-    createPublicKey,
-    generateKeyPairSync,
-    sign,
-} from "node:crypto";
-import fs from "node:fs";
-import Path from "node:path";
-
 import { errorMessage } from "./errors.ts";
+import {
+    buildDeviceAuthPayloadV3,
+    publicKeyRawBase64UrlFromPem,
+    signDevicePayload,
+} from "./openclawGatewayClient/identity.ts";
+import type {
+    GatewayEvent,
+    GatewayHelloOk,
+    OpenClawGatewayClientInstance,
+    OpenClawGatewayClientOptions,
+    OpenClawGatewayRequestOptions,
+} from "./openclawGatewayClient/types.ts";
 import { createStructuredLogger } from "./structuredLogger.ts";
+
+export { loadOrCreateDeviceIdentity } from "./openclawGatewayClient/identity.ts";
+export type {
+    DeviceIdentity,
+    GatewayEvent,
+    GatewayHelloOk,
+    OpenClawGatewayClientInstance,
+    OpenClawGatewayClientOptions,
+    OpenClawGatewayRequestOptions,
+} from "./openclawGatewayClient/types.ts";
 
 const logger = createStructuredLogger("openclaw-gateway-client");
 
-const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -41,31 +53,6 @@ const MIN_TICK_INTERVAL_MS = 1000;
 const MAX_TICK_INTERVAL_MS = 5 * 60_000;
 const TICK_WATCH_POLL_INTERVAL_MS = 1000;
 const DEFAULT_CONNECT_CHALLENGE_TIMEOUT_MS = 10_000;
-
-/** Defines device identity. */
-export type DeviceIdentity = {
-    deviceId: string;
-    publicKeyPem: string;
-    privateKeyPem: string;
-};
-
-/** Defines gateway hello success payload. */
-export type GatewayHelloOk = {
-    type?: string;
-    protocol?: number;
-    policy?: {
-        tickIntervalMs?: number;
-    };
-};
-
-/** Defines gateway event. */
-export type GatewayEvent = {
-    type?: string;
-    event?: string;
-    payload?: unknown;
-    seq?: number;
-    stateVersion?: number;
-};
 
 /** Defines gateway response. */
 type GatewayResponse = {
@@ -100,53 +87,6 @@ async function websocketMessageToString(data: unknown): Promise<string> {
     return String(data);
 }
 
-/** Defines open claw gateway client options. */
-export type OpenClawGatewayClientOptions = {
-    url?: string;
-    token?: string;
-    role?: string;
-    scopes?: string[];
-    caps?: string[];
-    clientName?: string;
-    clientDisplayName?: string;
-    clientVersion?: string;
-    mode?: string;
-    platform?: string;
-    deviceFamily?: string;
-    deviceIdentity?: DeviceIdentity;
-    requestTimeoutMs?: number;
-    onHelloOk?: (payload: GatewayHelloOk) => void;
-    onEvent?: (event: GatewayEvent) => void;
-    onConnectError?: (error: Error) => void;
-    onClose?: (code: number, reason: string) => void;
-};
-
-/** Configures one Gateway request without changing the connection defaults. */
-export type OpenClawGatewayRequestOptions = {
-    timeoutMs?: number;
-};
-
-/** Defines open claw gateway client instance. */
-export type OpenClawGatewayClientInstance = {
-    pendingRequestCount?: () => number;
-    start: () => void;
-    stop: () => void;
-    request: (
-        method: string,
-        parameters?: unknown,
-        options?: OpenClawGatewayRequestOptions
-    ) => Promise<unknown>;
-};
-
-/**
- * Performs base64 URL encode.
- * @returns Base64 URL encode result.
- */
-function base64UrlEncode(buffer: Buffer): string {
-    const bytes = buffer as unknown as Uint8Array & { toBase64: () => string };
-    return bytes.toBase64().replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
-}
-
 /**
  * Clamps timer durations from Gateway policy before they reach setInterval/setTimeout.
  * @param value Value to process.
@@ -165,46 +105,6 @@ function sanitizeTimerDurationMs(value: unknown, fallback: number): number {
 }
 
 /**
- * Performs derive public key raw.
- * @param publicKeyPem Public key pem value.
- * @returns Derive public key raw result.
- */
-function derivePublicKeyRaw(publicKeyPem: string): Buffer {
-    const spki = createPublicKey(publicKeyPem).export({
-        type: "spki",
-        format: "der",
-    });
-
-    if (
-        spki.length === ED25519_SPKI_PREFIX.length + 32 &&
-        spki.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)
-    ) {
-        return spki.subarray(ED25519_SPKI_PREFIX.length);
-    }
-    return spki;
-}
-
-/**
- * Performs fingerprint public key.
- * @param publicKeyPem Public key pem value.
- * @returns Fingerprint public key result.
- */
-function fingerprintPublicKey(publicKeyPem: string): string {
-    return new Bun.CryptoHasher("sha256")
-        .update(derivePublicKeyRaw(publicKeyPem))
-        .digest("hex");
-}
-
-/**
- * Performs public key raw base64 URL from pem.
- * @param publicKeyPem Public key pem value.
- * @returns Public key raw base64 URL from pem result.
- */
-function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
-    return base64UrlEncode(derivePublicKeyRaw(publicKeyPem));
-}
-
-/**
  * Returns a normalized error instance for callback surfaces.
  * @param error Error to inspect.
  * @returns a normalized error instance for callback surfaces.
@@ -213,133 +113,6 @@ function asError(error: unknown): Error {
     return error instanceof Error
         ? error
         : new Error(errorMessage(error, "OpenClaw Gateway request failed"));
-}
-
-/**
- * Performs sign device payload.
- * @param privateKeyPem Private key pem value.
- * @param payload Request or event payload.
- * @returns Sign device payload result.
- */
-function signDevicePayload(privateKeyPem: string, payload: string): string {
-    const key = createPrivateKey(privateKeyPem);
-    return base64UrlEncode(sign(undefined, Buffer.from(payload, "utf8"), key));
-}
-
-/**
- * Performs generate IDentity.
- * @returns Generate IDentity result.
- */
-function generateIdentity(): DeviceIdentity {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
-    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-
-    return {
-        deviceId: fingerprintPublicKey(publicKeyPem),
-        publicKeyPem,
-        privateKeyPem,
-    };
-}
-
-/**
- * Performs load or create device IDentity.
- * @param filePath File path value.
- * @returns Load or create device IDentity result.
- */
-export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
-    fs.mkdirSync(Path.dirname(filePath), { recursive: true });
-
-    try {
-        const parsed = JSON.parse(
-            fs.readFileSync(filePath, "utf8")
-        ) as Partial<DeviceIdentity> & {
-            version?: number;
-        };
-
-        if (
-            parsed?.version === 1 &&
-            typeof parsed.deviceId === "string" &&
-            typeof parsed.publicKeyPem === "string" &&
-            typeof parsed.privateKeyPem === "string"
-        ) {
-            const identity: DeviceIdentity = {
-                deviceId: fingerprintPublicKey(parsed.publicKeyPem),
-                publicKeyPem: parsed.publicKeyPem,
-                privateKeyPem: parsed.privateKeyPem,
-            };
-
-            fs.writeFileSync(
-                filePath,
-                `${JSON.stringify({ version: 1, ...identity }, undefined, 2)}\n`,
-                { mode: 0o600 }
-            );
-
-            return identity;
-        }
-    } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT" && !(error instanceof SyntaxError)) {
-            throw error;
-        }
-        // Missing or invalid JSON identity file; generate new identity below.
-    }
-
-    const identity = generateIdentity();
-    fs.writeFileSync(
-        filePath,
-        `${JSON.stringify({ version: 1, ...identity }, undefined, 2)}\n`,
-        {
-            mode: 0o600,
-        }
-    );
-    return identity;
-}
-
-/**
- * Normalizes device metadata for auth.
- * @param value Value to process.
- * @returns Normalized device metadata for auth.
- */
-function normalizeDeviceMetadataForAuth(value?: string): string {
-    if (typeof value !== "string") {
-        return "";
-    }
-
-    const trimmed = value.trim();
-    return trimmed ? trimmed.replaceAll(/[A-Z]/gu, (char) => char.toLowerCase()) : "";
-}
-
-/**
- * Builds device auth payload v3.
- * @param parameters Parameters value.
- * @returns Built device auth payload v3.
- */
-function buildDeviceAuthPayloadV3(parameters: {
-    deviceId: string;
-    clientId: string;
-    clientMode: string;
-    role: string;
-    scopes: string[];
-    signedAtMs: number;
-    token?: string | undefined;
-    nonce: string;
-    platform?: string;
-    deviceFamily?: string;
-}): string {
-    return [
-        "v3",
-        parameters.deviceId,
-        parameters.clientId,
-        parameters.clientMode,
-        parameters.role,
-        parameters.scopes.join(","),
-        String(parameters.signedAtMs),
-        parameters.token ?? "",
-        parameters.nonce,
-        normalizeDeviceMetadataForAuth(parameters.platform),
-        normalizeDeviceMetadataForAuth(parameters.deviceFamily),
-    ].join("|");
 }
 
 /** Implements open claw gateway client. */
