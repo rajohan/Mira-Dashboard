@@ -4,7 +4,7 @@ import {
     stripEquivalentChatTextPrefix,
 } from "../chatMessageIdentity";
 import type { ChatHistoryMessage } from "../chatTypes";
-import { hasPrimaryAnswerContent } from "./chatPresentation";
+import { hasPrimaryAnswerContent } from "./chatAnswerContent";
 import { exactToolIds, type ExactToolMessageIndex } from "./chatProjectionDiagnostics";
 import {
     asAssistantToolResultMessage,

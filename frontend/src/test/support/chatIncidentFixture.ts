@@ -6,11 +6,9 @@ import {
     type ChatHistoryMessage,
     type ChatRow,
 } from "../../components/features/chat/chatTypes";
+import { hasPrimaryAnswerContent } from "../../components/features/chat/domain/chatAnswerContent";
 import { projectCanonicalChat } from "../../components/features/chat/domain/chatCanonicalProjection";
-import {
-    createChatVisibility,
-    hasPrimaryAnswerContent,
-} from "../../components/features/chat/domain/chatPresentation";
+import { createChatVisibility } from "../../components/features/chat/domain/chatPresentation";
 import {
     createChatRuntimeState,
     findChatSessionRuntimeState,

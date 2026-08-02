@@ -6,7 +6,7 @@ import {
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
-import { hasPrimaryAnswerContent } from "./chatPresentation";
+import { hasPrimaryAnswerContent } from "./chatAnswerContent";
 import type { ChatRunState, ChatSessionRuntimeState } from "./chatState";
 
 export const RUN_START_USER_SKEW_MS = 1000;

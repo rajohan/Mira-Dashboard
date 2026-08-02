@@ -6,7 +6,7 @@ import {
     type ChatRow,
     type ChatVisibilitySettings,
 } from "../chatTypes";
-import { presentStructuredChatMessages, structureChatMessages } from "./chatPresentation";
+import { presentStructuredChatMessages } from "./chatPresentation";
 import {
     canonicalAssistantDisplay,
     canonicalFinalIndex,
@@ -48,6 +48,7 @@ import type {
     ChatSessionRuntimeState,
 } from "./chatState";
 import { findChatSessionRuntimeState } from "./chatState";
+import { structureChatMessages } from "./chatThinkingStructure";
 
 export interface ChatProjection {
     activeRuns: ChatRunState[];

@@ -5,7 +5,7 @@ import {
 } from "../chatMessageIdentity";
 import { insertMessagesByTimestamp } from "../chatMessageReconciliation";
 import type { ChatHistoryMessage } from "../chatTypes";
-import { hasPrimaryAnswerContent } from "./chatPresentation";
+import { hasPrimaryAnswerContent } from "./chatAnswerContent";
 import {
     canUseDashboardTurn,
     isEligibleRunPrompt,
