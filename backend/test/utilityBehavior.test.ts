@@ -52,7 +52,7 @@ import {
     resetRequestPolicyForTests,
     withRequestPolicy,
 } from "../src/requestPolicy/evaluator.ts";
-import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
+import { compactHeartbeatData } from "../src/routes/cacheHeartbeatProjection.ts";
 import { routes as appRoutes } from "../src/routes/registry.ts";
 import { isValidAgentId } from "../src/services/agents/statusService.ts";
 import { listAuditEvents } from "../src/services/auditEvents.ts";
