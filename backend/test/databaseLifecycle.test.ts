@@ -38,7 +38,7 @@ import { initialSchemaMigration } from "../src/databaseMigrations/0001InitialSch
 import { databaseMigrations } from "../src/databaseMigrations/registry.ts";
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import { RELEASE_READINESS_FAILURE_NOTE_PREFIX } from "../src/services/deploymentRuntimeResults.ts";
-import { pruneDatabaseHistory } from "../src/services/sqliteMaintenance.ts";
+import { pruneDatabaseHistory } from "../src/services/sqliteMaintenance/databaseHistoryRetention.ts";
 
 const temporaryRoots: string[] = [];
 
