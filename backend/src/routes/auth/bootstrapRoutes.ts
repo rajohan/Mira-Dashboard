@@ -5,7 +5,7 @@ import type {
     AuthLoginResponse,
 } from "../../../../contracts/auth.ts";
 import { parseFirstUserRegistrationRequest } from "../../../../contracts/auth.ts";
-import { createSession } from "../../auth/sessionService.ts";
+import { createSession } from "../../auth/sessionRepository.ts";
 import {
     createFirstUser,
     createUser,

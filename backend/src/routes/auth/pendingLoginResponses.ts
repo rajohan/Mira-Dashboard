@@ -2,7 +2,7 @@ import type { Server } from "bun";
 
 import type { DashboardMfaMethod } from "../../../../contracts/accountSecurity.ts";
 import type { AuthLoginResponse } from "../../../../contracts/auth.ts";
-import { createSession } from "../../auth/sessionService.ts";
+import { createSession } from "../../auth/sessionRepository.ts";
 import {
     clearPendingLoginCookie,
     json,

@@ -9,10 +9,10 @@ import {
     readDashboardSocketRequest,
 } from "../../../contracts/socket.ts";
 import {
-    getAuthSessionFromSessionId,
     hasRecentMfaVerification,
     validateAuthenticationConfig,
-} from "../auth/sessionService.ts";
+} from "../auth/sessionPolicy.ts";
+import { getAuthSessionFromSessionId } from "../auth/sessionRepository.ts";
 import { validateStoredSecretConfig } from "../auth/userRepository.ts";
 import { validateAutomationCredentials } from "../http/automationAuth.ts";
 import { isAllowedDashboardOrigin, sessionIdFromCookie } from "../http/core.ts";

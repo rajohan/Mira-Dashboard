@@ -40,7 +40,7 @@ async function ensureAuthenticatedTestSession(): Promise<void> {
     if (testState.sessionToken) return;
 
     const { createSession, createUser, findUserByUsername } = await Promise.all([
-        import("../src/auth/sessionService.ts"),
+        import("../src/auth/sessionRepository.ts"),
         import("../src/auth/userRepository.ts"),
     ]).then(([module0, module1]) => ({
         createSession: module0.createSession,

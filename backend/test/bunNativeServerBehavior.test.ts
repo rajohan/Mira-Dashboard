@@ -170,7 +170,7 @@ describe("Bun-native dashboard backend", () => {
         );
         const authSessionModulePath = path.resolve(
             import.meta.dirname,
-            "../src/auth/sessionService.ts"
+            "../src/auth/sessionRepository.ts"
         );
         const authUserModulePath = path.resolve(
             import.meta.dirname,

@@ -1,6 +1,9 @@
 import type { Server } from "bun";
 
-import { didRevokeUserSession, revokeUserSessions } from "../../auth/sessionService.ts";
+import {
+    didRevokeUserSession,
+    revokeUserSessions,
+} from "../../auth/sessionRepository.ts";
 import {
     clearPendingLoginCookie,
     clearSessionCookie,

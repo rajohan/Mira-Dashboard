@@ -1,6 +1,6 @@
 import { type Database } from "bun:sqlite";
 
-import { sessionIdleTtlMs } from "../auth/sessionService.ts";
+import { sessionIdleTtlMs } from "../auth/sessionPolicy.ts";
 import { database, getMiraDatabasePath } from "../database/connection.ts";
 import { validateDatabaseMigrationHistory } from "../database/migrationRunner.ts";
 import {

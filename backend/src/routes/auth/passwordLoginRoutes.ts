@@ -2,7 +2,7 @@ import type { Server } from "bun";
 
 import type { AuthLoginResponse } from "../../../../contracts/auth.ts";
 import { parseLoginCredentialsRequest } from "../../../../contracts/auth.ts";
-import { createSession, deleteSession } from "../../auth/sessionService.ts";
+import { createSession, deleteSession } from "../../auth/sessionRepository.ts";
 import {
     findUserByUsername,
     isBootstrapRequired,

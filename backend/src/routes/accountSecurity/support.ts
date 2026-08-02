@@ -7,15 +7,14 @@ import type {
     MfaStepUpResponse,
 } from "../../../../contracts/accountSecurity.ts";
 import type { ContractParser } from "../../../../contracts/runtime.ts";
+import { rotateSession } from "../../auth/sessionMutations.ts";
 import {
-    type AuthSession,
     hasRecentMfaVerification,
     hasRecentPasswordVerification,
-    listUserSessions,
     recentAuthenticationTtlMs,
-    revokeUserSessions,
-    rotateSession,
-} from "../../auth/sessionService.ts";
+} from "../../auth/sessionPolicy.ts";
+import { listUserSessions, revokeUserSessions } from "../../auth/sessionRepository.ts";
+import { type AuthSession } from "../../auth/sessionTypes.ts";
 import {
     authSession,
     clearSessionCookie,

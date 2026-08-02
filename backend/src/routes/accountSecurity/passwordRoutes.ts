@@ -7,9 +7,9 @@ import {
 } from "../../../../contracts/accountSecurity.ts";
 import {
     changePasswordAndRotateSession,
-    hasRecentMfaVerification,
     rotateSession,
-} from "../../auth/sessionService.ts";
+} from "../../auth/sessionMutations.ts";
+import { hasRecentMfaVerification } from "../../auth/sessionPolicy.ts";
 import { findUserById, verifyPassword } from "../../auth/userRepository.ts";
 import { json, sessionCookie, withCookies } from "../../http/core.ts";
 import { routeFailureResponse } from "../../http/routeSupport.ts";

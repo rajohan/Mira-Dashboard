@@ -12,7 +12,7 @@ import type { WebAuthnCredential } from "../../contracts/accountSecurity.ts";
 import {
     createSession,
     getAuthSessionFromSessionId,
-} from "../src/auth/sessionService.ts";
+} from "../src/auth/sessionRepository.ts";
 import { createUser, findUserById, verifyPassword } from "../src/auth/userRepository.ts";
 import { database } from "../src/database/connection.ts";
 import { runWithRequestAuditContext } from "../src/http/requestAuditContext.ts";

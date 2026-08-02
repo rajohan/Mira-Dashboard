@@ -1,11 +1,8 @@
 import type { Server } from "bun";
 
 import { parseAccountPasswordRequest } from "../../../../contracts/accountSecurity.ts";
-import {
-    createSession,
-    hasRecentMfaVerification,
-    revokeUserSessions,
-} from "../../auth/sessionService.ts";
+import { hasRecentMfaVerification } from "../../auth/sessionPolicy.ts";
+import { createSession, revokeUserSessions } from "../../auth/sessionRepository.ts";
 import { findUserById, verifyPassword } from "../../auth/userRepository.ts";
 import {
     clearPendingLoginCookie,

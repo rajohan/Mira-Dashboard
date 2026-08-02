@@ -870,7 +870,7 @@ describe("server start scheduler policy", () => {
         let isDeploymentCutoverActive = false;
         try {
             const now = new Date().toISOString();
-            const authModule = await import("../src/auth/sessionService.ts");
+            const authModule = await import("../src/auth/sessionRepository.ts");
             getAuthSessionSpy = jest
                 .spyOn(authModule, "getAuthSessionFromSessionId")
                 .mockReturnValue({

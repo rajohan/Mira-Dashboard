@@ -8,7 +8,7 @@ import type {
 import {
     createSession,
     getAuthSessionFromSessionId,
-} from "../src/auth/sessionService.ts";
+} from "../src/auth/sessionRepository.ts";
 import { createUser } from "../src/auth/userRepository.ts";
 import { database } from "../src/database/connection.ts";
 import {

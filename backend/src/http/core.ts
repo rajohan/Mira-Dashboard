@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import type { Server } from "bun";
 
 import type { DashboardUser } from "../../../contracts/auth.ts";
-import { type AuthSession, getAuthSessionFromSessionId } from "../auth/sessionService.ts";
+import { getAuthSessionFromSessionId } from "../auth/sessionRepository.ts";
+import { type AuthSession } from "../auth/sessionTypes.ts";
 import { byteStreamReader } from "../lib/byteStreams.ts";
 
 const DEFAULT_COOKIE_NAMESPACE = "mira_dashboard";

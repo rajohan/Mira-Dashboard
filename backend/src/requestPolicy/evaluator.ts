@@ -1,6 +1,6 @@
 import type { Server } from "bun";
 
-import { hasRecentMfaVerification } from "../auth/sessionService.ts";
+import { hasRecentMfaVerification } from "../auth/sessionPolicy.ts";
 import {
     authenticateAutomationRequest,
     type AutomationAuthentication,

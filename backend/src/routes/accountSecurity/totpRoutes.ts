@@ -5,7 +5,7 @@ import {
     parseTotpConfirmationRequest,
     parseTotpEnrollmentRequest,
 } from "../../../../contracts/accountSecurity.ts";
-import { hasRecentMfaVerification } from "../../auth/sessionService.ts";
+import { hasRecentMfaVerification } from "../../auth/sessionPolicy.ts";
 import { json } from "../../http/core.ts";
 import { type ParametersRequest, routeFailureResponse } from "../../http/routeSupport.ts";
 import { authenticationThrottleResponse } from "../../services/authenticationRequest.ts";

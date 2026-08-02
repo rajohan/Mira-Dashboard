@@ -1,7 +1,7 @@
 import type { Server } from "bun";
 
 import type { AuthSessionResponse } from "../../../../contracts/auth.ts";
-import { deleteSession } from "../../auth/sessionService.ts";
+import { deleteSession } from "../../auth/sessionRepository.ts";
 import { isBootstrapRequired } from "../../auth/userRepository.ts";
 import {
     authSession,

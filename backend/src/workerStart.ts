@@ -1,4 +1,4 @@
-import { validateAuthenticationConfig } from "./auth/sessionService.ts";
+import { validateAuthenticationConfig } from "./auth/sessionPolicy.ts";
 import { validateStoredSecretConfig } from "./auth/userRepository.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
