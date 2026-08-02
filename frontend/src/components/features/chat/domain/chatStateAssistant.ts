@@ -201,6 +201,8 @@ export function applyAssistantEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "assistant" }>
 ): ChatRunState {
+    const isActiveTerminalSessionSnapshot =
+        run.phase === "active" && event.source === "session" && event.mode === "replace";
     const isSessionUpdateAfterCanonicalFinal =
         run.phase !== "active" &&
         event.source === "session" &&
@@ -210,7 +212,8 @@ export function applyAssistantEvent(
         (!event.message.text ||
             !run.assistantSource ||
             run.assistantSource === event.source ||
-            run.phase !== "active");
+            run.phase !== "active" ||
+            isActiveTerminalSessionSnapshot);
     const sourcedMessage = withRuntimeMessageProvenance(event.message, event);
     const incoming = canUseText
         ? sourcedMessage

@@ -1,6 +1,7 @@
 import { describe, expect, it, jest } from "bun:test";
 
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 
 import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat/transport";
 import { type ChatRuntimeEvent } from "../components/features/chat/domain/chatState";
@@ -70,7 +71,7 @@ function deferred<T>() {
 }
 
 function fakeTransport(snapshotPromise: Promise<ChatRuntimeSnapshot>, generation = 1) {
-    const listeners = new Set<(event: ChatRuntimeEvent) => void>();
+    const listeners = new Set<(events: ChatRuntimeEvent[]) => void>();
     const transport: ChatTransport = {
         abort: jest.fn(async () => {}),
         compact: jest.fn(async () => {}),
@@ -94,7 +95,12 @@ function fakeTransport(snapshotPromise: Promise<ChatRuntimeSnapshot>, generation
     return {
         emit: (event: ChatRuntimeEvent) => {
             for (const listener of listeners) {
-                listener(event);
+                listener([event]);
+            }
+        },
+        emitBatch: (events: ChatRuntimeEvent[]) => {
+            for (const listener of listeners) {
+                listener(events);
             }
         },
         transport,
@@ -1386,6 +1392,124 @@ describe("chat runtime controller", () => {
             result.current.state.sessions[OFFSCREEN]?.runs["run-1"]?.assistant?.text
         ).toBe("visible");
         expect(fake.transport.snapshot).not.toHaveBeenCalled();
+    });
+
+    it("commits status and tool events from one envelope atomically", () => {
+        const fake = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [],
+                throughSequence: 0,
+            })
+        );
+        const commits: Array<{ hasStatus: boolean; toolCount: number }> = [];
+        renderHook(() => {
+            const runtime = useChatRuntime({
+                selectedSessionKey: "",
+                transport: fake.transport,
+            });
+            const run = runtime.state.sessions[OFFSCREEN]?.runs["run-1"];
+            useLayoutEffect(() => {
+                commits.push({
+                    hasStatus: Boolean(run?.statusText),
+                    toolCount:
+                        run?.diagnostics.filter(
+                            (entry) => entry.message.toolCalls?.length
+                        ).length ?? 0,
+                });
+            }, [run]);
+            return runtime;
+        });
+
+        act(() => {
+            fake.emitBatch([
+                {
+                    kind: "status",
+                    runId: "run-1",
+                    sequence: 16,
+                    sessionKey: OFFSCREEN,
+                    text: "Bash",
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+                {
+                    kind: "tool",
+                    message: {
+                        content: "",
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                    runId: "run-1",
+                    sequence: 17,
+                    sessionKey: OFFSCREEN,
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                    toolKey: "tool:call-1",
+                },
+            ]);
+        });
+
+        expect(commits).not.toContainEqual({ hasStatus: true, toolCount: 0 });
+        expect(commits.at(-1)).toEqual({ hasStatus: true, toolCount: 1 });
+    });
+
+    it("does not settle a stale control beside an accepted batch event", async () => {
+        const fake = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [assistant(SELECTED, 32, "working", "replace")],
+                throughSequence: 32,
+            })
+        );
+        const onSettled = jest.fn();
+        const { result } = renderHook(() =>
+            useChatRuntime({
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
+        );
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+            ).toBe("working")
+        );
+
+        act(() => {
+            fake.emitBatch([
+                {
+                    kind: "control",
+                    message: {
+                        content: "stale progress",
+                        controlId: "stale-control",
+                        intent: "control",
+                        role: "system",
+                        text: "stale progress",
+                    },
+                    sequence: 16,
+                    sessionKey: SELECTED,
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+                {
+                    kind: "tool",
+                    message: {
+                        content: "",
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                    runId: "run-1",
+                    sequence: 48,
+                    sessionKey: SELECTED,
+                    timestamp: "2026-07-16T12:00:01.000Z",
+                    toolKey: "tool:call-1",
+                },
+            ]);
+        });
+
+        expect(onSettled).not.toHaveBeenCalled();
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["run-1"]?.diagnostics
+        ).toHaveLength(1);
     });
 
     it("flushes queued events if snapshot recovery fails", async () => {

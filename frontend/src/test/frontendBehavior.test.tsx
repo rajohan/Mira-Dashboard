@@ -3222,9 +3222,9 @@ describe("Mira Dashboard frontend behavior", () => {
                 await Promise.resolve();
             });
 
-            const liveEvents: unknown[] = [];
-            const unsubscribe = result.current.subscribe((event) => {
-                liveEvents.push(event);
+            const liveBatches: unknown[] = [];
+            const unsubscribe = result.current.subscribe((events) => {
+                liveBatches.push(events);
             });
             const liveEnvelope = withCanonicalOpenClawEvents({
                 event: "session.tool",
@@ -3246,15 +3246,17 @@ describe("Mira Dashboard frontend behavior", () => {
             act(() => {
                 socket.message(liveEnvelope);
             });
-            expect(liveEvents).toEqual([
-                expect.objectContaining({
-                    kind: "status",
-                    sequence: expect.any(Number),
-                }),
-                expect.objectContaining({
-                    kind: "tool",
-                    sequence: expect.any(Number),
-                }),
+            expect(liveBatches).toEqual([
+                [
+                    expect.objectContaining({
+                        kind: "status",
+                        sequence: expect.any(Number),
+                    }),
+                    expect.objectContaining({
+                        kind: "tool",
+                        sequence: expect.any(Number),
+                    }),
+                ],
             ]);
 
             const snapshotPromise = result.current.snapshot("agent:main:main");

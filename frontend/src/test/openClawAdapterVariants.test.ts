@@ -457,11 +457,11 @@ describe("OpenClaw adapter variants", () => {
             toolKey: "tool:functions.exec:0",
         });
         expect(finalTurn.map((event) => event.kind)).toEqual([
-            "thinking",
             "assistant",
+            "thinking",
             "finish",
         ]);
-        expect(finalTurn[1]).toMatchObject({
+        expect(finalTurn[0]).toMatchObject({
             kind: "assistant",
             message: {
                 text: "SYNTHETIC_OK",
@@ -475,6 +475,66 @@ describe("OpenClaw adapter variants", () => {
             kind: "finish",
             outcome: "completed",
         });
+    });
+
+    it("reconciles a corrected terminal snapshot with its streamed draft", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = [
+            ...adapter.event(
+                envelope(
+                    "agent",
+                    {
+                        data: { delta: "Deployer ferdig." },
+                        stream: "assistant",
+                    },
+                    32
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: [
+                                { thinking: "report result", type: "thinking" },
+                                { text: "Deploy er ferdig.", type: "text" },
+                            ],
+                            role: "assistant",
+                            stopReason: "stop",
+                        },
+                    },
+                    33
+                )
+            ),
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), events);
+        const history = adapter.history([
+            { content: "status?", role: "user" },
+            {
+                content: "Deploy er ferdig.",
+                role: "assistant",
+                stopReason: "stop",
+            },
+        ]);
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            runtime.sessions[SESSION]?.runs["run-variants"]?.assistantSegments?.map(
+                (entry) => entry.message.text
+            )
+        ).toEqual(["Deploy er ferdig."]);
+        expect(
+            projection.rows
+                .map((row) => row.message.text)
+                .filter((text) => text.includes("ferdig"))
+        ).toEqual(["Deploy er ferdig."]);
     });
 
     it("carries Synthetic tool-use media onto the live tool diagnostic", () => {
@@ -640,7 +700,7 @@ describe("OpenClaw adapter variants", () => {
             );
 
             expect(events).toHaveLength(15);
-            expect(events.at(-2)).toMatchObject({
+            expect(events[0]).toMatchObject({
                 kind: "assistant",
                 message: { text: "SYNTHETIC_OK" },
             });
