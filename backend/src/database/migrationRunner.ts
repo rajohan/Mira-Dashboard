@@ -6,11 +6,9 @@ import {
     databaseMigrations,
 } from "../databaseMigrations/registry.ts";
 import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./schemaCompatibility.ts";
-import {
-    createVerifiedSqliteBackup,
-    pruneSqliteBackups,
-    type SqliteBackupResult,
-} from "./sqliteBackup.ts";
+import { createVerifiedSqliteBackup } from "./sqliteBackup/creation.ts";
+import { type SqliteBackupResult } from "./sqliteBackup/model.ts";
+import { pruneSqliteBackups } from "./sqliteBackup/retention.ts";
 
 interface AppliedMigrationRow {
     applied_at: string;

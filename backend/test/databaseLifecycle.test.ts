@@ -23,12 +23,16 @@ import {
 import {
     createVerifiedSqliteBackup,
     createVerifiedSqliteCutoverSnapshot,
+} from "../src/database/sqliteBackup/creation.ts";
+import {
     didDiscardSqliteCutoverSnapshot,
-    getSqliteBackupInventory,
-    pruneSqliteBackups,
     restoreVerifiedSqliteCutoverSnapshot,
     verifySqliteCutoverSnapshot,
-} from "../src/database/sqliteBackup.ts";
+} from "../src/database/sqliteBackup/cutover.ts";
+import {
+    getSqliteBackupInventory,
+    pruneSqliteBackups,
+} from "../src/database/sqliteBackup/retention.ts";
 import {
     prepareDatabaseStorage,
     secureSqliteFilePermissions,

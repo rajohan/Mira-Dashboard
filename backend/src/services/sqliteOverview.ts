@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { database, getMiraDatabasePath } from "../database/connection.ts";
 import { validateDatabaseMigrationHistory } from "../database/migrationRunner.ts";
-import { getSqliteBackupInventory } from "../database/sqliteBackup.ts";
+import { getSqliteBackupInventory } from "../database/sqliteBackup/retention.ts";
 import { databaseMigrations } from "../databaseMigrations/registry.ts";
 import { SQLITE_MAINTENANCE_JOB_ID } from "./sqliteMaintenance.ts";
 

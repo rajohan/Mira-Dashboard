@@ -9,10 +9,8 @@ import {
     migrateDisposableDatabaseCopy,
     validateDatabaseMigrationHistory,
 } from "./database/migrationRunner.ts";
-import {
-    createVerifiedSqliteBackup,
-    pruneSqliteBackups,
-} from "./database/sqliteBackup.ts";
+import { createVerifiedSqliteBackup } from "./database/sqliteBackup/creation.ts";
+import { pruneSqliteBackups } from "./database/sqliteBackup/retention.ts";
 import { secureSqliteFilePermissions } from "./database/storage.ts";
 import { writeCliOutput } from "./lib/cliOutput.ts";
 

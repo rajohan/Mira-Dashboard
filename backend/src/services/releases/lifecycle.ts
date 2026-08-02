@@ -6,12 +6,12 @@ import {
     getMiraDatabasePath,
 } from "../../database/connection.ts";
 import { validateDatabaseMigrationHistory } from "../../database/migrationRunner.ts";
+import { createVerifiedSqliteCutoverSnapshot } from "../../database/sqliteBackup/creation.ts";
 import {
-    createVerifiedSqliteCutoverSnapshot,
     didDiscardSqliteCutoverSnapshot,
     restoreVerifiedSqliteCutoverSnapshot,
     verifySqliteCutoverSnapshot,
-} from "../../database/sqliteBackup.ts";
+} from "../../database/sqliteBackup/cutover.ts";
 import { resolveDashboardProjectPaths } from "../../lib/dashboardPaths.ts";
 import type {
     DashboardReleaseManagerOptions,

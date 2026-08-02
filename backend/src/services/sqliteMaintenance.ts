@@ -1,9 +1,7 @@
 import { database, getMiraDatabasePath } from "../database/connection.ts";
 import { validateDatabaseMigrationHistory } from "../database/migrationRunner.ts";
-import {
-    createVerifiedSqliteBackup,
-    pruneSqliteBackups,
-} from "../database/sqliteBackup.ts";
+import { createVerifiedSqliteBackup } from "../database/sqliteBackup/creation.ts";
+import { pruneSqliteBackups } from "../database/sqliteBackup/retention.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { readDashboardReleaseState } from "./releases/releaseActivation.ts";
