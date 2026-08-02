@@ -2,15 +2,10 @@ import { withCurrentCanonicalOpenClawIdentity } from "../../../../contracts/chat
 import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat/transport.ts";
 import type { OpenClawChatCompactionSettlements } from "./openClawChatCompactionSettlements.ts";
 import {
-    INTERRUPTED_RUN_PROMOTION_WINDOW_MS,
     isAgentSessionKey,
-    isProvisionalRunId,
-    isRunlessRunId,
     isSameSessionKey,
     normalizedSessionKey,
     OpenClawChatIdentityRegistry,
-    promotableInterruptedConversationRuns,
-    type RepairedInterruptedRun,
 } from "./openClawChatIdentity.ts";
 import {
     isConversationContinuationEvent,
@@ -33,6 +28,13 @@ import {
     trimRetainedRun,
     type RetainedRun,
 } from "./openClawChatRetention.ts";
+import {
+    INTERRUPTED_RUN_PROMOTION_WINDOW_MS,
+    isProvisionalRunId,
+    isRunlessRunId,
+    promotableInterruptedConversationRuns,
+    type RepairedInterruptedRun,
+} from "./openClawChatRunIdentity.ts";
 
 interface OpenClawChatRunReconciliationOptions {
     clearSettledRequestBoundariesWithinRun: (

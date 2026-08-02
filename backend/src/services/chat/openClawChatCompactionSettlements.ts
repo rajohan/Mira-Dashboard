@@ -1,8 +1,5 @@
 import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat/transport.ts";
-import {
-    normalizedSessionKey,
-    promotableInterruptedConversationRuns,
-} from "./openClawChatIdentity.ts";
+import { normalizedSessionKey } from "./openClawChatIdentity.ts";
 import {
     isConversationContinuationEvent,
     isTerminalEvent,
@@ -13,6 +10,7 @@ import {
     lastSequence,
     type RetainedRun,
 } from "./openClawChatRetention.ts";
+import { promotableInterruptedConversationRuns } from "./openClawChatRunIdentity.ts";
 
 export const NESTED_COMPACTION_SETTLEMENT_GRACE_MS = 60_000;
 export const DEFERRED_COMPACTION_SETTLEMENT_RETRY_MS = 1000;

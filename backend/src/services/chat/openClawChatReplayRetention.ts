@@ -6,12 +6,8 @@ import {
     type OpenClawChatCompactionSettlements,
 } from "./openClawChatCompactionSettlements.ts";
 import {
-    isMatchingSessionEcho,
-    isPromotableRunlessUserLedRun,
-    isRunlessRunId,
     normalizedSessionKey,
     OpenClawChatIdentityRegistry,
-    promotableInterruptedConversationRuns,
 } from "./openClawChatIdentity.ts";
 import {
     isCompactionEvent,
@@ -48,6 +44,12 @@ import {
     trimRetainedRun,
     type RetainedRun,
 } from "./openClawChatRetention.ts";
+import {
+    isMatchingSessionEcho,
+    isPromotableRunlessUserLedRun,
+    isRunlessRunId,
+    promotableInterruptedConversationRuns,
+} from "./openClawChatRunIdentity.ts";
 import type { OpenClawChatRunReconciliation } from "./openClawChatRunReconciliation.ts";
 
 interface OpenClawChatReplayRetentionOptions {

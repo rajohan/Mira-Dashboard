@@ -9,7 +9,6 @@ import {
 import {
     isSameSessionKey,
     OpenClawChatIdentityRegistry,
-    sessionMessageRunId,
 } from "../src/services/chat/openClawChatIdentity.ts";
 import {
     isTerminalEvent,
@@ -34,6 +33,7 @@ import {
     snapshotFromRetainedRuns,
     type RetainedRun,
 } from "../src/services/chat/openClawChatRetention.ts";
+import { sessionMessageRunId } from "../src/services/chat/openClawChatRunIdentity.ts";
 
 function envelope(
     event: string,

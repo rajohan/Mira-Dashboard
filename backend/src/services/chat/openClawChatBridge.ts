@@ -14,16 +14,11 @@ import {
     OpenClawChatCompactionSettlements,
 } from "./openClawChatCompactionSettlements.ts";
 import {
-    isActiveConversationAtBoundary,
     isAgentSessionKey,
-    isProvisionalRunId,
     isSameSessionKey,
     normalizedSessionKey,
     OpenClawChatIdentityRegistry,
-    sessionMessageRequestId,
-    sessionMessageRunId,
     type OpenClawChatSessionIdentity,
-    type RepairedInterruptedRun,
 } from "./openClawChatIdentity.ts";
 import { OpenClawChatRuntimeMetricsRecorder } from "./openClawChatMetrics.ts";
 import {
@@ -40,16 +35,19 @@ import {
 import { OpenClawChatReplayRetention } from "./openClawChatReplayRetention.ts";
 import { OpenClawChatReplaySessions } from "./openClawChatReplaySessions.ts";
 import { OpenClawChatRequestBoundaries } from "./openClawChatRequestBoundaries.ts";
+import { OpenClawChatRequestLifecycle } from "./openClawChatRequestLifecycle.ts";
 import {
     boundedCanonicalRuntimeEnvelope,
-    firstSequence,
-    hasActiveConversationRun,
     isCompactionOnlyRun,
-    lastSequence,
     MAX_BYTES_ACROSS_REPLAY,
     RETAINED_RUNTIME_EVENTS,
     type RetainedRun,
 } from "./openClawChatRetention.ts";
+import {
+    isProvisionalRunId,
+    sessionMessageRunId,
+    type RepairedInterruptedRun,
+} from "./openClawChatRunIdentity.ts";
 import { OpenClawChatRunReconciliation } from "./openClawChatRunReconciliation.ts";
 
 interface OpenClawChatBridgeOptions {
@@ -73,6 +71,7 @@ export class OpenClawChatBridge {
     readonly #runReconciliation: OpenClawChatRunReconciliation;
     readonly #replayRetention: OpenClawChatReplayRetention;
     readonly #replaySessions: OpenClawChatReplaySessions;
+    readonly #requestLifecycle: OpenClawChatRequestLifecycle;
     readonly #requestBoundaries = new OpenClawChatRequestBoundaries(
         normalizedSessionKey,
         isSameSessionKey
@@ -132,7 +131,10 @@ export class OpenClawChatBridge {
         });
         this.#runReconciliation = new OpenClawChatRunReconciliation({
             clearSettledRequestBoundariesWithinRun: (sessionKey, firstSequence) =>
-                this.#clearSettledRequestBoundariesWithinRun(sessionKey, firstSequence),
+                this.#requestLifecycle.clearSettledRequestBoundariesWithinRun(
+                    sessionKey,
+                    firstSequence
+                ),
             compactionSettlements: this.#compactionSettlements,
             enforceReplayMemoryLimit: (protectedSessionKey) =>
                 this.#replaySessions.enforceReplayMemoryLimit(protectedSessionKey),
@@ -153,7 +155,10 @@ export class OpenClawChatBridge {
         });
         this.#replayRetention = new OpenClawChatReplayRetention({
             clearSettledRequestBoundariesWithinRun: (sessionKey, firstSequence) =>
-                this.#clearSettledRequestBoundariesWithinRun(sessionKey, firstSequence),
+                this.#requestLifecycle.clearSettledRequestBoundariesWithinRun(
+                    sessionKey,
+                    firstSequence
+                ),
             compactionSettlements: this.#compactionSettlements,
             enforceReplayMemoryLimit: (protectedSessionKey) =>
                 this.#replaySessions.enforceReplayMemoryLimit(protectedSessionKey),
@@ -184,6 +189,18 @@ export class OpenClawChatBridge {
                 this.#replayRetention.retain(envelope, shouldPersist),
             runReconciliation: this.#runReconciliation,
             runsBySession: this.#runsBySession,
+        });
+        this.#requestLifecycle = new OpenClawChatRequestLifecycle({
+            currentSequence: () => this.#sequence,
+            identity: this.#identity,
+            persistence: this.#persistence,
+            replaySessions: this.#replaySessions,
+            requestBoundaries: this.#requestBoundaries,
+            requireSequenceHydrated: () => this.#requireSequenceHydrated(),
+            runReconciliation: this.#runReconciliation,
+            runsBySession: this.#runsBySession,
+            runtimeIdentityEnvelope: (sessionKey, repaired) =>
+                this.#runtimeIdentityEnvelope(sessionKey, repaired),
         });
         if (!store) {
             this.#sequenceHydrated = true;
@@ -326,95 +343,6 @@ export class OpenClawChatBridge {
         this.#persistence.clearMemoryIndexes();
     }
 
-    #settleRequestBoundary(
-        sessionKey: string,
-        requestId: string | undefined,
-        fallbackBoundary: number | undefined,
-        isContinuation: boolean
-    ): void {
-        const changedSessionKeys = this.#requestBoundaries.settle(
-            sessionKey,
-            requestId,
-            fallbackBoundary,
-            isContinuation
-        );
-        for (const candidateSessionKey of changedSessionKeys) {
-            if (this.#runsBySession.has(candidateSessionKey)) {
-                this.#persistence.flushSession(candidateSessionKey);
-            }
-        }
-    }
-
-    #clearSettledRequestBoundariesWithinRun(
-        sessionKey: string,
-        firstRunSequence: number
-    ): void {
-        const changedSessionKeys = this.#requestBoundaries.clearSettledWithinRun(
-            sessionKey,
-            firstRunSequence
-        );
-        for (const changedSessionKey of changedSessionKeys) {
-            this.#persistence.queueSession(changedSessionKey);
-        }
-    }
-
-    #requestContinuesExistingRun(
-        sessionKey: string,
-        runId: string | undefined,
-        requestBoundary?: number
-    ): boolean {
-        if (requestBoundary === undefined) {
-            return false;
-        }
-        const activeCandidates = new Map<string, RetainedRun>();
-        for (const [candidateSessionKey, runs] of this.#runsBySession) {
-            if (!isSameSessionKey(candidateSessionKey, sessionKey)) {
-                continue;
-            }
-            if (runId) {
-                const run = runs.get(runId);
-                if (run) {
-                    const isContinuation = firstSequence(run) <= requestBoundary;
-                    if (isContinuation) {
-                        this.#clearSettledRequestBoundariesWithinRun(
-                            sessionKey,
-                            firstSequence(run)
-                        );
-                    }
-                    return isContinuation;
-                }
-                continue;
-            }
-            const matchingRuns = runs
-                .values()
-                .filter((run) => isActiveConversationAtBoundary(run, requestBoundary));
-            for (const run of matchingRuns) {
-                const existing = activeCandidates.get(run.runId);
-                if (!existing || lastSequence(run) > lastSequence(existing)) {
-                    activeCandidates.set(run.runId, run);
-                }
-            }
-        }
-        if (runId || activeCandidates.size === 0) {
-            return false;
-        }
-        const isContinuation =
-            activeCandidates.size === 1 ||
-            Boolean(
-                this.#runReconciliation.interruptedRunSplitCandidate(
-                    sessionKey,
-                    activeCandidates
-                )
-            );
-        if (isContinuation) {
-            this.#clearSettledRequestBoundariesWithinRun(
-                sessionKey,
-                Math.min(...activeCandidates.values().map((run) => firstSequence(run)))
-            );
-        }
-        return isContinuation;
-    }
-
     /**
      * Returns content-free replay and persistence metrics.
      * @returns Current chat runtime metrics.
@@ -545,53 +473,7 @@ export class OpenClawChatBridge {
      * @returns Captured request-boundary sequence number.
      */
     captureRequestBoundary(sessionKey?: string, requestId?: string): number {
-        this.#requireSequenceHydrated();
-        if (sessionKey) {
-            if (!this.#replaySessions.ensureEquivalentSessionsLoaded(sessionKey)) {
-                throw new Error("Chat send boundary session could not be hydrated");
-            }
-            const storageSessionKey = normalizedSessionKey(sessionKey);
-            const boundarySessionKeys = this.#runsBySession
-                .entries()
-                .filter(
-                    ([candidateSessionKey, runs]) =>
-                        isSameSessionKey(candidateSessionKey, storageSessionKey) &&
-                        hasActiveConversationRun(runs)
-                )
-                .map(([candidateSessionKey]) => candidateSessionKey)
-                .toArray();
-            if (
-                boundarySessionKeys.some(
-                    (boundarySessionKey) =>
-                        !this.#requestBoundaries.canCapture(boundarySessionKey, requestId)
-                )
-            ) {
-                throw new Error("Too many pending chat requests for one session");
-            }
-            for (const boundarySessionKey of boundarySessionKeys) {
-                this.#requestBoundaries.capture(
-                    boundarySessionKey,
-                    requestId,
-                    this.#sequence
-                );
-            }
-            let didPersistAll = true;
-            for (const boundarySessionKey of boundarySessionKeys) {
-                if (!this.#persistence.flushSession(boundarySessionKey)) {
-                    didPersistAll = false;
-                }
-            }
-            if (!didPersistAll) {
-                this.#settleRequestBoundary(
-                    storageSessionKey,
-                    requestId,
-                    this.#sequence,
-                    true
-                );
-                throw new Error("Chat send boundary could not be persisted");
-            }
-        }
-        return this.#sequence;
+        return this.#requestLifecycle.captureRequestBoundary(sessionKey, requestId);
     }
 
     /**
@@ -599,42 +481,7 @@ export class OpenClawChatBridge {
      * @param sessionKey Session key value.
      */
     clearSession(sessionKey: string): void {
-        const storageSessionKey = normalizedSessionKey(sessionKey);
-        const sessionKeys = new Set([storageSessionKey]);
-        for (const candidateSessionKey of this.#runsBySession.keys()) {
-            if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
-                sessionKeys.add(candidateSessionKey);
-            }
-        }
-        for (const candidateSessionKey of this.#persistence.pendingSessionKeys()) {
-            if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
-                sessionKeys.add(candidateSessionKey);
-            }
-        }
-        this.#requestBoundaries.forget(storageSessionKey);
-        this.#persistence.beginSessionClear(storageSessionKey);
-        const storedSessionKeys = this.#persistence.storedSessionKeys();
-        if (storedSessionKeys) {
-            for (const candidateSessionKey of storedSessionKeys) {
-                if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
-                    sessionKeys.add(candidateSessionKey);
-                }
-            }
-        }
-        for (const matchingSessionKey of sessionKeys) {
-            this.#replaySessions.evictSessionFromMemory(matchingSessionKey);
-        }
-        if (!this.#persistence.enabled) {
-            return;
-        }
-
-        let didClearAll = storedSessionKeys !== undefined;
-        for (const matchingSessionKey of sessionKeys) {
-            if (!this.#persistence.deleteSession(matchingSessionKey)) {
-                didClearAll = false;
-            }
-        }
-        this.#persistence.finishSessionClear(storageSessionKey, didClearAll);
+        this.#requestLifecycle.clearSession(sessionKey);
     }
 
     /**
@@ -651,108 +498,12 @@ export class OpenClawChatBridge {
         payload: unknown,
         requestBoundary?: number
     ): OpenClawRuntimeEnvelope | undefined {
-        if (method === "chat.abort") {
-            const sessionKey = stringField(parameters, "sessionKey");
-            if (sessionKey) {
-                this.clearSession(sessionKey);
-            }
-            return;
-        }
-        if (method === "sessions.delete") {
-            const sessionKey = stringField(parameters, "key");
-            if (sessionKey) {
-                this.clearSession(sessionKey);
-            }
-            return;
-        }
-        if (method !== "chat.send") {
-            return;
-        }
-
-        const sessionKey = stringField(parameters, "sessionKey");
-        const message = stringField(parameters, "message");
-        if (sessionKey && message && /^\/(?:new|reset)(?:\s|$)/i.test(message)) {
-            this.clearSession(sessionKey);
-            return;
-        }
-        const runId = stringField(asRecord(payload), "runId");
-        const provisionalRunId = stringField(parameters, "idempotencyKey");
-        if (sessionKey) {
-            if (!this.#replaySessions.ensureEquivalentSessionsLoaded(sessionKey)) {
-                // The provider has already accepted the send. Keep its durable
-                // pending boundary intact until a later matching user echo can
-                // hydrate and settle it; settling empty memory would strand a
-                // stale cutoff in SQLite after the next restart.
-                return;
-            }
-            const continuesExistingRun = this.#requestContinuesExistingRun(
-                sessionKey,
-                runId,
-                requestBoundary
-            );
-            const pendingRequestBoundary = this.#requestBoundaries.pending(
-                sessionKey,
-                provisionalRunId,
-                requestBoundary
-            );
-            if (
-                !continuesExistingRun &&
-                pendingRequestBoundary !== undefined &&
-                (!runId || isProvisionalRunId(runId))
-            ) {
-                // A successful chat.send acknowledgement means that OpenClaw
-                // accepted the request, not that its user event has entered the
-                // transcript. During restart recovery it may remain queued while
-                // the interrupted response resumes under another provider run.
-                // Keep the boundary pending until that user echo establishes its
-                // real position instead of turning the ACK into a false run split.
-                const changedSessionKeys = this.#requestBoundaries.acknowledge(
-                    sessionKey,
-                    provisionalRunId,
-                    requestBoundary
-                );
-                for (const changedSessionKey of changedSessionKeys) {
-                    if (this.#runsBySession.has(changedSessionKey)) {
-                        this.#persistence.flushSession(changedSessionKey);
-                    }
-                }
-                const repaired =
-                    this.#runReconciliation.repairInterruptedRunForSession(sessionKey);
-                return repaired
-                    ? this.#runtimeIdentityEnvelope(sessionKey, repaired)
-                    : undefined;
-            }
-            let acknowledgedRunId =
-                runId || (continuesExistingRun ? undefined : provisionalRunId);
-            if (acknowledgedRunId) {
-                this.#runReconciliation.promoteProvisionalRun(
-                    sessionKey,
-                    acknowledgedRunId,
-                    provisionalRunId,
-                    requestBoundary
-                );
-            }
-            this.#settleRequestBoundary(
-                sessionKey,
-                provisionalRunId,
-                requestBoundary,
-                continuesExistingRun
-            );
-            let repaired: RepairedInterruptedRun | undefined;
-            if (!acknowledgedRunId && continuesExistingRun) {
-                repaired =
-                    this.#runReconciliation.repairInterruptedRunForSession(sessionKey);
-                acknowledgedRunId = repaired?.providerRunId;
-            }
-            this.#replaySessions.clearCompletedRuns(sessionKey, acknowledgedRunId);
-            if (acknowledgedRunId) {
-                this.#identity.rememberRunSession(acknowledgedRunId, sessionKey);
-            }
-            return repaired
-                ? this.#runtimeIdentityEnvelope(sessionKey, repaired)
-                : undefined;
-        }
-        return undefined;
+        return this.#requestLifecycle.handleSuccessfulRequest(
+            method,
+            parameters,
+            payload,
+            requestBoundary
+        );
     }
 
     /**
@@ -766,20 +517,7 @@ export class OpenClawChatBridge {
         parameters: Record<string, unknown>,
         requestBoundary?: number
     ): void {
-        if (method !== "chat.send") {
-            return;
-        }
-        const sessionKey = stringField(parameters, "sessionKey");
-        if (!sessionKey) {
-            return;
-        }
-        this.#replaySessions.ensureEquivalentSessionsLoaded(sessionKey);
-        this.#settleRequestBoundary(
-            sessionKey,
-            stringField(parameters, "idempotencyKey"),
-            requestBoundary,
-            true
-        );
+        this.#requestLifecycle.handleFailedRequest(method, parameters, requestBoundary);
     }
 
     /**
@@ -814,36 +552,10 @@ export class OpenClawChatBridge {
                 runtimeSequence: ++this.#sequence,
             })
         );
-        const requestId = sessionMessageRequestId(event, enrichedPayload);
-        let requestRepair: RepairedInterruptedRun | undefined;
-        if (enrichedSessionKey && requestId) {
-            const requestBoundary = this.#requestBoundaries.pending(
-                enrichedSessionKey,
-                requestId
-            );
-            if (requestBoundary !== undefined) {
-                const runId = stringField(runtimePayloadView(enrichedPayload), "runId");
-                requestRepair =
-                    this.#runReconciliation.repairAcknowledgedProvisionalContinuationForSession(
-                        enrichedSessionKey,
-                        runId,
-                        requestId,
-                        requestBoundary
-                    );
-                const isContinuation =
-                    this.#requestContinuesExistingRun(
-                        enrichedSessionKey,
-                        runId,
-                        requestBoundary
-                    ) || Boolean(requestRepair);
-                this.#settleRequestBoundary(
-                    enrichedSessionKey,
-                    requestId,
-                    requestBoundary,
-                    isContinuation
-                );
-            }
-        }
+        const requestRepair = this.#requestLifecycle.settleRequestEvent(
+            event,
+            enrichedPayload
+        );
         const runtimeRunAliases = [
             ...(requestRepair?.interruptedRunIds || []),
             ...this.#replayRetention.retain(
