@@ -45,6 +45,7 @@ import {
 } from "./chatProjectionIdentity";
 import type {
     ChatRunState,
+    ChatRuntimeMessageEntry,
     ChatRuntimeState,
     ChatSessionRuntimeState,
 } from "./chatState";
@@ -61,6 +62,33 @@ export interface ChatCompactionStatus {
     phase: "active" | "complete";
     text: string;
     timestamp: string;
+}
+
+function runtimeAssistantEntries(run: ChatRunState): ChatRuntimeMessageEntry[] {
+    if (run.assistantSegments?.length) {
+        return run.assistantSegments;
+    }
+    return run.assistant
+        ? [
+              {
+                  key: "assistant",
+                  message: run.assistant,
+                  sequence:
+                      run.phase === "active"
+                          ? (run.assistantSequence ??
+                            run.lastContentSequence ??
+                            run.lastSequence)
+                          : (run.terminalSequence ??
+                            run.lastContentSequence ??
+                            run.assistantSequence ??
+                            run.lastSequence),
+              },
+          ]
+        : [];
+}
+
+function latestRuntimeAssistant(run: ChatRunState): ChatHistoryMessage | undefined {
+    return runtimeAssistantEntries(run).at(-1)?.message ?? run.assistant;
 }
 
 function projectedMessageDisplay(message: ChatHistoryMessage): ChatHistoryMessage {
@@ -238,7 +266,7 @@ function runFinalAnchorIndex(
         }
     }
 
-    const assistantText = run.assistant?.text;
+    const assistantText = latestRuntimeAssistant(run)?.text;
     const terminalTimestamp = Date.parse(run.terminalAt ?? run.updatedAt);
     if (!assistantText || Number.isNaN(terminalTimestamp)) {
         return -1;
@@ -391,7 +419,7 @@ function canonicalFinalIndex(
     segment: ResponseSegment,
     exactToolIndex: ExactToolMessageIndex
 ): number {
-    const assistantText = run.assistant?.text || "";
+    const assistantText = latestRuntimeAssistant(run)?.text || "";
     const hasOverlappingUserTurn = hasUnansweredUserBeforeSegment(messages, segment);
     const anchoredFinalIndex = runFinalAnchorIndex(messages, run, exactToolIndex);
     for (let index = segment.end - 1; index >= segment.start; index -= 1) {
@@ -491,11 +519,12 @@ function hasUnambiguousFinalEvidence(
     if (runFinalAnchorIndex(messages, run, exactToolIndex) === finalIndex) {
         return true;
     }
-    if (!run.assistant || !hasPrimaryAnswerContent(run.assistant)) {
+    const runtimeAssistant = latestRuntimeAssistant(run);
+    if (!runtimeAssistant || !hasPrimaryAnswerContent(runtimeAssistant)) {
         return false;
     }
-    const assistantText = run.assistant.text;
-    const assistantMediaIdentity = messageMediaIdentity(run.assistant);
+    const assistantText = runtimeAssistant.text;
+    const assistantMediaIdentity = messageMediaIdentity(runtimeAssistant);
     if (!assistantText && !assistantMediaIdentity) {
         return false;
     }
@@ -565,12 +594,6 @@ function transientMessage(
         runtimeSequence,
         timestamp: message.timestamp || run.updatedAt,
     };
-}
-
-function assistantRuntimeSequence(run: ChatRunState): number | undefined {
-    return run.phase === "active"
-        ? (run.assistantSequence ?? run.lastContentSequence)
-        : (run.terminalSequence ?? run.lastContentSequence);
 }
 
 function canonicalFinalRuntimeSequence(run: ChatRunState): number | undefined {
@@ -1101,6 +1124,10 @@ export function reconcileChatMessages(
     const messages = scopeTranscriptDiagnosticsToRuns(historyWithScopedUsers, runs);
     for (const run of runs) {
         const commentaries = transientCommentaryMessages(run);
+        const assistantEntries = runtimeAssistantEntries(run);
+        const assistantMessages = assistantEntries.map((entry) =>
+            transientMessage(entry.message, run, entry.key, entry.sequence)
+        );
         for (const [index, message] of messages.entries()) {
             const shouldUseCanonicalRunId =
                 (isUserMessage(message) || isStandaloneDiagnostic(message)) &&
@@ -1161,31 +1188,33 @@ export function reconcileChatMessages(
             scopeCanonicalResponse(messages, run, segment, finalIndex, exactToolIndex);
             const canonical = messages[finalIndex]!;
             const runtimeSequence = canonicalFinalRuntimeSequence(run);
-            if (run.assistant) {
+            const latestAssistant = assistantEntries.at(-1)?.message;
+            if (latestAssistant) {
                 messages[finalIndex] = {
                     ...mergeChatMessageDetails(
                         canonical,
-                        transientMessage(run.assistant, run, "assistant", runtimeSequence)
+                        transientMessage(
+                            latestAssistant,
+                            run,
+                            assistantEntries.at(-1)!.key,
+                            runtimeSequence
+                        )
                     ),
                     isFinal: canonical.isFinal || run.phase === "completed" || undefined,
                     runtimeSequence,
                 };
             }
-            messages.splice(finalIndex, 0, ...diagnostics, ...commentaries);
+            messages.splice(
+                finalIndex,
+                0,
+                ...diagnostics,
+                ...commentaries,
+                ...assistantMessages.slice(0, -1)
+            );
             continue;
         }
 
-        const additions = [...diagnostics, ...commentaries];
-        if (run.assistant) {
-            additions.push(
-                transientMessage(
-                    run.assistant,
-                    run,
-                    "assistant",
-                    assistantRuntimeSequence(run)
-                )
-            );
-        }
+        const additions = [...diagnostics, ...commentaries, ...assistantMessages];
         messages.splice(segment.end, 0, ...additions);
     }
     const deduped = dedupeMessages(messages);

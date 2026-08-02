@@ -940,8 +940,9 @@ describe("OpenClaw chat bridge", () => {
     it("terminalizes an auto-compaction settlement when no response resumes", () => {
         jest.useFakeTimers();
         try {
+            const store = new MemorySnapshotStore();
             const deferredEnvelopes: unknown[] = [];
-            const bridge = new OpenClawChatBridge(undefined, {
+            const bridge = new OpenClawChatBridge(store, {
                 nestedCompactionSettlementGraceMs: 10,
                 onDeferredEnvelope: (envelope) => deferredEnvelopes.push(envelope),
             });
@@ -952,6 +953,18 @@ describe("OpenClaw chat bridge", () => {
                     runId: "parent-run",
                     sessionKey: MAIN,
                     stream: "thinking",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "session.tool",
+                {
+                    callId: "call-before-timeout",
+                    name: "exec",
+                    phase: "result",
+                    result: "retained tool output",
+                    runId: "parent-run",
+                    sessionKey: MAIN,
                 },
                 []
             );
@@ -989,6 +1002,76 @@ describe("OpenClaw chat bridge", () => {
                 event: "model.completed",
                 payload: { runId: "parent-run", sessionKey: MAIN },
             });
+            expect(snapshot.events.some((event) => event.event === "session.tool")).toBe(
+                true
+            );
+            expect(deferredEnvelopes).toHaveLength(1);
+
+            expect(bridge.clearMemory()).toBe(true);
+            const restarted = new OpenClawChatBridge(store);
+            expect(
+                restarted
+                    .snapshot(MAIN)
+                    .events.some((event) => event.event === "session.tool")
+            ).toBe(true);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("resumes a persisted auto-compaction settlement after reconnect", () => {
+        jest.useFakeTimers();
+        try {
+            const store = new MemorySnapshotStore();
+            const bridge = new OpenClawChatBridge(store, {
+                nestedCompactionSettlementGraceMs: 10,
+            });
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "working" },
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    phase: "end",
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                    stream: "compaction",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "end", stream: "lifecycle" },
+                    sessionKey: MAIN,
+                },
+                []
+            );
+            bridge.markGatewayDisconnected();
+            expect(bridge.flush()).toBe(true);
+            expect(bridge.clearMemory()).toBe(true);
+
+            const deferredEnvelopes: unknown[] = [];
+            const restarted = new OpenClawChatBridge(store, {
+                gatewayConnected: false,
+                nestedCompactionSettlementGraceMs: 10,
+                onDeferredEnvelope: (envelope) => deferredEnvelopes.push(envelope),
+            });
+            expect(restarted.snapshot(MAIN).completed).toBe(false);
+            jest.advanceTimersByTime(30);
+            expect(deferredEnvelopes).toEqual([]);
+
+            restarted.markGatewayConnected();
+            jest.advanceTimersByTime(1000);
+
+            expect(restarted.snapshot(MAIN).completed).toBe(true);
             expect(deferredEnvelopes).toHaveLength(1);
         } finally {
             jest.useRealTimers();

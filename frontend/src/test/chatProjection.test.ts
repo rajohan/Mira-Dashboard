@@ -746,6 +746,161 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("keeps assistant text on both sides of a tool in provider order", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "assistant",
+                message: message("assistant", "Before the tool.", "run-1"),
+                mode: "append",
+                runId: "run-1",
+                source: "runtime",
+            }),
+            event(24, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "assistant",
+                message: message("assistant", "After the tool.", "run-1"),
+                mode: "append",
+                runId: "run-1",
+                source: "runtime",
+            }),
+            event(40, {
+                kind: "finish",
+                message: message("assistant", "Before the tool.After the tool.", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "question")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projectionRowKinds(projection)).toEqual([
+            "question",
+            "Before the tool.",
+            "tool",
+            "After the tool.",
+        ]);
+    });
+
+    it("keeps both assistant segments when a thinking stream updates between them", () => {
+        const commentary = {
+            content: "",
+            intent: "commentary" as const,
+            role: "assistant",
+            runtimeKey: "commentary:preamble",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, {
+                kind: "commentary",
+                message: { ...commentary, text: "Started reasoning." },
+                mode: "replace",
+                runId: "run-1",
+            }),
+            event(16, {
+                kind: "assistant",
+                message: message("assistant", "Before thinking.", "run-1"),
+                mode: "append",
+                runId: "run-1",
+                source: "runtime",
+            }),
+            event(24, {
+                kind: "commentary",
+                message: { ...commentary, text: "Updated reasoning." },
+                mode: "replace",
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "assistant",
+                message: message("assistant", "After thinking.", "run-1"),
+                mode: "append",
+                runId: "run-1",
+                source: "runtime",
+            }),
+            event(40, {
+                kind: "finish",
+                message: message("assistant", "Before thinking.After thinking.", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "question")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projectionRowKinds(projection)).toEqual([
+            "question",
+            "thinking",
+            "Before thinking.",
+            "After thinking.",
+        ]);
+    });
+
+    it("does not move pre-tool text when the final only repeats that text", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "assistant",
+                message: message("assistant", "Before the tool.", "run-1"),
+                mode: "append",
+                runId: "run-1",
+                source: "runtime",
+            }),
+            event(24, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "finish",
+                message: message("assistant", "Before the tool.", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "question")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projectionRowKinds(projection)).toEqual([
+            "question",
+            "Before the tool.",
+            "tool",
+        ]);
+    });
+
     it("keeps optimistic user rows as deletable messages", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

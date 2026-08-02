@@ -29,6 +29,7 @@ const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
 export const MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN = 200;
 export const MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN = 100;
 export const MAX_CHAT_RUNTIME_CONTROLS_PER_SESSION = 100;
+const MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN = 100;
 
 export interface ChatRuntimeMessageEntry {
     key: string;
@@ -39,7 +40,9 @@ export interface ChatRuntimeMessageEntry {
 /** Canonical runtime state for one session-scoped run. */
 export interface ChatRunState {
     aliases: string[];
+    assistantBoundarySequence?: number;
     assistant?: ChatHistoryMessage;
+    assistantSegments?: ChatRuntimeMessageEntry[];
     assistantSequence?: number;
     assistantSource?: ChatTextSource;
     commentary: ChatRuntimeMessageEntry[];
@@ -310,6 +313,7 @@ function emptyRun(
 ): ChatRunState {
     return {
         aliases: [runId],
+        assistantSegments: [],
         commentary: [],
         diagnostics: [],
         lastSequence: sequence,
@@ -568,6 +572,112 @@ function isCompatibleSessionEcho(
     return nonTextDetailsSignature(previous) === nonTextDetailsSignature(incoming);
 }
 
+function assistantTextContribution(
+    previousText: string,
+    nextText: string,
+    incomingText: string,
+    mode: Extract<ChatRuntimeEvent, { kind: "assistant" }>["mode"],
+    canUseText: boolean,
+    isCompletedSessionEcho: boolean
+): string {
+    if (!canUseText || isCompletedSessionEcho) {
+        return "";
+    }
+    if (mode === "replace") {
+        return incomingText;
+    }
+    return nextText.startsWith(previousText)
+        ? nextText.slice(previousText.length)
+        : incomingText;
+}
+
+function assistantSegmentMessage(
+    incoming: ChatHistoryMessage,
+    text: string
+): ChatHistoryMessage {
+    return {
+        ...incoming,
+        content: text,
+        text,
+        toolCalls: undefined,
+        toolResult: undefined,
+    };
+}
+
+function hasAssistantSegmentContent(message: ChatHistoryMessage): boolean {
+    return Boolean(message.text || message.images?.length || message.attachments?.length);
+}
+
+function latestAssistantBoundarySequence(run: ChatRunState): number {
+    return Math.max(
+        -1,
+        run.assistantBoundarySequence ?? -1,
+        ...run.commentary.map((entry) => entry.sequence),
+        ...run.diagnostics.map((entry) => entry.sequence),
+        ...run.userMessages.map((entry) => entry.sequence)
+    );
+}
+
+function applyAssistantSegment(
+    run: ChatRunState,
+    event: Extract<ChatRuntimeEvent, { kind: "assistant" }>,
+    incoming: ChatHistoryMessage,
+    previousText: string,
+    nextText: string,
+    canUseText: boolean,
+    isCompletedSessionEcho: boolean
+): ChatRuntimeMessageEntry[] | undefined {
+    const previousSegments = run.assistantSegments || [];
+    let contribution = assistantTextContribution(
+        previousText,
+        nextText,
+        incoming.text,
+        event.mode,
+        canUseText,
+        isCompletedSessionEcho
+    );
+    const startsNewSegment =
+        previousSegments.length === 0 ||
+        run.lastContentKind !== "assistant" ||
+        latestAssistantBoundarySequence(run) > (run.assistantSequence ?? -1);
+    const previousSegment = startsNewSegment ? undefined : previousSegments.at(-1);
+    if (event.mode === "replace") {
+        const sealedText = (
+            startsNewSegment ? previousSegments : previousSegments.slice(0, -1)
+        )
+            .map((entry) => entry.message.text)
+            .join("");
+        if (sealedText && contribution.startsWith(sealedText)) {
+            contribution = contribution.slice(sealedText.length);
+        }
+    }
+    let segmentText = contribution;
+    if (previousSegment) {
+        if (event.mode === "replace") {
+            segmentText = contribution;
+        } else if (event.mode === "append") {
+            segmentText = `${previousSegment.message.text}${contribution}`;
+        } else {
+            segmentText = mergeChatStreamText(previousSegment.message.text, contribution);
+        }
+    }
+    const segmentIncoming = assistantSegmentMessage(incoming, segmentText);
+    if (!hasAssistantSegmentContent(segmentIncoming)) {
+        return run.assistantSegments;
+    }
+    const segment: ChatRuntimeMessageEntry = {
+        key: previousSegment?.key || `assistant:${event.sequence}`,
+        message: previousSegment
+            ? mergeMessageDetails(previousSegment.message, segmentIncoming, segmentText)
+            : segmentIncoming,
+        sequence: previousSegment?.sequence ?? event.sequence,
+    };
+    const segments = previousSegment
+        ? [...previousSegments.slice(0, -1), segment]
+        : [...previousSegments, segment];
+    return segments.slice(-MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN);
+}
+
 function applyAssistantEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "assistant" }>
@@ -605,6 +715,15 @@ function applyAssistantEvent(
         isCompletedSessionEcho
     );
     const assistant = mergeMessageDetails(run.assistant, incoming, text);
+    const assistantSegments = applyAssistantSegment(
+        run,
+        event,
+        incoming,
+        previousText,
+        text,
+        canUseText,
+        isCompletedSessionEcho
+    );
     let assistantSource = run.assistantSource;
     if (incoming.text) {
         assistantSource =
@@ -622,6 +741,7 @@ function applyAssistantEvent(
                       toolResult: incoming.toolResult,
                   }
                 : assistant,
+        assistantSegments,
         assistantSequence: event.sequence,
         assistantSource,
     };
@@ -870,6 +990,7 @@ function applyDiagnosticEvent(
     const key = event.kind === "tool" ? event.toolKey : "thinking:primary";
     return {
         ...run,
+        assistantBoundarySequence: event.sequence,
         diagnostics: mergeDiagnosticEntry(
             run.diagnostics,
             key,
@@ -898,6 +1019,7 @@ function applyUserEvent(
     }
     return {
         ...run,
+        assistantBoundarySequence: event.sequence,
         userMessages: [
             ...run.userMessages,
             {
@@ -978,6 +1100,7 @@ function applyCommentaryEvent(
     }
     return {
         ...run,
+        assistantBoundarySequence: event.sequence,
         commentary:
             commentary.length <= MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN
                 ? commentary
@@ -1058,6 +1181,44 @@ function mergeRunCommentary(
         .slice(-MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN);
 }
 
+function mergeRunAssistantSegments(
+    older: ChatRunState,
+    newer: ChatRunState
+): ChatRuntimeMessageEntry[] | undefined {
+    const entries = new Map<string, ChatRuntimeMessageEntry>();
+    for (const entry of [
+        ...(older.assistantSegments || []),
+        ...(newer.assistantSegments || []),
+    ]) {
+        const previous = entries.get(entry.key);
+        entries.set(
+            entry.key,
+            previous
+                ? {
+                      key: previous.key,
+                      message: mergeMessageDetails(
+                          previous.message,
+                          entry.message,
+                          entry.message.text || previous.message.text
+                      ),
+                      sequence: Math.min(previous.sequence, entry.sequence),
+                  }
+                : entry
+        );
+    }
+    if (entries.size === 0) {
+        return undefined;
+    }
+    return entries
+        .values()
+        .toArray()
+        .toSorted(
+            (left, right) =>
+                left.sequence - right.sequence || left.key.localeCompare(right.key)
+        )
+        .slice(-MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN);
+}
+
 function mergeAcknowledgedRuns(
     existing: ChatRunState,
     optimistic: ChatRunState,
@@ -1077,6 +1238,10 @@ function mergeAcknowledgedRuns(
     const assistantSequence = Math.max(
         existing.assistantSequence ?? -1,
         optimistic.assistantSequence ?? -1
+    );
+    const assistantBoundarySequence = Math.max(
+        existing.assistantBoundarySequence ?? -1,
+        optimistic.assistantBoundarySequence ?? -1
     );
     const startedAt = (
         Date.parse(existing.startedAt) <= Date.parse(optimistic.startedAt)
@@ -1117,6 +1282,9 @@ function mergeAcknowledgedRuns(
             providerRunId,
         ]),
         assistant,
+        assistantBoundarySequence:
+            assistantBoundarySequence === -1 ? undefined : assistantBoundarySequence,
+        assistantSegments: mergeRunAssistantSegments(older, newer),
         assistantSequence: assistantSequence === -1 ? undefined : assistantSequence,
         assistantSource: newer.assistantSource || older.assistantSource,
         commentary: mergeRunCommentary(older, newer),
@@ -1189,6 +1357,8 @@ function applyFinishEvent(
     if (isPendingCompaction) {
         operationPhase = event.outcome === "completed" ? "complete" : "inactive";
     }
+    const shouldFinalizeAssistantSegment =
+        !event.message || withMessage.assistantSegments !== run.assistantSegments;
     return {
         ...withMessage,
         assistant: withMessage.assistant
@@ -1197,6 +1367,19 @@ function applyFinishEvent(
                   isFinal: event.outcome === "completed",
               }
             : undefined,
+        assistantSegments: shouldFinalizeAssistantSegment
+            ? withMessage.assistantSegments?.map((entry, index, entries) =>
+                  index === entries.length - 1
+                      ? {
+                            ...entry,
+                            message: {
+                                ...entry.message,
+                                isFinal: event.outcome === "completed" || undefined,
+                            },
+                        }
+                      : entry
+              )
+            : withMessage.assistantSegments,
         error,
         operationPhase,
         operationUpdatedAt: isPendingCompaction
@@ -1337,6 +1520,7 @@ export function reduceChatRuntime(
                           key,
                           {
                               ...run,
+                              assistantSegments: [...(run.assistantSegments || [])],
                               commentary: [...run.commentary],
                               diagnostics: [...run.diagnostics],
                               sessionKey,
@@ -1471,6 +1655,7 @@ export function addOptimisticChatRun(
                       key,
                       {
                           ...run,
+                          assistantSegments: [...(run.assistantSegments || [])],
                           commentary: [...run.commentary],
                           diagnostics: [...run.diagnostics],
                           sessionKey: canonicalSessionKey,

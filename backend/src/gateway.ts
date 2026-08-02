@@ -188,8 +188,12 @@ const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
 
-function createChatReplayBridge(store?: SqliteOpenClawChatSnapshotStore) {
+function createChatReplayBridge(
+    store?: SqliteOpenClawChatSnapshotStore,
+    gatewayConnected = gatewayState.isConnected
+) {
     const bridge = new OpenClawChatBridge(store, {
+        gatewayConnected,
         onDeferredEnvelope: (envelope) => {
             if (chatReplayState.bridge === bridge) {
                 broadcast(envelope);
@@ -247,9 +251,11 @@ function didSelectChatReplayScope(endpoint: string, token: string): boolean {
     if (!chatReplayState.bridge.clearMemory()) {
         return false;
     }
-    chatReplayState.bridge = createChatReplayBridge(
-        new SqliteOpenClawChatSnapshotStore(gatewayScope)
+    const bridge = createChatReplayBridge(
+        new SqliteOpenClawChatSnapshotStore(gatewayScope),
+        false
     );
+    chatReplayState.bridge = bridge;
     chatReplayState.scope = gatewayScope;
     chatReplayState.generation = Bun.randomUUIDv7();
     chatReplayState.bridge.hydratePersistedSessions();
@@ -1068,6 +1074,7 @@ function init(token: string): void {
         gatewayMetricsState.connections += 1;
         gatewayMetricsState.lastConnectedAt = new Date().toISOString();
         gatewayState.isConnected = true;
+        thisReplayBridge.markGatewayConnected();
         logger.info("gateway.connected", {
             connections: gatewayMetricsState.connections,
             reconnects: gatewayMetricsState.reconnects,
