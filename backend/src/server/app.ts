@@ -28,7 +28,7 @@ import { routes } from "../routes/registry.ts";
 import { isProductionDeploymentCutoverActive } from "../services/deploymentCutoverState.ts";
 import { type DashboardSocket } from "../services/gateway/dashboardSocket.ts";
 import gateway from "../services/gateway/runtime.ts";
-import { validateTotpStorageConfig } from "../services/multiFactorAuth/factorService.ts";
+import { validateTotpStorageConfig } from "../services/multiFactorAuth/totpFactorService.ts";
 import { validateWebAuthnConfig } from "../services/webAuthn/service.ts";
 import { resolveFrontendPath } from "./frontendAssets.ts";
 

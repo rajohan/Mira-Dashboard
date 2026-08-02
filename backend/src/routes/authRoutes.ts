@@ -51,11 +51,7 @@ import {
     recordAuthenticationFailure,
 } from "../services/authenticationThrottle.ts";
 import gateway from "../services/gateway/runtime.ts";
-import {
-    mfaMethodsForUser,
-    verifyRecoveryCodeForUser,
-    verifyTotpForUser,
-} from "../services/multiFactorAuth/factorService.ts";
+import { mfaMethodsForUser } from "../services/multiFactorAuth/factorInventory.ts";
 import {
     consumePendingLogin,
     createPendingLogin,
@@ -63,6 +59,8 @@ import {
     type PendingLogin,
     recordPendingLoginFailure,
 } from "../services/multiFactorAuth/pendingLoginService.ts";
+import { verifyRecoveryCodeForUser } from "../services/multiFactorAuth/recoveryCodeService.ts";
+import { verifyTotpForUser } from "../services/multiFactorAuth/totpFactorService.ts";
 import {
     createWebAuthnAuthenticationOptions,
     verifyWebAuthnAuthentication,

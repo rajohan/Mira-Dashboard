@@ -14,10 +14,8 @@ import {
     clearAuthenticationFailures,
     recordAuthenticationFailure,
 } from "../../services/authenticationThrottle.ts";
-import {
-    verifyRecoveryCodeForUser,
-    verifyTotpForUser,
-} from "../../services/multiFactorAuth/factorService.ts";
+import { verifyRecoveryCodeForUser } from "../../services/multiFactorAuth/recoveryCodeService.ts";
+import { verifyTotpForUser } from "../../services/multiFactorAuth/totpFactorService.ts";
 import {
     normalizedCode,
     readSecurityBody,

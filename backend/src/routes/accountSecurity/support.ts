@@ -28,7 +28,7 @@ import { currentRequestAuditContext } from "../../http/requestAuditContext.ts";
 import { readApiJsonOrError, routeFailureResponse } from "../../http/routeSupport.ts";
 import { writeAuditEvent } from "../../services/auditEvents.ts";
 import { secretEncryptionKeyBytes } from "../../services/mfaCrypto.ts";
-import { getMultiFactorSummary } from "../../services/multiFactorAuth/factorService.ts";
+import { getMultiFactorSummary } from "../../services/multiFactorAuth/factorInventory.ts";
 import { webAuthnConfig } from "../../services/webAuthn/service.ts";
 
 export interface SecurityRequestContext {

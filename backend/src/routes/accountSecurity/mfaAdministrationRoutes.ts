@@ -19,10 +19,8 @@ import {
     clearAuthenticationFailures,
     recordAuthenticationFailure,
 } from "../../services/authenticationThrottle.ts";
-import {
-    disableMultiFactor,
-    rotateRecoveryCodes,
-} from "../../services/multiFactorAuth/factorService.ts";
+import { disableMultiFactor } from "../../services/multiFactorAuth/factorLifecycle.ts";
+import { rotateRecoveryCodes } from "../../services/multiFactorAuth/recoveryCodeService.ts";
 import {
     normalizedPassword,
     readSecurityBody,

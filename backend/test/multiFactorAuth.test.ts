@@ -30,17 +30,17 @@ import {
 } from "../src/services/configRedaction.ts";
 import { decryptStoredSecret, encryptStoredSecret } from "../src/services/mfaCrypto.ts";
 import {
-    confirmTotpEnrollment,
-    createTotpEnrollment,
-    validateTotpStorageConfig,
-    verifyRecoveryCodeForUser,
-    verifyTotpForUser,
-} from "../src/services/multiFactorAuth/factorService.ts";
-import {
     consumePendingLogin,
     createPendingLogin,
     getPendingLogin,
 } from "../src/services/multiFactorAuth/pendingLoginService.ts";
+import { verifyRecoveryCodeForUser } from "../src/services/multiFactorAuth/recoveryCodeService.ts";
+import {
+    confirmTotpEnrollment,
+    createTotpEnrollment,
+    validateTotpStorageConfig,
+    verifyTotpForUser,
+} from "../src/services/multiFactorAuth/totpFactorService.ts";
 import {
     didRemoveWebAuthnCredential,
     webAuthnConfig,

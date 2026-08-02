@@ -14,12 +14,14 @@ import {
     recordAuthenticationFailure,
 } from "../../services/authenticationThrottle.ts";
 import {
+    normalizeFactorId,
+    normalizeFactorLabel,
+} from "../../services/multiFactorAuth/factorIdentity.ts";
+import {
     confirmTotpEnrollment,
     createTotpEnrollment,
     didRemoveTotpFactor,
-    normalizeFactorId,
-    normalizeFactorLabel,
-} from "../../services/multiFactorAuth/factorService.ts";
+} from "../../services/multiFactorAuth/totpFactorService.ts";
 import {
     canManageFactors,
     normalizedCode,

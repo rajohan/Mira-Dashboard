@@ -26,7 +26,7 @@ import {
 import {
     confirmTotpEnrollment,
     createTotpEnrollment,
-} from "../src/services/multiFactorAuth/factorService.ts";
+} from "../src/services/multiFactorAuth/totpFactorService.ts";
 import { type WebAuthnChallengeContext } from "../src/services/webAuthn/service.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 

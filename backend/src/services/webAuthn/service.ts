@@ -14,12 +14,12 @@ import type {
     WebAuthnCredential as WebAuthnFactorSummary,
 } from "../../../../contracts/accountSecurity.ts";
 import { database } from "../../database/connection.ts";
+import { normalizeFactorLabel } from "../multiFactorAuth/factorIdentity.ts";
+import { totalConfirmedFactorCount } from "../multiFactorAuth/factorInventory.ts";
 import {
     enableMultiFactorInTransaction,
     generateRecoveryCodeSet,
-    normalizeFactorLabel,
-    totalConfirmedFactorCount,
-} from "../multiFactorAuth/factorService.ts";
+} from "../multiFactorAuth/recoveryCodeService.ts";
 import { webAuthnConfig } from "./config.ts";
 import {
     type WebAuthnChallengeContext,

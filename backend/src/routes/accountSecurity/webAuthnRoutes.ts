@@ -5,7 +5,7 @@ import { parseWebAuthnRegistrationRequest } from "../../../../contracts/accountS
 import { hasRecentMfaVerification } from "../../auth/sessionService.ts";
 import { json } from "../../http/core.ts";
 import { type ParametersRequest, routeFailureResponse } from "../../http/routeSupport.ts";
-import { normalizeFactorLabel } from "../../services/multiFactorAuth/factorService.ts";
+import { normalizeFactorLabel } from "../../services/multiFactorAuth/factorIdentity.ts";
 import { didRemoveWebAuthnCredential } from "../../services/webAuthn/service.ts";
 import {
     canManageFactors,
