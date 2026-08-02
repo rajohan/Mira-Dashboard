@@ -1200,7 +1200,157 @@ describe("OpenClaw chat bridge", () => {
 
             const snapshot = bridge.snapshot(MAIN);
             expect(snapshot.completed).toBe(false);
-            expect(snapshot.events).toHaveLength(eventCountBeforeContinuation);
+            expect(snapshot.events).toHaveLength(eventCountBeforeContinuation + 1);
+            expect(snapshot.events.at(-1)).toMatchObject({
+                canonicalEvents: [],
+                event: "agent",
+                payload: {
+                    miraReplayMarker: "nested-compaction-continuation",
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                },
+            });
+            expect(deferredEnvelopes).toEqual([]);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("keeps a filtered compaction continuation durable across restart", () => {
+        jest.useFakeTimers();
+        try {
+            const store = new MemorySnapshotStore();
+            const bridge = new OpenClawChatBridge(store, {
+                nestedCompactionSettlementGraceMs: 10,
+            });
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "working" },
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    phase: "end",
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                    stream: "compaction",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "end", stream: "lifecycle" },
+                    sessionKey: MAIN,
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        item: { kind: "reasoning", phase: "start" },
+                        phase: "start",
+                        stream: "item",
+                    },
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                },
+                []
+            );
+            expect(bridge.flush()).toBe(true);
+            expect(store.snapshots.get(MAIN)?.events.at(-1)?.payload).toMatchObject({
+                miraReplayMarker: "nested-compaction-continuation",
+            });
+            expect(bridge.clearMemory()).toBe(true);
+
+            const deferredEnvelopes: unknown[] = [];
+            const restarted = new OpenClawChatBridge(store, {
+                nestedCompactionSettlementGraceMs: 10,
+                onDeferredEnvelope: (envelope) => deferredEnvelopes.push(envelope),
+            });
+            expect(restarted.snapshot(MAIN).completed).toBe(false);
+            jest.advanceTimersByTime(30);
+
+            expect(restarted.snapshot(MAIN).completed).toBe(false);
+            expect(deferredEnvelopes).toEqual([]);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it("keeps deferred settlement interrupted until provider run promotion", () => {
+        jest.useFakeTimers();
+        try {
+            const deferredEnvelopes: unknown[] = [];
+            const bridge = new OpenClawChatBridge(undefined, {
+                nestedCompactionSettlementGraceMs: 10,
+                onDeferredEnvelope: (envelope) => deferredEnvelopes.push(envelope),
+            });
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "working" },
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    phase: "end",
+                    runId: "parent-run",
+                    sessionKey: MAIN,
+                    stream: "compaction",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "end", stream: "lifecycle" },
+                    sessionKey: MAIN,
+                },
+                []
+            );
+
+            bridge.markGatewayDisconnected(Date.now());
+            jest.advanceTimersByTime(30);
+            expect(bridge.snapshot(MAIN).completed).toBe(false);
+            expect(deferredEnvelopes).toEqual([]);
+
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: "provider-after-reconnect",
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+            jest.advanceTimersByTime(30);
+
+            const snapshot = bridge.snapshot(MAIN);
+            expect(snapshot.completed).toBe(false);
+            expect(
+                snapshot.events.map(
+                    (event) => (event.payload as { runId?: string }).runId
+                )
+            ).toEqual(
+                Array.from(
+                    { length: snapshot.events.length },
+                    () => "provider-after-reconnect"
+                )
+            );
             expect(deferredEnvelopes).toEqual([]);
         } finally {
             jest.useRealTimers();
