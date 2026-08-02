@@ -16,16 +16,20 @@ import {
     resolveDashboardRuntimePath,
 } from "../src/lib/dashboardPaths.ts";
 import {
-    assertManagedDashboardUnitProperties,
     type DashboardReleaseCommandRunner,
-    MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT,
-    MANAGED_DASHBOARD_UNITS,
-    managedDashboardUnitContract,
     runReleaseDeploymentCommand,
     stageDashboardRelease,
 } from "../src/services/releases/deployment.ts";
+import {
+    assertManagedDashboardUnitProperties,
+    managedDashboardUnitContract,
+} from "../src/services/releases/managedUnitContract.ts";
 import { managedReleasePath } from "../src/services/releases/releaseLayout.ts";
 import { currentBunRuntimeIdentity } from "../src/services/releases/runtime.ts";
+import {
+    MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT,
+    MANAGED_DASHBOARD_UNITS,
+} from "../src/services/releases/systemdPolicy.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const COMMIT_SHA = "a".repeat(40);

@@ -18,16 +18,16 @@ import {
     releaseLifecycleInvocation,
     shellQuote,
 } from "./cutoverCommands.ts";
+import { installManagedBunRuntime } from "./managedRuntimeStore.ts";
 import {
     assertManagedDashboardUnitProperties,
-    MANAGED_DASHBOARD_UNITS,
     managedDashboardUnitContract,
-} from "./deployment.ts";
-import { installManagedBunRuntime } from "./managedRuntimeStore.ts";
+} from "./managedUnitContract.ts";
 import type { ManagedDashboardRelease } from "./managerModel.ts";
 import { loadManagedRelease, resolveDashboardReleasesRoot } from "./releaseLayout.ts";
 import { hasManagedBunRuntime, requireManagedBunRuntime } from "./runtime.ts";
 import { assertDashboardReleaseRuntimeAvailable } from "./schemaCompatibility.ts";
+import { MANAGED_DASHBOARD_UNITS } from "./systemdPolicy.ts";
 
 export async function assertManagedDashboardServiceContract(
     signal?: AbortSignal
