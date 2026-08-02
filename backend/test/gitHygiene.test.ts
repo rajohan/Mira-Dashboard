@@ -4,10 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import * as processModule from "../src/lib/processes.ts";
-import {
-    syncDockerUpdaterChanges,
-    syncOpenClawWorkspaceSafePaths,
-} from "../src/services/gitHygiene.ts";
+import { syncDockerUpdaterChanges } from "../src/services/gitHygiene/dockerSync.ts";
+import { syncOpenClawWorkspaceSafePaths } from "../src/services/gitHygiene/workspaceSync.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 

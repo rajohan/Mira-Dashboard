@@ -5988,7 +5988,7 @@ esac
         const { registerCacheRefreshScheduledJobs } =
             await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         const { registerGitHygieneScheduledJobs } =
-            await import("../src/services/gitHygiene.ts");
+            await import("../src/services/gitHygiene/scheduler.ts");
 
         registerCacheRefreshScheduledJobs();
         registerGitHygieneScheduledJobs();
