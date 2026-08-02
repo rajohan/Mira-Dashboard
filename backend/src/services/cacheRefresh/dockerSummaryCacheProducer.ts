@@ -1,12 +1,10 @@
+import { writeCacheSuccess } from "../cacheEntryWriter.ts";
+import { getContainers, getImages, getVolumes } from "../docker/inventory.ts";
 import {
-    getContainers,
     getDockerUpdaterEvents,
     getDockerUpdaterServices,
     getDockerUpdaterSummary,
-    getImages,
-    getVolumes,
-} from "../../routes/dockerRoutes.ts";
-import { writeCacheSuccess } from "../cacheEntryWriter.ts";
+} from "../docker/updaterProjection.ts";
 import { nowIso } from "./cacheProducerSupport.ts";
 
 export const DOCKER_SUMMARY_KEY = "docker.summary";
