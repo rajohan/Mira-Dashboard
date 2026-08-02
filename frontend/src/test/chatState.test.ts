@@ -1333,6 +1333,173 @@ describe("chat runtime state", () => {
         expect(state.sessions[SESSION]?.runs["runtime-runless-48"]).toBeUndefined();
     });
 
+    it("does not finish the parent chat run when lifecycle only settles adjacent auto-compaction", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(24, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "exec" }],
+                },
+                runId: "chat-run",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:compact-operation",
+                text: "Compacting context",
+            }),
+            event(48, {
+                kind: "finish",
+                outcome: "completed",
+                runId: "chat-run",
+                settlesCompactionRunId: "compaction:chat-run",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({ key: "thinking:primary" }),
+                expect.objectContaining({ key: "tool:call-1" }),
+            ]),
+            phase: "active",
+        });
+        expect(
+            state.sessions[SESSION]?.runs["compaction:compact-operation"]
+        ).toMatchObject({ operationPhase: "complete", phase: "completed" });
+    });
+
+    it("does not finish the sole active parent from an unscoped compaction lifecycle", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:compact-operation",
+            }),
+            event(48, {
+                kind: "finish",
+                outcome: "completed",
+                settlesCompactionRunId: `compaction:${SESSION}`,
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            phase: "active",
+        });
+        expect(
+            state.sessions[SESSION]?.runs["compaction:compact-operation"]
+        ).toMatchObject({ operationPhase: "complete", phase: "completed" });
+    });
+
+    it("keeps the parent active after an already-complete nested lifecycle until its terminal event", () => {
+        let state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:chat-run",
+            }),
+            event(48, {
+                kind: "finish",
+                outcome: "completed",
+                runId: "chat-run",
+                settlesCompactionRunId: "compaction:chat-run",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            phase: "active",
+        });
+
+        state = reduceChatRuntime(state, [
+            event(64, {
+                kind: "finish",
+                outcome: "completed",
+                runId: "chat-run",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            phase: "completed",
+        });
+    });
+
+    it("applies a failed adjacent compaction lifecycle to the parent run", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "retrying",
+                runId: "compaction:compact-operation",
+                text: "Compacting context",
+            }),
+            event(48, {
+                error: "Compaction failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "chat-run",
+                settlesCompactionRunId: "compaction:chat-run",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            error: "Compaction failed",
+            phase: "error",
+        });
+        expect(
+            state.sessions[SESSION]?.runs["compaction:compact-operation"]
+        ).toMatchObject({
+            error: "Compaction failed",
+            operationPhase: "inactive",
+            phase: "error",
+        });
+    });
+
     it("keeps runless work with its user echo when the provider id arrives", () => {
         const state = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

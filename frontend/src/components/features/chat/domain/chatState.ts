@@ -18,7 +18,11 @@ import {
     mergeChatImages,
     mergeChatMessageProvenance,
 } from "../chatTypes";
-import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
+import {
+    messageDeleteKey,
+    stableChatStringify,
+    stripEquivalentChatTextPrefix,
+} from "../chatUtilities";
 
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";
@@ -29,6 +33,7 @@ const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
 export const MAX_CHAT_RUNTIME_DIAGNOSTICS_PER_RUN = 200;
 export const MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN = 100;
 export const MAX_CHAT_RUNTIME_CONTROLS_PER_SESSION = 100;
+const MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN = 100;
 
 export interface ChatRuntimeMessageEntry {
     key: string;
@@ -39,7 +44,10 @@ export interface ChatRuntimeMessageEntry {
 /** Canonical runtime state for one session-scoped run. */
 export interface ChatRunState {
     aliases: string[];
+    assistantBoundarySequence?: number;
     assistant?: ChatHistoryMessage;
+    assistantSegments?: ChatRuntimeMessageEntry[];
+    assistantSequence?: number;
     assistantSource?: ChatTextSource;
     commentary: ChatRuntimeMessageEntry[];
     diagnostics: ChatRuntimeMessageEntry[];
@@ -309,6 +317,7 @@ function emptyRun(
 ): ChatRunState {
     return {
         aliases: [runId],
+        assistantSegments: [],
         commentary: [],
         diagnostics: [],
         lastSequence: sequence,
@@ -567,6 +576,113 @@ function isCompatibleSessionEcho(
     return nonTextDetailsSignature(previous) === nonTextDetailsSignature(incoming);
 }
 
+function assistantTextContribution(
+    previousText: string,
+    nextText: string,
+    incomingText: string,
+    mode: Extract<ChatRuntimeEvent, { kind: "assistant" }>["mode"],
+    canUseText: boolean,
+    isCompletedSessionEcho: boolean
+): string {
+    if (!canUseText || isCompletedSessionEcho) {
+        return "";
+    }
+    if (mode === "replace") {
+        return incomingText;
+    }
+    return nextText.startsWith(previousText)
+        ? nextText.slice(previousText.length)
+        : incomingText;
+}
+
+function assistantSegmentMessage(
+    incoming: ChatHistoryMessage,
+    text: string
+): ChatHistoryMessage {
+    return {
+        ...incoming,
+        content: text,
+        text,
+        toolCalls: undefined,
+        toolResult: undefined,
+    };
+}
+
+function hasAssistantSegmentContent(message: ChatHistoryMessage): boolean {
+    return Boolean(message.text || message.images?.length || message.attachments?.length);
+}
+
+function latestAssistantBoundarySequence(run: ChatRunState): number {
+    return Math.max(
+        -1,
+        run.assistantBoundarySequence ?? -1,
+        ...run.commentary.map((entry) => entry.sequence),
+        ...run.diagnostics.map((entry) => entry.sequence),
+        ...run.userMessages.map((entry) => entry.sequence)
+    );
+}
+
+function applyAssistantSegment(
+    run: ChatRunState,
+    event: Extract<ChatRuntimeEvent, { kind: "assistant" }>,
+    incoming: ChatHistoryMessage,
+    previousText: string,
+    nextText: string,
+    canUseText: boolean,
+    isCompletedSessionEcho: boolean
+): ChatRuntimeMessageEntry[] | undefined {
+    const previousSegments = run.assistantSegments || [];
+    let contribution = assistantTextContribution(
+        previousText,
+        nextText,
+        incoming.text,
+        event.mode,
+        canUseText,
+        isCompletedSessionEcho
+    );
+    const startsNewSegment =
+        previousSegments.length === 0 ||
+        run.lastContentKind !== "assistant" ||
+        (run.assistantBoundarySequence ?? -1) > (run.assistantSequence ?? -1);
+    const previousSegment = startsNewSegment ? undefined : previousSegments.at(-1);
+    if (event.mode === "replace") {
+        const sealedText = (
+            startsNewSegment ? previousSegments : previousSegments.slice(0, -1)
+        )
+            .map((entry) => entry.message.text)
+            .join("");
+        if (sealedText) {
+            contribution =
+                stripEquivalentChatTextPrefix(contribution, sealedText) ?? contribution;
+        }
+    }
+    let segmentText = contribution;
+    if (previousSegment) {
+        if (event.mode === "replace") {
+            segmentText = contribution;
+        } else if (event.mode === "append") {
+            segmentText = `${previousSegment.message.text}${contribution}`;
+        } else {
+            segmentText = mergeChatStreamText(previousSegment.message.text, contribution);
+        }
+    }
+    const segmentIncoming = assistantSegmentMessage(incoming, segmentText);
+    if (!hasAssistantSegmentContent(segmentIncoming)) {
+        return run.assistantSegments;
+    }
+    const segment: ChatRuntimeMessageEntry = {
+        key: previousSegment?.key || `assistant:${event.sequence}`,
+        message: previousSegment
+            ? mergeMessageDetails(previousSegment.message, segmentIncoming, segmentText)
+            : segmentIncoming,
+        sequence: previousSegment?.sequence ?? event.sequence,
+    };
+    const segments = previousSegment
+        ? [...previousSegments.slice(0, -1), segment]
+        : [...previousSegments, segment];
+    return segments.slice(-MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN);
+}
+
 function applyAssistantEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "assistant" }>
@@ -604,6 +720,15 @@ function applyAssistantEvent(
         isCompletedSessionEcho
     );
     const assistant = mergeMessageDetails(run.assistant, incoming, text);
+    const assistantSegments = applyAssistantSegment(
+        run,
+        event,
+        incoming,
+        previousText,
+        text,
+        canUseText,
+        isCompletedSessionEcho
+    );
     let assistantSource = run.assistantSource;
     if (incoming.text) {
         assistantSource =
@@ -621,6 +746,8 @@ function applyAssistantEvent(
                       toolResult: incoming.toolResult,
                   }
                 : assistant,
+        assistantSegments,
+        assistantSequence: event.sequence,
         assistantSource,
     };
 }
@@ -868,6 +995,7 @@ function applyDiagnosticEvent(
     const key = event.kind === "tool" ? event.toolKey : "thinking:primary";
     return {
         ...run,
+        assistantBoundarySequence: event.sequence,
         diagnostics: mergeDiagnosticEntry(
             run.diagnostics,
             key,
@@ -896,6 +1024,7 @@ function applyUserEvent(
     }
     return {
         ...run,
+        assistantBoundarySequence: event.sequence,
         userMessages: [
             ...run.userMessages,
             {
@@ -976,6 +1105,7 @@ function applyCommentaryEvent(
     }
     return {
         ...run,
+        assistantBoundarySequence: event.sequence,
         commentary:
             commentary.length <= MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN
                 ? commentary
@@ -1056,6 +1186,44 @@ function mergeRunCommentary(
         .slice(-MAX_CHAT_RUNTIME_COMMENTARY_PER_RUN);
 }
 
+function mergeRunAssistantSegments(
+    older: ChatRunState,
+    newer: ChatRunState
+): ChatRuntimeMessageEntry[] | undefined {
+    const entries = new Map<string, ChatRuntimeMessageEntry>();
+    for (const entry of [
+        ...(older.assistantSegments || []),
+        ...(newer.assistantSegments || []),
+    ]) {
+        const previous = entries.get(entry.key);
+        entries.set(
+            entry.key,
+            previous
+                ? {
+                      key: previous.key,
+                      message: mergeMessageDetails(
+                          previous.message,
+                          entry.message,
+                          entry.message.text || previous.message.text
+                      ),
+                      sequence: Math.min(previous.sequence, entry.sequence),
+                  }
+                : entry
+        );
+    }
+    if (entries.size === 0) {
+        return undefined;
+    }
+    return entries
+        .values()
+        .toArray()
+        .toSorted(
+            (left, right) =>
+                left.sequence - right.sequence || left.key.localeCompare(right.key)
+        )
+        .slice(-MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN);
+}
+
 function mergeAcknowledgedRuns(
     existing: ChatRunState,
     optimistic: ChatRunState,
@@ -1072,6 +1240,14 @@ function mergeAcknowledgedRuns(
                   mergeChatStreamText(older.assistant.text, newer.assistant.text)
               )
             : newer.assistant || older.assistant;
+    const assistantSequence = Math.max(
+        existing.assistantSequence ?? -1,
+        optimistic.assistantSequence ?? -1
+    );
+    const assistantBoundarySequence = Math.max(
+        latestAssistantBoundarySequence(existing),
+        latestAssistantBoundarySequence(optimistic)
+    );
     const startedAt = (
         Date.parse(existing.startedAt) <= Date.parse(optimistic.startedAt)
             ? existing
@@ -1111,6 +1287,10 @@ function mergeAcknowledgedRuns(
             providerRunId,
         ]),
         assistant,
+        assistantBoundarySequence:
+            assistantBoundarySequence === -1 ? undefined : assistantBoundarySequence,
+        assistantSegments: mergeRunAssistantSegments(older, newer),
+        assistantSequence: assistantSequence === -1 ? undefined : assistantSequence,
         assistantSource: newer.assistantSource || older.assistantSource,
         commentary: mergeRunCommentary(older, newer),
         diagnostics: mergeRunDiagnostics(older, newer),
@@ -1182,6 +1362,8 @@ function applyFinishEvent(
     if (isPendingCompaction) {
         operationPhase = event.outcome === "completed" ? "complete" : "inactive";
     }
+    const shouldFinalizeAssistantSegment =
+        !event.message || withMessage.assistantSegments !== run.assistantSegments;
     return {
         ...withMessage,
         assistant: withMessage.assistant
@@ -1190,6 +1372,19 @@ function applyFinishEvent(
                   isFinal: event.outcome === "completed",
               }
             : undefined,
+        assistantSegments: shouldFinalizeAssistantSegment
+            ? withMessage.assistantSegments?.map((entry, index, entries) =>
+                  index === entries.length - 1
+                      ? {
+                            ...entry,
+                            message: {
+                                ...entry.message,
+                                isFinal: event.outcome === "completed" || undefined,
+                            },
+                        }
+                      : entry
+              )
+            : withMessage.assistantSegments,
         error,
         operationPhase,
         operationUpdatedAt: isPendingCompaction
@@ -1203,30 +1398,87 @@ function applyFinishEvent(
     };
 }
 
-function settleRetryingCompactionRun(
+function adjacentCompactionRunEntry(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
-): void {
-    if (event.kind !== "finish" || !event.settlesCompactionRunId) {
-        return;
+): [string, ChatRunState] | undefined {
+    if (event.kind !== "finish" || event.message || !event.settlesCompactionRunId) {
+        return undefined;
     }
-    const runKey = matchingRunKey(session, event.settlesCompactionRunId);
-    const run = runKey ? session.runs[runKey] : undefined;
-    if (!runKey || run?.operation !== "compact" || run.operationPhase !== "retrying") {
-        return;
+    const exactRunKey = matchingRunKey(session, event.settlesCompactionRunId);
+    const exactRun = exactRunKey ? session.runs[exactRunKey] : undefined;
+    if (
+        exactRunKey &&
+        exactRun?.operation === "compact" &&
+        exactRun.lastSequence === session.lastSequence
+    ) {
+        return [exactRunKey, exactRun];
     }
-    session.runs[runKey] = {
-        ...run,
-        error: event.error,
-        lastSequence: event.sequence,
-        operationPhase: event.outcome === "completed" ? "complete" : "inactive",
-        operationUpdatedAt: event.timestamp,
-        phase: event.outcome,
-        statusText: undefined,
-        terminalAt: event.timestamp,
-        terminalSequence: event.sequence,
-        updatedAt: event.timestamp,
-    };
+    const parentRunKey = event.runId ? matchingRunKey(session, event.runId) : undefined;
+    const parentRun = parentRunKey ? session.runs[parentRunKey] : undefined;
+    let activeParentRuns: ChatRunState[];
+    if (event.runId) {
+        activeParentRuns =
+            parentRun && parentRun.operation !== "compact" && parentRun.phase === "active"
+                ? [parentRun]
+                : [];
+    } else {
+        activeParentRuns = Object.values(session.runs).filter(
+            (run) => run.operation !== "compact" && run.phase === "active"
+        );
+    }
+    if (activeParentRuns.length !== 1) {
+        return undefined;
+    }
+    const adjacentCompactionRuns = Object.entries(session.runs).filter(
+        ([, run]) =>
+            run.operation === "compact" && run.lastSequence === session.lastSequence
+    );
+    return adjacentCompactionRuns.length === 1 ? adjacentCompactionRuns[0] : undefined;
+}
+
+/**
+ * Consumes a successful nested lifecycle so it cannot terminalize the parent run.
+ * Failed lifecycles update the compaction row but continue into the parent reducer.
+ * @returns Whether the nested lifecycle event was consumed.
+ */
+function consumeAdjacentCompactionLifecycle(
+    session: ChatSessionRuntimeState,
+    event: ChatRuntimeEvent
+): boolean {
+    const compactionEntry = adjacentCompactionRunEntry(session, event);
+    if (!compactionEntry || event.kind !== "finish") {
+        return false;
+    }
+    const [runKey, run] = compactionEntry;
+    if (run.operationPhase === "active" || run.operationPhase === "retrying") {
+        session.runs[runKey] = {
+            ...run,
+            error: event.error,
+            lastSequence: event.sequence,
+            operationPhase: event.outcome === "completed" ? "complete" : "inactive",
+            operationUpdatedAt: event.timestamp,
+            phase: event.outcome,
+            statusText: undefined,
+            terminalAt: event.timestamp,
+            terminalSequence: event.sequence,
+            updatedAt: event.timestamp,
+        };
+    }
+    return event.outcome === "completed";
+}
+
+function commitChatSession(
+    state: ChatRuntimeState,
+    previousSessionKey: string | undefined,
+    session: ChatSessionRuntimeState
+): ChatRuntimeState {
+    const sessions = { ...state.sessions };
+    if (previousSessionKey && previousSessionKey !== session.sessionKey) {
+        delete sessions[previousSessionKey];
+    }
+    sessions[session.sessionKey] = session;
+    return { ...state, sessions };
 }
 
 /**
@@ -1278,6 +1530,7 @@ export function reduceChatRuntime(
                           key,
                           {
                               ...run,
+                              assistantSegments: [...(run.assistantSegments || [])],
                               commentary: [...run.commentary],
                               diagnostics: [...run.diagnostics],
                               sessionKey,
@@ -1287,31 +1540,25 @@ export function reduceChatRuntime(
                   ),
               }
             : { controls: [], lastSequence: -1, runs: {}, sessionKey };
-        settleRetryingCompactionRun(session, normalizedEvent);
+        const consumedAdjacentCompaction = consumeAdjacentCompactionLifecycle(
+            session,
+            normalizedEvent
+        );
+        if (consumedAdjacentCompaction) {
+            session.lastSequence = normalizedEvent.sequence;
+            nextState = commitChatSession(nextState, previousSessionKey, session);
+            continue;
+        }
         if (normalizedEvent.kind === "control") {
             session.controls = applyControlEvent(session.controls, normalizedEvent);
             session.lastSequence = normalizedEvent.sequence;
-            const sessions = { ...nextState.sessions };
-            if (previousSessionKey && previousSessionKey !== sessionKey) {
-                delete sessions[previousSessionKey];
-            }
-            nextState = {
-                ...nextState,
-                sessions: { ...sessions, [sessionKey]: session },
-            };
+            nextState = commitChatSession(nextState, previousSessionKey, session);
             continue;
         }
         const resolved = resolveRun(session, normalizedEvent);
         session.lastSequence = normalizedEvent.sequence;
-        const sessions = { ...nextState.sessions };
-        if (previousSessionKey && previousSessionKey !== sessionKey) {
-            delete sessions[previousSessionKey];
-        }
         if (!resolved) {
-            nextState = {
-                ...nextState,
-                sessions: { ...sessions, [sessionKey]: session },
-            };
+            nextState = commitChatSession(nextState, previousSessionKey, session);
             continue;
         }
 
@@ -1328,10 +1575,7 @@ export function reduceChatRuntime(
             lastSequence: normalizedEvent.sequence,
             updatedAt: normalizedEvent.timestamp,
         };
-        nextState = {
-            ...nextState,
-            sessions: { ...sessions, [sessionKey]: session },
-        };
+        nextState = commitChatSession(nextState, previousSessionKey, session);
     }
     return nextState;
 }
@@ -1421,6 +1665,7 @@ export function addOptimisticChatRun(
                       key,
                       {
                           ...run,
+                          assistantSegments: [...(run.assistantSegments || [])],
                           commentary: [...run.commentary],
                           diagnostics: [...run.diagnostics],
                           sessionKey: canonicalSessionKey,

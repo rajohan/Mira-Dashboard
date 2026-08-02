@@ -187,12 +187,28 @@ const gatewayMetricsState: Omit<GatewayMetrics, "connected" | "pendingRequests">
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
+
+function createChatReplayBridge(
+    store?: SqliteOpenClawChatSnapshotStore,
+    gatewayConnected = gatewayState.isConnected
+) {
+    const bridge = new OpenClawChatBridge(store, {
+        gatewayConnected,
+        onDeferredEnvelope: (envelope) => {
+            if (chatReplayState.bridge === bridge) {
+                broadcast(envelope);
+            }
+        },
+    });
+    return bridge;
+}
+
 const chatReplayState: {
     bridge: OpenClawChatBridge;
     generation: string;
     scope: string | undefined;
 } = {
-    bridge: new OpenClawChatBridge(),
+    bridge: createChatReplayBridge(),
     generation: Bun.randomUUIDv7(),
     scope: undefined,
 };
@@ -232,12 +248,14 @@ function didSelectChatReplayScope(endpoint: string, token: string): boolean {
         chatReplayState.bridge.hydratePersistedSessions();
         return true;
     }
-    if (!chatReplayState.bridge.flush()) {
+    if (!chatReplayState.bridge.clearMemory()) {
         return false;
     }
-    chatReplayState.bridge = new OpenClawChatBridge(
-        new SqliteOpenClawChatSnapshotStore(gatewayScope)
+    const bridge = createChatReplayBridge(
+        new SqliteOpenClawChatSnapshotStore(gatewayScope),
+        false
     );
+    chatReplayState.bridge = bridge;
     chatReplayState.scope = gatewayScope;
     chatReplayState.generation = Bun.randomUUIDv7();
     chatReplayState.bridge.hydratePersistedSessions();
@@ -1056,6 +1074,7 @@ function init(token: string): void {
         gatewayMetricsState.connections += 1;
         gatewayMetricsState.lastConnectedAt = new Date().toISOString();
         gatewayState.isConnected = true;
+        thisReplayBridge.markGatewayConnected();
         logger.info("gateway.connected", {
             connections: gatewayMetricsState.connections,
             reconnects: gatewayMetricsState.reconnects,
@@ -1719,24 +1738,6 @@ async function sendSessionMessage(sessionKey: string, message: string): Promise<
 }
 
 /**
- * Appends a durable control notice without creating a human chat turn, then wakes the
- * owning agent through OpenClaw's system-event lane.
- * @param sessionKey Session key value.
- * @param message Control notice to display and deliver.
- */
-async function sendSessionControlEvent(
-    sessionKey: string,
-    message: string
-): Promise<void> {
-    await sendRequestAsync("chat.inject", { message, sessionKey }, { timeoutMs: 10_000 });
-    await sendRequestAsync(
-        "wake",
-        { mode: "now", sessionKey, text: message },
-        { timeoutMs: 10_000 }
-    );
-}
-
-/**
  * Performs abort session run.
  * @param sessionKey Session key value.
  */
@@ -1783,6 +1784,9 @@ async function request(
 function shutdown(): void {
     const previousGatewayClient = gatewayState.client;
     const wasConnected = gatewayState.isConnected;
+    if (wasConnected) {
+        chatReplayState.bridge.markGatewayDisconnected();
+    }
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -1818,7 +1822,6 @@ export default {
     getMetrics,
     getChatMetrics,
     getGatewayWs,
-    sendSessionControlEvent,
     sendSessionMessage,
     abortSessionRun,
     deleteSession,

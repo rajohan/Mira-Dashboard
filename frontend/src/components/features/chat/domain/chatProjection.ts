@@ -11,6 +11,7 @@ import {
     mergeChatMessageDetails,
     messageIdentity,
     messageMediaIdentity,
+    stripEquivalentChatTextPrefix,
 } from "../chatUtilities";
 import {
     hasPrimaryAnswerContent,
@@ -45,6 +46,7 @@ import {
 } from "./chatProjectionIdentity";
 import type {
     ChatRunState,
+    ChatRuntimeMessageEntry,
     ChatRuntimeState,
     ChatSessionRuntimeState,
 } from "./chatState";
@@ -61,6 +63,55 @@ export interface ChatCompactionStatus {
     phase: "active" | "complete";
     text: string;
     timestamp: string;
+}
+
+function runtimeAssistantEntries(run: ChatRunState): ChatRuntimeMessageEntry[] {
+    if (run.assistantSegments?.length) {
+        return run.assistantSegments;
+    }
+    return run.assistant
+        ? [
+              {
+                  key: "assistant",
+                  message: run.assistant,
+                  sequence:
+                      run.phase === "active"
+                          ? (run.assistantSequence ??
+                            run.lastContentSequence ??
+                            run.lastSequence)
+                          : (run.terminalSequence ??
+                            run.lastContentSequence ??
+                            run.assistantSequence ??
+                            run.lastSequence),
+              },
+          ]
+        : [];
+}
+
+function canonicalRuntimeAssistant(run: ChatRunState): ChatHistoryMessage | undefined {
+    return run.assistant ?? runtimeAssistantEntries(run).at(-1)?.message;
+}
+
+function canonicalAssistantDisplay(
+    canonical: ChatHistoryMessage,
+    assistantEntries: ChatRuntimeMessageEntry[]
+): ChatHistoryMessage {
+    const sealedText = assistantEntries
+        .slice(0, -1)
+        .map((entry) => entry.message.text)
+        .join("");
+    if (!sealedText) {
+        return canonical;
+    }
+    const trailingText = stripEquivalentChatTextPrefix(canonical.text, sealedText);
+    if (trailingText === undefined) {
+        return canonical;
+    }
+    return {
+        ...canonical,
+        content: typeof canonical.content === "string" ? trailingText : canonical.content,
+        text: trailingText,
+    };
 }
 
 function projectedMessageDisplay(message: ChatHistoryMessage): ChatHistoryMessage {
@@ -238,7 +289,7 @@ function runFinalAnchorIndex(
         }
     }
 
-    const assistantText = run.assistant?.text;
+    const assistantText = canonicalRuntimeAssistant(run)?.text;
     const terminalTimestamp = Date.parse(run.terminalAt ?? run.updatedAt);
     if (!assistantText || Number.isNaN(terminalTimestamp)) {
         return -1;
@@ -391,7 +442,7 @@ function canonicalFinalIndex(
     segment: ResponseSegment,
     exactToolIndex: ExactToolMessageIndex
 ): number {
-    const assistantText = run.assistant?.text || "";
+    const assistantText = canonicalRuntimeAssistant(run)?.text || "";
     const hasOverlappingUserTurn = hasUnansweredUserBeforeSegment(messages, segment);
     const anchoredFinalIndex = runFinalAnchorIndex(messages, run, exactToolIndex);
     for (let index = segment.end - 1; index >= segment.start; index -= 1) {
@@ -491,11 +542,12 @@ function hasUnambiguousFinalEvidence(
     if (runFinalAnchorIndex(messages, run, exactToolIndex) === finalIndex) {
         return true;
     }
-    if (!run.assistant || !hasPrimaryAnswerContent(run.assistant)) {
+    const runtimeAssistant = canonicalRuntimeAssistant(run);
+    if (!runtimeAssistant || !hasPrimaryAnswerContent(runtimeAssistant)) {
         return false;
     }
-    const assistantText = run.assistant.text;
-    const assistantMediaIdentity = messageMediaIdentity(run.assistant);
+    const assistantText = runtimeAssistant.text;
+    const assistantMediaIdentity = messageMediaIdentity(runtimeAssistant);
     if (!assistantText && !assistantMediaIdentity) {
         return false;
     }
@@ -567,10 +619,8 @@ function transientMessage(
     };
 }
 
-function assistantRuntimeSequence(run: ChatRunState): number | undefined {
-    return run.phase === "active"
-        ? run.lastContentSequence
-        : (run.terminalSequence ?? run.lastContentSequence);
+function canonicalFinalRuntimeSequence(run: ChatRunState): number | undefined {
+    return run.terminalSequence ?? run.lastContentSequence ?? run.assistantSequence;
 }
 
 function scopeTranscriptUsersToRuns(
@@ -858,26 +908,48 @@ function orderRuntimeMessages(
         const transcriptUsers = runtimeSlots
             .filter((slot) => slot !== promptSlot && slot.sequence === undefined)
             .toSorted((left, right) => left.index - right.index);
-        const finalSlots = sequencedActivity.filter((slot) =>
-            isFinalRunMessage(slot.message, run)
+        let lastNonFinalSlot: IndexedChatMessage | undefined;
+        for (const slot of sequencedActivity) {
+            if (isFinalRunMessage(slot.message, run)) {
+                continue;
+            }
+            if (
+                !lastNonFinalSlot ||
+                slot.sequence! > lastNonFinalSlot.sequence! ||
+                (slot.sequence === lastNonFinalSlot.sequence &&
+                    slot.index > lastNonFinalSlot.index)
+            ) {
+                lastNonFinalSlot = slot;
+            }
+        }
+        const trailingAssistantSlots = new Set(
+            sequencedActivity.filter(
+                (slot) =>
+                    isAssistantTextStream(slot.message) &&
+                    (!lastNonFinalSlot ||
+                        slot.sequence! > lastNonFinalSlot.sequence! ||
+                        (slot.sequence === lastNonFinalSlot.sequence &&
+                            slot.index >= lastNonFinalSlot.index))
+            )
         );
-        const thinkingSlots = sequencedActivity.filter(
+        const answerSlots = sequencedActivity.filter(
             (slot) =>
-                !isFinalRunMessage(slot.message, run) &&
-                isThinkingOnlyRunMessage(slot.message)
+                isFinalRunMessage(slot.message, run) || trailingAssistantSlots.has(slot)
+        );
+        const answerSlotSet = new Set(answerSlots);
+        const thinkingSlots = sequencedActivity.filter(
+            (slot) => !answerSlotSet.has(slot) && isThinkingOnlyRunMessage(slot.message)
         );
         const activitySlots = sequencedActivity.filter(
-            (slot) =>
-                !isFinalRunMessage(slot.message, run) &&
-                !isThinkingOnlyRunMessage(slot.message)
+            (slot) => !answerSlotSet.has(slot) && !isThinkingOnlyRunMessage(slot.message)
         );
         const orderedActivity = insertUsersByTimestamp(activitySlots, transcriptUsers);
         const targetIndexes = runtimeSlots
             .map((slot) => slot.index)
             .toSorted((left, right) => left - right);
         const ordered = promptSlot
-            ? [promptSlot, ...orderedActivity, ...thinkingSlots, ...finalSlots]
-            : [...orderedActivity, ...thinkingSlots, ...finalSlots];
+            ? [promptSlot, ...orderedActivity, ...thinkingSlots, ...answerSlots]
+            : [...orderedActivity, ...thinkingSlots, ...answerSlots];
         for (const [slotIndex, index] of targetIndexes.entries()) {
             next[index] = ordered[slotIndex]!.message;
         }
@@ -1075,6 +1147,10 @@ export function reconcileChatMessages(
     const messages = scopeTranscriptDiagnosticsToRuns(historyWithScopedUsers, runs);
     for (const run of runs) {
         const commentaries = transientCommentaryMessages(run);
+        const assistantEntries = runtimeAssistantEntries(run);
+        const assistantMessages = assistantEntries.map((entry) =>
+            transientMessage(entry.message, run, entry.key, entry.sequence)
+        );
         for (const [index, message] of messages.entries()) {
             const shouldUseCanonicalRunId =
                 (isUserMessage(message) || isStandaloneDiagnostic(message)) &&
@@ -1134,36 +1210,38 @@ export function reconcileChatMessages(
         if (finalIndex !== -1) {
             scopeCanonicalResponse(messages, run, segment, finalIndex, exactToolIndex);
             const canonical = messages[finalIndex]!;
-            if (run.assistant) {
+            const canonicalDisplay = canonicalAssistantDisplay(
+                canonical,
+                assistantEntries
+            );
+            const runtimeSequence = canonicalFinalRuntimeSequence(run);
+            const latestAssistant = assistantEntries.at(-1)?.message;
+            if (latestAssistant) {
                 messages[finalIndex] = {
                     ...mergeChatMessageDetails(
-                        canonical,
+                        canonicalDisplay,
                         transientMessage(
-                            run.assistant,
+                            latestAssistant,
                             run,
-                            "assistant",
-                            assistantRuntimeSequence(run)
+                            assistantEntries.at(-1)!.key,
+                            runtimeSequence
                         )
                     ),
                     isFinal: canonical.isFinal || run.phase === "completed" || undefined,
-                    runtimeSequence: assistantRuntimeSequence(run),
+                    runtimeSequence,
                 };
             }
-            messages.splice(finalIndex, 0, ...diagnostics, ...commentaries);
+            messages.splice(
+                finalIndex,
+                0,
+                ...diagnostics,
+                ...commentaries,
+                ...assistantMessages.slice(0, -1)
+            );
             continue;
         }
 
-        const additions = [...diagnostics, ...commentaries];
-        if (run.assistant) {
-            additions.push(
-                transientMessage(
-                    run.assistant,
-                    run,
-                    "assistant",
-                    assistantRuntimeSequence(run)
-                )
-            );
-        }
+        const additions = [...diagnostics, ...commentaries, ...assistantMessages];
         messages.splice(segment.end, 0, ...additions);
     }
     const deduped = dedupeMessages(messages);

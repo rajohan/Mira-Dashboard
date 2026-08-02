@@ -25,6 +25,8 @@ export interface RetainedRun {
     firstSequence: number;
     interruptionEligible: boolean;
     interruptedAt?: number;
+    pendingCompactionSettlementAt?: number;
+    pendingCompactionSettlementSequence?: number;
     runId: string;
     terminalSequence: number;
     totalBytes: number;
