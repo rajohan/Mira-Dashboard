@@ -1,12 +1,12 @@
 import type { DeploymentJob } from "../../../../contracts/delivery.ts";
 import { ORPHANED_CUTOVER_READINESS_FAILURE_NOTE_PREFIX } from "../deploymentRuntimeResults.ts";
 import { getDashboardRoot } from "../pullRequests/config.ts";
+import { parseDeploymentCutoverContext } from "../pullRequests/deploymentCutoverContext.ts";
 import {
-    parseDeploymentCutoverContext,
     readDeploymentJob,
-    readDeploymentLockExecution,
     writeDeploymentJob,
-} from "../pullRequests/deploymentRepository.ts";
+} from "../pullRequests/deploymentJobRepository.ts";
+import { readDeploymentLockExecution } from "../pullRequests/deploymentLock.ts";
 import { buildCommandEnvironment } from "../pullRequests/githubCommandClient.ts";
 import { dateToISOString, FULL_COMMIT_SHA_PATTERN } from "../pullRequests/support.ts";
 import { type OrphanedDeploymentCutover } from "../scheduledJobs/deploymentCutoverReconciler.ts";

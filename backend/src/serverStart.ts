@@ -4,7 +4,7 @@ import { shouldStartScheduledJobs } from "./server/startPolicy.ts";
 import gateway from "./services/gateway/runtime.ts";
 import { resolveGatewayToken } from "./services/gateway/token.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
-import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests/deploymentRepository.ts";
+import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests/deploymentLock.ts";
 import { requireRunnableReleaseCommit } from "./services/releases/manifestPolicy.ts";
 import { getRuntimeReleaseIdentity } from "./services/releases/runtimeReleaseIdentity.ts";
 

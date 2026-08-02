@@ -22,7 +22,7 @@ import {
     acquireDeploymentLock,
     registerPullRequestJobLifecycleHandlers,
     releaseDeploymentLock,
-} from "./deploymentRepository.ts";
+} from "./deploymentLock.ts";
 import { registerDeploymentExecutionActions } from "./deploymentService.ts";
 import { validatePrNumber } from "./githubPullRequestListing.ts";
 import { createPullRequestStack } from "./githubStackClient.ts";

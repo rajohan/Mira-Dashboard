@@ -18,7 +18,7 @@ import {
     acquireDeploymentLock,
     refreshDeploymentLockOwner,
     releaseDeploymentLock,
-} from "./deploymentRepository.ts";
+} from "./deploymentLock.ts";
 import { startDeployLatest } from "./deploymentService.ts";
 import {
     parseRepoParts,

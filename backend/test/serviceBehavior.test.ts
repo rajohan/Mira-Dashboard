@@ -2516,7 +2516,7 @@ describe("backend service behavior", () => {
 
         try {
             const { readDeploymentJobs } =
-                await import("../src/services/pullRequests/deploymentRepository.ts");
+                await import("../src/services/pullRequests/deploymentJobRepository.ts");
             const jobs = readDeploymentJobs();
 
             expect(jobs.findIndex((job) => job.id === newerId)).toBeLessThan(
@@ -2572,7 +2572,7 @@ describe("backend service behavior", () => {
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
 
         const { getDashboardReleaseStatus, prepareAndStartRollback } = await Promise.all([
-            import("../src/services/pullRequests/deploymentRepository.ts"),
+            import("../src/services/pullRequests/releaseStatus.ts"),
             import("../src/services/pullRequests/deploymentService.ts"),
         ]).then(([module0, module1]) => ({
             getDashboardReleaseStatus: module0.getDashboardReleaseStatus,
@@ -2815,7 +2815,7 @@ describe("backend service behavior", () => {
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
 
         const { getDashboardReleaseStatus, prepareAndStartRollback } = await Promise.all([
-            import("../src/services/pullRequests/deploymentRepository.ts"),
+            import("../src/services/pullRequests/releaseStatus.ts"),
             import("../src/services/pullRequests/deploymentService.ts"),
         ]).then(([module0, module1]) => ({
             getDashboardReleaseStatus: module0.getDashboardReleaseStatus,

@@ -2137,7 +2137,7 @@ describe("Mira Dashboard backend integration", () => {
     it("maps deployment rows into recent pull request deployment summaries", async () => {
         const [{ database, sqlNullable }, { readDeploymentJobs }] = await Promise.all([
             import("../src/database/connection.ts"),
-            import("../src/services/pullRequests/deploymentRepository.ts"),
+            import("../src/services/pullRequests/deploymentJobRepository.ts"),
         ]);
         database.prepare("DELETE FROM deployment_jobs").run();
         database

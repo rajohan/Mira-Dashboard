@@ -28,10 +28,7 @@ import {
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
 } from "../services/pullRequestPreviews/service.ts";
-import {
-    getDashboardReleaseStatus,
-    readDeploymentJobs,
-} from "../services/pullRequests/deploymentRepository.ts";
+import { readDeploymentJobs } from "../services/pullRequests/deploymentJobRepository.ts";
 import {
     prepareAndStartDeployLatest,
     prepareAndStartRollback,
@@ -47,6 +44,7 @@ import {
     listDashboardPullRequests,
     validatePrNumber,
 } from "../services/pullRequests/githubPullRequestListing.ts";
+import { getDashboardReleaseStatus } from "../services/pullRequests/releaseStatus.ts";
 import { getProductionCheckoutStatus } from "../services/pullRequests/worktreeManager.ts";
 
 function routeError(error: unknown, fallback = "Pull request route failed"): Response {

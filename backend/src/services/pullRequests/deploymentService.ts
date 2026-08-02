@@ -21,17 +21,18 @@ import {
 import { registerDeploymentCutoverRecoveryHandler } from "../scheduledJobs/runtime.ts";
 import { getDashboardRoot, getDashboardWorktreeRoot } from "./config.ts";
 import {
-    acquireDeploymentLock,
     createDeploymentCutoverContext,
     type DeploymentCutoverContext,
-    readDeploymentJob,
+} from "./deploymentCutoverContext.ts";
+import { readDeploymentJob, writeDeploymentJob } from "./deploymentJobRepository.ts";
+import {
+    acquireDeploymentLock,
     refreshDeploymentHeartbeat,
     registerPullRequestJobLifecycleHandlers,
     releaseDeploymentLock,
-    rollbackIneligibilityReason,
-    writeDeploymentJob,
-} from "./deploymentRepository.ts";
+} from "./deploymentLock.ts";
 import { runCommand } from "./githubCommandClient.ts";
+import { rollbackIneligibilityReason } from "./releaseStatus.ts";
 import {
     dateToISOString,
     FULL_COMMIT_SHA_PATTERN,

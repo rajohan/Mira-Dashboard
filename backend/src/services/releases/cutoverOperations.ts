@@ -6,7 +6,7 @@ import {
     RELEASE_READINESS_FAILURE_NOTE_PREFIX,
     ROLLBACK_READINESS_FAILURE_NOTE_PREFIX,
 } from "../deploymentRuntimeResults.ts";
-import { type DeploymentCutoverContext } from "../pullRequests/deploymentRepository.ts";
+import { type DeploymentCutoverContext } from "../pullRequests/deploymentCutoverContext.ts";
 import { runCommand } from "../pullRequests/githubCommandClient.ts";
 import { dateToISOString, FULL_COMMIT_SHA_PATTERN } from "../pullRequests/support.ts";
 import {
