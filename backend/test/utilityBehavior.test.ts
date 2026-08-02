@@ -65,10 +65,8 @@ import {
     pullRequestPreviewCandidate,
 } from "../src/services/pullRequestPreviews/service.ts";
 import { getResolvedRoots } from "../src/services/pullRequests/config.ts";
-import {
-    parsePublicGithubPullRequests,
-    validatePrNumber,
-} from "../src/services/pullRequests/githubPullRequestListing.ts";
+import { parsePublicGithubPullRequests } from "../src/services/pullRequests/githubPublicPullRequestListing.ts";
+import { validatePrNumber } from "../src/services/pullRequests/githubPullRequestListing.ts";
 import { pullRequestPreviewScope } from "../src/services/pullRequests/reviewPolicy.ts";
 import { httpOrigin, httpUrl } from "./support/httpUrls.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
