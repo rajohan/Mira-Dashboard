@@ -244,7 +244,7 @@ function didSelectChatReplayScope(endpoint: string, token: string): boolean {
         chatReplayState.bridge.hydratePersistedSessions();
         return true;
     }
-    if (!chatReplayState.bridge.flush()) {
+    if (!chatReplayState.bridge.clearMemory()) {
         return false;
     }
     chatReplayState.bridge = createChatReplayBridge(

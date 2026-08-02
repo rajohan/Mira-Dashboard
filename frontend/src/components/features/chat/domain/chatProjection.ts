@@ -862,18 +862,28 @@ function orderRuntimeMessages(
         const transcriptUsers = runtimeSlots
             .filter((slot) => slot !== promptSlot && slot.sequence === undefined)
             .toSorted((left, right) => left.index - right.index);
+        let lastNonFinalSlot: IndexedChatMessage | undefined;
+        for (const slot of sequencedActivity) {
+            if (isFinalRunMessage(slot.message, run)) {
+                continue;
+            }
+            if (
+                !lastNonFinalSlot ||
+                slot.sequence! > lastNonFinalSlot.sequence! ||
+                (slot.sequence === lastNonFinalSlot.sequence &&
+                    slot.index > lastNonFinalSlot.index)
+            ) {
+                lastNonFinalSlot = slot;
+            }
+        }
         const trailingAssistantSlots = new Set(
             sequencedActivity.filter(
                 (slot) =>
                     isAssistantTextStream(slot.message) &&
-                    !sequencedActivity.some(
-                        (candidate) =>
-                            candidate !== slot &&
-                            !isFinalRunMessage(candidate.message, run) &&
-                            (candidate.sequence! > slot.sequence! ||
-                                (candidate.sequence === slot.sequence &&
-                                    candidate.index > slot.index))
-                    )
+                    (!lastNonFinalSlot ||
+                        slot.sequence! > lastNonFinalSlot.sequence! ||
+                        (slot.sequence === lastNonFinalSlot.sequence &&
+                            slot.index >= lastNonFinalSlot.index))
             )
         );
         const answerSlots = sequencedActivity.filter(

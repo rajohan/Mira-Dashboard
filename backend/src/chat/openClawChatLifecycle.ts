@@ -89,7 +89,16 @@ export function isSuccessfulLifecycleSettlementEvent(
     const record = runtimePayloadView(payload);
     const stream = (stringField(record, "stream") || "").toLowerCase();
     const phase = (stringField(record, "phase") || "").toLowerCase();
-    return event === "agent" && stream === "lifecycle" && phase === "end";
+    const status = (stringField(record, "status") || "").toLowerCase();
+    const explicitError =
+        stringField(record, "errorMessage") ||
+        stringField(record, "promptError") ||
+        stringField(record, "error");
+    const isFailed =
+        Boolean(explicitError) ||
+        record?.aborted === true ||
+        TERMINAL_FAILURE_STATES.has(status);
+    return event === "agent" && stream === "lifecycle" && phase === "end" && !isFailed;
 }
 
 /**

@@ -861,6 +861,8 @@ describe("gateway behavior", () => {
         );
         const socket = new FakeDashboardSocket();
         gateway.handleDashboardClient(socket);
+        const clearReplayMemory = jest.spyOn(OpenClawChatBridge.prototype, "clearMemory");
+        cleanupCallbacks.push(() => clearReplayMemory.mockRestore());
         const requestIdentity = async (
             id: string
         ): Promise<{ replayScope?: string; runtimeGeneration?: string } | undefined> => {
@@ -887,10 +889,13 @@ describe("gateway behavior", () => {
 
         gateway.init("token-one");
         const firstIdentity = await requestIdentity("generation-one");
+        const clearsAfterFirstScope = clearReplayMemory.mock.calls.length;
         gateway.init("token-two");
         const secondIdentity = await requestIdentity("generation-two");
+        expect(clearReplayMemory).toHaveBeenCalledTimes(clearsAfterFirstScope + 1);
         gateway.init("token-two");
         const unchangedIdentity = await requestIdentity("generation-unchanged");
+        expect(clearReplayMemory).toHaveBeenCalledTimes(clearsAfterFirstScope + 1);
 
         expect(firstIdentity).toMatchObject({
             replayScope: expect.any(String),

@@ -1258,7 +1258,7 @@ function settleAdjacentCompactionLifecycle(
         return false;
     }
     const [runKey, run] = compactionEntry;
-    if (run.operationPhase === "retrying") {
+    if (run.operationPhase === "active" || run.operationPhase === "retrying") {
         session.runs[runKey] = {
             ...run,
             error: event.error,

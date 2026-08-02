@@ -1364,12 +1364,6 @@ describe("chat runtime state", () => {
                 text: "Compacting context",
             }),
             event(48, {
-                kind: "status",
-                operation: "compact",
-                operationPhase: "complete",
-                runId: "compaction:compact-operation",
-            }),
-            event(64, {
                 kind: "finish",
                 outcome: "completed",
                 runId: "chat-run",

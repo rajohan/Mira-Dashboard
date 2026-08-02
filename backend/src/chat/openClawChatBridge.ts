@@ -88,6 +88,7 @@ interface OpenClawChatBridgeOptions {
 }
 
 const NESTED_COMPACTION_SETTLEMENT_GRACE_MS = 60_000;
+const DEFERRED_COMPACTION_SETTLEMENT_RETRY_MS = 1000;
 type UnrefableTimer = ReturnType<typeof setTimeout> & { unref?: () => void };
 
 /**
@@ -401,7 +402,52 @@ export class OpenClawChatBridge {
         }
     }
 
-    #scheduleDeferredCompactionSettlement(sessionKey: string, run: RetainedRun): void {
+    #clearDeferredCompactionSettlementOnContinuation(
+        sessionKey: string,
+        envelope: OpenClawRuntimeEnvelope,
+        shouldPersist: boolean
+    ): void {
+        if (
+            isTerminalEvent(envelope.event, envelope.payload) ||
+            !isConversationContinuationEvent(envelope.event, envelope.payload)
+        ) {
+            return;
+        }
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        const runs = this.#runsBySession.get(storageSessionKey);
+        if (!runs) {
+            return;
+        }
+        const explicitRunId = stringField(runtimePayloadView(envelope.payload), "runId");
+        const activeConversationRuns = runs
+            .values()
+            .filter((run) => !run.completed && !isCompactionOnlyRun(run))
+            .toArray();
+        let run = explicitRunId ? runs.get(explicitRunId) : undefined;
+        if (!explicitRunId && activeConversationRuns.length === 1) {
+            run = activeConversationRuns[0];
+        }
+        if (
+            !run ||
+            run.pendingCompactionSettlementSequence === undefined ||
+            envelope.runtimeSequence <= run.pendingCompactionSettlementSequence
+        ) {
+            return;
+        }
+        run.pendingCompactionSettlementAt = undefined;
+        run.pendingCompactionSettlementSequence = undefined;
+        run.updatedAt = Math.max(run.updatedAt, envelope.runtimeRecordedAt);
+        this.#clearDeferredCompactionTimer(storageSessionKey, run.runId);
+        if (shouldPersist) {
+            this.#persistence.queueSession(storageSessionKey);
+        }
+    }
+
+    #scheduleDeferredCompactionSettlement(
+        sessionKey: string,
+        run: RetainedRun,
+        minimumDelayMs = 0
+    ): void {
         const pendingAt = run.pendingCompactionSettlementAt;
         if (pendingAt === undefined || run.completed) {
             this.#clearDeferredCompactionTimer(sessionKey, run.runId);
@@ -411,7 +457,7 @@ export class OpenClawChatBridge {
         const key = this.#deferredCompactionTimerKey(storageSessionKey, run.runId);
         this.#clearDeferredCompactionTimer(storageSessionKey, run.runId);
         const delayMs = Math.max(
-            0,
+            minimumDelayMs,
             pendingAt + this.#nestedCompactionSettlementGraceMs - this.#now()
         );
         const timer = setTimeout(() => {
@@ -425,7 +471,11 @@ export class OpenClawChatBridge {
             }
             const pendingRun = this.#runsBySession.get(storageSessionKey)?.get(run.runId);
             if (pendingRun?.pendingCompactionSettlementAt !== undefined) {
-                this.#scheduleDeferredCompactionSettlement(storageSessionKey, pendingRun);
+                this.#scheduleDeferredCompactionSettlement(
+                    storageSessionKey,
+                    pendingRun,
+                    DEFERRED_COMPACTION_SETTLEMENT_RETRY_MS
+                );
             }
         }, delayMs);
         (timer as UnrefableTimer).unref?.();
@@ -442,7 +492,8 @@ export class OpenClawChatBridge {
             return false;
         }
         let didComplete = false;
-        for (const run of runs.values()) {
+        const runsSnapshot = runs.values().toArray();
+        for (const run of runsSnapshot) {
             const pendingAt = run.pendingCompactionSettlementAt;
             if (
                 run.completed ||
@@ -470,7 +521,11 @@ export class OpenClawChatBridge {
                     // The retained completion remains durable if a live subscriber fails.
                 }
             } catch {
-                this.#scheduleDeferredCompactionSettlement(storageSessionKey, run);
+                this.#scheduleDeferredCompactionSettlement(
+                    storageSessionKey,
+                    run,
+                    DEFERRED_COMPACTION_SETTLEMENT_RETRY_MS
+                );
             }
         }
         return didComplete;
@@ -1499,6 +1554,11 @@ export class OpenClawChatBridge {
 
         const explicitRunId = stringField(payloadView, "runId");
         const isTerminal = isTerminalEvent(envelope.event, envelope.payload);
+        this.#clearDeferredCompactionSettlementOnContinuation(
+            storageSessionKey,
+            envelope,
+            shouldPersist
+        );
         const associationBytes = explicitRunId
             ? Buffer.byteLength(
                   JSON.stringify({ runId: explicitRunId, sessionKey: storageSessionKey })
@@ -1707,17 +1767,6 @@ export class OpenClawChatBridge {
             previousEnvelope &&
             isCompactionEvent(previousEnvelope.event, previousEnvelope.payload)
         );
-        const resumesAfterNestedCompaction = Boolean(
-            snapshot.pendingCompactionSettlementSequence !== undefined &&
-            envelope.runtimeSequence > snapshot.pendingCompactionSettlementSequence &&
-            !isTerminal &&
-            isConversationContinuationEvent(envelope.event, envelope.payload)
-        );
-        if (resumesAfterNestedCompaction) {
-            snapshot.pendingCompactionSettlementAt = undefined;
-            snapshot.pendingCompactionSettlementSequence = undefined;
-            this.#clearDeferredCompactionTimer(storageSessionKey, snapshot.runId);
-        }
         snapshot.firstSequence = Math.min(
             snapshot.firstSequence,
             envelope.runtimeSequence
