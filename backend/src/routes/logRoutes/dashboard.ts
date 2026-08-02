@@ -28,6 +28,7 @@ const DASHBOARD_JOURNAL_UNITS = [
     "mira-dashboard.service",
     "mira-dashboard-worker.service",
 ] as const;
+const DASHBOARD_JOURNAL_PROCESS_MATCH = "_COMM=bun";
 
 interface JournalRecord {
     MESSAGE?: unknown;
@@ -91,6 +92,7 @@ export async function readDashboardJournal(
             "--lines",
             String(lines),
             ...DASHBOARD_JOURNAL_UNITS.flatMap((unit) => ["--unit", unit]),
+            DASHBOARD_JOURNAL_PROCESS_MATCH,
         ],
         {
             maxBuffer: DASHBOARD_LOG_MAX_BUFFER_BYTES,
