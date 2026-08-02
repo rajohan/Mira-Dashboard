@@ -568,6 +568,32 @@ describe("development stack", () => {
                     .get()
             ).toEqual({ value: "fresh" });
             refreshedSnapshot.close();
+
+            const staleSidecar = `${config.databasePath}-wal`;
+            writeFileSync(staleSidecar, "stale preview journal");
+            expect(
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+                    .database
+            ).toBe("snapshot-created");
+            expect(existsSync(staleSidecar)).toBe(false);
+
+            symlinkSync(sourceDatabase, staleSidecar);
+            expect(() =>
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+            ).toThrow("Development database sidecar must be a real regular file");
+            rmSync(staleSidecar);
+
+            rmSync(config.databasePath);
+            symlinkSync(sourceDatabase, config.databasePath);
+            expect(() =>
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+            ).toThrow("Development database must be a real regular file");
+            rmSync(config.databasePath);
+            expect(
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+                    .database
+            ).toBe("snapshot-created");
+
             rmSync(sourceDatabase);
             expect(prepareDevelopmentState(config)).toEqual({
                 database: "reused",

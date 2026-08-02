@@ -103,6 +103,7 @@ import { AppErrorFallback } from "../components/ui/AppErrorFallback";
 import { Badge } from "../components/ui/Badge";
 import { Checkbox } from "../components/ui/Checkbox";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
+import { CopyButton } from "../components/ui/CopyButton";
 import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { ProgressBar } from "../components/ui/ProgressBar";
@@ -329,6 +330,37 @@ describe("shared component helpers", () => {
             await waitFor(() => {
                 expect(writeText).toHaveBeenLastCalledWith("# Notes");
             });
+        } finally {
+            view.unmount();
+            if (originalClipboardDescriptor) {
+                Object.defineProperty(
+                    navigator,
+                    "clipboard",
+                    originalClipboardDescriptor
+                );
+            } else {
+                Reflect.deleteProperty(navigator, "clipboard");
+            }
+        }
+    });
+
+    it("reports when clipboard copying is unavailable", async () => {
+        const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+            navigator,
+            "clipboard"
+        );
+        const user = userEvent.setup();
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: undefined,
+        });
+        const view = render(<CopyButton content="notes" label="Copy notes" />);
+
+        try {
+            await user.click(screen.getByRole("button", { name: "Copy notes" }));
+            expect(
+                await screen.findByRole("button", { name: "Copy failed" })
+            ).toBeInTheDocument();
         } finally {
             view.unmount();
             if (originalClipboardDescriptor) {
