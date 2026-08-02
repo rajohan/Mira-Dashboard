@@ -537,6 +537,76 @@ describe("OpenClaw adapter variants", () => {
         ).toEqual(["Deploy er ferdig."]);
     });
 
+    it("preserves assistant delta whitespace before a history-only final", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = [
+            ...adapter.event(
+                envelope(
+                    "agent",
+                    {
+                        data: { delta: "# Deploy" },
+                        stream: "assistant",
+                    },
+                    34
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "agent",
+                    {
+                        data: { delta: "\n\n- Produksjon" },
+                        stream: "assistant",
+                    },
+                    35
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "agent",
+                    {
+                        data: { delta: " kjører stabilt." },
+                        stream: "assistant",
+                    },
+                    36
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "agent",
+                    {
+                        data: { phase: "end" },
+                        stream: "lifecycle",
+                    },
+                    37
+                )
+            ),
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), events);
+        const history = adapter.history([
+            { content: "status?", role: "user" },
+            {
+                content: "# Deploy\n\n- Produksjon kjører stabilt.",
+                role: "assistant",
+                stopReason: "stop",
+            },
+        ]);
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(runtime.sessions[SESSION]?.runs["run-variants"]?.assistant?.text).toBe(
+            "# Deploy\n\n- Produksjon kjører stabilt."
+        );
+        expect(
+            projection.rows.filter((row) => row.message.text.includes("Produksjon"))
+        ).toHaveLength(1);
+    });
+
     it("carries Synthetic tool-use media onto the live tool diagnostic", () => {
         const adapter = new OpenClawChatAdapter();
         const toolTurn = adapter.event(
