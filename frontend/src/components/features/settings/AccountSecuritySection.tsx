@@ -1,6 +1,4 @@
 import {
-    Copy,
-    Download,
     KeyRound,
     Laptop,
     LogOut,
@@ -10,279 +8,55 @@ import {
     Smartphone,
     Trash2,
 } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 
-import type { TotpEnrollment } from "../../../../../contracts/accountSecurity";
-import {
-    useAccountSecurity,
-    useChangePassword,
-    useConfirmTotpEnrollment,
-    useCreateTotpEnrollment,
-    useDisableMfa,
-    usePasswordReauthentication,
-    useRecoveryStepUp,
-    useRegisterSecurityKey,
-    useRemoveSecurityKey,
-    useRemoveTotpFactor,
-    useRevokeAllSessions,
-    useRevokeOtherSessions,
-    useRevokeSession,
-    useRotateRecoveryCodes,
-    useTotpStepUp,
-    useWebAuthnStepUp,
-} from "../../../hooks";
 import { messageFromError } from "../../../lib/errorMessage";
 import { formatDate } from "../../../utils/format";
 import { Alert } from "../../ui/Alert";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card, CardTitle } from "../../ui/Card";
-import { ConfirmModal } from "../../ui/ConfirmModal";
-import { Input } from "../../ui/Input";
 import { LoadingState } from "../../ui/LoadingState";
-import { Modal } from "../../ui/Modal";
-
-type VerificationMode = "mfa" | "password" | undefined;
-type PendingFactorRemoval =
-    | {
-          id: string;
-          label: string;
-          type: "security-key" | "totp";
-      }
-    | undefined;
-
-function downloadRecoveryCodes(codes: string[]): void {
-    const blob = new Blob(
-        [
-            [
-                "Mira Dashboard recovery codes",
-                "Each code can be used once. Store these offline.",
-                "",
-                ...codes,
-                "",
-            ].join("\n"),
-        ],
-        { type: "text/plain;charset=utf-8" }
-    );
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "mira-dashboard-recovery-codes.txt";
-    anchor.click();
-    URL.revokeObjectURL(url);
-}
+import { AccountSecurityDialogs } from "./AccountSecurityDialogs";
+import { useAccountSecurityController } from "./useAccountSecurityController";
 
 /**
  * Renders Dashboard-owned account security, factors, recovery, and sessions.
  * @returns Rendered Dashboard-owned account security, factors, recovery, and sessions.
  */
 export function AccountSecuritySection() {
-    const { data, isLoading } = useAccountSecurity();
-    const changePassword = useChangePassword();
-    const passwordReauth = usePasswordReauthentication();
-    const totpStepUp = useTotpStepUp();
-    const recoveryStepUp = useRecoveryStepUp();
-    const webAuthnStepUp = useWebAuthnStepUp();
-    const registerSecurityKey = useRegisterSecurityKey();
-    const removeSecurityKey = useRemoveSecurityKey();
-    const createTotp = useCreateTotpEnrollment();
-    const confirmTotp = useConfirmTotpEnrollment();
-    const removeTotp = useRemoveTotpFactor();
-    const rotateRecoveryCodes = useRotateRecoveryCodes();
-    const disableMfa = useDisableMfa();
-    const revokeSession = useRevokeSession();
-    const revokeOthers = useRevokeOtherSessions();
-    const revokeAll = useRevokeAllSessions();
-
-    const [error, setError] = useState<string>();
-    const [success, setSuccess] = useState<string>();
-    const [verificationMode, setVerificationMode] = useState<VerificationMode>();
-    const [verificationCode, setVerificationCode] = useState("");
-    const [password, setPassword] = useState("");
-    const [keyLabel, setKeyLabel] = useState("Primary YubiKey");
-    const [showKeyModal, setShowKeyModal] = useState(false);
-    const [totpLabel, setTotpLabel] = useState("Authenticator app");
-    const [totpEnrollment, setTotpEnrollment] = useState<TotpEnrollment>();
-    const [totpCode, setTotpCode] = useState("");
-    const [showTotpModal, setShowTotpModal] = useState(false);
-    const [recoveryCodes, setRecoveryCodes] = useState<string[]>();
-    const [showDisableModal, setShowDisableModal] = useState(false);
-    const [showPasswordModal, setShowPasswordModal] = useState(false);
-    const [currentPassword, setCurrentPassword] = useState("");
-    const [newPassword, setNewPassword] = useState("");
-    const [confirmPassword, setConfirmPassword] = useState("");
-    const [pendingFactorRemoval, setPendingFactorRemoval] =
-        useState<PendingFactorRemoval>();
+    const controller = useAccountSecurityController();
+    const {
+        data,
+        error,
+        isBusy,
+        isLoading,
+        isMfaEnabled,
+        requiresManagementVerification,
+        revokeAll,
+        revokeOthers,
+        revokeSession,
+        rotateCodes,
+        setConfirmPassword,
+        setCurrentPassword,
+        setError,
+        setKeyLabel,
+        setNewPassword,
+        setPassword,
+        setPendingFactorRemoval,
+        setShowDisableModal,
+        setShowKeyModal,
+        setShowPasswordModal,
+        setShowTotpModal,
+        setSuccess,
+        setTotpEnrollment,
+        setTotpLabel,
+        setVerificationMode,
+        success,
+    } = controller;
 
     if (isLoading || !data) {
         return <LoadingState size="lg" />;
-    }
-
-    const isMfaEnabled = Boolean(data.factors.enabledAt);
-    const registeredSecurityKeyCount = data.factors.webAuthnCredentials.length;
-    const canManage = isMfaEnabled
-        ? data.recentVerification.mfa
-        : data.recentVerification.password;
-    const isBusy =
-        changePassword.isPending ||
-        passwordReauth.isPending ||
-        totpStepUp.isPending ||
-        recoveryStepUp.isPending ||
-        webAuthnStepUp.isPending ||
-        registerSecurityKey.isPending ||
-        createTotp.isPending ||
-        confirmTotp.isPending ||
-        removeSecurityKey.isPending ||
-        removeTotp.isPending ||
-        rotateRecoveryCodes.isPending ||
-        disableMfa.isPending ||
-        revokeSession.isPending ||
-        revokeOthers.isPending ||
-        revokeAll.isPending;
-
-    function requiresManagementVerification(): boolean {
-        if (canManage) return true;
-        setVerificationMode(isMfaEnabled ? "mfa" : "password");
-        setError(undefined);
-        return false;
-    }
-
-    async function registerKey(): Promise<void> {
-        if (!requiresManagementVerification()) {
-            setShowKeyModal(false);
-            return;
-        }
-        setError(undefined);
-        try {
-            const result = await registerSecurityKey.mutateAsync(keyLabel.trim());
-            setShowKeyModal(false);
-            setKeyLabel(
-                registeredSecurityKeyCount === 0 ? "Backup YubiKey" : "Additional YubiKey"
-            );
-            if (result.recoveryCodes?.length) {
-                setRecoveryCodes(result.recoveryCodes);
-            }
-            setSuccess("Security key registered");
-            registerSecurityKey.reset();
-        } catch (error_) {
-            setError(messageFromError(error_, "Security-key registration failed"));
-        }
-    }
-
-    async function startTotpSetup(): Promise<void> {
-        if (!requiresManagementVerification()) {
-            setShowTotpModal(false);
-            return;
-        }
-        setError(undefined);
-        try {
-            const result = await createTotp.mutateAsync(totpLabel.trim());
-            setTotpEnrollment(result.enrollment);
-            setTotpCode("");
-            createTotp.reset();
-        } catch (error_) {
-            setError(messageFromError(error_, "Authenticator setup failed"));
-        }
-    }
-
-    async function completeTotpSetup(): Promise<void> {
-        if (!totpEnrollment) return;
-        setError(undefined);
-        try {
-            const result = await confirmTotp.mutateAsync({
-                code: totpCode,
-                factorId: totpEnrollment.factorId,
-            });
-            setShowTotpModal(false);
-            setTotpEnrollment(undefined);
-            setTotpCode("");
-            if (result.recoveryCodes?.length) {
-                setRecoveryCodes(result.recoveryCodes);
-            }
-            setSuccess("Authenticator app added");
-            confirmTotp.reset();
-        } catch (error_) {
-            setError(messageFromError(error_, "Authenticator code was not accepted"));
-        }
-    }
-
-    async function verifyPassword(): Promise<void> {
-        setError(undefined);
-        try {
-            await passwordReauth.mutateAsync(password);
-            setPassword("");
-            setVerificationMode(undefined);
-            setSuccess("Password verified for sensitive changes");
-        } catch (error_) {
-            setError(messageFromError(error_, "Password verification failed"));
-        }
-    }
-
-    async function verifyMfa(method: "recovery" | "totp" | "webauthn"): Promise<void> {
-        setError(undefined);
-        try {
-            if (method === "webauthn") {
-                await webAuthnStepUp.mutateAsync();
-            } else if (method === "totp") {
-                await totpStepUp.mutateAsync(verificationCode);
-            } else {
-                await recoveryStepUp.mutateAsync(verificationCode);
-            }
-            setVerificationCode("");
-            setVerificationMode(undefined);
-            setSuccess("Recent MFA verification recorded");
-        } catch (error_) {
-            setError(messageFromError(error_, "MFA verification failed"));
-        }
-    }
-
-    async function rotateCodes(): Promise<void> {
-        if (!requiresManagementVerification()) return;
-        setError(undefined);
-        try {
-            const result = await rotateRecoveryCodes.mutateAsync();
-            setRecoveryCodes(result.recoveryCodes);
-            rotateRecoveryCodes.reset();
-        } catch (error_) {
-            setError(messageFromError(error_, "Could not rotate recovery codes"));
-        }
-    }
-
-    async function removeSelectedFactor(): Promise<void> {
-        if (!pendingFactorRemoval) return;
-        setError(undefined);
-        try {
-            if (pendingFactorRemoval.type === "security-key") {
-                await removeSecurityKey.mutateAsync(pendingFactorRemoval.id);
-                setSuccess("Security key removed");
-            } else {
-                await removeTotp.mutateAsync(pendingFactorRemoval.id);
-                setSuccess("Authenticator app removed");
-            }
-            setPendingFactorRemoval(undefined);
-        } catch (error_) {
-            setError(
-                messageFromError(
-                    error_,
-                    pendingFactorRemoval.type === "security-key"
-                        ? "Could not remove security key"
-                        : "Could not remove authenticator app"
-                )
-            );
-        }
-    }
-
-    async function copyRecoveryCodes(): Promise<void> {
-        try {
-            if (!navigator.clipboard) {
-                throw new Error("Clipboard API unavailable");
-            }
-            await navigator.clipboard.writeText(recoveryCodes?.join("\n") ?? "");
-            setSuccess("Recovery codes copied");
-        } catch {
-            setError("Could not copy recovery codes");
-        }
     }
 
     let verificationButton: ReactNode;
@@ -306,15 +80,6 @@ export function AccountSecuritySection() {
                 Verify password
             </Button>
         );
-    }
-
-    const hasTotpMethod = data.factors.methods.includes("totp");
-    const hasRecoveryMethod = data.factors.methods.includes("recovery");
-    let verificationCodeLabel = "Recovery code";
-    if (hasTotpMethod && hasRecoveryMethod) {
-        verificationCodeLabel = "Authenticator or recovery code";
-    } else if (hasTotpMethod) {
-        verificationCodeLabel = "Authenticator code";
     }
 
     return (
@@ -694,388 +459,7 @@ export function AccountSecuritySection() {
                 </Card>
             ) : undefined}
 
-            {pendingFactorRemoval ? (
-                <ConfirmModal
-                    confirmLabel="Remove factor"
-                    danger
-                    isOpen
-                    loading={removeSecurityKey.isPending || removeTotp.isPending}
-                    message={`Remove ${pendingFactorRemoval.label}? You cannot remove the final configured second factor.`}
-                    onCancel={() => setPendingFactorRemoval(undefined)}
-                    onConfirm={() => void removeSelectedFactor()}
-                    title="Remove login factor"
-                />
-            ) : undefined}
-
-            {showPasswordModal ? (
-                <Modal
-                    isOpen={showPasswordModal}
-                    onClose={() => {
-                        setCurrentPassword("");
-                        setNewPassword("");
-                        setConfirmPassword("");
-                        setShowPasswordModal(false);
-                    }}
-                    size="sm"
-                    title="Change Dashboard password"
-                >
-                    <form
-                        className="space-y-4"
-                        onSubmit={(event_) => {
-                            event_.preventDefault();
-                            setError(undefined);
-                            if (newPassword !== confirmPassword) {
-                                setError("New passwords do not match");
-                                return;
-                            }
-                            void (async () => {
-                                try {
-                                    const result = await changePassword.mutateAsync({
-                                        currentPassword,
-                                        newPassword,
-                                    });
-                                    setCurrentPassword("");
-                                    setNewPassword("");
-                                    setConfirmPassword("");
-                                    setShowPasswordModal(false);
-                                    setSuccess(
-                                        `Password changed; ${result.revokedSessions} other session${result.revokedSessions === 1 ? "" : "s"} revoked`
-                                    );
-                                } catch (error_) {
-                                    setError(
-                                        messageFromError(
-                                            error_,
-                                            "Could not change password"
-                                        )
-                                    );
-                                }
-                            })();
-                        }}
-                    >
-                        <Input
-                            autoComplete="current-password"
-                            label="Current password"
-                            onChange={(event_) => setCurrentPassword(event_.target.value)}
-                            type="password"
-                            value={currentPassword}
-                        />
-                        <Input
-                            autoComplete="new-password"
-                            description="8-256 characters"
-                            label="New password"
-                            minLength={8}
-                            onChange={(event_) => setNewPassword(event_.target.value)}
-                            type="password"
-                            value={newPassword}
-                        />
-                        <Input
-                            autoComplete="new-password"
-                            label="Confirm new password"
-                            minLength={8}
-                            onChange={(event_) => setConfirmPassword(event_.target.value)}
-                            type="password"
-                            value={confirmPassword}
-                        />
-                        <Button
-                            className="w-full"
-                            disabled={
-                                isBusy ||
-                                !currentPassword ||
-                                newPassword.length < 8 ||
-                                !confirmPassword
-                            }
-                            type="submit"
-                        >
-                            Change and revoke other sessions
-                        </Button>
-                    </form>
-                </Modal>
-            ) : undefined}
-
-            {verificationMode === undefined ? undefined : (
-                <Modal
-                    isOpen
-                    onClose={() => {
-                        setVerificationCode("");
-                        setPassword("");
-                        setVerificationMode(undefined);
-                    }}
-                    size="sm"
-                    title={
-                        verificationMode === "password"
-                            ? "Verify current password"
-                            : "Verify second factor"
-                    }
-                >
-                    {verificationMode === "password" ? (
-                        <form
-                            className="space-y-4"
-                            onSubmit={(event_) => {
-                                event_.preventDefault();
-                                void verifyPassword();
-                            }}
-                        >
-                            <Input
-                                autoComplete="current-password"
-                                label="Current password"
-                                onChange={(event_) => setPassword(event_.target.value)}
-                                type="password"
-                                value={password}
-                            />
-                            <Button
-                                className="w-full"
-                                disabled={isBusy || !password}
-                                type="submit"
-                            >
-                                Verify
-                            </Button>
-                        </form>
-                    ) : (
-                        <div className="space-y-3">
-                            {data.factors.methods.includes("webauthn") ? (
-                                <Button
-                                    className="w-full"
-                                    disabled={isBusy}
-                                    onClick={() => void verifyMfa("webauthn")}
-                                >
-                                    <KeyRound className="size-4" />
-                                    Use security key
-                                </Button>
-                            ) : undefined}
-                            {data.factors.methods.includes("totp") ||
-                            data.factors.methods.includes("recovery") ? (
-                                <form
-                                    className="space-y-2"
-                                    onSubmit={(event_) => {
-                                        event_.preventDefault();
-                                        void verifyMfa(
-                                            data.factors.methods.includes("totp")
-                                                ? "totp"
-                                                : "recovery"
-                                        );
-                                    }}
-                                >
-                                    <Input
-                                        autoComplete="one-time-code"
-                                        inputMode={
-                                            data.factors.methods.includes("recovery")
-                                                ? "text"
-                                                : "numeric"
-                                        }
-                                        label={verificationCodeLabel}
-                                        onChange={(event_) =>
-                                            setVerificationCode(event_.target.value)
-                                        }
-                                        value={verificationCode}
-                                    />
-                                    {data.factors.methods.includes("totp") ? (
-                                        <Button
-                                            className="w-full"
-                                            disabled={isBusy || !verificationCode.trim()}
-                                            type="submit"
-                                            variant="secondary"
-                                        >
-                                            Verify TOTP
-                                        </Button>
-                                    ) : undefined}
-                                    {data.factors.methods.includes("recovery") ? (
-                                        <Button
-                                            className="w-full"
-                                            disabled={isBusy || !verificationCode.trim()}
-                                            onClick={() => void verifyMfa("recovery")}
-                                            type="button"
-                                            variant="ghost"
-                                        >
-                                            Use recovery code
-                                        </Button>
-                                    ) : undefined}
-                                </form>
-                            ) : undefined}
-                        </div>
-                    )}
-                </Modal>
-            )}
-
-            {showKeyModal ? (
-                <Modal
-                    isOpen={showKeyModal}
-                    onClose={() => setShowKeyModal(false)}
-                    size="sm"
-                    title="Register security key"
-                >
-                    <div className="space-y-4">
-                        <Input
-                            description="Use a distinct name such as Primary YubiKey or Backup YubiKey."
-                            label="Key name"
-                            maxLength={64}
-                            onChange={(event_) => setKeyLabel(event_.target.value)}
-                            value={keyLabel}
-                        />
-                        <Button
-                            className="w-full"
-                            disabled={isBusy || !keyLabel.trim()}
-                            onClick={() => void registerKey()}
-                        >
-                            Touch and register key
-                        </Button>
-                    </div>
-                </Modal>
-            ) : undefined}
-
-            {showTotpModal ? (
-                <Modal
-                    isOpen={showTotpModal}
-                    onClose={() => {
-                        setShowTotpModal(false);
-                        setTotpEnrollment(undefined);
-                        setTotpCode("");
-                        createTotp.reset();
-                        confirmTotp.reset();
-                    }}
-                    size="sm"
-                    title="Add authenticator app"
-                >
-                    {totpEnrollment ? (
-                        <div className="space-y-4">
-                            <div className="mx-auto w-fit rounded-lg bg-white p-3">
-                                <QRCodeSVG
-                                    level="M"
-                                    size={192}
-                                    value={totpEnrollment.otpauthUri}
-                                />
-                            </div>
-                            <div>
-                                <p className="text-xs text-primary-400">
-                                    Manual setup key
-                                </p>
-                                <code className="mt-1 block rounded bg-primary-900 p-2 text-xs break-all text-primary-100">
-                                    {totpEnrollment.secret}
-                                </code>
-                            </div>
-                            <Input
-                                autoComplete="one-time-code"
-                                inputMode="numeric"
-                                label="Confirm 6-digit code"
-                                onChange={(event_) => setTotpCode(event_.target.value)}
-                                value={totpCode}
-                            />
-                            <Button
-                                className="w-full"
-                                disabled={isBusy || !/^\d{6}$/u.test(totpCode)}
-                                onClick={() => void completeTotpSetup()}
-                            >
-                                Confirm authenticator
-                            </Button>
-                        </div>
-                    ) : (
-                        <div className="space-y-4">
-                            <Input
-                                label="App name"
-                                maxLength={64}
-                                onChange={(event_) => setTotpLabel(event_.target.value)}
-                                value={totpLabel}
-                            />
-                            <Button
-                                className="w-full"
-                                disabled={isBusy || !totpLabel.trim()}
-                                onClick={() => void startTotpSetup()}
-                            >
-                                Create setup code
-                            </Button>
-                        </div>
-                    )}
-                </Modal>
-            ) : undefined}
-
-            {recoveryCodes ? (
-                <Modal
-                    isOpen={Boolean(recoveryCodes)}
-                    onClose={() => setRecoveryCodes(undefined)}
-                    size="md"
-                    title="Save recovery codes now"
-                >
-                    <Alert variant="warning">
-                        These full codes are shown once. Store them offline; do not put
-                        them in Dashboard notes or screenshots.
-                    </Alert>
-                    <div className="my-4 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-                        {recoveryCodes?.map((code) => (
-                            <code
-                                className="min-w-0 rounded bg-primary-900 p-2 text-center text-xs break-all whitespace-normal text-primary-100"
-                                key={code}
-                            >
-                                {code}
-                            </code>
-                        ))}
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-                        <Button
-                            onClick={() => void copyRecoveryCodes()}
-                            variant="secondary"
-                        >
-                            <Copy className="size-4" />
-                            Copy
-                        </Button>
-                        <Button
-                            onClick={() => downloadRecoveryCodes(recoveryCodes ?? [])}
-                        >
-                            <Download className="size-4" />
-                            Download
-                        </Button>
-                    </div>
-                </Modal>
-            ) : undefined}
-
-            {showDisableModal ? (
-                <Modal
-                    isOpen={showDisableModal}
-                    onClose={() => {
-                        setPassword("");
-                        setShowDisableModal(false);
-                    }}
-                    size="sm"
-                    title="Disable two-step login"
-                >
-                    <form
-                        className="space-y-4"
-                        onSubmit={(event_) => {
-                            event_.preventDefault();
-                            setError(undefined);
-                            void (async () => {
-                                try {
-                                    await disableMfa.mutateAsync(password);
-                                    setPassword("");
-                                    setShowDisableModal(false);
-                                    setSuccess("Two-step login disabled");
-                                } catch (error_) {
-                                    setError(
-                                        messageFromError(error_, "Could not disable MFA")
-                                    );
-                                }
-                            })();
-                        }}
-                    >
-                        <Alert variant="warning">
-                            This removes every key, TOTP seed, and recovery code.
-                        </Alert>
-                        <Input
-                            autoComplete="current-password"
-                            label="Current password"
-                            onChange={(event_) => setPassword(event_.target.value)}
-                            type="password"
-                            value={password}
-                        />
-                        <Button
-                            className="w-full"
-                            disabled={isBusy || !password}
-                            type="submit"
-                            variant="danger"
-                        >
-                            Disable and revoke sessions
-                        </Button>
-                    </form>
-                </Modal>
-            ) : undefined}
+            <AccountSecurityDialogs controller={controller} />
         </div>
     );
 }
