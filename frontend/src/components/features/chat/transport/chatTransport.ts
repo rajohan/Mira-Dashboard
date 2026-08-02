@@ -33,5 +33,6 @@ export interface ChatTransport {
     ) => Promise<void>;
     send: (request: ChatSendRequest) => Promise<ChatSendResponse>;
     snapshot: (sessionKey: string) => Promise<ChatRuntimeSnapshot>;
-    subscribe: (listener: (event: ChatRuntimeEvent) => void) => () => void;
+    /** Delivers every event derived from one provider envelope as one atomic batch. */
+    subscribe: (listener: (events: ChatRuntimeEvent[]) => void) => () => void;
 }

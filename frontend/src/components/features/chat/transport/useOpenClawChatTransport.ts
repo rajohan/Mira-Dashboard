@@ -105,8 +105,9 @@ export function useOpenClawChatTransport(): ChatTransport {
 
     const subscribe = (listener: Parameters<ChatTransport["subscribe"]>[0]) =>
         socket.subscribe((raw) => {
-            for (const event of adapter.event(raw)) {
-                listener(event);
+            const events = adapter.event(raw);
+            if (events.length > 0) {
+                listener(events);
             }
         });
 

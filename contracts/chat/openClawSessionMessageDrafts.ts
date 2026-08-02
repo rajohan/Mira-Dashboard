@@ -36,7 +36,7 @@ export function sessionMessageDrafts(
     const message = normalizeAssistant(rawMessage, common.runId);
     const role = message.role.toLowerCase();
     if (role === "assistant") {
-        const drafts = sessionAssistantDiagnosticDrafts(
+        const diagnosticDrafts = sessionAssistantDiagnosticDrafts(
             message,
             common,
             sequence,
@@ -45,8 +45,9 @@ export function sessionMessageDrafts(
         const hasPrimaryContent = Boolean(
             message.text.trim() || message.images?.length || message.attachments?.length
         );
+        const drafts: CanonicalChatEventDraft[] = [];
         if (hasPrimaryContent && !isToolUseAssistantMessage) {
-            drafts.push({
+            const assistantDraft: CanonicalChatEventDraft = {
                 ...common,
                 kind: "assistant",
                 message: {
@@ -60,8 +61,14 @@ export function sessionMessageDrafts(
                 },
                 mode: isTerminalAssistantMessage ? "replace" : "merge",
                 source: "session",
-            });
+            };
+            if (isTerminalAssistantMessage) {
+                drafts.push(assistantDraft);
+            } else {
+                diagnosticDrafts.push(assistantDraft);
+            }
         }
+        drafts.push(...diagnosticDrafts);
         if (isTerminalAssistantMessage) {
             drafts.push({
                 ...common,

@@ -146,18 +146,33 @@ export function useChatRuntime({
             return;
         }
 
-        return transportRef.current.subscribe((event) => {
+        return transportRef.current.subscribe((events) => {
+            if (events.length === 0) {
+                return;
+            }
             const gate = gateRef.current;
-            if (gate && isSameChatSession(event.sessionKey, gate.sessionKey)) {
-                gate.events.push(event);
+            const liveEvents = gate
+                ? events.filter((event) => {
+                      if (!isSameChatSession(event.sessionKey, gate.sessionKey)) {
+                          return true;
+                      }
+                      gate.events.push(event);
+                      return false;
+                  })
+                : events;
+            if (liveEvents.length === 0) {
                 return;
             }
 
             const previousState = stateRef.current;
-            const reduction = reduceRuntimeEvents(previousState, [event]);
+            const reduction = reduceRuntimeEvents(previousState, liveEvents);
             updateState(() => reduction.state);
-            if (event.kind === "control" && reduction.state !== previousState) {
-                handleControlSideEffect(event);
+            if (reduction.state !== previousState) {
+                for (const event of liveEvents) {
+                    if (event.kind === "control") {
+                        handleControlSideEffect(event);
+                    }
+                }
             }
             for (const finish of reduction.finishes) {
                 handleFinishSideEffects(finish.event, finish.state);
