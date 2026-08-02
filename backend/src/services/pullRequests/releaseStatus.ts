@@ -10,7 +10,7 @@ import {
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL,
 } from "../deploymentRuntimeResults.ts";
 import type { ManagedDashboardRelease } from "../releases/managerModel.ts";
-import { readDashboardReleaseState } from "../releases/managerOperations.ts";
+import { readDashboardReleaseState } from "../releases/releaseActivation.ts";
 import { resolveDashboardReleasesRoot } from "../releases/releaseLayout.ts";
 import { assertManagedDashboardReleaseRollbackSchemaCompatible } from "../releases/schemaCompatibility.ts";
 import { dashboardCommitUrl, pullRequestLogger as logger } from "./support.ts";

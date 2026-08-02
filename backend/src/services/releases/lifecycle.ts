@@ -19,12 +19,14 @@ import type {
 } from "./managerModel.ts";
 import {
     activateDashboardRelease,
-    pruneDashboardReleases,
     readDashboardReleaseState,
+} from "./releaseActivation.ts";
+import { resolveDashboardReleasesRoot } from "./releaseLayout.ts";
+import { pruneDashboardReleases } from "./releaseRetention.ts";
+import {
     restoreDashboardReleaseAfterFailedActivation,
     rollbackDashboardRelease,
-} from "./managerOperations.ts";
-import { resolveDashboardReleasesRoot } from "./releaseLayout.ts";
+} from "./releaseRollback.ts";
 import { resolveManagedBunRuntimeRoot } from "./runtime.ts";
 import { prepareManagedDashboardUnits } from "./systemd.ts";
 

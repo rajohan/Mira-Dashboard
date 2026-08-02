@@ -11,11 +11,9 @@ import type {
     DashboardReleaseRetentionResult,
     ManagedDashboardRelease,
 } from "./managerModel.ts";
-import {
-    pruneDashboardReleases,
-    publishVerifiedDashboardRelease,
-} from "./managerOperations.ts";
 import { loadManagedRelease, resolveDashboardReleasesRoot } from "./releaseLayout.ts";
+import { publishVerifiedDashboardRelease } from "./releasePublication.ts";
+import { pruneDashboardReleases } from "./releaseRetention.ts";
 import {
     bunExecutableRuntimeIdentity,
     installManagedBunRuntime,

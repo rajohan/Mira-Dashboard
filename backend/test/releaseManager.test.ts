@@ -30,14 +30,6 @@ import {
     RELEASE_TRANSITION_LOCK_PROGRAM,
 } from "../src/services/releases/managerModel.ts";
 import {
-    activateDashboardRelease,
-    pruneDashboardReleases,
-    publishVerifiedDashboardRelease,
-    readDashboardReleaseState,
-    restoreDashboardReleaseAfterFailedActivation,
-    rollbackDashboardRelease,
-} from "../src/services/releases/managerOperations.ts";
-import {
     loadReleaseManifest,
     writeReleaseManifest,
 } from "../src/services/releases/manifestArtifacts.ts";
@@ -47,11 +39,21 @@ import {
     RELEASE_MANIFEST_FILE_NAME,
 } from "../src/services/releases/manifestPolicy.ts";
 import {
+    activateDashboardRelease,
+    readDashboardReleaseState,
+} from "../src/services/releases/releaseActivation.ts";
+import {
     ensureDashboardReleaseLayout,
     loadManagedRelease,
     managedReleasePath,
     resolveDashboardReleasesRoot,
 } from "../src/services/releases/releaseLayout.ts";
+import { publishVerifiedDashboardRelease } from "../src/services/releases/releasePublication.ts";
+import { pruneDashboardReleases } from "../src/services/releases/releaseRetention.ts";
+import {
+    restoreDashboardReleaseAfterFailedActivation,
+    rollbackDashboardRelease,
+} from "../src/services/releases/releaseRollback.ts";
 import {
     currentBunRuntimeIdentity,
     hasManagedBunRuntime,

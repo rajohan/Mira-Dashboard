@@ -9,7 +9,7 @@ import { runProcess } from "../backend/src/lib/processes.ts";
 import { parseSystemdProperties } from "../backend/src/lib/systemdProperties.ts";
 import { runReleaseLifecycleCommand } from "../backend/src/releaseLifecycle.ts";
 import { stageDashboardRelease } from "../backend/src/services/releases/deployment.ts";
-import { readDashboardReleaseState } from "../backend/src/services/releases/managerOperations.ts";
+import { readDashboardReleaseState } from "../backend/src/services/releases/releaseActivation.ts";
 import { MANAGED_DASHBOARD_UNIT_NAMES } from "../backend/src/services/releases/systemdPolicy.ts";
 
 const FULL_COMMIT_PATTERN = /^[\da-f]{40}$/u;

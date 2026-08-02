@@ -11,7 +11,7 @@ import {
 } from "../releases/cutoverOperations.ts";
 import { didScheduleOrphanedReleaseCutoverRecovery } from "../releases/cutoverRecovery.ts";
 import { stageDashboardRelease } from "../releases/deployment.ts";
-import { readDashboardReleaseState } from "../releases/managerOperations.ts";
+import { readDashboardReleaseState } from "../releases/releaseActivation.ts";
 import { resolveDashboardReleasesRoot } from "../releases/releaseLayout.ts";
 import { assertDashboardReleaseRuntimeAvailable } from "../releases/schemaCompatibility.ts";
 import {

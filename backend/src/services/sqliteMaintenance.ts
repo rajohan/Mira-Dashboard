@@ -14,7 +14,7 @@ import {
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL,
 } from "./deploymentRuntimeResults.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
-import { readDashboardReleaseState } from "./releases/managerOperations.ts";
+import { readDashboardReleaseState } from "./releases/releaseActivation.ts";
 import { resolveDashboardReleasesRoot } from "./releases/releaseLayout.ts";
 import { registerScheduledJobAction } from "./scheduledJobs/actionRegistry.ts";
 import {
