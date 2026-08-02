@@ -130,7 +130,7 @@ function pathFromMediaRef(reference: string): string {
 }
 
 function mimeTypeFromPath(path: string): string {
-    const extension = path.split("./transport").pop()?.toLowerCase() || "";
+    const extension = path.split(".").pop()?.toLowerCase() || "";
     const mimeTypes: Record<string, string> = {
         aac: "audio/aac",
         bmp: "image/bmp",
