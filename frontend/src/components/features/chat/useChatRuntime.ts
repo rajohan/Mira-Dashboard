@@ -1,165 +1,32 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { type ChatRuntimeActions, useChatRuntimeActions } from "./chatRuntimeActions";
+import {
+    carryActiveRunsToGeneration,
+    type ControlEvent,
+    type DisplacedReplayGroup,
+    displacedReplayGroupForSession,
+    type FinishEvent,
+    isLocallyOptimisticRunId,
+    reduceRuntimeEvents,
+    type RuntimeIdentity,
+    replayIdentityTransition,
+    type SnapshotGate,
+} from "./chatRuntimeReplay";
 import {
     acknowledgeChatRun,
     addOptimisticChatRun,
-    type ChatRuntimeEvent,
     type ChatRuntimeState,
-    clearChatRun,
     clearChatSessionRuntime,
     clearCompletedChatRuns,
-    clearStatusOnlyChatRuns,
-    completedChatRuns,
     createChatRuntimeState,
     findChatSessionRuntimeState,
     isProvisionalChatRunId,
     isSameChatSession,
-    reduceChatRuntime,
-    restoreChatRuns,
 } from "./domain/chatState";
-import type { ChatRuntimeSnapshot, ChatTransport } from "./transport/chatTransport";
+import type { ChatTransport } from "./transport/chatTransport";
 
 const MAX_HANDLED_FINISH_SEQUENCES = 500;
-
-function isLocallyOptimisticRunId(runId: string): boolean {
-    return runId.startsWith("dashboard-chat-") || runId.startsWith("dashboard-compact-");
-}
-
-interface SnapshotGate {
-    events: ChatRuntimeEvent[];
-    optimisticRuns: Map<
-        string,
-        {
-            observedAfterSnapshotRequest: boolean;
-            operation?: "compact";
-            providerRunId?: string;
-        }
-    >;
-    reconnecting: boolean;
-    sessionKey: string;
-    token: number;
-}
-
-interface RuntimeIdentity {
-    generation?: string;
-    replayScope?: string;
-}
-
-function replayIdentityTransition(
-    previous: RuntimeIdentity,
-    snapshot: Pick<ChatRuntimeSnapshot, "replayScope" | "runtimeGeneration">,
-    isReconnecting: boolean
-): { didLoseContinuity: boolean; isSameScopeRestart: boolean } {
-    const didGenerationChange = Boolean(
-        snapshot.runtimeGeneration &&
-        previous.generation &&
-        snapshot.runtimeGeneration !== previous.generation
-    );
-    const isKnownSameScope = Boolean(
-        snapshot.replayScope &&
-        previous.replayScope &&
-        snapshot.replayScope === previous.replayScope
-    );
-    const didKnownScopeChange = Boolean(
-        snapshot.replayScope &&
-        previous.replayScope &&
-        snapshot.replayScope !== previous.replayScope
-    );
-    return {
-        didLoseContinuity:
-            isReconnecting &&
-            (didKnownScopeChange || (didGenerationChange && !isKnownSameScope)),
-        isSameScopeRestart: isReconnecting && didGenerationChange && isKnownSameScope,
-    };
-}
-
-interface DisplacedReplayGroup {
-    pendingRunIds: Set<string>;
-    runs: ReturnType<typeof completedChatRuns>;
-    sessionKey: string;
-}
-
-function displacedReplayGroupForSession(
-    groups: Map<string, DisplacedReplayGroup>,
-    sessionKey: string
-): [string, DisplacedReplayGroup] | undefined {
-    for (const entry of groups) {
-        if (isSameChatSession(entry[1].sessionKey, sessionKey)) {
-            return entry;
-        }
-    }
-    return undefined;
-}
-
-type FinishEvent = Extract<ChatRuntimeEvent, { kind: "finish" }>;
-type ControlEvent = Extract<ChatRuntimeEvent, { kind: "control" }>;
-
-interface RuntimeReduction {
-    finishes: Array<{ event: FinishEvent; state: ChatRuntimeState }>;
-    state: ChatRuntimeState;
-}
-
-function reduceRuntimeEvents(
-    previous: ChatRuntimeState,
-    events: ChatRuntimeEvent[]
-): RuntimeReduction {
-    let state = previous;
-    const finishes: RuntimeReduction["finishes"] = [];
-    const orderedEvents = events.toSorted(
-        (left, right) => left.sequence - right.sequence
-    );
-    for (const event of orderedEvents) {
-        const next = reduceChatRuntime(state, [event]);
-        if (next === state) {
-            continue;
-        }
-        state = next;
-        if (event.kind === "finish") {
-            finishes.push({ event, state });
-        }
-    }
-    return { finishes, state };
-}
-
-function carryActiveRunsToGeneration(
-    state: ChatRuntimeState,
-    generation: number
-): ChatRuntimeState {
-    const sessions = Object.fromEntries(
-        Object.entries(state.sessions).flatMap(([sessionKey, session]) => {
-            const runs = Object.fromEntries(
-                Object.entries(session.runs).flatMap(([runKey, run]) => {
-                    if (run.phase !== "active") {
-                        return [];
-                    }
-                    const retained = {
-                        ...run,
-                        commentary: [...run.commentary],
-                        diagnostics: [...run.diagnostics],
-                        lastSequence: -1,
-                        userMessages: [...run.userMessages],
-                    };
-                    delete retained.terminalSequence;
-                    return [[runKey, retained]];
-                })
-            );
-            return Object.keys(runs).length > 0 || session.controls.length > 0
-                ? [
-                      [
-                          sessionKey,
-                          {
-                              ...session,
-                              controls: [...session.controls],
-                              lastSequence: -1,
-                              runs,
-                          },
-                      ],
-                  ]
-                : [];
-        })
-    );
-    return { generation, sessions };
-}
 
 interface UseChatRuntimeOptions {
     onError?: (message: string) => void;
@@ -168,23 +35,7 @@ interface UseChatRuntimeOptions {
     transport: ChatTransport;
 }
 
-export interface ChatRuntimeController {
-    acknowledgeRun: (
-        sessionKey: string,
-        optimisticRunId: string,
-        providerRunId?: string
-    ) => void;
-    beginRun: (
-        sessionKey: string,
-        runId: string,
-        options?: {
-            operation?: "compact";
-            replaceStatusOnlyRuns?: boolean;
-        }
-    ) => void;
-    clearRun: (sessionKey: string, runId: string) => void;
-    clearSession: (sessionKey: string) => void;
-    failRun: (sessionKey: string, runId: string) => void;
+export interface ChatRuntimeController extends ChatRuntimeActions {
     state: ChatRuntimeState;
 }
 
@@ -563,135 +414,14 @@ export function useChatRuntime({
 
     useEffect(() => () => handledFinishSequencesRef.current.clear(), []);
 
-    const beginRun: ChatRuntimeController["beginRun"] = (
-        sessionKey,
-        runId,
-        options = {}
-    ) => {
-        const gate = gateRef.current;
-        if (gate && isSameChatSession(gate.sessionKey, sessionKey)) {
-            const pendingRun = gate.optimisticRuns.get(runId);
-            gate.optimisticRuns.set(runId, {
-                ...pendingRun,
-                observedAfterSnapshotRequest: true,
-                operation: options.operation ?? pendingRun?.operation,
-            });
-        }
-        updateState((current) => {
-            const existingGroup = displacedReplayGroupForSession(
-                displacedCompletedRunsRef.current,
-                sessionKey
-            )?.[1];
-            const displacedRuns = completedChatRuns(current, sessionKey);
-            const group =
-                existingGroup ||
-                (Object.keys(displacedRuns).length > 0
-                    ? {
-                          pendingRunIds: new Set<string>(),
-                          runs: displacedRuns,
-                          sessionKey,
-                      }
-                    : undefined);
-            if (group && !existingGroup) {
-                displacedCompletedRunsRef.current.set(sessionKey, group);
-            }
-            group?.pendingRunIds.add(runId);
-            const withoutStaleStatus = options.replaceStatusOnlyRuns
-                ? clearStatusOnlyChatRuns(current, sessionKey)
-                : current;
-            return addOptimisticChatRun(
-                clearCompletedChatRuns(withoutStaleStatus, sessionKey),
-                sessionKey,
-                runId,
-                options.operation
-            );
-        });
-    };
-    const acknowledgeRun = (
-        sessionKey: string,
-        optimisticRunId: string,
-        providerRunId?: string
-    ) => {
-        const displacedGroup = displacedReplayGroupForSession(
-            displacedCompletedRunsRef.current,
-            sessionKey
-        );
-        if (displacedGroup?.[1].pendingRunIds.has(optimisticRunId)) {
-            displacedCompletedRunsRef.current.delete(displacedGroup[0]);
-        }
-        const gate = gateRef.current;
-        const pendingRun =
-            gate && isSameChatSession(gate.sessionKey, sessionKey)
-                ? gate.optimisticRuns.get(optimisticRunId)
-                : undefined;
-        if (pendingRun) {
-            pendingRun.observedAfterSnapshotRequest = true;
-            pendingRun.providerRunId = providerRunId;
-        }
-        updateState((current) =>
-            acknowledgeChatRun(current, sessionKey, optimisticRunId, providerRunId)
-        );
-    };
-    const removeRunFromSnapshotGate = (sessionKey: string, runId: string) => {
-        const gate = gateRef.current;
-        if (gate && isSameChatSession(gate.sessionKey, sessionKey)) {
-            for (const [optimisticRunId, pendingRun] of gate.optimisticRuns) {
-                if (optimisticRunId === runId || pendingRun.providerRunId === runId) {
-                    gate.optimisticRuns.delete(optimisticRunId);
-                }
-            }
-        }
-    };
-    const clearRun = (sessionKey: string, runId: string) => {
-        const displacedGroup = displacedReplayGroupForSession(
-            displacedCompletedRunsRef.current,
-            sessionKey
-        );
-        if (displacedGroup?.[1].pendingRunIds.has(runId)) {
-            displacedCompletedRunsRef.current.delete(displacedGroup[0]);
-        }
-        removeRunFromSnapshotGate(sessionKey, runId);
-        updateState((current) => clearChatRun(current, sessionKey, runId));
-    };
-    const failRun = (sessionKey: string, runId: string) => {
-        removeRunFromSnapshotGate(sessionKey, runId);
-        const displacedGroup = displacedReplayGroupForSession(
-            displacedCompletedRunsRef.current,
-            sessionKey
-        );
-        const displaced = displacedGroup?.[1];
-        const didRemovePendingRun = displaced?.pendingRunIds.delete(runId) === true;
-        const shouldRestore = didRemovePendingRun && displaced?.pendingRunIds.size === 0;
-        if (displacedGroup && shouldRestore) {
-            displacedCompletedRunsRef.current.delete(displacedGroup[0]);
-        }
-        updateState((current) => {
-            const withoutFailedRun = clearChatRun(current, sessionKey, runId);
-            return shouldRestore && displaced
-                ? restoreChatRuns(withoutFailedRun, sessionKey, displaced.runs)
-                : withoutFailedRun;
-        });
-    };
-    const clearSession = (sessionKey: string) => {
-        if (isSameChatSession(gateRef.current?.sessionKey, sessionKey)) {
-            // A snapshot response captured before an abort/reset must not restore
-            // the runtime state that this explicit clear just removed.
-            gateRef.current = undefined;
-        }
-        for (const [groupKey, displaced] of displacedCompletedRunsRef.current) {
-            if (isSameChatSession(displaced.sessionKey, sessionKey)) {
-                displacedCompletedRunsRef.current.delete(groupKey);
-            }
-        }
-        updateState((current) => clearChatSessionRuntime(current, sessionKey));
-    };
+    const actions = useChatRuntimeActions({
+        displacedCompletedRunsRef,
+        gateRef,
+        updateState,
+    });
 
     return {
-        acknowledgeRun,
-        beginRun,
-        clearRun,
-        clearSession,
-        failRun,
+        ...actions,
         state,
     };
 }
