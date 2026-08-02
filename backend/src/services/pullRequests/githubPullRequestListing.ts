@@ -1,12 +1,12 @@
 import type {
     GitHubPullRequestState,
     PullRequestSummary,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/pullRequests.ts";
 import {
     parseGitHubPullRequestState,
     parsePublicGitHubPullRequests,
     parsePullRequestSummary,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/pullRequests.ts";
 import { byteStreamReader } from "../../lib/byteStreams.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { DASHBOARD_REPO } from "./config.ts";

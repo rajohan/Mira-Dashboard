@@ -3,7 +3,7 @@ import path from "node:path";
 import type {
     PullRequestPreviewLifecycle,
     PullRequestPreviewStatus,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/previews.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { runProcess } from "../../lib/processes.ts";
 import { parseSystemdProperties } from "../../lib/systemdProperties.ts";

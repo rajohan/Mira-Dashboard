@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { Server } from "bun";
 
-import type { PullRequestSummary } from "../../contracts/delivery.ts";
+import type { PullRequestSummary } from "../../contracts/delivery/pullRequests.ts";
 import { database } from "../src/database/connection.ts";
 import * as databaseMigrationRunnerModule from "../src/database/migrationRunner.ts";
 import {

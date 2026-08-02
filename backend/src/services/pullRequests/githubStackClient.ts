@@ -2,11 +2,11 @@ import type {
     GitHubPullRequestStackResource,
     PullRequestStack,
     PullRequestSummary,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/pullRequests.ts";
 import {
     parseGitHubPullRequestStackResource,
     parseGitHubPullRequestStacks,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/pullRequests.ts";
 import { DASHBOARD_REPO, DEFAULT_BASE } from "./config.ts";
 import {
     GitHubRestApiError,

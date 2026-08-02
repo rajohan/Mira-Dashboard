@@ -2,7 +2,7 @@ import type {
     DashboardReleaseStatus,
     DashboardReleaseSummary,
     DeploymentJob,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/deployments.ts";
 import { database } from "../../database/connection.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import {

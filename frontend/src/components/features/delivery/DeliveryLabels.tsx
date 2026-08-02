@@ -1,4 +1,4 @@
-import type { DeploymentJob } from "../../../../../contracts/delivery";
+import type { DeploymentJob } from "../../../../../contracts/delivery/deployments";
 import { Badge } from "../../ui/Badge";
 import { CardTitle } from "../../ui/Card";
 

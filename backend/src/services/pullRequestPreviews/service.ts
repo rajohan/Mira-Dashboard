@@ -1,8 +1,8 @@
 import type {
     PullRequestPreviewLifecycle,
     PullRequestPreviewStatus,
-    PullRequestSummary,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/previews.ts";
+import type { PullRequestSummary } from "../../../../contracts/delivery/pullRequests.ts";
 import { database } from "../../database/connection.ts";
 import {
     enqueueJobExecution,

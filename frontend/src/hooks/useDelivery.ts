@@ -3,8 +3,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
     type DashboardRollbackRequest,
     type DashboardReleaseStatus,
-    type DeploymentActionResponse,
     type DeploymentJob,
+    type ProductionCheckoutStatus,
+} from "../../../contracts/delivery/deployments";
+import {
+    type PullRequestPreviewStatus,
+    type PullRequestPreviewStartRequest,
+} from "../../../contracts/delivery/previews";
+import {
+    type PullRequestApproveRequest,
+    type PullRequestRejectRequest,
+    type PullRequestStackCreateRequest,
+} from "../../../contracts/delivery/pullRequestActions";
+import {
+    type PullRequestExpectedHead,
+    type PullRequestSummary,
+} from "../../../contracts/delivery/pullRequests";
+import {
+    type DeploymentActionResponse,
     parseDashboardReleaseStatusResponse,
     parseDeploymentActionResponse,
     parseDeploymentsResponse,
@@ -13,16 +29,8 @@ import {
     parsePullRequestPreviewMutationResponse,
     parsePullRequestPreviewResponse,
     parsePullRequestsResponse,
-    type ProductionCheckoutStatus,
     type PullRequestActionResponse,
-    type PullRequestApproveRequest,
-    type PullRequestExpectedHead,
-    type PullRequestPreviewStatus,
-    type PullRequestPreviewStartRequest,
-    type PullRequestRejectRequest,
-    type PullRequestStackCreateRequest,
-    type PullRequestSummary,
-} from "../../../contracts/delivery";
+} from "../../../contracts/delivery/responses";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchParsed, apiPostParsed } from "./useApi";

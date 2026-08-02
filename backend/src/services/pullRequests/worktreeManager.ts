@@ -1,9 +1,7 @@
 import path from "node:path";
 
-import type {
-    ProductionCheckoutStatus,
-    WorktreeCleanupResult,
-} from "../../../../contracts/delivery.ts";
+import type { ProductionCheckoutStatus } from "../../../../contracts/delivery/deployments.ts";
+import type { WorktreeCleanupResult } from "../../../../contracts/delivery/previews.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { DEFAULT_BASE, getDashboardRoot, getDashboardWorktreeRoot } from "./config.ts";
 import { runCommand } from "./githubCommandClient.ts";

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import type { PullRequestSummary } from "../../../../../contracts/delivery";
+import type { PullRequestSummary } from "../../../../../contracts/delivery/pullRequests";
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,

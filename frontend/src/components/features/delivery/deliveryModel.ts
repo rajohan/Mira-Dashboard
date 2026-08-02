@@ -2,10 +2,12 @@ import type {
     DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
+} from "../../../../../contracts/delivery/deployments";
+import type { PullRequestPreviewStatus } from "../../../../../contracts/delivery/previews";
+import type {
     PullRequestExpectedHead,
-    PullRequestPreviewStatus,
     PullRequestSummary,
-} from "../../../../../contracts/delivery";
+} from "../../../../../contracts/delivery/pullRequests";
 import { messageFromError } from "../../../lib/errorMessage";
 import type { PullRequestStackCandidate } from "./pullRequestStacks";
 

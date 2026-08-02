@@ -1,3 +1,10 @@
+import { parseDashboardRollbackRequest } from "../../../contracts/delivery/deployments.ts";
+import { parsePullRequestPreviewStartRequest } from "../../../contracts/delivery/previews.ts";
+import {
+    parsePullRequestApproveRequest,
+    parsePullRequestRejectRequest,
+    parsePullRequestStackCreateRequest,
+} from "../../../contracts/delivery/pullRequestActions.ts";
 import type {
     DashboardReleaseStatusResponse,
     DeploymentActionResponse,
@@ -7,14 +14,7 @@ import type {
     PullRequestPreviewMutationResponse,
     PullRequestPreviewResponse,
     PullRequestsResponse,
-} from "../../../contracts/delivery.ts";
-import {
-    parseDashboardRollbackRequest,
-    parsePullRequestApproveRequest,
-    parsePullRequestPreviewStartRequest,
-    parsePullRequestRejectRequest,
-    parsePullRequestStackCreateRequest,
-} from "../../../contracts/delivery.ts";
+} from "../../../contracts/delivery/responses.ts";
 import { json, jsonWithEtag } from "../http/core.ts";
 import {
     type ParametersRequest,

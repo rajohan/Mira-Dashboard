@@ -1,4 +1,4 @@
-import type { DeploymentJob } from "../../../../contracts/delivery.ts";
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
 import { ORPHANED_CUTOVER_READINESS_FAILURE_NOTE_PREFIX } from "../deploymentRuntimeResults.ts";
 import { getDashboardRoot } from "../pullRequests/config.ts";
 import { parseDeploymentCutoverContext } from "../pullRequests/deploymentCutoverContext.ts";

@@ -1,4 +1,4 @@
-import type { DeploymentJob } from "../../../../contracts/delivery.ts";
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
 import { database } from "../../database/connection.ts";
 import type { JobExecutionRecord } from "../jobExecutionQueue/repository.ts";
 import {

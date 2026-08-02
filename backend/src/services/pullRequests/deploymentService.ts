@@ -1,4 +1,4 @@
-import type { DeploymentJob } from "../../../../contracts/delivery.ts";
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
 import { database } from "../../database/connection.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { enqueueJobExecution } from "../jobExecutionQueue/repository.ts";

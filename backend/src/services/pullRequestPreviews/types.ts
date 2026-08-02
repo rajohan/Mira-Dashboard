@@ -1,4 +1,4 @@
-import type { PullRequestPreviewLifecycle } from "../../../../contracts/delivery.ts";
+import type { PullRequestPreviewLifecycle } from "../../../../contracts/delivery/previews.ts";
 
 export const PREVIEW_RECORD_FORMAT_VERSION = 1 as const;
 

@@ -1,7 +1,7 @@
 import type {
     GitHubPullRequestStackResource,
     PullRequestSummary,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/pullRequests.ts";
 import {
     isPullRequestPreviewAuthorAllowed,
     resolvePullRequestPreviewAllowedAuthors,

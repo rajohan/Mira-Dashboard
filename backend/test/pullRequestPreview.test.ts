@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { PullRequestSummary } from "../../contracts/delivery.ts";
+import type { PullRequestSummary } from "../../contracts/delivery/pullRequests.ts";
 import type { ScheduledJob } from "../../contracts/jobs.ts";
 import { isPlainRecord } from "../../contracts/runtime.ts";
 import { parseJsonText } from "../../test/support/fetch.ts";

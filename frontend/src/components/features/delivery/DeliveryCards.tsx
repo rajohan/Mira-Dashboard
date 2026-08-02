@@ -4,10 +4,8 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
-import type {
-    DeploymentJob,
-    PullRequestSummary,
-} from "../../../../../contracts/delivery";
+import type { DeploymentJob } from "../../../../../contracts/delivery/deployments";
+import type { PullRequestSummary } from "../../../../../contracts/delivery/pullRequests";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card, CardTitle } from "../../ui/Card";

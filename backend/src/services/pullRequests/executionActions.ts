@@ -1,4 +1,4 @@
-import type { PullRequestExpectedHead } from "../../../../contracts/delivery.ts";
+import type { PullRequestExpectedHead } from "../../../../contracts/delivery/pullRequests.ts";
 import type { ScheduledJob } from "../../../../contracts/jobs.ts";
 import {
     enqueueJobExecution,

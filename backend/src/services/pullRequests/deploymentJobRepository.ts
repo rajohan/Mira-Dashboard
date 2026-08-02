@@ -1,4 +1,4 @@
-import type { DeploymentJob } from "../../../../contracts/delivery.ts";
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
 import { database, sqlNullable } from "../../database/connection.ts";
 import { dashboardCommitUrl } from "./support.ts";
 

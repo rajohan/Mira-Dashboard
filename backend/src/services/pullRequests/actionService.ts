@@ -1,7 +1,7 @@
 import type {
     GitHubPullRequestStackResource,
     PullRequestSummary,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/pullRequests.ts";
 import { cleanupClosedPullRequestPreview } from "../pullRequestPreviews/host.ts";
 import { DASHBOARD_REPO, DEFAULT_BASE } from "./config.ts";
 import {

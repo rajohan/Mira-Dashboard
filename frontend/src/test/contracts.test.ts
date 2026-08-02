@@ -18,11 +18,11 @@ import {
     parseOpenClawRuntimeEnvelope,
     parseOpenClawRuntimeSnapshot,
 } from "../../../contracts/chat/transport";
+import { parsePullRequestPreviewStartRequest } from "../../../contracts/delivery/previews";
 import {
     parsePullRequestApproveRequest,
-    parsePullRequestPreviewStartRequest,
     parsePullRequestStackCreateRequest,
-} from "../../../contracts/delivery";
+} from "../../../contracts/delivery/pullRequestActions";
 import { parseExecRequest } from "../../../contracts/exec";
 import { parseFileContent, parseFilesResponse } from "../../../contracts/files";
 import {

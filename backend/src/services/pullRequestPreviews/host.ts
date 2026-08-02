@@ -1,7 +1,7 @@
 import type {
     PullRequestPreviewCleanupResult,
     PullRequestPreviewStatus,
-} from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/previews.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { hasLineBreakOrNullByte } from "../../lib/values.ts";
 import { resolveGatewayToken } from "../gateway/token.ts";

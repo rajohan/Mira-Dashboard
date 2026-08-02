@@ -1,4 +1,4 @@
-import type { PullRequestSummary } from "../../../../../contracts/delivery";
+import type { PullRequestSummary } from "../../../../../contracts/delivery/pullRequests";
 
 export interface PullRequestStackCandidate {
     baseRefName: string;

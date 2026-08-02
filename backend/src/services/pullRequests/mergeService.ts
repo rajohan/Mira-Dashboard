@@ -1,12 +1,14 @@
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
 import type {
-    DeploymentJob,
+    PullRequestPreviewCleanupResult,
+    WorktreeCleanupResult,
+} from "../../../../contracts/delivery/previews.ts";
+import type {
     GitHubAsyncPullRequestMergeResult,
     GitHubPullRequestStackResource,
     PullRequestExpectedHead,
-    PullRequestPreviewCleanupResult,
-    WorktreeCleanupResult,
-} from "../../../../contracts/delivery.ts";
-import { parseGitHubAsyncPullRequestMergeResult } from "../../../../contracts/delivery.ts";
+} from "../../../../contracts/delivery/pullRequests.ts";
+import { parseGitHubAsyncPullRequestMergeResult } from "../../../../contracts/delivery/pullRequests.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { cleanupClosedPullRequestPreview } from "../pullRequestPreviews/host.ts";
 import {

@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { PullRequestSummary } from "../../contracts/delivery.ts";
+import type { PullRequestSummary } from "../../contracts/delivery/pullRequests.ts";
 import { parseGitWorkspaceSummary } from "../../contracts/git.ts";
 import { parseJsonText, requestUrl } from "../../test/support/fetch.ts";
 import { database, sqlNullable } from "../src/database/connection.ts";

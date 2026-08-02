@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { DeploymentJob } from "../../../../contracts/delivery.ts";
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
 import { resolveBunExecutable } from "../../lib/processes.ts";
 import {
     RELEASE_READINESS_FAILURE_NOTE_PREFIX,

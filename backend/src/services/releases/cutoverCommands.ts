@@ -1,4 +1,4 @@
-import type { DeploymentJob } from "../../../../contracts/delivery.ts";
+import type { DeploymentJob } from "../../../../contracts/delivery/deployments.ts";
 import { getMiraDatabasePath } from "../../database/connection.ts";
 import { resolveDashboardProjectPaths } from "../../lib/dashboardPaths.ts";
 import { resolveBunExecutable } from "../../lib/processes.ts";
