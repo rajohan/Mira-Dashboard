@@ -50,7 +50,9 @@ export function preparePreviewState(
         environment,
         config.dashboardRoot
     );
-    prepareDevelopmentState(developmentConfig);
+    prepareDevelopmentState(developmentConfig, {
+        refreshDatabaseSnapshot: true,
+    });
     return stateRoot;
 }
 

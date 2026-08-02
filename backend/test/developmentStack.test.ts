@@ -539,6 +539,35 @@ describe("development stack", () => {
                     .get()
             ).toEqual({ value: "preserved" });
             reusedSnapshot.close();
+
+            const productionDatabase = new Database(sourceDatabase);
+            productionDatabase
+                .prepare("UPDATE app_config SET value = ? WHERE key = 'theme'")
+                .run("fresh");
+            productionDatabase.close();
+            expect(
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+            ).toEqual({
+                database: "snapshot-created",
+                releases: "reused",
+                workspace: "reused",
+            });
+            const refreshedSnapshot = new Database(config.databasePath, {
+                readonly: true,
+            });
+            expect(
+                refreshedSnapshot
+                    .query(
+                        "SELECT value FROM app_config WHERE key = 'development-marker'"
+                    )
+                    .get()
+            ).toBeNull();
+            expect(
+                refreshedSnapshot
+                    .query("SELECT value FROM app_config WHERE key = 'theme'")
+                    .get()
+            ).toEqual({ value: "fresh" });
+            refreshedSnapshot.close();
             rmSync(sourceDatabase);
             expect(prepareDevelopmentState(config)).toEqual({
                 database: "reused",

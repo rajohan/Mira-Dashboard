@@ -34,6 +34,10 @@ export interface DevelopmentStateResult {
     workspace: DevelopmentWorkspaceState;
 }
 
+export interface DevelopmentStateOptions {
+    refreshDatabaseSnapshot?: boolean;
+}
+
 interface DevelopmentStateMarker {
     formatVersion: 1;
     owner: string;
@@ -250,6 +254,17 @@ function createDevelopmentDatabaseSnapshot(
         }
         chmodSync(stagingPath, 0o600);
         scrubDevelopmentDatabase(stagingPath, shouldPreserveWebAuthnCredentials);
+        for (const suffix of ["-journal", "-shm", "-wal"]) {
+            const sidecarPath = `${targetPath}${suffix}`;
+            if (isPathPresentNoFollow(sidecarPath)) {
+                if (!isRealRegularFile(sidecarPath)) {
+                    throw new Error(
+                        `Development database sidecar must be a real regular file: ${sidecarPath}`
+                    );
+                }
+                rmSync(sidecarPath, { force: true });
+            }
+        }
         renameSync(stagingPath, targetPath);
     } catch (error) {
         rmSync(stagingPath, { force: true });
@@ -433,7 +448,8 @@ export function developmentSecretEncryptionKey(config: DevelopmentStackConfig): 
  * @returns Created or reuses isolated, ignored development state.
  */
 export function prepareDevelopmentState(
-    config: DevelopmentStackConfig
+    config: DevelopmentStackConfig,
+    options: DevelopmentStateOptions = {}
 ): DevelopmentStateResult {
     assertOrCreateStateOwnership(config);
     ensurePrivateStateDirectory(config, config.openClawClientHome);
@@ -448,21 +464,25 @@ export function prepareDevelopmentState(
     });
 
     let database: DevelopmentStateResult["database"];
-    if (isPathPresentNoFollow(config.databasePath)) {
-        if (!isRealRegularFile(config.databasePath)) {
-            throw new Error("Development database must be a real regular file");
-        }
-        if (config.sourceWebAuthnRpId !== config.rpId) {
-            scrubDevelopmentDatabase(config.databasePath, false);
-        }
-        database = "reused";
-    } else if (config.databaseSource) {
+    const hasDatabase = isPathPresentNoFollow(config.databasePath);
+    if (hasDatabase && !isRealRegularFile(config.databasePath)) {
+        throw new Error("Development database must be a real regular file");
+    }
+    if (
+        config.databaseSource &&
+        (!hasDatabase || options.refreshDatabaseSnapshot === true)
+    ) {
         createDevelopmentDatabaseSnapshot(
             config.databaseSource,
             config.databasePath,
             config.sourceWebAuthnRpId === config.rpId
         );
         database = "snapshot-created";
+    } else if (hasDatabase) {
+        if (config.sourceWebAuthnRpId !== config.rpId) {
+            scrubDevelopmentDatabase(config.databasePath, false);
+        }
+        database = "reused";
     } else {
         database = "created-empty";
     }

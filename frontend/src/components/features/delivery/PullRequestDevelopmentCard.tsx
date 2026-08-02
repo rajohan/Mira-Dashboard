@@ -1,5 +1,5 @@
 import { ExternalLink, MonitorPlay, Square } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import type { PullRequestPreviewStatus } from "../../../../../contracts/delivery/previews";
 import { messageFromError } from "../../../lib/errorMessage";
@@ -21,7 +21,7 @@ function previewVariant(status: PullRequestPreviewStatus["status"]) {
             return "error" as const;
         }
         case "stopped": {
-            return "default" as const;
+            return "success" as const;
         }
     }
 }
@@ -64,7 +64,7 @@ export function PullRequestDevelopmentCard({
     const status = preview?.status ?? "stopped";
     const hasPreview = preview?.number !== undefined;
     const areControlsAvailable = preview?.controlsAvailable !== false;
-    let badgeVariant = previewVariant(status);
+    let badgeVariant: ComponentProps<typeof Badge>["variant"] = previewVariant(status);
     let badgeLabel = previewLabel(status);
     if (error) {
         badgeVariant = "error";

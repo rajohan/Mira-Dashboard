@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 
 import { CodeSyntaxHighlighter } from "../../../lib/syntaxHighlighter";
 import { cn } from "../../../utils/cn";
+import { CopyButton } from "../../ui/CopyButton";
 import {
     getPreCodeBlock,
     isJsonLike,
@@ -24,8 +25,15 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
     if (parsedJson) {
         return (
             <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-                <div className="border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide text-primary-400 uppercase">
-                    {JSON_LANGUAGES.has(language) ? language : "json"}
+                <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2 py-0.5">
+                    <span className="text-[10px] tracking-wide text-primary-400 uppercase">
+                        {JSON_LANGUAGES.has(language) ? language : "json"}
+                    </span>
+                    <CopyButton
+                        className="px-1.5 py-0 text-[10px]"
+                        content={code}
+                        label="Copy code"
+                    />
                 </div>
                 <div className="max-w-full overflow-x-auto p-2">
                     <ReactJsonView
@@ -49,8 +57,15 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
 
     return (
         <div className="my-1.5 max-w-full overflow-hidden rounded-lg border border-white/10 bg-black/25">
-            <div className="border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide text-primary-400 uppercase">
-                {language}
+            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2 py-0.5">
+                <span className="text-[10px] tracking-wide text-primary-400 uppercase">
+                    {language}
+                </span>
+                <CopyButton
+                    className="px-1.5 py-0 text-[10px]"
+                    content={code}
+                    label="Copy code"
+                />
             </div>
             <CodeSyntaxHighlighter
                 language={normalizeSyntaxLanguage(language)}

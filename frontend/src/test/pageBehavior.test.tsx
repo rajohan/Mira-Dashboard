@@ -82,6 +82,7 @@ const animationFrameState = {
     id: 0,
     frames: new Map<number, FrameRequestCallback>(),
 };
+const scrollIntoViewMock = jest.fn();
 const terminalApiState = {
     expectedExecCwd: "/tmp",
     wasJobStopped: false,
@@ -2387,7 +2388,8 @@ describe("Mira Dashboard pages", () => {
                 writable: true,
             },
         });
-        Element.prototype.scrollIntoView = jest.fn();
+        scrollIntoViewMock.mockReset();
+        Element.prototype.scrollIntoView = scrollIntoViewMock;
     });
 
     afterEach(() => {
@@ -2467,6 +2469,26 @@ describe("Mira Dashboard pages", () => {
             view.unmount();
             view.queryClient.clear();
         }
+    });
+
+    it("separates Moltbook feed sorting from the content tabs", async () => {
+        const view = renderPage(createElement(Moltbook));
+
+        const feedSort = await screen.findByRole("group", {
+            name: "Moltbook feed sort",
+        });
+        const contentTabs = screen.getByRole("group", {
+            name: "Moltbook content",
+        });
+        expect(contentTabs.parentElement?.tagName).toBe("DIV");
+        expect(contentTabs.parentElement?.parentElement).toBe(
+            feedSort.parentElement?.parentElement
+        );
+        expect(feedSort.parentElement).not.toBe(contentTabs.parentElement);
+        expect(feedSort.parentElement).toHaveClass("space-y-4", "lg:space-y-6");
+
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("labels and dismisses file save errors", async () => {
@@ -3210,6 +3232,72 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("closes merge confirmations while the merge job continues", async () => {
+        const user = userEvent.setup();
+        const defaultFetch = globalThis.fetch;
+        let finishMerge: ((response: Response) => void) | undefined;
+        const mergeResponse = new Promise<Response>((resolve) => {
+            finishMerge = resolve;
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+                if (method === "POST" && url === "/api/pull-requests/190/approve") {
+                    expect(parseRequestBody(init)).toEqual({
+                        deploy: true,
+                        expectedHeadSha: "a".repeat(40),
+                        mergeStack: false,
+                    });
+                    return mergeResponse;
+                }
+                return defaultFetch(input, init);
+            }),
+            writable: true,
+        });
+        const view = renderPage(createElement(Delivery));
+
+        await screen.findByText("Expand backend coverage");
+        await user.click(screen.getAllByRole("button", { name: "Merge + Deploy" })[0]!);
+        const dialog = screen.getByRole("dialog", { name: "Merge + Deploy" });
+        await user.click(within(dialog).getByRole("button", { name: "Merge + Deploy" }));
+
+        expect(screen.queryByRole("dialog", { name: "Merge + Deploy" })).toBeNull();
+        expect(
+            screen.getByText("Merging PR #190 and preparing deploy...")
+        ).toBeInTheDocument();
+        expect(
+            screen.getAllByRole("button", { name: "Merge + Deploy" })[0]
+        ).toBeDisabled();
+        await waitFor(() => {
+            expect(scrollIntoViewMock).toHaveBeenCalledWith({
+                behavior: "smooth",
+                block: "start",
+            });
+        });
+
+        act(() => {
+            finishMerge?.(
+                Response.json({
+                    isOk: true,
+                    message: "PR #190 merged. Deploy started",
+                })
+            );
+        });
+        await waitFor(() => {
+            expect(
+                screen.getByText("PR #190 merged. Deploy started")
+            ).toBeInTheDocument();
+            expect(
+                screen.queryByText("Merging PR #190 and preparing deploy...")
+            ).toBeNull();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("shows dependent PR chains and creates GitHub stacks bottom-to-top", async () => {
         const user = userEvent.setup();
         const defaultFetch = globalThis.fetch;
@@ -3645,7 +3733,7 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
-    it("keeps PR dev status messages ahead of pull request action buttons", async () => {
+    it("keeps PR dev status and controls ahead of review actions", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
             value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -3707,8 +3795,13 @@ describe("Mira Dashboard pages", () => {
             "PR dev status is unavailable: bun executable must resolve to an absolute path"
         );
         const approveButton = screen.getByRole("button", { name: "Approve PR" });
+        const runInDevButton = screen.getByRole("button", { name: "Run in dev" });
         expect(
-            previewStatus.compareDocumentPosition(approveButton) &
+            previewStatus.compareDocumentPosition(runInDevButton) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+        expect(
+            runInDevButton.compareDocumentPosition(approveButton) &
                 Node.DOCUMENT_POSITION_FOLLOWING
         ).toBeTruthy();
         expect(previewStatus).toHaveClass("col-span-full", "w-full");

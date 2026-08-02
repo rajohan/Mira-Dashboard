@@ -72,17 +72,19 @@ export function Moltbook() {
             )}
 
             {/* Tabs */}
-            <FilterButtonGroup
-                ariaLabel="Moltbook content"
-                options={TAB_OPTIONS}
-                value={activeTab}
-                onChange={(v) => setActiveTab(v)}
-                className="w-full [&>button]:flex-1 sm:[&>button]:flex-none"
-            />
+            <div>
+                <FilterButtonGroup
+                    ariaLabel="Moltbook content"
+                    options={TAB_OPTIONS}
+                    value={activeTab}
+                    onChange={(v) => setActiveTab(v)}
+                    className="w-full [&>button]:flex-1 sm:[&>button]:flex-none"
+                />
+            </div>
 
             {/* Feed Tab */}
             {activeTab === "feed" && (
-                <>
+                <div className="space-y-4 lg:space-y-6">
                     <FilterButtonGroup
                         ariaLabel="Moltbook feed sort"
                         options={SORT_OPTIONS}
@@ -100,7 +102,7 @@ export function Moltbook() {
                             ))
                         )}
                     </div>
-                </>
+                </div>
             )}
 
             {/* My Posts Tab */}
