@@ -79,6 +79,7 @@ export type FinishEvent = Extract<ChatRuntimeEvent, { kind: "finish" }>;
 export type ControlEvent = Extract<ChatRuntimeEvent, { kind: "control" }>;
 
 interface RuntimeReduction {
+    acceptedEvents: ChatRuntimeEvent[];
     finishes: Array<{ event: FinishEvent; state: ChatRuntimeState }>;
     state: ChatRuntimeState;
 }
@@ -88,6 +89,7 @@ export function reduceRuntimeEvents(
     events: ChatRuntimeEvent[]
 ): RuntimeReduction {
     let state = previous;
+    const acceptedEvents: ChatRuntimeEvent[] = [];
     const finishes: RuntimeReduction["finishes"] = [];
     const orderedEvents = events.toSorted(
         (left, right) => left.sequence - right.sequence
@@ -96,9 +98,10 @@ export function reduceRuntimeEvents(
         const next = reduceChatRuntime(state, [event]);
         if (next === state) continue;
         state = next;
+        acceptedEvents.push(event);
         if (event.kind === "finish") finishes.push({ event, state });
     }
-    return { finishes, state };
+    return { acceptedEvents, finishes, state };
 }
 
 export function carryActiveRunsToGeneration(

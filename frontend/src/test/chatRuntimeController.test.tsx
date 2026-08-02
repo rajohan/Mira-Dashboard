@@ -1452,6 +1452,66 @@ describe("chat runtime controller", () => {
         expect(commits.at(-1)).toEqual({ hasStatus: true, toolCount: 1 });
     });
 
+    it("does not settle a stale control beside an accepted batch event", async () => {
+        const fake = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [assistant(SELECTED, 32, "working", "replace")],
+                throughSequence: 32,
+            })
+        );
+        const onSettled = jest.fn();
+        const { result } = renderHook(() =>
+            useChatRuntime({
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
+        );
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+            ).toBe("working")
+        );
+
+        act(() => {
+            fake.emitBatch([
+                {
+                    kind: "control",
+                    message: {
+                        content: "stale progress",
+                        controlId: "stale-control",
+                        intent: "control",
+                        role: "system",
+                        text: "stale progress",
+                    },
+                    sequence: 16,
+                    sessionKey: SELECTED,
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+                {
+                    kind: "tool",
+                    message: {
+                        content: "",
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                    runId: "run-1",
+                    sequence: 48,
+                    sessionKey: SELECTED,
+                    timestamp: "2026-07-16T12:00:01.000Z",
+                    toolKey: "tool:call-1",
+                },
+            ]);
+        });
+
+        expect(onSettled).not.toHaveBeenCalled();
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["run-1"]?.diagnostics
+        ).toHaveLength(1);
+    });
+
     it("flushes queued events if snapshot recovery fails", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

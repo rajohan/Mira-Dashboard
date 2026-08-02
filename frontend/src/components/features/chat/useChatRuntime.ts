@@ -167,11 +167,9 @@ export function useChatRuntime({
             const previousState = stateRef.current;
             const reduction = reduceRuntimeEvents(previousState, liveEvents);
             updateState(() => reduction.state);
-            if (reduction.state !== previousState) {
-                for (const event of liveEvents) {
-                    if (event.kind === "control") {
-                        handleControlSideEffect(event);
-                    }
+            for (const event of reduction.acceptedEvents) {
+                if (event.kind === "control") {
+                    handleControlSideEffect(event);
                 }
             }
             for (const finish of reduction.finishes) {
@@ -270,6 +268,7 @@ export function useChatRuntime({
                         event.sequence > snapshot.throughSequence ||
                         !replayedSequences.has(event.sequence)
                 );
+                const queuedAfterSnapshotSet = new Set(queuedAfterSnapshot);
                 const replayReduction = reduceRuntimeEvents(
                     shouldPreserveActiveRuns
                         ? stateRef.current
@@ -375,8 +374,8 @@ export function useChatRuntime({
                     );
                 }
                 updateState(() => next);
-                for (const event of queuedAfterSnapshot) {
-                    if (event.kind === "control") {
+                for (const event of replayReduction.acceptedEvents) {
+                    if (event.kind === "control" && queuedAfterSnapshotSet.has(event)) {
                         handleControlSideEffect(event);
                     }
                 }
@@ -394,7 +393,7 @@ export function useChatRuntime({
                 if (gate.events.length > 0) {
                     const reduction = reduceRuntimeEvents(stateRef.current, gate.events);
                     updateState(() => reduction.state);
-                    for (const event of gate.events) {
+                    for (const event of reduction.acceptedEvents) {
                         if (event.kind === "control") {
                             handleControlSideEffect(event);
                         }
@@ -414,7 +413,7 @@ export function useChatRuntime({
                 if (queued.length > 0) {
                     const reduction = reduceRuntimeEvents(stateRef.current, queued);
                     updateState(() => reduction.state);
-                    for (const event of queued) {
+                    for (const event of reduction.acceptedEvents) {
                         if (event.kind === "control") {
                             handleControlSideEffect(event);
                         }
