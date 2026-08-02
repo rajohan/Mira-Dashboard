@@ -31,16 +31,14 @@ import {
     childrenToText,
     getPreCodeBlock,
 } from "../components/features/chat/chatMarkdownUtilities";
+import { AttachmentIcon } from "../components/features/chat/ChatMessageAttachments";
 import { ChatMessageDetails } from "../components/features/chat/ChatMessageDetails";
 import { messageIdentity } from "../components/features/chat/chatMessageIdentity";
 import {
     mergeWithRecentOptimisticMessages,
     rollbackFailedOptimisticMessage,
 } from "../components/features/chat/chatMessageReconciliation";
-import {
-    AttachmentIcon,
-    ChatMessagesList,
-} from "../components/features/chat/ChatMessagesList";
+import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import { chatThinkingOptions } from "../components/features/chat/chatSettings";
 import { executeChatSlashCommand } from "../components/features/chat/chatSlashCommandHandler";
 import {
