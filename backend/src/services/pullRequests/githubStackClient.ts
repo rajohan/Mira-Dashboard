@@ -26,7 +26,7 @@ const STACK_MERGE_POLL_INTERVAL_MS = 1000;
 const STACK_MERGE_TIMEOUT_MS = 5 * 60 * 1000;
 export const STACK_MERGE_JOB_TIMEOUT_MS = STACK_MERGE_TIMEOUT_MS * 2 + 2 * 60 * 1000;
 
-/** Submits an exact-head native stack merge and waits for GitHub's terminal result. */
+// Submits an exact-head native stack merge and waits for GitHub's terminal result.
 export async function mergePullRequestStack(
     number: number,
     expectedHeadSha: string,

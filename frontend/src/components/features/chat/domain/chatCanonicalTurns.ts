@@ -268,7 +268,7 @@ function assertCanonicalChatTurnInvariants(
             throw new Error("Canonical chat turn invariant failed: entry run");
         }
     }
-    const expected = expectedMessages.map(semanticMessage);
+    const expected = expectedMessages.map((message) => semanticMessage(message));
     const actual = turns.flatMap((turn) =>
         turn.entries.map((entry) =>
             stableCanonicalChatStringify(
@@ -340,7 +340,7 @@ function assembleCanonicalChatTurnsWithContinuations(
     return turns;
 }
 
-/** Assembles structured canonical messages into versioned logical turns. */
+// Assembles structured canonical messages into versioned logical turns.
 export function assembleCanonicalChatTurns(
     messages: ChatHistoryMessage[],
     runs: ChatRunState[],

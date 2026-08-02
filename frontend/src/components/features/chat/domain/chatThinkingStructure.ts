@@ -93,7 +93,9 @@ function completedResponseStart(
             /^\[System\]\s+Your previous turn was interrupted by a gateway restart\b/iu.test(
                 nextUserMessage.text.trim()
             );
-        const hasPriorAnswer = interveningMessages.some(isSettledAnswerMessage);
+        const hasPriorAnswer = interveningMessages.some((message) =>
+            isSettledAnswerMessage(message)
+        );
         if (hasPriorAnswer && !isGatewayRestartContinuation) return groupStart;
         const hasContinuationEvidence = interveningMessages.some(
             (candidate) =>
@@ -157,12 +159,10 @@ function thinkingAnchorIndex(
         : segments.findIndex(
               (segment, index) => index > group.firstIndex && segment !== group.segment
           );
-    const rangeEnd =
-        finalIndex === -1
-            ? nextSegmentIndex === -1
-                ? messages.length
-                : nextSegmentIndex
-            : finalIndex;
+    let rangeEnd = finalIndex;
+    if (rangeEnd === -1) {
+        rangeEnd = nextSegmentIndex === -1 ? messages.length : nextSegmentIndex;
+    }
     let latestPrerequisiteIndex = -1;
 
     for (const [index, message] of messages.entries()) {
@@ -294,7 +294,7 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
     return collapsed;
 }
 
-/** Normalizes thinking into stable standalone messages before visibility policy. */
+// Normalizes thinking into stable standalone messages before visibility policy.
 export function structureChatMessages(
     messages: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {

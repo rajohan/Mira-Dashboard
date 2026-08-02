@@ -50,7 +50,7 @@ export function parseDisableUntilDraft(draft: DateTimePickerValue): number | und
     );
 }
 
-/** Starts a temporary disable at the end of today's application-time-zone date. */
+// Starts a temporary disable at the end of today's application-time-zone date.
 export function defaultDisableUntilDraft(now = Date.now()): DateTimePickerValue {
     const today = appTimeZoneParts(new Date(now));
     const endOfToday = {
@@ -67,7 +67,7 @@ export function defaultDisableUntilDraft(now = Date.now()): DateTimePickerValue 
         : toDisableUntilDraft(now + DEFAULT_DISABLE_FALLBACK_MS);
 }
 
-/** Resolves the initial date/time draft for an existing disable annotation. */
+// Resolves the initial date/time draft for an existing disable annotation.
 export function disableUntilDraftForCandidate(
     candidate: DisableCandidate
 ): DateTimePickerValue {

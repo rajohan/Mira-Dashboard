@@ -32,14 +32,14 @@ function parseDockerMemoryPart(part: string): number | undefined {
     return factor ? amount * factor : undefined;
 }
 
-/** Parses a Docker percentage string for numeric table sorting. */
+// Parses a Docker percentage string for numeric table sorting.
 export function parseDockerPercent(value: string | undefined): number {
     if (!value) return -1;
     const match = value.match(/-?\d+(?:\.\d+)?/);
     return match ? Number(match[0]) : -1;
 }
 
-/** Parses the used side of a Docker memory summary as MiB. */
+// Parses the used side of a Docker memory summary as MiB.
 export function parseDockerMemoryUsedMiB(value: string | undefined): number {
     if (!value) return -1;
     const used = value.split("/", 1)[0]?.trim();
@@ -48,7 +48,7 @@ export function parseDockerMemoryUsedMiB(value: string | undefined): number {
     return usedBytes === undefined ? -1 : usedBytes / 1024 ** 2;
 }
 
-/** Formats the used side of a Docker memory summary as decimal MB or GB. */
+// Formats the used side of a Docker memory summary as decimal MB or GB.
 export function formatDockerMemoryUsed(value: string | undefined): string {
     const usedMiB = parseDockerMemoryUsedMiB(value);
     if (!Number.isFinite(usedMiB) || usedMiB < 0) return "-";
@@ -58,7 +58,7 @@ export function formatDockerMemoryUsed(value: string | undefined): string {
     return `${usedMb.toFixed(0)} MB`;
 }
 
-/** Ranks Docker health values for stable table sorting. */
+// Ranks Docker health values for stable table sorting.
 export function dockerContainerHealthRank(health: string): number {
     switch (health) {
         case "healthy": {
@@ -79,7 +79,7 @@ export function dockerContainerHealthRank(health: string): number {
     }
 }
 
-/** Selects the status badge variant for Docker container health. */
+// Selects the status badge variant for Docker container health.
 export function dockerContainerHealthVariant(
     container: DockerContainer
 ): "success" | "warning" | "error" | "default" {
@@ -89,7 +89,7 @@ export function dockerContainerHealthVariant(
     return "default";
 }
 
-/** Selects the status badge variant for a Docker container state. */
+// Selects the status badge variant for a Docker container state.
 export function dockerContainerStateVariant(
     state: string
 ): "success" | "warning" | "error" | "default" {
@@ -99,7 +99,7 @@ export function dockerContainerStateVariant(
     return "default";
 }
 
-/** Ranks Docker container states for stable table sorting. */
+// Ranks Docker container states for stable table sorting.
 export function dockerContainerStateRank(state: string): number {
     switch (state) {
         case "running": {

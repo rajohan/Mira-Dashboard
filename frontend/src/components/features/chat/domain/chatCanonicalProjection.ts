@@ -114,7 +114,7 @@ function assertCanonicalFinalProjection(projection: ChatProjection): void {
     }
 }
 
-/** Projects canonical turns into the stable row contract consumed by the chat UI. */
+// Projects canonical turns into the stable row contract consumed by the chat UI.
 export function projectCanonicalChat(
     history: ChatHistoryMessage[],
     runtime: ChatRuntimeState,

@@ -46,7 +46,7 @@ void PENDING_ACTION_SWITCH_IS_EXHAUSTIVE;
 export const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 export const DEFAULT_BASE = "main";
 
-/** Returns the confirmation label for a pending Delivery action. */
+// Returns the confirmation label for a pending Delivery action.
 export function actionLabel(action: Exclude<PendingAction, undefined>) {
     switch (action.type) {
         case "merge": {
@@ -118,7 +118,7 @@ export function expectedStackHeadsForMerge(
     });
 }
 
-/** Returns the confirmation message for a pending Delivery action. */
+// Returns the confirmation message for a pending Delivery action.
 export function actionMessage(action: Exclude<PendingAction, undefined>) {
     switch (action.type) {
         case "merge": {
@@ -170,7 +170,7 @@ export function actionMessage(action: Exclude<PendingAction, undefined>) {
     }
 }
 
-/** Combines an action result with any best-effort cleanup outcomes. */
+// Combines an action result with any best-effort cleanup outcomes.
 export function actionResultMessage(
     message: string,
     ...cleanupResults: Array<{ message: string } | { message: string }[] | undefined>

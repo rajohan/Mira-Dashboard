@@ -100,7 +100,7 @@ function applyFinalThinkingPreference(
         .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
 
-/** Applies visibility to already-structured messages. */
+// Applies visibility to already-structured messages.
 export function presentStructuredChatMessages(
     messages: ChatHistoryMessage[],
     visibility: ChatVisibilitySettings,
@@ -203,7 +203,7 @@ export function presentStructuredChatMessages(
     );
 }
 
-/** Structures and applies visibility as a pure projection. */
+// Structures and applies visibility as a pure projection.
 export function presentChatMessages(
     messages: ChatHistoryMessage[],
     visibility: ChatVisibilitySettings,

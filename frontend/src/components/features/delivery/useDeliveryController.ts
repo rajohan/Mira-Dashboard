@@ -276,7 +276,7 @@ export function useDeliveryController() {
         }
     }
 
-    /** Updates one pull request branch and presents the mutation result. */
+    // Updates one pull request branch and presents the mutation result.
     async function updateBranch(number: number): Promise<void> {
         try {
             const result = await updatePullRequestBranch.mutateAsync({ number });

@@ -9,7 +9,7 @@ export function isAnswerCapableRole(role: string): boolean {
     return normalizedRole === "assistant" || normalizedRole === "system";
 }
 
-/** Removes thinking content without disturbing explicit media on the message. */
+// Removes thinking content without disturbing explicit media on the message.
 export function stripThinkingFromMessage(
     message: ChatHistoryMessage
 ): ChatHistoryMessage {
@@ -56,7 +56,7 @@ export function chatAnswerDetails(message: ChatHistoryMessage): ChatAnswerDetail
     };
 }
 
-/** Identifies answer content independently from role and visibility settings. */
+// Identifies answer content independently from role and visibility settings.
 export function hasPrimaryAnswerContent(message: ChatHistoryMessage): boolean {
     return chatAnswerDetails(message).isPrimaryAnswerContent;
 }
