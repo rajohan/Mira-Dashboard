@@ -8,7 +8,7 @@ export {
 export type {
     PullRequestPreviewGatewayProxy,
     PullRequestPreviewGatewayProxyOptions,
-} from "./services/pullRequestPreviews/gatewayProxy.ts";
+} from "./services/pullRequestPreviews/gatewayProxyTypes.ts";
 
 if (import.meta.main) {
     await runPullRequestPreviewGatewayProxyEntrypoint();

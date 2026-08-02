@@ -1,71 +1,37 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import {
-    closeSync,
-    constants,
-    existsSync,
-    fstatSync,
-    lstatSync,
-    openSync,
-    readFileSync,
-} from "node:fs";
-import path from "node:path";
+import { randomBytes } from "node:crypto";
 
-import type { Server, ServerWebSocket } from "bun";
+import type { Server } from "bun";
 
 import {
     isDevelopmentGatewayProxyEventAllowed,
     isDevelopmentGatewayProxyMethodAllowed,
 } from "../../development/developmentGatewayPolicy.ts";
 import {
-    loadOrCreateDeviceIdentity,
     OpenClawGatewayClient,
-    type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
 } from "../../lib/openclawGatewayClient/client.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
-import { hasLineBreakOrNullByte } from "../../lib/values.ts";
 import { redactConfigSecrets } from "../configRedaction.ts";
+import {
+    areGatewayTokensEqual,
+    loadPrivatePreviewDeviceIdentity,
+    normalizedGatewayToken,
+    pullRequestPreviewGatewayProxyOptionsFromEnvironment,
+} from "./gatewayProxyConfig.ts";
+import type {
+    PreviewGatewayRequest,
+    PreviewGatewaySocket,
+    PreviewGatewaySocketData,
+    PullRequestPreviewGatewayProxy,
+    PullRequestPreviewGatewayProxyOptions,
+} from "./gatewayProxyTypes.ts";
 
 const logger = createStructuredLogger("preview-gateway-proxy");
 
 const AUTHENTICATION_TIMEOUT_MS = 10_000;
 export const MAX_CLIENT_PENDING_REQUESTS = 128;
 const MAX_GATEWAY_FRAME_BYTES = 1024 * 1024;
-const MAX_GATEWAY_TOKEN_BYTES = 16 * 1024;
 const PROXY_PATH = "/gateway";
-
-interface PreviewGatewaySocketData {
-    authenticated: boolean;
-    authenticationTimer?: NodeJS.Timeout;
-    challengeNonce: string;
-    pendingRequests: number;
-}
-
-interface PreviewGatewayRequest {
-    id: string;
-    method: string;
-    parameters: Record<string, unknown>;
-}
-
-export interface PullRequestPreviewGatewayProxyOptions {
-    clientToken: string;
-    deviceIdentityFile: string;
-    port: number;
-    serverFactory?: (
-        options: Bun.Serve.Options<PreviewGatewaySocketData>
-    ) => Server<PreviewGatewaySocketData>;
-    upstreamClientFactory?: (
-        options: OpenClawGatewayClientOptions
-    ) => OpenClawGatewayClientInstance;
-    upstreamToken: string;
-    upstreamUrl: string;
-}
-
-export interface PullRequestPreviewGatewayProxy {
-    isUpstreamConnected: () => boolean;
-    port: number;
-    stop: () => Promise<void>;
-}
 
 function previewGatewayResponse(method: string, payload: unknown): unknown {
     return method === "config.get" ? redactConfigSecrets(payload) : payload;
@@ -75,129 +41,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : undefined;
-}
-
-function normalizedToken(value: string, label: string): string {
-    const token = value.trim();
-    if (
-        !token ||
-        Buffer.byteLength(token) > MAX_GATEWAY_TOKEN_BYTES ||
-        hasLineBreakOrNullByte(token)
-    ) {
-        throw new TypeError(`${label} must be a valid single-line token`);
-    }
-    return token;
-}
-
-function areTokensEqual(left: string, right: string): boolean {
-    const leftBuffer = Buffer.from(left);
-    const rightBuffer = Buffer.from(right);
-    return (
-        leftBuffer.length === rightBuffer.length &&
-        timingSafeEqual(leftBuffer, rightBuffer)
-    );
-}
-
-function configuredPort(value: string | undefined): number {
-    if (!value || !/^\d+$/u.test(value)) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT must be an integer"
-        );
-    }
-    const port = Number(value);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT must be between 1 and 65535"
-        );
-    }
-    return port;
-}
-
-function configuredUpstreamUrl(value: string | undefined): string {
-    if (!value?.trim()) {
-        throw new TypeError("MIRA_DASHBOARD_PREVIEW_GATEWAY_UPSTREAM_URL is required");
-    }
-    const url = new URL(value);
-    if (
-        !["ws:", "wss:"].includes(url.protocol) ||
-        url.username ||
-        url.password ||
-        url.hash
-    ) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_GATEWAY_UPSTREAM_URL must be ws:// or wss:// without credentials or a fragment"
-        );
-    }
-    return url.href;
-}
-
-function absoluteFilePath(name: string, value: string | undefined): string {
-    if (!value?.trim() || !path.isAbsolute(value)) {
-        throw new TypeError(`${name} must be an absolute path`);
-    }
-    const resolved = path.resolve(value);
-    if (resolved === path.parse(resolved).root) {
-        throw new TypeError(`${name} must not be the filesystem root`);
-    }
-    return resolved;
-}
-
-function readSecretFile(filePath: string, label: string): string {
-    const descriptor = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-        const stat = fstatSync(descriptor);
-        if (
-            !stat.isFile() ||
-            stat.nlink !== 1 ||
-            stat.size > MAX_GATEWAY_TOKEN_BYTES ||
-            (stat.mode & 0o077) !== 0
-        ) {
-            throw new Error(`${label} must be a private single-link regular file`);
-        }
-        return normalizedToken(readFileSync(descriptor, "utf8"), label);
-    } finally {
-        closeSync(descriptor);
-    }
-}
-
-function loadPrivateDeviceIdentity(filePath: string) {
-    const directory = path.dirname(filePath);
-    const directoryStat = lstatSync(directory);
-    if (
-        !directoryStat.isDirectory() ||
-        directoryStat.isSymbolicLink() ||
-        (directoryStat.mode & 0o077) !== 0
-    ) {
-        throw new Error(
-            "Preview Gateway proxy identity directory must be a private real directory"
-        );
-    }
-    if (existsSync(filePath)) {
-        const fileStat = lstatSync(filePath);
-        if (
-            !fileStat.isFile() ||
-            fileStat.isSymbolicLink() ||
-            fileStat.nlink !== 1 ||
-            (fileStat.mode & 0o077) !== 0
-        ) {
-            throw new Error(
-                "Preview Gateway proxy identity must be a private single-link regular file"
-            );
-        }
-    }
-    const identity = loadOrCreateDeviceIdentity(filePath);
-    const createdStat = lstatSync(filePath);
-    if (
-        !createdStat.isFile() ||
-        createdStat.isSymbolicLink() ||
-        createdStat.nlink !== 1 ||
-        (createdStat.mode & 0o077) !== 0
-    ) {
-        throw new Error(
-            "Preview Gateway proxy identity must be a private single-link regular file"
-        );
-    }
-    return identity;
 }
 
 function requestFromFrame(value: unknown): PreviewGatewayRequest | undefined {
@@ -223,10 +66,7 @@ function websocketMessageText(message: string | Buffer): string {
     return typeof message === "string" ? message : message.toString("utf8");
 }
 
-function sendFrame(
-    socket: ServerWebSocket<PreviewGatewaySocketData>,
-    frame: unknown
-): void {
+function sendFrame(socket: PreviewGatewaySocket, frame: unknown): void {
     try {
         socket.send(JSON.stringify(frame));
     } catch {
@@ -234,11 +74,7 @@ function sendFrame(
     }
 }
 
-function sendError(
-    socket: ServerWebSocket<PreviewGatewaySocketData>,
-    id: string,
-    message: string
-): void {
+function sendError(socket: PreviewGatewaySocket, id: string, message: string): void {
     sendFrame(socket, {
         error: { code: "PREVIEW_GATEWAY_DENIED", message },
         id,
@@ -247,7 +83,7 @@ function sendError(
     });
 }
 
-function terminateSocket(socket: ServerWebSocket<PreviewGatewaySocketData>): void {
+function terminateSocket(socket: PreviewGatewaySocket): void {
     if (socket.data.authenticationTimer) {
         clearTimeout(socket.data.authenticationTimer);
         socket.data.authenticationTimer = undefined;
@@ -256,7 +92,7 @@ function terminateSocket(socket: ServerWebSocket<PreviewGatewaySocketData>): voi
 }
 
 function isClientAuthenticated(
-    socket: ServerWebSocket<PreviewGatewaySocketData>,
+    socket: PreviewGatewaySocket,
     request: PreviewGatewayRequest,
     clientToken: string,
     isUpstreamConnected: boolean
@@ -267,7 +103,7 @@ function isClientAuthenticated(
     }
     const auth = asRecord(request.parameters.auth);
     const suppliedToken = typeof auth?.token === "string" ? auth.token : "";
-    if (!areTokensEqual(clientToken, suppliedToken)) {
+    if (!areGatewayTokensEqual(clientToken, suppliedToken)) {
         sendError(socket, request.id, "Gateway proxy authentication failed");
         return false;
     }
@@ -300,16 +136,19 @@ function isClientAuthenticated(
 export function startPullRequestPreviewGatewayProxy(
     options: PullRequestPreviewGatewayProxyOptions
 ): PullRequestPreviewGatewayProxy {
-    const clientToken = normalizedToken(options.clientToken, "Preview client token");
-    const upstreamToken = normalizedToken(
+    const clientToken = normalizedGatewayToken(
+        options.clientToken,
+        "Preview client token"
+    );
+    const upstreamToken = normalizedGatewayToken(
         options.upstreamToken,
         "Preview upstream Gateway token"
     );
-    if (areTokensEqual(clientToken, upstreamToken)) {
+    if (areGatewayTokensEqual(clientToken, upstreamToken)) {
         throw new TypeError("Preview client and upstream Gateway tokens must differ");
     }
 
-    const clients = new Set<ServerWebSocket<PreviewGatewaySocketData>>();
+    const clients = new Set<PreviewGatewaySocket>();
     let isStopping = false;
     let isUpstreamConnected = false;
 
@@ -353,7 +192,7 @@ export function startPullRequestPreviewGatewayProxy(
         clientDisplayName: "Mira Dashboard PR Dev Gateway Proxy",
         clientName: "gateway-client",
         deviceFamily: "server",
-        deviceIdentity: loadPrivateDeviceIdentity(options.deviceIdentityFile),
+        deviceIdentity: loadPrivatePreviewDeviceIdentity(options.deviceIdentityFile),
         mode: "backend",
         onClose() {
             isUpstreamConnected = false;
@@ -513,37 +352,11 @@ export function startPullRequestPreviewGatewayProxy(
     };
 }
 
-function optionsFromEnvironment(
-    environment: Record<string, string | undefined> = process.env
-): PullRequestPreviewGatewayProxyOptions {
-    const clientTokenFile = absoluteFilePath(
-        "MIRA_DASHBOARD_PREVIEW_GATEWAY_CLIENT_TOKEN_FILE",
-        environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_CLIENT_TOKEN_FILE
-    );
-    const upstreamTokenFile = absoluteFilePath(
-        "MIRA_DASHBOARD_PREVIEW_GATEWAY_UPSTREAM_TOKEN_FILE",
-        environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_UPSTREAM_TOKEN_FILE
-    );
-    return {
-        clientToken: readSecretFile(clientTokenFile, "Preview client token file"),
-        deviceIdentityFile: absoluteFilePath(
-            "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_IDENTITY_FILE",
-            environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_IDENTITY_FILE
-        ),
-        port: configuredPort(environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT),
-        upstreamToken: readSecretFile(
-            upstreamTokenFile,
-            "Preview upstream Gateway token file"
-        ),
-        upstreamUrl: configuredUpstreamUrl(
-            environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_UPSTREAM_URL
-        ),
-    };
-}
-
 export async function runPullRequestPreviewGatewayProxyEntrypoint(): Promise<void> {
     try {
-        const proxy = startPullRequestPreviewGatewayProxy(optionsFromEnvironment());
+        const proxy = startPullRequestPreviewGatewayProxy(
+            pullRequestPreviewGatewayProxyOptionsFromEnvironment()
+        );
         const shutdown = Promise.withResolvers<NodeJS.Signals>();
         const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
         process.once("SIGINT", stop);
