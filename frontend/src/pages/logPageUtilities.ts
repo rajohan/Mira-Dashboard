@@ -121,16 +121,3 @@ export function compareLogEntriesByLineId(
     }
     return secondLineId === undefined ? 0 : 1;
 }
-
-/**
- * Formats the visible and total log-entry counts.
- * @param visibleCount Visible count.
- * @param totalCount Total count.
- * @returns Formatted the visible and total log-entry counts.
- */
-export function formatLogEntryCount(visibleCount: number, totalCount: number): string {
-    const suffix = visibleCount === 1 ? "entry" : "entries";
-    return visibleCount === totalCount
-        ? `${visibleCount} ${suffix}`
-        : `${visibleCount} of ${totalCount} ${totalCount === 1 ? "entry" : "entries"}`;
-}

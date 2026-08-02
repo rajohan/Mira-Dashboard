@@ -9,11 +9,10 @@ import type {
 } from "../../../contracts/jobs/scheduled";
 import { CronJobList } from "../components/features/cron/CronJobList";
 import { CronJobEditor } from "../components/features/jobs/CronJobEditor";
+import { JobDisableIntentModal } from "../components/features/jobs/JobDisableIntentModal";
+import type { DisableCandidate } from "../components/features/jobs/jobDisableIntentModel";
 import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";
 import {
-    type DisableCandidate,
-    type DisableMode,
-    disableModeOptions,
     getInitialCronJobId,
     getInitialJobsView,
     type JobsView,
@@ -25,14 +24,7 @@ import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
-import {
-    DateTimePicker,
-    type DateTimePickerValue,
-} from "../components/ui/DateTimePicker";
 import { LoadingState } from "../components/ui/LoadingState";
-import { Modal } from "../components/ui/Modal";
-import { Select } from "../components/ui/Select";
-import { Textarea } from "../components/ui/Textarea";
 import {
     useCronJobs,
     useDeleteCronJob,
@@ -47,11 +39,6 @@ import {
 } from "../hooks/useScheduledJobs";
 import { messageFromError } from "../lib/errorMessage";
 import { getCronJobId, sortCronJobs } from "../utils/cronUtilities";
-import {
-    defaultDisableUntilDraft,
-    parseDisableUntilDraft,
-    toDisableUntilDraft,
-} from "./jobPageUtilities";
 
 export function Jobs() {
     const {
@@ -85,13 +72,6 @@ export function Jobs() {
     const [disableCandidate, setDisableCandidate] = useState<
         DisableCandidate | undefined
     >();
-    const [disableMode, setDisableMode] = useState<DisableMode>("until");
-    const [disableComment, setDisableComment] = useState("");
-    const [disableUntil, setDisableUntil] = useState<DateTimePickerValue>(() =>
-        defaultDisableUntilDraft()
-    );
-    const [disableCommentError, setDisableCommentError] = useState<string | undefined>();
-    const [disableUntilError, setDisableUntilError] = useState<string | undefined>();
     const [actionError, setActionError] = useState<string | undefined>();
 
     const selectedScheduledJob =
@@ -155,24 +135,7 @@ export function Jobs() {
     }
 
     function openDisableModal(candidate: DisableCandidate) {
-        const existingIntent = candidate.job.disableIntent;
         setDisableCandidate(candidate);
-        setDisableMode(existingIntent?.mode ?? "until");
-        setDisableComment(existingIntent?.comment ?? "");
-        let untilTimestamp: number | undefined;
-        if (existingIntent?.mode === "until" && existingIntent.until) {
-            const parsedUntilTimestamp = Date.parse(existingIntent.until);
-            if (Number.isFinite(parsedUntilTimestamp)) {
-                untilTimestamp = parsedUntilTimestamp;
-            }
-        }
-        setDisableUntil(
-            untilTimestamp === undefined
-                ? defaultDisableUntilDraft()
-                : toDisableUntilDraft(untilTimestamp)
-        );
-        setDisableCommentError(undefined);
-        setDisableUntilError(undefined);
     }
 
     async function persistCronToggle(
@@ -203,33 +166,8 @@ export function Jobs() {
         void persistCronToggle(job, isEnabled);
     }
 
-    async function handleIntentionalDisable() {
+    async function handleIntentionalDisable(disableIntent: JobDisableIntent) {
         if (!disableCandidate) return;
-        setDisableCommentError(undefined);
-        setDisableUntilError(undefined);
-        const comment = disableComment.trim();
-        if (!comment) {
-            setDisableCommentError("A comment is required for an intentional disable.");
-            return;
-        }
-        let disableIntent: JobDisableIntent;
-        if (disableMode === "indefinite") {
-            disableIntent = {
-                mode: "indefinite",
-                comment,
-            };
-        } else {
-            const untilTimestamp = parseDisableUntilDraft(disableUntil);
-            if (untilTimestamp === undefined || untilTimestamp <= Date.now()) {
-                setDisableUntilError("Choose a future date and time.");
-                return;
-            }
-            disableIntent = {
-                mode: "until",
-                comment,
-                until: new Date(untilTimestamp).toISOString(),
-            };
-        }
         await (disableCandidate.kind === "scheduled"
             ? persistScheduledToggle(disableCandidate.job, false, disableIntent)
             : persistCronToggle(disableCandidate.job, false, disableIntent));
@@ -385,22 +323,6 @@ export function Jobs() {
         );
     }
 
-    let disableActionLabel = "Disable job";
-    if (isDisablePending) {
-        disableActionLabel = "Saving...";
-    } else if (disableCandidate?.job.enabled === false) {
-        disableActionLabel = "Save disabled state";
-    }
-    const linkedTaskCount =
-        disableCandidate?.kind === "cron"
-            ? (disableCandidate.job.taskLinks?.length ?? 0)
-            : 0;
-    const linkedTaskSuffix = linkedTaskCount === 1 ? "" : "s";
-    const linkedTaskNotice =
-        linkedTaskCount > 0
-            ? ` It is linked to ${linkedTaskCount} open task${linkedTaskSuffix}.`
-            : "";
-
     return (
         <div className="space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-6">
             {actionError ? (
@@ -458,70 +380,17 @@ export function Jobs() {
             ) : undefined}
 
             {disableCandidate ? (
-                <Modal
-                    isOpen
-                    title={
-                        disableCandidate.job.enabled === false
-                            ? "Edit disabled state"
-                            : "Disable job"
-                    }
-                    onClose={() => {
-                        if (!isDisablePending) setDisableCandidate(undefined);
-                    }}
-                >
-                    <div className="space-y-4">
-                        <p className="text-sm text-primary-300">
-                            Heartbeat will treat this{" "}
-                            {disableCandidate.kind === "scheduled"
-                                ? "Dashboard job"
-                                : "OpenClaw cron job"}{" "}
-                            as intentionally disabled while this annotation is active.
-                            {linkedTaskNotice}
-                        </p>
-                        <Select
-                            ariaLabel="Disabled duration"
-                            value={disableMode}
-                            options={disableModeOptions}
-                            onChange={(value) => setDisableMode(value as DisableMode)}
-                            width="w-full"
-                        />
-                        {disableMode === "until" ? (
-                            <DateTimePicker
-                                label="Disabled until"
-                                value={disableUntil}
-                                error={disableUntilError}
-                                onChange={setDisableUntil}
-                            />
-                        ) : undefined}
-                        <Textarea
-                            label="Comment"
-                            description="Required. Explain why the job is disabled and what should happen before it is enabled again."
-                            value={disableComment}
-                            onChange={(event) => setDisableComment(event.target.value)}
-                            maxLength={1000}
-                            rows={4}
-                            error={disableCommentError}
-                        />
-                        <div className="flex justify-end gap-2">
-                            <Button
-                                variant="secondary"
-                                disabled={isDisablePending}
-                                onClick={() => setDisableCandidate(undefined)}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                variant="primary"
-                                disabled={isDisablePending}
-                                onClick={() => {
-                                    void handleIntentionalDisable();
-                                }}
-                            >
-                                {disableActionLabel}
-                            </Button>
-                        </div>
-                    </div>
-                </Modal>
+                <JobDisableIntentModal
+                    key={`${disableCandidate.kind}:${
+                        disableCandidate.kind === "scheduled"
+                            ? disableCandidate.job.id
+                            : getCronJobId(disableCandidate.job)
+                    }`}
+                    candidate={disableCandidate}
+                    isPending={isDisablePending}
+                    onCancel={() => setDisableCandidate(undefined)}
+                    onSubmit={handleIntentionalDisable}
+                />
             ) : undefined}
         </div>
     );

@@ -5,7 +5,6 @@ import {
     DragOverlay,
     type DragStartEvent,
 } from "@dnd-kit/core";
-import { Plus } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -16,17 +15,19 @@ import {
     type TaskAutomationInput,
 } from "../../../contracts/tasks";
 import { NewTaskModal } from "../components/features/tasks/NewTaskModal";
+import {
+    TaskBoardToolbar,
+    type TaskAssigneeFilter,
+    type TaskAutomationFilter,
+} from "../components/features/tasks/TaskBoardToolbar";
 import { TaskColumn } from "../components/features/tasks/TaskColumn";
 import { TaskDetailModal } from "../components/features/tasks/TaskDetailModal";
 import { TaskOverlay } from "../components/features/tasks/TaskOverlay";
 import { Alert } from "../components/ui/Alert";
-import { Button } from "../components/ui/Button";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
-import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
-import { SearchInput } from "../components/ui/SearchInput";
 import {
     useAssignTask,
     useCreateTask,
@@ -48,18 +49,6 @@ import {
     isTaskMatchSearch,
 } from "../utils/taskUtilities";
 
-const ASSIGNMENT_FILTERS = [
-    { value: "all", label: "All" },
-    { value: TASK_ASSIGNEES.mira.id, label: TASK_ASSIGNEES.mira.label },
-    { value: TASK_ASSIGNEES.raymond.id, label: TASK_ASSIGNEES.raymond.label },
-] as const;
-
-const AUTOMATION_FILTERS = [
-    { value: "all", label: "All tasks" },
-    { value: "recurring", label: "Recurring" },
-    { value: "manual", label: "Manual" },
-] as const;
-
 /**
  * Renders the tasks UI.
  * @returns Rendered the tasks UI.
@@ -77,9 +66,8 @@ export function Tasks() {
     const deleteTaskUpdate = useDeleteTaskUpdate();
 
     const [search, setSearch] = useState("");
-    const [filter, setFilter] = useState<"all" | TaskAssigneeId>("all");
-    const [automationFilter, setAutomationFilter] =
-        useState<(typeof AUTOMATION_FILTERS)[number]["value"]>("all");
+    const [filter, setFilter] = useState<TaskAssigneeFilter>("all");
+    const [automationFilter, setAutomationFilter] = useState<TaskAutomationFilter>("all");
     const [activeId, setActiveId] = useState<string | undefined>();
     const [overId, setOverId] = useState<ColumnId | undefined>();
     const [selectedTask, setSelectedTask] = useState<Task | undefined>();
@@ -350,77 +338,24 @@ export function Tasks() {
                         </Alert>
                     )}
 
-                    <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:gap-4">
-                            <SearchInput
-                                value={search}
-                                onChange={setSearch}
-                                placeholder="Search tasks..."
-                                clearLabel="Clear task search"
-                            />
-                            <FilterButtonGroup
-                                ariaLabel="Task assignee"
-                                options={ASSIGNMENT_FILTERS}
-                                value={filter}
-                                onChange={setFilter}
-                            />
-                            <FilterButtonGroup
-                                ariaLabel="Task automation"
-                                options={AUTOMATION_FILTERS}
-                                value={automationFilter}
-                                onChange={setAutomationFilter}
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-[1fr_auto] items-center gap-2 sm:flex sm:justify-end">
-                            <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={() => setIsNewTaskOpen(true)}
-                                className="w-full sm:w-auto"
-                            >
-                                <Plus className="size-4" />
-                                New Task
-                            </Button>
-                            <RefreshButton
-                                onClick={() => void refetch()}
-                                isLoading={isLoading}
-                                label=""
-                                variant="secondary"
-                            />
-                        </div>
-                    </div>
-
-                    {filteredTasks.length === 0 && (
-                        <div className="mb-4 flex flex-col gap-3 rounded-lg border border-primary-700 bg-primary-800/60 p-4 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                                <p className="text-sm font-medium text-primary-100">
-                                    {hasActiveFilters
-                                        ? "No tasks match the current filters."
-                                        : "No tasks yet."}
-                                </p>
-                                <p className="mt-1 text-xs text-primary-300">
-                                    {hasActiveFilters
-                                        ? "Clear search, assignee, and automation filters to return to the full board."
-                                        : "Create a task when there is new work to track."}
-                                </p>
-                            </div>
-                            {hasActiveFilters && (
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => {
-                                        setSearch("");
-                                        setFilter("all");
-                                        setAutomationFilter("all");
-                                    }}
-                                    className="w-full sm:w-auto"
-                                >
-                                    Clear filters
-                                </Button>
-                            )}
-                        </div>
-                    )}
+                    <TaskBoardToolbar
+                        assigneeFilter={filter}
+                        automationFilter={automationFilter}
+                        hasActiveFilters={hasActiveFilters}
+                        isEmpty={filteredTasks.length === 0}
+                        isLoading={isLoading}
+                        onAssigneeFilterChange={setFilter}
+                        onAutomationFilterChange={setAutomationFilter}
+                        onClearFilters={() => {
+                            setSearch("");
+                            setFilter("all");
+                            setAutomationFilter("all");
+                        }}
+                        onCreateTask={() => setIsNewTaskOpen(true)}
+                        onRefresh={() => void refetch()}
+                        onSearchChange={setSearch}
+                        search={search}
+                    />
 
                     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-4 lg:flex-row lg:overflow-x-auto lg:overflow-y-hidden">
                         {COLUMN_CONFIG.map((column) => (

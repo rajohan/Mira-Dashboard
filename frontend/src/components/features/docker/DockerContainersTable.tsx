@@ -15,157 +15,17 @@ import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { SortIndicator } from "../../ui/SortIndicator";
+import {
+    dockerContainerHealthRank,
+    dockerContainerHealthVariant,
+    dockerContainerStateRank,
+    dockerContainerStateVariant,
+    formatDockerMemoryUsed,
+    parseDockerMemoryUsedMiB,
+    parseDockerPercent,
+} from "./dockerFormatters";
 
 const columnHelper = createColumnHelper<DockerContainer>();
-
-/**
- * Parses percent.
- * @param value Value to process.
- * @returns Parsed percent.
- */
-function parsePercent(value: string | undefined): number {
-    if (!value) {
-        return -1;
-    }
-
-    const match = value.match(/-?\d+(?:\.\d+)?/);
-    return match ? Number(match[0]) : -1;
-}
-
-/**
- * Parses memory used mi b.
- * @param value Value to process.
- * @returns Parsed memory used mi b.
- */
-function parseMemoryUsedMiB(value: string | undefined): number {
-    if (!value) {
-        return -1;
-    }
-
-    const used = value.split("/", 1)[0]!.trim();
-    const match = used.match(/^(\d+(?:\.\d+)?)\s*([KMGTP]i?B|B)$/i);
-    if (!match) {
-        return -1;
-    }
-
-    const amount = Number(match[1]!);
-    const unit = match[2]!.toUpperCase();
-    const factors: Record<string, number> = {
-        B: 1 / (1024 * 1024),
-        KIB: 1 / 1024,
-        KB: 1 / 1024,
-        MIB: 1,
-        MB: 1,
-        GIB: 1024,
-        GB: 1024,
-        TIB: 1024 * 1024,
-        TB: 1024 * 1024,
-        PIB: 1024 * 1024 * 1024,
-        PB: 1024 * 1024 * 1024,
-    };
-
-    return amount * factors[unit]!;
-}
-
-/**
- * Formats memory used mb for display.
- * @param value Value to process.
- * @returns Formatted memory used mb for display.
- */
-function formatMemoryUsedMb(value: string | undefined): string {
-    const usedMiB = parseMemoryUsedMiB(value);
-    if (!Number.isFinite(usedMiB) || usedMiB < 0) {
-        return "-";
-    }
-
-    const usedMb = usedMiB * 1.048576;
-    if (usedMb >= 1024) {
-        return `${(usedMb / 1024).toFixed(2)} GB`;
-    }
-
-    return `${usedMb.toFixed(0)} MB`;
-}
-
-/**
- * Returns health rank.
- * @param health Health value.
- * @returns health rank.
- */
-function getHealthRank(health: string): number {
-    switch (health) {
-        case "healthy": {
-            return 0;
-        }
-        case "starting": {
-            return 1;
-        }
-        case "unknown": {
-            return 2;
-        }
-        case "unhealthy": {
-            return 3;
-        }
-        default: {
-            return 4;
-        }
-    }
-}
-
-/**
- * Returns health variant.
- * @returns health variant.
- */
-function getHealthVariant(
-    container: DockerContainer
-): "success" | "warning" | "error" | "default" {
-    if (container.health === "healthy") return "success";
-    if (container.health === "unhealthy") return "error";
-    if (container.state === "running") return "warning";
-    return "default";
-}
-
-/**
- * Returns state variant.
- * @param state Current state.
- * @returns state variant.
- */
-function getStateVariant(state: string): "success" | "warning" | "error" | "default" {
-    if (state === "running") return "success";
-    if (state === "exited") return "error";
-    if (state === "restarting" || state === "created") return "warning";
-    return "default";
-}
-
-/**
- * Returns state rank.
- * @param state Current state.
- * @returns state rank.
- */
-function getStateRank(state: string): number {
-    switch (state) {
-        case "running": {
-            return 0;
-        }
-        case "restarting": {
-            return 1;
-        }
-        case "created": {
-            return 2;
-        }
-        case "paused": {
-            return 3;
-        }
-        case "exited": {
-            return 4;
-        }
-        case "dead": {
-            return 5;
-        }
-        default: {
-            return 6;
-        }
-    }
-}
 
 /** Provides props for Docker containers table. */
 interface DockerContainersTableProperties {
@@ -218,31 +78,35 @@ export function DockerContainersTable({
                 );
             },
         }),
-        columnHelper.accessor((row) => `${getStateRank(row.state)}|${row.status}`, {
-            id: "state",
-            header: "State",
-            cell: (info) => {
-                const container = info.row.original;
-                return (
-                    <div>
-                        <Badge variant={getStateVariant(container.state)}>
-                            {container.state}
-                        </Badge>
-                        <div className="mt-1 text-xs text-primary-400">
-                            {container.status}
+        columnHelper.accessor(
+            (row) => `${dockerContainerStateRank(row.state)}|${row.status}`,
+            {
+                id: "state",
+                header: "State",
+                cell: (info) => {
+                    const container = info.row.original;
+                    return (
+                        <div>
+                            <Badge variant={dockerContainerStateVariant(container.state)}>
+                                {container.state}
+                            </Badge>
+                            <div className="mt-1 text-xs text-primary-400">
+                                {container.status}
+                            </div>
                         </div>
-                    </div>
-                );
-            },
-            sortingFn: (a, b) => {
-                const stateDiff =
-                    getStateRank(a.original.state) - getStateRank(b.original.state);
-                if (stateDiff !== 0) {
-                    return stateDiff;
-                }
-                return a.original.status.localeCompare(b.original.status);
-            },
-        }),
+                    );
+                },
+                sortingFn: (a, b) => {
+                    const stateDiff =
+                        dockerContainerStateRank(a.original.state) -
+                        dockerContainerStateRank(b.original.state);
+                    if (stateDiff !== 0) {
+                        return stateDiff;
+                    }
+                    return a.original.status.localeCompare(b.original.status);
+                },
+            }
+        ),
         columnHelper.accessor((row) => row.health, {
             id: "health",
             header: "Health",
@@ -250,7 +114,7 @@ export function DockerContainersTable({
                 const container = info.row.original;
                 return (
                     <div>
-                        <Badge variant={getHealthVariant(container)}>
+                        <Badge variant={dockerContainerHealthVariant(container)}>
                             {container.health}
                         </Badge>
                         <div className="mt-1 text-xs text-primary-400">
@@ -260,9 +124,10 @@ export function DockerContainersTable({
                 );
             },
             sortingFn: (a, b) =>
-                getHealthRank(a.original.health) - getHealthRank(b.original.health),
+                dockerContainerHealthRank(a.original.health) -
+                dockerContainerHealthRank(b.original.health),
         }),
-        columnHelper.accessor((row) => parsePercent(row.stats?.cpu), {
+        columnHelper.accessor((row) => parseDockerPercent(row.stats?.cpu), {
             id: "cpu",
             header: "CPU",
             cell: (info) => {
@@ -274,14 +139,14 @@ export function DockerContainersTable({
                 );
             },
         }),
-        columnHelper.accessor((row) => parseMemoryUsedMiB(row.stats?.memory), {
+        columnHelper.accessor((row) => parseDockerMemoryUsedMiB(row.stats?.memory), {
             id: "memory",
             header: "Memory",
             cell: (info) => {
                 const container = info.row.original;
                 return (
                     <div className="text-xs text-primary-300">
-                        {formatMemoryUsedMb(container.stats?.memory)}
+                        {formatDockerMemoryUsed(container.stats?.memory)}
                     </div>
                 );
             },
@@ -407,20 +272,28 @@ export function DockerContainersTable({
                                             {container.image}
                                         </div>
                                     </div>
-                                    <Badge variant={getStateVariant(container.state)}>
+                                    <Badge
+                                        variant={dockerContainerStateVariant(
+                                            container.state
+                                        )}
+                                    >
                                         {container.state}
                                     </Badge>
                                 </div>
                                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-primary-300">
                                     <div>
                                         <div className="text-primary-500">Health</div>
-                                        <Badge variant={getHealthVariant(container)}>
+                                        <Badge
+                                            variant={dockerContainerHealthVariant(
+                                                container
+                                            )}
+                                        >
                                             {container.health}
                                         </Badge>
                                     </div>
                                     <div>
                                         <div className="text-primary-500">Memory</div>
-                                        {formatMemoryUsedMb(container.stats?.memory)}
+                                        {formatDockerMemoryUsed(container.stats?.memory)}
                                     </div>
                                     <div>
                                         <div className="text-primary-500">CPU</div>

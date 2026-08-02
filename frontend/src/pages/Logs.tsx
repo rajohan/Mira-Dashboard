@@ -1,26 +1,20 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Download, FileText, Trash2 } from "lucide-react";
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 import type { LogFile } from "../../../contracts/logs";
 import { logsCollection } from "../collections/logs";
-import { LevelFilter } from "../components/features/logs/LevelFilter";
+import { LogControls, type LogSource } from "../components/features/logs/LogControls";
 import { LogLine } from "../components/features/logs/LogLine";
-import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { Input } from "../components/ui/Input";
-import { RefreshButton } from "../components/ui/RefreshButton";
-import { Select } from "../components/ui/Select";
 import { useDashboardLogContent, useLogContent, useLogFiles } from "../hooks/useLogs";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { messageFromError } from "../lib/errorMessage";
 import { formatDateStamp } from "../utils/format";
-import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtilities";
+import { parseLogLine } from "../utils/logUtilities";
 import {
     compareLogEntriesByLineId,
     compareLogFileNamesDescending,
-    formatLogEntryCount,
     isLogViewportAtBottom,
     isNamedLogFile,
     readNumericLogLineId,
@@ -28,7 +22,6 @@ import {
 } from "./logPageUtilities";
 
 const logsPageState: { lastVisibleLogFiles: LogFile[] } = { lastVisibleLogFiles: [] };
-type LogSource = "dashboard" | "openclaw";
 function logSnapshotRequestKey(
     source: LogSource,
     file: string | undefined,
@@ -448,111 +441,25 @@ export function Logs() {
 
     return (
         <div className="flex h-full min-h-0 flex-col p-3 sm:p-4 lg:p-6">
-            <Card variant="bordered" className="mb-3 p-2 sm:mb-4">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Button
-                        type="button"
-                        variant={source === "dashboard" ? "primary" : "ghost"}
-                        aria-pressed={source === "dashboard"}
-                        onClick={() => setSource("dashboard")}
-                        className="justify-center"
-                    >
-                        Dashboard logs
-                    </Button>
-                    <Button
-                        type="button"
-                        variant={source === "openclaw" ? "primary" : "ghost"}
-                        aria-pressed={source === "openclaw"}
-                        onClick={() => setSource("openclaw")}
-                        className="justify-center"
-                    >
-                        OpenClaw logs
-                    </Button>
-                </div>
-            </Card>
-
-            <div className="mb-3 flex flex-col gap-3 sm:mb-4 md:flex-row md:flex-wrap md:items-center xl:flex-nowrap">
-                {source === "openclaw" ? (
-                    <div className="min-w-0 md:min-w-64 md:flex-1">
-                        <Select
-                            value={selectedFile || ""}
-                            onChange={(v) => setSelectedFile(v || undefined)}
-                            options={sortedLogFiles.map((f) => ({
-                                value: f.name,
-                                label: f.name,
-                            }))}
-                            placeholder="Select file..."
-                            icon={<FileText className="size-4" />}
-                            width="w-full"
-                        />
-                    </div>
-                ) : undefined}
-
-                <div className="w-full shrink-0 md:w-32">
-                    <Select
-                        value={lineCount.toString()}
-                        onChange={(v) => setLineCount(Math.trunc(Number(v)))}
-                        options={LINE_OPTIONS.map((n) => ({
-                            value: n.toString(),
-                            label: `${n} lines`,
-                        }))}
-                        width="w-full"
-                    />
-                </div>
-
-                <div className="min-w-0 md:min-w-64 md:flex-2">
-                    <Input
-                        placeholder="Search logs..."
-                        value={search}
-                        onChange={(event_) => setSearch(event_.target.value)}
-                        className="w-full min-w-0"
-                    />
-                </div>
-
-                <div className="min-w-0 md:w-full xl:w-auto xl:shrink-0">
-                    <LevelFilter
-                        levels={LOG_LEVELS}
-                        activeLevels={levelFilter}
-                        onToggle={toggleLevel}
-                    />
-                </div>
-            </div>
-
-            <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-primary-400">
-                    {isLoadingContent
-                        ? "Loading..."
-                        : formatLogEntryCount(filteredLogs.length, liveLogs.length)}
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
-                    <RefreshButton
-                        onClick={() => void loadLogContent()}
-                        isLoading={isLoadingContent}
-                        label="Reload"
-                        disabled={source === "openclaw" && !selectedFile}
-                    />
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={handleExport}
-                        disabled={filteredLogs.length === 0}
-                    >
-                        <Download size={14} />
-                        Export
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={clearLogCollection}
-                        disabled={liveLogs.length === 0}
-                    >
-                        <Trash2 size={14} />
-                        Clear
-                    </Button>
-                </div>
-            </div>
-
+            <LogControls
+                activeLevels={levelFilter}
+                availableLogFiles={sortedLogFiles}
+                isLoading={isLoadingContent}
+                lineCount={lineCount}
+                onClear={clearLogCollection}
+                onExport={handleExport}
+                onLevelToggle={toggleLevel}
+                onLineCountChange={setLineCount}
+                onReload={() => void loadLogContent()}
+                onSearchChange={setSearch}
+                onSelectedFileChange={setSelectedFile}
+                onSourceChange={setSource}
+                search={search}
+                selectedFile={selectedFile}
+                source={source}
+                totalCount={liveLogs.length}
+                visibleCount={filteredLogs.length}
+            />
             <Card
                 className="min-h-0 flex-1 overflow-hidden p-0 sm:p-4"
                 variant="bordered"
