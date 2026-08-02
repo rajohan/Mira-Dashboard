@@ -3,13 +3,15 @@ import { errorMessage } from "../../lib/errors.ts";
 import { withJobResourceClass } from "../../lib/jobResources.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {
-    finishJobExecution,
     getJobExecution,
-    heartbeatJobExecution,
     type JobExecutionRecord,
+} from "../jobExecutionQueue/repository.ts";
+import {
+    finishJobExecution,
+    heartbeatJobExecution,
     protectRunningJobExecutionFromCancellation,
     updateJobExecutionOutput,
-} from "../jobExecutionQueue.ts";
+} from "../jobExecutionQueue/worker.ts";
 import {
     registeredScheduledJobAction,
     ScheduledJobActionError,

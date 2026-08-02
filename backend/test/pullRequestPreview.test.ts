@@ -18,12 +18,12 @@ import type { PullRequestSummary } from "../../contracts/delivery.ts";
 import type { ScheduledJob } from "../../contracts/jobs.ts";
 import { isPlainRecord } from "../../contracts/runtime.ts";
 import { parseJsonText } from "../../test/support/fetch.ts";
-import * as developmentStack from "../src/development/developmentStack.ts";
+import * as developmentStack from "../src/development/developmentState.ts";
 import * as processModule from "../src/lib/processes.ts";
-import type { JobExecutionRecord } from "../src/services/jobExecutionQueue.ts";
-import * as jobExecutionQueue from "../src/services/jobExecutionQueue.ts";
-import * as previewHost from "../src/services/pullRequestPreviews/host.ts";
+import { type JobExecutionRecord } from "../src/services/jobExecutionQueue/repository.ts";
+import * as jobExecutionQueue from "../src/services/jobExecutionQueue/repository.ts";
 import { resolvePullRequestPreviewConfig } from "../src/services/pullRequestPreviews/config.ts";
+import * as previewHost from "../src/services/pullRequestPreviews/host.ts";
 import {
     buildPullRequestPreviewSandboxCommand,
     cleanupClosedPullRequestPreview,
@@ -33,7 +33,6 @@ import {
     startPullRequestPreview,
     stopPullRequestPreview,
 } from "../src/services/pullRequestPreviews/host.ts";
-import type { PullRequestPreviewConfig } from "../src/services/pullRequestPreviews/types.ts";
 import {
     getPullRequestPreviewStatus as getDeliveryPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
@@ -41,13 +40,15 @@ import {
     reconcileClosedPullRequestPreview,
     registerPullRequestPreviewExecutionActions,
 } from "../src/services/pullRequestPreviews/service.ts";
-import * as pullRequests from "../src/services/pullRequests.ts";
+import type { PullRequestPreviewConfig } from "../src/services/pullRequestPreviews/types.ts";
+import * as pullRequests from "../src/services/pullRequests/githubPullRequestListing.ts";
 import * as queuedJobExecution from "../src/services/queuedJobExecution.ts";
-import type {
-    ScheduledJobActionContext,
-    ScheduledJobActionHandler,
-} from "../src/services/scheduledJobs.ts";
-import * as scheduledJobs from "../src/services/scheduledJobs.ts";
+import {
+    type ScheduledJobActionContext,
+    type ScheduledJobActionHandler,
+} from "../src/services/scheduledJobs/actionRegistry.ts";
+import * as scheduledJobActions from "../src/services/scheduledJobs/actionRegistry.ts";
+import * as scheduledJobRepository from "../src/services/scheduledJobs/repository.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureRejection } from "./support/rejections.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
@@ -1072,7 +1073,7 @@ describe("managed pull request preview", () => {
             );
         const handlers = new Map<string, ScheduledJobActionHandler>();
         const registerSpy = jest
-            .spyOn(scheduledJobs, "registerScheduledJobAction")
+            .spyOn(scheduledJobActions, "registerScheduledJobAction")
             .mockImplementation((actionKey, handler) => {
                 handlers.set(actionKey, handler);
             });
@@ -1352,20 +1353,20 @@ describe("managed pull request preview", () => {
                 throw new Error("Preview handlers were not registered");
             }
             expect(
-                scheduledJobs.getScheduledJob("dashboard.preview.reconcile")
+                scheduledJobRepository.getScheduledJob("dashboard.preview.reconcile")
             ).toMatchObject({
                 actionKey: "dashboard.preview.reconcile",
                 enabled: true,
                 intervalSeconds: 6 * 60 * 60,
                 scheduleType: "interval",
             });
-            scheduledJobs.updateScheduledJob("dashboard.preview.reconcile", {
+            scheduledJobRepository.updateScheduledJob("dashboard.preview.reconcile", {
                 enabled: false,
                 intervalSeconds: 12 * 60 * 60,
             });
             registerPullRequestPreviewExecutionActions();
             expect(
-                scheduledJobs.getScheduledJob("dashboard.preview.reconcile")
+                scheduledJobRepository.getScheduledJob("dashboard.preview.reconcile")
             ).toMatchObject({
                 enabled: false,
                 intervalSeconds: 12 * 60 * 60,

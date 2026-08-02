@@ -4,14 +4,14 @@ import { useState } from "react";
 
 import type { Session } from "../../../contracts/sessions";
 import { sessionsCollection } from "../collections/sessions";
-import { SESSION_TYPES, SessionsTable } from "../components/features/sessions";
+import { SessionsTable } from "../components/features/sessions/SessionsTable";
 import { Alert } from "../components/ui/Alert";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { useSessionActions } from "../hooks/useSessionActions";
 import { messageFromError } from "../lib/errorMessage";
-import { sortSessionsByTypeAndActivity } from "../utils/sessionUtilities";
+import { SESSION_TYPES, sortSessionsByTypeAndActivity } from "../utils/sessionUtilities";
 
 /**
  * Renders the sessions UI.

@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import type { Metrics } from "../../../contracts/metrics.ts";
-import gateway from "../gateway.ts";
-import { json } from "../http.ts";
+import { json } from "../http/core.ts";
+import { routeErrorResponse } from "../http/routeSupport.ts";
 import {
     CoalescedSnapshot,
     getCoalescedSnapshotMetrics,
@@ -13,8 +13,8 @@ import { getHttpRequestMetrics } from "../lib/httpRequestMetrics.ts";
 import { runProcess } from "../lib/processes.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { stringFallback } from "../lib/values.ts";
-import { getAppObservabilityMetrics } from "../observability.ts";
-import { routeErrorResponse } from "../routeSupport.ts";
+import { getAppObservabilityMetrics } from "../server/observability.ts";
+import gateway from "../services/gateway/runtime.ts";
 
 interface NetworkMetrics {
     downloadMbps: number;

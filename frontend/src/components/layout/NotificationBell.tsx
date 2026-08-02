@@ -9,7 +9,7 @@ import {
     useMarkAllNotificationsRead,
     useMarkNotificationRead,
     useNotifications,
-} from "../../hooks";
+} from "../../hooks/useNotifications";
 import { AUTO_REFRESH_MS } from "../../lib/queryClient";
 import { formatDate } from "../../utils/format";
 import { Badge } from "../ui/Badge";

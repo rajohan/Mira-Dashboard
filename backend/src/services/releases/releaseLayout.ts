@@ -23,11 +23,11 @@ import {
     type ReleaseTransitionJournalSnapshot,
 } from "./managerModel.ts";
 import {
-    type DashboardReleaseManifest,
     loadReleaseManifest,
     verifyReleaseArtifacts,
     verifyReleaseBuildIdentities,
-} from "./manifest.ts";
+} from "./manifestArtifacts.ts";
+import type { DashboardReleaseManifest } from "./manifestPolicy.ts";
 import { MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT } from "./systemdPolicy.ts";
 import {
     readReleaseTransitionJournal,

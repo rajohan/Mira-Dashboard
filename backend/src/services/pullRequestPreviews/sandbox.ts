@@ -1,9 +1,7 @@
 import path from "node:path";
 
-import {
-    prepareDevelopmentState,
-    resolveDevelopmentStackConfig,
-} from "../../development/developmentStack.ts";
+import { resolveDevelopmentStackConfig } from "../../development/developmentStackConfig.ts";
+import { prepareDevelopmentState } from "../../development/developmentState.ts";
 import { safeInstallEnvironment } from "./commands.ts";
 import { managedStateRoot } from "./state.ts";
 import type { PullRequestPreviewConfig } from "./types.ts";
@@ -70,7 +68,11 @@ function sandboxDirectories(...targets: string[]): string[] {
     return [...directories];
 }
 
-/** Builds the filesystem-isolated process used by the transient preview unit. */
+/**
+ * Builds the filesystem-isolated process used by the transient preview unit.
+ * @param input Preview paths and public origin.
+ * @returns Bubblewrap command arguments for the preview process.
+ */
 export function buildPullRequestPreviewSandboxCommand(input: {
     config: PullRequestPreviewConfig;
     publicOrigin: string;

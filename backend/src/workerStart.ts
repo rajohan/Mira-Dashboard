@@ -1,15 +1,14 @@
-import { validateAuthenticationConfig, validateStoredSecretConfig } from "./auth.ts";
+import { validateAuthenticationConfig } from "./auth/sessionService.ts";
+import { validateStoredSecretConfig } from "./auth/userRepository.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
-import {
-    getRuntimeReleaseIdentity,
-    requireRunnableReleaseCommit,
-} from "./services/releases/manifest.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
+import { requireRunnableReleaseCommit } from "./services/releases/manifestPolicy.ts";
+import { getRuntimeReleaseIdentity } from "./services/releases/runtimeReleaseIdentity.ts";
 
 const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;
 const logger = createStructuredLogger("worker");
 
-export { runLogRotationCli } from "./services/logRotation.ts";
+export { runLogRotationCli } from "./services/logRotation/runtime.ts";
 
 export function isDirectWorkerEntrypoint(isMain = import.meta.main): boolean {
     return isMain;

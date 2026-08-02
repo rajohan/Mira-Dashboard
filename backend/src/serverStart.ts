@@ -1,14 +1,12 @@
-import gateway from "./gateway.ts";
-import { resolveGatewayToken } from "./gatewayToken.ts";
 import { createStructuredLogger } from "./lib/structuredLogger.ts";
-import {
-    getRuntimeReleaseIdentity,
-    requireRunnableReleaseCommit,
-} from "./services/releases/manifest.ts";
-import { createServer, resolveListenPort } from "./server.ts";
-import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
+import { createServer, resolveListenPort } from "./server/app.ts";
+import { shouldStartScheduledJobs } from "./server/startPolicy.ts";
+import gateway from "./services/gateway/runtime.ts";
+import { resolveGatewayToken } from "./services/gateway/token.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
-import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests.ts";
+import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests/deploymentRepository.ts";
+import { requireRunnableReleaseCommit } from "./services/releases/manifestPolicy.ts";
+import { getRuntimeReleaseIdentity } from "./services/releases/runtimeReleaseIdentity.ts";
 
 const logger = createStructuredLogger("server");
 
@@ -20,7 +18,7 @@ const serverStartState: {
     startupPromise: undefined,
 };
 
-export { runLogRotationCli } from "./services/logRotation.ts";
+export { runLogRotationCli } from "./services/logRotation/runtime.ts";
 
 function rollbackBackgroundServiceStartup(
     function_: () => void | Promise<void>,

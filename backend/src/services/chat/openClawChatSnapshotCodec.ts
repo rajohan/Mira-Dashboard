@@ -3,7 +3,7 @@ import {
     parseOpenClawRuntimeEnvelope,
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
-} from "../../../../contracts/chat.ts";
+} from "../../../../contracts/chat/transport.ts";
 import { MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES } from "./openClawChatRequestBoundaries.ts";
 
 export interface SnapshotEventRow {

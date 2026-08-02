@@ -1,11 +1,11 @@
 import {
-    type OpenClawRuntimeEnvelope,
-    type OpenClawRuntimeSnapshot,
-} from "../../../../contracts/chat.ts";
-import {
     withCanonicalOpenClawEvents,
     withCurrentCanonicalOpenClawIdentity,
 } from "../../../../contracts/chat/openClawRuntimeAdapter.ts";
+import {
+    type OpenClawRuntimeEnvelope,
+    type OpenClawRuntimeSnapshot,
+} from "../../../../contracts/chat/transport.ts";
 import type { ChatRuntimeMetrics } from "../../../../contracts/metrics.ts";
 import {
     DEFERRED_COMPACTION_SETTLEMENT_RETRY_MS,

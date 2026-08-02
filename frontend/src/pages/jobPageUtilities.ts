@@ -1,4 +1,4 @@
-import type { DateTimePickerValue } from "../components/ui/DateTimePicker";
+import { type DateTimePickerValue } from "../components/ui/DateTimePicker";
 import { appTimeZoneParts } from "../utils/date";
 import { appDateTimeToTimestamp } from "../utils/format";
 

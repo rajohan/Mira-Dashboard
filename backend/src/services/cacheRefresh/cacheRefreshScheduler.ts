@@ -1,14 +1,14 @@
 import type { ScheduledJob } from "../../../../contracts/jobs.ts";
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { invalidateCacheEntry } from "../../lib/cacheStore.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
+import { registerScheduledJobAction } from "../scheduledJobs/actionRegistry.ts";
+import { enqueueScheduledJob } from "../scheduledJobs/enqueue.ts";
 import {
-    enqueueScheduledJob,
     getScheduledJob,
-    registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "../scheduledJobs.ts";
+} from "../scheduledJobs/repository.ts";
 import { cacheRefreshScopeKey } from "./cacheProducerRegistry.ts";
 import { refreshCacheProducer } from "./cacheRefreshRuntime.ts";
 import { DATABASE_SUMMARY_KEY } from "./databaseSummaryCacheProducer.ts";

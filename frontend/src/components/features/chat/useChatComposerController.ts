@@ -3,12 +3,9 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Session } from "../../../../../contracts/sessions";
 import { subscribeToGlobalEvent } from "../../../lib/globalEvents";
+import { hasFilesInDataTransfer, MAX_ATTACHMENTS } from "./chatAttachmentUtilities";
+import { type ChatModelOption } from "./chatSettings";
 import type { ChatAttachmentInputSource, ChatSendAttachment } from "./chatTypes";
-import {
-    hasFilesInDataTransfer,
-    type ChatModelOption,
-    MAX_ATTACHMENTS,
-} from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
 
 interface ChatComposerControllerOptions {

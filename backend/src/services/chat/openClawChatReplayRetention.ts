@@ -1,5 +1,5 @@
-import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat.ts";
 import { withCurrentCanonicalOpenClawIdentity } from "../../../../contracts/chat/openClawRuntimeAdapter.ts";
+import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat/transport.ts";
 import {
     DEFERRED_COMPACTION_CONTINUATION_MARKER,
     DEFERRED_COMPACTION_SETTLEMENT_TIMEOUT_REASON,

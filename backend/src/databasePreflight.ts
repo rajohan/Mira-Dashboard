@@ -4,14 +4,17 @@ import {
     assertMiraDatabasePathSafeForEnvironment,
     enableRequiredWalJournalMode,
     getMiraDatabasePath,
-} from "./database.ts";
+} from "./database/connection.ts";
 import {
     migrateDisposableDatabaseCopy,
     validateDatabaseMigrationHistory,
-} from "./databaseMigrationRunner.ts";
-import { secureSqliteFilePermissions } from "./databaseStorage.ts";
+} from "./database/migrationRunner.ts";
+import {
+    createVerifiedSqliteBackup,
+    pruneSqliteBackups,
+} from "./database/sqliteBackup.ts";
+import { secureSqliteFilePermissions } from "./database/storage.ts";
 import { writeCliOutput } from "./lib/cliOutput.ts";
-import { createVerifiedSqliteBackup, pruneSqliteBackups } from "./sqliteBackup.ts";
 
 export async function runDatabasePreflight() {
     const databasePath = getMiraDatabasePath();

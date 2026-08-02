@@ -1,5 +1,5 @@
-import gateway from "../gateway.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
+import gateway from "./gateway/runtime.ts";
 
 const cronListSnapshot = new CoalescedSnapshot<unknown>({
     freshForMs: 3000,

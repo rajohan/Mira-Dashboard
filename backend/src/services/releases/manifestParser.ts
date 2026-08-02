@@ -1,5 +1,5 @@
 import { isPlainRecord } from "../../../../contracts/runtime.ts";
-import type { DatabaseMigrationIdentity } from "../../databaseMigrations/index.ts";
+import type { DatabaseMigrationIdentity } from "../../databaseMigrations/registry.ts";
 import {
     assertCommitIdentity,
     compareStrings,

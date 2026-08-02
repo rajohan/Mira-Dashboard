@@ -1,4 +1,4 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import type { CacheTtlUnit } from "../cacheEntryWriter.ts";
 import { cacheExpiryIso } from "../cacheEntryWriter.ts";
 import { errorMessage, nowIso } from "./cacheProducerSupport.ts";

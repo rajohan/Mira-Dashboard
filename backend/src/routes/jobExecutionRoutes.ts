@@ -6,22 +6,22 @@ import type {
     JobWorkerClaimsMutationResponse,
 } from "../../../contracts/jobs.ts";
 import { parseJobWorkerClaimsPatch } from "../../../contracts/jobs.ts";
-import { json } from "../http.ts";
-import { httpStatusCode } from "../lib/errors.ts";
-import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { json } from "../http/core.ts";
 import {
     type ParametersRequest,
     readApiJson,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { httpStatusCode } from "../lib/errors.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
-    cancelJobExecution,
     getJobExecution,
     getJobExecutionSummary,
     type JobExecutionRecord,
     listJobExecutions,
-} from "../services/jobExecutionQueue.ts";
+} from "../services/jobExecutionQueue/repository.ts";
+import { cancelJobExecution } from "../services/jobExecutionQueue/worker.ts";
 import { setJobWorkerClaimsPaused } from "../services/jobWorkerControl.ts";
 
 const logger = createStructuredLogger("job-execution-route");

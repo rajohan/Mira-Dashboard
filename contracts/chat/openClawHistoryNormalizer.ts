@@ -3,7 +3,7 @@ import {
     type CanonicalChatImage,
     type CanonicalChatMessage,
     type CanonicalChatToolResult,
-} from "../chatCanonical";
+} from "./canonical";
 import {
     canonicalChatAttachmentKind,
     canonicalChatImageDisplayUrl,
@@ -14,12 +14,12 @@ import {
     extractCanonicalChatToolCalls,
     mergeCanonicalChatAttachments,
     normalizeCanonicalChatText,
-} from "../chatCanonicalMessage";
+} from "./canonicalMessage";
 import {
     canonicalIsoString,
     MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
     truncateCanonicalChatText,
-} from "../chatCanonicalUtilities";
+} from "./canonicalUtilities";
 
 const REMOTE_MEDIA_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -126,7 +126,7 @@ function pathFromMediaRef(reference: string): string {
 }
 
 function mimeTypeFromPath(path: string): string {
-    const extension = path.split(".").pop()?.toLowerCase() || "";
+    const extension = path.split("./transport").pop()?.toLowerCase() || "";
     const mimeTypes: Record<string, string> = {
         aac: "audio/aac",
         bmp: "image/bmp",

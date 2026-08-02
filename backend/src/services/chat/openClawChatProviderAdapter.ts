@@ -1,4 +1,4 @@
-import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat.ts";
+import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat/transport.ts";
 
 const COMPACT_PROVIDER_METADATA_KEYS = [
     "aborted",

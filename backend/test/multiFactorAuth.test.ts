@@ -6,17 +6,15 @@ import { generate } from "otplib";
 import {
     changePasswordAndRotateSession,
     createSession,
-    createUser,
-    findUserById,
     getAuthSessionFromSessionId,
-    verifyPassword,
-} from "../src/auth.ts";
-import { database } from "../src/database.ts";
+} from "../src/auth/sessionService.ts";
+import { createUser, findUserById, verifyPassword } from "../src/auth/userRepository.ts";
+import { database } from "../src/database/connection.ts";
 import {
     requiresRecentMfa,
     resetRequestPolicyForTests,
     withRequestPolicy,
-} from "../src/requestPolicy.ts";
+} from "../src/requestPolicy/evaluator.ts";
 import { accountSecurityRoutes } from "../src/routes/accountSecurityRoutes.ts";
 import {
     authenticationThrottleStatus,
@@ -33,15 +31,20 @@ import {
 import { decryptStoredSecret, encryptStoredSecret } from "../src/services/mfaCrypto.ts";
 import {
     confirmTotpEnrollment,
-    consumePendingLogin,
-    createPendingLogin,
     createTotpEnrollment,
-    getPendingLogin,
     validateTotpStorageConfig,
     verifyRecoveryCodeForUser,
     verifyTotpForUser,
-} from "../src/services/multiFactorAuth.ts";
-import { didRemoveWebAuthnCredential, webAuthnConfig } from "../src/services/webAuthn.ts";
+} from "../src/services/multiFactorAuth/factorService.ts";
+import {
+    consumePendingLogin,
+    createPendingLogin,
+    getPendingLogin,
+} from "../src/services/multiFactorAuth/pendingLoginService.ts";
+import {
+    didRemoveWebAuthnCredential,
+    webAuthnConfig,
+} from "../src/services/webAuthn/service.ts";
 
 const USER_PREFIX = "mfa-test-";
 const originalSecretEncryptionKey = process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;

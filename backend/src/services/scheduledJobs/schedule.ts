@@ -26,16 +26,12 @@ export function assertValidSchedule(
     }
     if (scheduleType === "daily") {
         if (!timeOfDay || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(timeOfDay)) {
-            throw new ScheduledJobValidationError(
-                "Daily jobs require HH:MM timeOfDay"
-            );
+            throw new ScheduledJobValidationError("Daily jobs require HH:MM timeOfDay");
         }
         return;
     }
     if (!cronExpression || !parseCronExpression(cronExpression)) {
-        throw new ScheduledJobValidationError(
-            "Cron jobs require a valid cronExpression"
-        );
+        throw new ScheduledJobValidationError("Cron jobs require a valid cronExpression");
     }
 }
 
@@ -178,9 +174,7 @@ function isCronDayMatch(
 function nextCronRun(now: Date, expression: string): Date {
     const cron = parseCronExpression(expression);
     if (!cron) {
-        throw new ScheduledJobValidationError(
-            "Cron jobs require a valid cronExpression"
-        );
+        throw new ScheduledJobValidationError("Cron jobs require a valid cronExpression");
     }
     const next = new Date(now);
     next.setUTCSeconds(0, 0);
@@ -219,7 +213,12 @@ function nextDailyRun(now: Date, timeOfDay: string): Date {
     return next;
 }
 
-/** Calculates the next run timestamp for one enabled schedule. */
+/**
+ * Calculates the next run timestamp for one enabled schedule.
+ * @param job Schedule definition to evaluate.
+ * @param from Timestamp from which to calculate the next run.
+ * @returns Next run timestamp, or undefined when the schedule is disabled.
+ */
 export function calculateNextRunAt(
     job: Pick<
         ScheduledJob,

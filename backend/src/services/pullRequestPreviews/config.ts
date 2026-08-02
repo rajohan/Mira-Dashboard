@@ -79,7 +79,11 @@ function defaultGatewayProxyEntrypoint(): string {
     );
 }
 
-/** Resolves the single-slot managed PR preview host contract. */
+/**
+ * Resolves the single-slot managed PR preview host contract.
+ * @param environment Environment used to resolve host paths and ports.
+ * @returns Validated pull request preview configuration.
+ */
 export function resolvePullRequestPreviewConfig(
     environment: Record<string, string | undefined> = process.env
 ): PullRequestPreviewConfig {

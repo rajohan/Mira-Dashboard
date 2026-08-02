@@ -1,4 +1,4 @@
-import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat.ts";
+import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat/transport.ts";
 import {
     isConversationContinuationEvent,
     isMetadataOnlyCompletionEnvelope,

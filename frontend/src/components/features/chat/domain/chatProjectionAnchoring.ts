@@ -1,9 +1,9 @@
-import type { ChatHistoryMessage } from "../chatTypes";
 import {
     isRecoveredAssistantText,
     messageMediaIdentity,
     stripEquivalentChatTextPrefix,
-} from "../chatUtilities";
+} from "../chatMessageIdentity";
+import type { ChatHistoryMessage } from "../chatTypes";
 import { hasPrimaryAnswerContent } from "./chatPresentation";
 import { exactToolIds, type ExactToolMessageIndex } from "./chatProjectionDiagnostics";
 import {

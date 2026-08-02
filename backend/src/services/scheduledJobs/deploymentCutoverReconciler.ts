@@ -1,4 +1,4 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { parseSystemdProperties } from "../../lib/systemdProperties.ts";
 
@@ -10,9 +10,7 @@ const GUARDIAN_UNIT_PREFIX = "mira-dashboard-deploy-";
 const RECOVERY_UNIT_PREFIX = "mira-dashboard-deploy-recovery-";
 
 type DeploymentGuardianState = "active" | "inactive" | "unknown";
-export type DeploymentGuardianStateReader = (
-    jobId: string
-) => DeploymentGuardianState;
+export type DeploymentGuardianStateReader = (jobId: string) => DeploymentGuardianState;
 
 export interface OrphanedDeploymentCutover {
     candidateCommit?: string;
@@ -153,11 +151,8 @@ export class DeploymentCutoverReconciler {
 
     reconcile(
         timestamp = new Date().toISOString(),
-        readGuardianState: DeploymentGuardianStateReader =
-            readDeploymentGuardianState,
-        ...recoveryHandlerOverride: [
-            recoverCutover?: DeploymentCutoverRecoveryHandler,
-        ]
+        readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState,
+        ...recoveryHandlerOverride: [recoverCutover?: DeploymentCutoverRecoveryHandler]
     ): number {
         const recoverCutover =
             recoveryHandlerOverride.length === 0

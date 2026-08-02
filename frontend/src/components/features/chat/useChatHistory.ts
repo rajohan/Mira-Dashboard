@@ -11,11 +11,14 @@ import {
 import { messageFromError } from "../../../lib/errorMessage";
 import { isBrowserPollingAllowed, refreshPolicy } from "../../../lib/refreshPolicy";
 import {
+    CHAT_HISTORY_LIMIT,
+    mergeWithRecentOptimisticMessages,
+} from "./chatMessageReconciliation";
+import {
     nextRefreshedChatMessages,
     shouldStayAtHistoryBottom,
 } from "./chatPageUtilities";
 import type { ChatHistoryMessage } from "./chatTypes";
-import { CHAT_HISTORY_LIMIT, mergeWithRecentOptimisticMessages } from "./chatUtilities";
 import type { ChatTransport } from "./transport/chatTransport";
 
 const LIVE_HISTORY_POLL_MS = refreshPolicy.live;

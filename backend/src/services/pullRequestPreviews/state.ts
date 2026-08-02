@@ -22,7 +22,11 @@ export function managedStateRoot(
     return stateRoot;
 }
 
-/** Lists isolated PR state directories without following directory symlinks. */
+/**
+ * Lists isolated PR state directories without following directory symlinks.
+ * @param config Pull request preview configuration.
+ * @returns Managed pull request numbers with valid state directories.
+ */
 export function listManagedPullRequestPreviewStateNumbers(
     config: PullRequestPreviewConfig = resolvePullRequestPreviewConfig()
 ): number[] {

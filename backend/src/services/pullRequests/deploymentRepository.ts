@@ -3,23 +3,21 @@ import type {
     DashboardReleaseSummary,
     DeploymentJob,
 } from "../../../../contracts/delivery.ts";
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { errorMessage } from "../../lib/errors.ts";
-import {
-    assertManagedDashboardReleaseRollbackSchemaCompatible,
-    type ManagedDashboardRelease,
-    readDashboardReleaseState,
-    resolveDashboardReleasesRoot,
-} from "../releases/manager.ts";
 import {
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS,
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL,
 } from "../deploymentRuntimeResults.ts";
+import { type JobExecutionRecord } from "../jobExecutionQueue/repository.ts";
 import {
-    type JobExecutionRecord,
     registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
-} from "../jobExecutionQueue.ts";
+} from "../jobExecutionQueue/worker.ts";
+import { type ManagedDashboardRelease } from "../releases/managerModel.ts";
+import { readDashboardReleaseState } from "../releases/managerOperations.ts";
+import { resolveDashboardReleasesRoot } from "../releases/releaseLayout.ts";
+import { assertManagedDashboardReleaseRollbackSchemaCompatible } from "../releases/schemaCompatibility.ts";
 import { DASHBOARD_REPO } from "./config.ts";
 import {
     dateToISOString,

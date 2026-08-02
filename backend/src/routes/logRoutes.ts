@@ -8,8 +8,10 @@ import type {
     OpenClawLogContentResponse,
     OpenClawLogFilesResponse,
 } from "../../../contracts/logs.ts";
-import { json } from "../http.ts";
-import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
+import { json } from "../http/core.ts";
+import { routeFailureResponse } from "../http/routeSupport.ts";
+import { guardedPath } from "../lib/guardedOps/core.ts";
+import { openReadNoFollowNonblockingGuarded } from "../lib/guardedOps/read.ts";
 import {
     formatOpenClawLogDate,
     logUnavailableReason,
@@ -18,7 +20,6 @@ import {
 import { lineEntriesFromLogRead, type LogRead } from "../lib/logTail.ts";
 import { runProcess, type RunProcessResult } from "../lib/processes.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { routeFailureResponse } from "../routeSupport.ts";
 
 const logger = createStructuredLogger("logs");
 

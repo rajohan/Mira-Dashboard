@@ -1,5 +1,5 @@
-import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat.ts";
 import { withCurrentCanonicalOpenClawIdentity } from "../../../../contracts/chat/openClawRuntimeAdapter.ts";
+import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat/transport.ts";
 import type { OpenClawChatCompactionSettlements } from "./openClawChatCompactionSettlements.ts";
 import {
     INTERRUPTED_RUN_PROMOTION_WINDOW_MS,

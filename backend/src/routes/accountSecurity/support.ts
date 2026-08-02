@@ -15,7 +15,7 @@ import {
     recentAuthenticationTtlMs,
     revokeUserSessions,
     rotateSession,
-} from "../../auth.ts";
+} from "../../auth/sessionService.ts";
 import {
     authSession,
     clearSessionCookie,
@@ -23,13 +23,13 @@ import {
     sessionCookie,
     sessionIdFromCookie,
     withCookies,
-} from "../../http.ts";
-import { currentRequestAuditContext } from "../../requestAuditContext.ts";
-import { readApiJsonOrError, routeFailureResponse } from "../../routeSupport.ts";
+} from "../../http/core.ts";
+import { currentRequestAuditContext } from "../../http/requestAuditContext.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../../http/routeSupport.ts";
 import { writeAuditEvent } from "../../services/auditEvents.ts";
 import { secretEncryptionKeyBytes } from "../../services/mfaCrypto.ts";
-import { getMultiFactorSummary } from "../../services/multiFactorAuth.ts";
-import { webAuthnConfig } from "../../services/webAuthn.ts";
+import { getMultiFactorSummary } from "../../services/multiFactorAuth/factorService.ts";
+import { webAuthnConfig } from "../../services/webAuthn/service.ts";
 
 export interface SecurityRequestContext {
     session: AuthSession;

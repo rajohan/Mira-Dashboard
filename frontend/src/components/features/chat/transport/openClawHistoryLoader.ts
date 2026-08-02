@@ -4,12 +4,12 @@ import {
     type CanonicalChatHistoryPage,
     type CanonicalChatHistoryMessageResult,
     type CanonicalChatHistoryRow,
-} from "../../../../../../contracts/chatCanonicalHistory";
+} from "../../../../../../contracts/chat/canonicalHistory";
 import {
     canonicalChatContentFingerprint,
     summarizeCanonicalChatValueForFingerprint,
-} from "../../../../../../contracts/chatCanonicalMessage";
-import { stableCanonicalChatStringify } from "../../../../../../contracts/chatCanonicalUtilities";
+} from "../../../../../../contracts/chat/canonicalMessage";
+import { stableCanonicalChatStringify } from "../../../../../../contracts/chat/canonicalUtilities";
 import type { ChatHistoryMessage } from "../chatTypes";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 import { appendOpenClawHistory } from "./openClawHistoryAdapter";

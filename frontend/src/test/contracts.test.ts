@@ -10,14 +10,14 @@ import {
 } from "../../../contracts/accountSecurity";
 import { parseApiErrorResponse } from "../../../contracts/apiErrors";
 import { parseBackupStatusResponse } from "../../../contracts/backups";
+import { canonicalChatImageDisplayUrl } from "../../../contracts/chat/canonicalMessage";
+import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
+import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
 import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     parseOpenClawRuntimeEnvelope,
     parseOpenClawRuntimeSnapshot,
-} from "../../../contracts/chat";
-import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
-import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
-import { canonicalChatImageDisplayUrl } from "../../../contracts/chatCanonicalMessage";
+} from "../../../contracts/chat/transport";
 import {
     parsePullRequestApproveRequest,
     parsePullRequestPreviewStartRequest,

@@ -7,6 +7,15 @@ import { resolveDashboardProjectPaths } from "../../lib/dashboardPaths.ts";
 import { runProcess } from "../../lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "../../lib/safePath.ts";
 import { parseSystemdProperties } from "../../lib/systemdProperties.ts";
+import type {
+    DashboardReleaseRetentionResult,
+    ManagedDashboardRelease,
+} from "./managerModel.ts";
+import {
+    pruneDashboardReleases,
+    publishVerifiedDashboardRelease,
+} from "./managerOperations.ts";
+import { loadManagedRelease, resolveDashboardReleasesRoot } from "./releaseLayout.ts";
 import {
     bunExecutableRuntimeIdentity,
     installManagedBunRuntime,
@@ -21,14 +30,6 @@ import {
     MANAGED_DASHBOARD_UNITS,
     type ManagedDashboardUnitName,
 } from "./systemdPolicy.ts";
-import {
-    type DashboardReleaseRetentionResult,
-    loadManagedRelease,
-    type ManagedDashboardRelease,
-    pruneDashboardReleases,
-    publishVerifiedDashboardRelease,
-    resolveDashboardReleasesRoot,
-} from "./manager.ts";
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const MAX_PROCESS_OUTPUT_BYTES = 20 * 1024 * 1024;

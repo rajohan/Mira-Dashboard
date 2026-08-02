@@ -8,16 +8,13 @@ import {
     type DashboardSettingsResponse,
     parseDashboardSettingsPatch,
 } from "../../../contracts/settings.ts";
-import gateway from "../gateway.ts";
-import { json } from "../http.ts";
-import {
-    guardedPath,
-    mkdirGuarded,
-    readTextNoFollowGuarded,
-    writeTextNoFollowGuarded,
-} from "../lib/guardedOps.ts";
+import { json } from "../http/core.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../http/routeSupport.ts";
+import { guardedPath, mkdirGuarded } from "../lib/guardedOps/core.ts";
+import { readTextNoFollowGuarded } from "../lib/guardedOps/read.ts";
+import { writeTextNoFollowGuarded } from "../lib/guardedOps/write.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
+import gateway from "../services/gateway/runtime.ts";
 
 const DEFAULT_SETTINGS: DashboardSettings = {
     defaultModel: "ollama/glm-5",

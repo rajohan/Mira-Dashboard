@@ -21,7 +21,7 @@ import {
     OpenClawGatewayClient,
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
-} from "../../lib/openclawGatewayClient.ts";
+} from "../../lib/openclawGatewayClient/client.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { hasLineBreakOrNullByte } from "../../lib/values.ts";
 import { redactConfigSecrets } from "../configRedaction.ts";

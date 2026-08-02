@@ -9,21 +9,22 @@ import {
     type OpenClawSkill,
     type OpenClawSkillSource,
 } from "../../../contracts/openClawConfig.ts";
-import gateway from "../gateway.ts";
-import { json } from "../http.ts";
-import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
-import { objectFallback, stringFallback } from "../lib/values.ts";
+import { json } from "../http/core.ts";
 import {
     type ParametersRequest,
     readApiJsonOrError,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { guardedPath } from "../lib/guardedOps/core.ts";
+import { openReadNoFollowNonblockingGuarded } from "../lib/guardedOps/read.ts";
+import { objectFallback, stringFallback } from "../lib/values.ts";
 import {
     hasConfigRedactionSentinel,
     redactConfigSecrets,
     restoreConfigRedactionSentinels,
 } from "../services/configRedaction.ts";
+import gateway from "../services/gateway/runtime.ts";
 import { OPENCLAW_GATEWAY_RESTART_ACTION } from "../services/openclawActions.ts";
 import {
     enqueueAndWaitForJobExecution,

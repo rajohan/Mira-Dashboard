@@ -1,4 +1,4 @@
-import { normalizeCanonicalChatImage } from "../../../../../../contracts/chatCanonicalMessage";
+import { normalizeCanonicalChatImage } from "../../../../../../contracts/chat/canonicalMessage";
 import { normalizeChatMimeType } from "./identity";
 import type { ChatImageBlock } from "./types";
 
@@ -48,9 +48,7 @@ function dashboardMediaKind(pathname: string): DashboardMediaKind | undefined {
     if (pathname === "/api/media") {
         return "local";
     }
-    return pathname.startsWith("/api/chat/media/outgoing/")
-        ? "managed"
-        : undefined;
+    return pathname.startsWith("/api/chat/media/outgoing/") ? "managed" : undefined;
 }
 
 function dashboardMediaKindFromUrl(url: string): DashboardMediaKind | undefined {
@@ -92,7 +90,11 @@ function safeChatImageUrl(value: unknown): string | undefined {
         : undefined;
 }
 
-/** Returns the original local path encoded in a Dashboard media URL. */
+/**
+ * Returns the original local path encoded in a Dashboard media URL.
+ * @param url Dashboard media URL to inspect.
+ * @returns Encoded local path when the URL is valid local media.
+ */
 export function chatLocalMediaPathFromUrl(url: string): string | undefined {
     const parsedChatUrl = parseChatUrl(url);
     if (
@@ -104,7 +106,12 @@ export function chatLocalMediaPathFromUrl(url: string): string | undefined {
     return parsedChatUrl.url.searchParams.get("path")?.trim() || undefined;
 }
 
-/** Returns a bounded preview URL for Dashboard-managed media. */
+/**
+ * Returns a bounded preview URL for Dashboard-managed media.
+ * @param url Media URL to adapt.
+ * @param mode Requested preview mode.
+ * @returns Safe preview URL when supported.
+ */
 export function chatAttachmentPreviewUrl(
     url: string,
     mode: "image" | "text"
@@ -125,7 +132,11 @@ export function chatAttachmentPreviewUrl(
     return mode === "image" ? safeChatImageUrl(url) : undefined;
 }
 
-/** Returns the original safe URL from every OpenClaw image block variant. */
+/**
+ * Returns the original safe URL from every OpenClaw image block variant.
+ * @param image Image block to inspect.
+ * @returns Safe download URL when one is available.
+ */
 export function chatImageDownloadUrl(image: ChatImageBlock): string | undefined {
     const normalizedImage = normalizeCanonicalChatImage(image);
     if (!normalizedImage) {
@@ -155,9 +166,7 @@ export function chatImageDownloadUrl(image: ChatImageBlock): string | undefined 
         return safeChatImageUrl(normalizedImageData);
     }
     const mimeType =
-        normalizedImage.source?.media_type ||
-        normalizedImage.mimeType ||
-        "image/png";
+        normalizedImage.source?.media_type || normalizedImage.mimeType || "image/png";
     return `data:${mimeType};base64,${normalizedImageData}`;
 }
 
@@ -176,10 +185,7 @@ function base64ImageHeader(dataUrl: string): Uint8Array | undefined {
         .replaceAll(/\s/gu, "");
     try {
         const decoded = atob(encodedPrefix);
-        return Uint8Array.from(
-            decoded,
-            (character) => character.codePointAt(0) ?? 0
-        );
+        return Uint8Array.from(decoded, (character) => character.codePointAt(0) ?? 0);
     } catch {
         return undefined;
     }
@@ -246,15 +252,9 @@ function webpDimensions(bytes: Uint8Array): ChatImageDimensions | undefined {
     if (format === "VP8X" && bytes.length >= 30) {
         return {
             width:
-                1 +
-                (bytes[24] ?? 0) +
-                ((bytes[25] ?? 0) << 8) +
-                ((bytes[26] ?? 0) << 16),
+                1 + (bytes[24] ?? 0) + ((bytes[25] ?? 0) << 8) + ((bytes[26] ?? 0) << 16),
             height:
-                1 +
-                (bytes[27] ?? 0) +
-                ((bytes[28] ?? 0) << 8) +
-                ((bytes[29] ?? 0) << 16),
+                1 + (bytes[27] ?? 0) + ((bytes[28] ?? 0) << 8) + ((bytes[29] ?? 0) << 16),
         };
     }
     if (format === "VP8L" && bytes.length >= 25 && bytes[20] === 47) {
@@ -282,9 +282,7 @@ function webpDimensions(bytes: Uint8Array): ChatImageDimensions | undefined {
     return undefined;
 }
 
-function embeddedChatImageDimensions(
-    dataUrl: string
-): ChatImageDimensions | undefined {
+function embeddedChatImageDimensions(dataUrl: string): ChatImageDimensions | undefined {
     const bytes = base64ImageHeader(dataUrl);
     if (!bytes) {
         return undefined;
@@ -320,11 +318,13 @@ function isEmbeddedChatImageWithinDimensionLimit(dataUrl: string): boolean {
     );
 }
 
-/** Returns a safe inline image URL while preserving the download URL. */
-export function chatImageDisplayUrl(
-    url: string,
-    mimeType: string
-): string | undefined {
+/**
+ * Returns a safe inline image URL while preserving the download URL.
+ * @param url Candidate image URL.
+ * @param mimeType Declared image MIME type.
+ * @returns Safe display URL when the image can be embedded.
+ */
+export function chatImageDisplayUrl(url: string, mimeType: string): string | undefined {
     const safeUrl = safeChatImageUrl(url);
     if (!safeUrl) {
         return undefined;
@@ -345,7 +345,11 @@ export function chatImageDisplayUrl(
         : safeUrl;
 }
 
-/** Returns an embeddable URL from every OpenClaw image block variant. */
+/**
+ * Returns an embeddable URL from every OpenClaw image block variant.
+ * @param image Image block to inspect.
+ * @returns Safe embeddable URL when available.
+ */
 export function chatImageUrl(image: ChatImageBlock): string | undefined {
     const downloadUrl = chatImageDownloadUrl(image);
     return downloadUrl
@@ -353,16 +357,16 @@ export function chatImageUrl(image: ChatImageBlock): string | undefined {
         : undefined;
 }
 
-/** Returns the declared image MIME type with a safe display fallback. */
+/**
+ * Returns the declared image MIME type with a safe display fallback.
+ * @param image Image block to inspect.
+ * @returns Declared or inferred image MIME type.
+ */
 export function chatImageMimeType(image: ChatImageBlock): string {
     const declaredMimeType = image.source?.media_type || image.mimeType;
     if (declaredMimeType) {
         return declaredMimeType;
     }
-    const localMediaPath = chatLocalMediaPathFromUrl(
-        chatImageDownloadUrl(image) || ""
-    );
-    return localMediaPath?.toLowerCase().endsWith(".svg")
-        ? "image/svg+xml"
-        : "image/png";
+    const localMediaPath = chatLocalMediaPathFromUrl(chatImageDownloadUrl(image) || "");
+    return localMediaPath?.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "image/png";
 }

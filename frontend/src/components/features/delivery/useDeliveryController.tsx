@@ -27,7 +27,7 @@ import {
     useStartPullRequestPreview,
     useStopPullRequestPreview,
     useUpdatePullRequestBranch,
-} from "../../../hooks";
+} from "../../../hooks/useDelivery";
 import { messageFromError } from "../../../lib/errorMessage";
 import { Button } from "../../ui/Button";
 import {

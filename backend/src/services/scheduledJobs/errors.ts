@@ -9,7 +9,11 @@ export class ScheduledJobValidationError extends Error {
     }
 }
 
-/** Returns whether an error is a scheduled-job validation failure. */
+/**
+ * Returns whether an error is a scheduled-job validation failure.
+ * @param error Error to inspect.
+ * @returns Whether the error is a scheduled-job validation error.
+ */
 export function isScheduledJobValidationError(
     error: unknown
 ): error is ScheduledJobValidationError {

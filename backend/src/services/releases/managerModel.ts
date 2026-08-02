@@ -1,5 +1,5 @@
-import type { DatabaseMigrationIdentity } from "../../databaseMigrations/index.ts";
-import type { DashboardReleaseManifest } from "./manifest.ts";
+import type { DatabaseMigrationIdentity } from "../../databaseMigrations/registry.ts";
+import type { DashboardReleaseManifest } from "./manifestPolicy.ts";
 
 export const MANAGED_RELEASES_DIRECTORY_NAME = "releases";
 

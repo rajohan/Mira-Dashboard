@@ -6,8 +6,8 @@ import path from "node:path";
 import type { Server } from "bun";
 
 import type { PullRequestSummary } from "../../contracts/delivery.ts";
-import { database } from "../src/database.ts";
-import * as databaseMigrationRunnerModule from "../src/databaseMigrationRunner.ts";
+import { database } from "../src/database/connection.ts";
+import * as databaseMigrationRunnerModule from "../src/database/migrationRunner.ts";
 import {
     isAllowedDashboardOrigin,
     readJson,
@@ -16,9 +16,13 @@ import {
     sessionIdFromCookie,
     text,
     withCookie,
-} from "../src/http.ts";
+} from "../src/http/core.ts";
+import {
+    isAllowedMutationSource,
+    withRequestSecurity,
+} from "../src/http/requestSecurity.ts";
 import { errorMessage, httpStatusCode } from "../src/lib/errors.ts";
-import { loadOrCreateDeviceIdentity } from "../src/lib/openclawGatewayClient.ts";
+import { loadOrCreateDeviceIdentity } from "../src/lib/openclawGatewayClient/client.ts";
 import { pipeProcessOutput, runProcess } from "../src/lib/processes.ts";
 import {
     prepareSafeWriteTargetWithinRoot,
@@ -47,26 +51,25 @@ import {
     requiresRecentMfaForGatewayMethod,
     resetRequestPolicyForTests,
     withRequestPolicy,
-} from "../src/requestPolicy.ts";
-import { isAllowedMutationSource, withRequestSecurity } from "../src/requestSecurity.ts";
-import { routes as appRoutes } from "../src/routes.ts";
+} from "../src/requestPolicy/evaluator.ts";
 import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
-import { isValidAgentId } from "../src/services/agents.ts";
+import { routes as appRoutes } from "../src/routes/registry.ts";
+import { isValidAgentId } from "../src/services/agents/statusService.ts";
 import { listAuditEvents } from "../src/services/auditEvents.ts";
-import { mapBackupJob } from "../src/services/backups.ts";
+import { mapBackupJob } from "../src/services/backups/backupJobs.ts";
 import { isProductionDeploymentCutoverActive } from "../src/services/deploymentCutoverState.ts";
-import * as jobExecutionQueueModule from "../src/services/jobExecutionQueue.ts";
+import * as jobExecutionQueueModule from "../src/services/jobExecutionQueue/repository.ts";
 import { dashboardJobProfile } from "../src/services/jobWorker.ts";
 import {
     parsePullRequestPreviewStatus,
     pullRequestPreviewCandidate,
 } from "../src/services/pullRequestPreviews/service.ts";
+import { getResolvedRoots } from "../src/services/pullRequests/config.ts";
 import {
-    getResolvedRoots,
     parsePublicGithubPullRequests,
-    pullRequestPreviewScope,
     validatePrNumber,
-} from "../src/services/pullRequests.ts";
+} from "../src/services/pullRequests/githubPullRequestListing.ts";
+import { pullRequestPreviewScope } from "../src/services/pullRequests/reviewPolicy.ts";
 import { httpOrigin, httpUrl } from "./support/httpUrls.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
@@ -543,7 +546,7 @@ describe("backend service utilities", () => {
     });
 
     it("maps undefined bindings to SQLite null while preserving concrete values", async () => {
-        const { sqlNullable } = await import("../src/database.ts");
+        const { sqlNullable } = await import("../src/database/connection.ts");
         expect(sqlNullable("value")).toBe("value");
         expect(sqlNullable(0)).toBe(0);
         expect(sqlNullable()).toBeNull();

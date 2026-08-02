@@ -164,11 +164,21 @@ describe("Bun-native dashboard backend", () => {
             "export const isOk = true;\n"
         );
         const serverScript = path.join(state.temporaryRoot, "native-server.ts");
-        const serverModulePath = path.resolve(import.meta.dirname, "../src/server.ts");
-        const authModulePath = path.resolve(import.meta.dirname, "../src/auth.ts");
+        const serverModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/server/app.ts"
+        );
+        const authSessionModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/auth/sessionService.ts"
+        );
+        const authUserModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/auth/userRepository.ts"
+        );
         const databaseModulePath = path.resolve(
             import.meta.dirname,
-            "../src/database.ts"
+            "../src/database/connection.ts"
         );
         const dockerActionsModulePath = path.resolve(
             import.meta.dirname,
@@ -180,10 +190,11 @@ describe("Bun-native dashboard backend", () => {
         );
         const scheduledJobsModulePath = path.resolve(
             import.meta.dirname,
-            "../src/services/scheduledJobs.ts"
+            "../src/services/scheduledJobs/runtime.ts"
         );
         const serverModuleUrl = pathToFileURL(serverModulePath).href;
-        const authModuleUrl = pathToFileURL(authModulePath).href;
+        const authSessionModuleUrl = pathToFileURL(authSessionModulePath).href;
+        const authUserModuleUrl = pathToFileURL(authUserModulePath).href;
         const databaseModuleUrl = pathToFileURL(databaseModulePath).href;
         const dockerActionsModuleUrl = pathToFileURL(dockerActionsModulePath).href;
         const execJobsModuleUrl = pathToFileURL(execJobsModulePath).href;
@@ -192,7 +203,8 @@ describe("Bun-native dashboard backend", () => {
             serverScript,
             [
                 `import { createServer } from ${JSON.stringify(serverModuleUrl)};`,
-                `import { createSession, createUser } from ${JSON.stringify(authModuleUrl)};`,
+                `import { createSession } from ${JSON.stringify(authSessionModuleUrl)};`,
+                `import { createUser } from ${JSON.stringify(authUserModuleUrl)};`,
                 `import { database } from ${JSON.stringify(databaseModuleUrl)};`,
                 `import { registerDockerExecutionActions } from ${JSON.stringify(dockerActionsModuleUrl)};`,
                 `import { registerExecExecutionActions } from ${JSON.stringify(execJobsModuleUrl)};`,

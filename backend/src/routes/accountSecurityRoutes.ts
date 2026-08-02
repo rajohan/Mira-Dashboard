@@ -18,20 +18,19 @@ import {
     changePasswordAndRotateSession,
     createSession,
     didRevokeUserSession,
-    findUserById,
     hasRecentMfaVerification,
     revokeUserSessions,
     rotateSession,
-    verifyPassword,
-} from "../auth.ts";
+} from "../auth/sessionService.ts";
+import { findUserById, verifyPassword } from "../auth/userRepository.ts";
 import {
     clearPendingLoginCookie,
     clearSessionCookie,
     json,
     sessionCookie,
     withCookies,
-} from "../http.ts";
-import { type ParametersRequest, routeFailureResponse } from "../routeSupport.ts";
+} from "../http/core.ts";
+import { type ParametersRequest, routeFailureResponse } from "../http/routeSupport.ts";
 import {
     authenticationThrottleResponse,
     parseAuthenticationResponse,
@@ -50,14 +49,14 @@ import {
     rotateRecoveryCodes,
     verifyRecoveryCodeForUser,
     verifyTotpForUser,
-} from "../services/multiFactorAuth.ts";
+} from "../services/multiFactorAuth/factorService.ts";
 import {
     createWebAuthnAuthenticationOptions,
     createWebAuthnRegistrationOptions,
     didRemoveWebAuthnCredential,
     verifyWebAuthnAuthentication,
     verifyWebAuthnRegistration,
-} from "../services/webAuthn.ts";
+} from "../services/webAuthn/service.ts";
 import {
     canManageFactors,
     credentialAuditTargetId,

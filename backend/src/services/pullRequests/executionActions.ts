@@ -1,6 +1,9 @@
 import type { PullRequestExpectedHead } from "../../../../contracts/delivery.ts";
 import type { ScheduledJob } from "../../../../contracts/jobs.ts";
-import { enqueueJobExecution, type JobExecutionRecord } from "../jobExecutionQueue.ts";
+import {
+    enqueueJobExecution,
+    type JobExecutionRecord,
+} from "../jobExecutionQueue/repository.ts";
 import {
     successfulJobExecutionOutput,
     waitForJobExecution,
@@ -9,7 +12,7 @@ import {
     registerScheduledJobAction,
     type ScheduledJobActionContext,
     ScheduledJobActionError,
-} from "../scheduledJobs.ts";
+} from "../scheduledJobs/actionRegistry.ts";
 import {
     approvePullRequestReview,
     rejectPullRequest,
@@ -21,7 +24,8 @@ import {
     releaseDeploymentLock,
 } from "./deploymentRepository.ts";
 import { registerDeploymentExecutionActions } from "./deploymentService.ts";
-import { createPullRequestStack, validatePrNumber } from "./githubClient.ts";
+import { validatePrNumber } from "./githubPullRequestListing.ts";
+import { createPullRequestStack } from "./githubStackClient.ts";
 import {
     approvePullRequest,
     requireExpectedStackHeads,

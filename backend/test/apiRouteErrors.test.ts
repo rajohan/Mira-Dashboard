@@ -8,8 +8,8 @@ import { opsRoutes } from "../src/routes/opsRoutes.ts";
 import { reportRoutes } from "../src/routes/reportRoutes.ts";
 import { settingsRoutes } from "../src/routes/settingsRoutes.ts";
 import { ttsRoutes } from "../src/routes/ttsRoutes.ts";
-import * as agentService from "../src/services/agents.ts";
-import type { JobExecutionRecord } from "../src/services/jobExecutionQueue.ts";
+import * as agentService from "../src/services/agents/statusService.ts";
+import { type JobExecutionRecord } from "../src/services/jobExecutionQueue/repository.ts";
 import * as queuedJobExecution from "../src/services/queuedJobExecution.ts";
 import * as reportService from "../src/services/reports.ts";
 
@@ -297,7 +297,7 @@ describe("API route error contracts", () => {
     it("serves the copied Docker snapshot without host access in safe mode", async () => {
         setEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE", "1");
         setEnvironment("NODE_ENV", "test");
-        const { database } = await import("../src/database.ts");
+        const { database } = await import("../src/database/connection.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         database.run("SAVEPOINT isolated_docker_route");
         try {

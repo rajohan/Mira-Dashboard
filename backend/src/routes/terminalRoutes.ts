@@ -12,13 +12,14 @@ import {
     parseTerminalCdRequest,
     parseTerminalCompletionRequest,
 } from "../../../contracts/terminal.ts";
-import { json } from "../http.ts";
-import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.ts";
+import { json } from "../http/core.ts";
 import {
     readApiJson,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { guardedPath } from "../lib/guardedOps/core.ts";
+import { readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps/read.ts";
 
 const HOME_DIR = os.homedir();
 const SHELL_ESCAPE_RE = /([\s\\'"$`!&|;<>()*?[\]{}])/gu;

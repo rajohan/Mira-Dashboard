@@ -6,14 +6,14 @@ import {
     parseWalgBackupCache,
 } from "../../../../../contracts/backups";
 import {
-    useCacheEntry,
     useClearKopiaBackupAttention,
     useClearWalgBackupAttention,
     useKopiaBackup,
     useRunKopiaBackup,
     useRunWalgBackup,
     useWalgBackup,
-} from "../../../hooks";
+} from "../../../hooks/useBackups";
+import { useCacheEntry } from "../../../hooks/useCache";
 import { formatDuration } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";

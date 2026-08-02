@@ -3,15 +3,15 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveGatewayToken } from "../gatewayToken.ts";
+import { routeFailureResponse } from "../http/routeSupport.ts";
 import { byteStreamReader } from "../lib/byteStreams.ts";
+import { guardedPath } from "../lib/guardedOps/core.ts";
 import {
-    guardedPath,
     openReadNoFollowNonblockingGuarded,
     readFromOpenFile,
-} from "../lib/guardedOps.ts";
+} from "../lib/guardedOps/read.ts";
 import { stringFallback } from "../lib/values.ts";
-import { routeFailureResponse } from "../routeSupport.ts";
+import { resolveGatewayToken } from "../services/gateway/token.ts";
 
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 const MAX_TEXT_PREVIEW_SIZE = 1024 * 1024;

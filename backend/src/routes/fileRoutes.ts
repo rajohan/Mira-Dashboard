@@ -8,19 +8,18 @@ import type {
     FileWriteResponse,
 } from "../../../contracts/files.ts";
 import { parseFileWriteRequest } from "../../../contracts/files.ts";
-import { json } from "../http.ts";
+import { json } from "../http/core.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../http/routeSupport.ts";
+import { guardedPath, mkdirGuarded } from "../lib/guardedOps/core.ts";
 import {
-    guardedPath,
     lstatGuarded,
-    mkdirGuarded,
     openReadNoFollowNonblockingGuarded,
     readdirGuarded,
     readFromOpenFile,
     statGuarded,
-    writeTextNoFollowAnchoredGuarded,
-} from "../lib/guardedOps.ts";
+} from "../lib/guardedOps/read.ts";
+import { writeTextNoFollowAnchoredGuarded } from "../lib/guardedOps/write.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
-import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
 
 const MAX_FILE_SIZE = 1024 * 1024;
 const JSON_WRITE_BODY_LIMIT = MAX_FILE_SIZE * 3;

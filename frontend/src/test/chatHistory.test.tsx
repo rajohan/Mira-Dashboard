@@ -3,11 +3,11 @@ import { describe, expect, it, jest } from "bun:test";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { RefObject } from "react";
 
-import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
-import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
-import type {
-    ChatRuntimeSnapshot,
-    ChatTransport,
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat/transport";
+import { type ChatHistoryMessage } from "../components/features/chat/chatTypes";
+import {
+    type ChatRuntimeSnapshot,
+    type ChatTransport,
 } from "../components/features/chat/transport/chatTransport";
 import { useChatHistory } from "../components/features/chat/useChatHistory";
 

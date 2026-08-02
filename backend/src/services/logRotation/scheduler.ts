@@ -1,12 +1,14 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
 import {
-    getScheduledJob,
     registerScheduledJobAction,
-    removeScheduledJobsNotInAction,
     ScheduledJobActionError,
+} from "../scheduledJobs/actionRegistry.ts";
+import {
+    getScheduledJob,
+    removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "../scheduledJobs.ts";
+} from "../scheduledJobs/repository.ts";
 import {
     type ElevatedLogRotationResult,
     runElevatedLogRotationService,

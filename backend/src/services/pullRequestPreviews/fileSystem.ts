@@ -36,9 +36,7 @@ export function ensureRealDirectory(directoryPath: string): void {
     chmodSync(directoryPath, 0o700);
 }
 
-export function ensureRealDirectoryPreservingExistingMode(
-    directoryPath: string
-): void {
+export function ensureRealDirectoryPreservingExistingMode(directoryPath: string): void {
     const didExist = existsSync(directoryPath);
     mkdirSync(directoryPath, { mode: 0o700, recursive: true });
     if (!isRealDirectory(directoryPath)) {

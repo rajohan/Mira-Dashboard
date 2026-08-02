@@ -3,9 +3,9 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import type { RuntimeReleaseIdentity } from "../../../../contracts/health.ts";
-import { getBackendBuildCommit } from "../../buildIdentity.ts";
-import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "../../databaseSchemaCompatibility.ts";
+import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "../../database/schemaCompatibility.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
+import { getBackendBuildCommit } from "../../server/buildIdentity.ts";
 import {
     gitOutput,
     loadReleaseManifest,

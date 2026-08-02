@@ -7,7 +7,7 @@ import type {
     ScheduledJobScheduleType,
     ScheduledJobTriggerType,
 } from "../../../../contracts/jobs.ts";
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { isJobResourceClass } from "../../lib/jobResources.ts";
 import { parseJobDisableIntent } from "../jobDisableIntent.ts";
 import {
@@ -125,11 +125,7 @@ function latestRunsByJobId(jobIds: string[]): Map<string, ScheduledJobRun> {
         return new Map();
     }
     const runs = new Map<string, ScheduledJobRun>();
-    for (
-        let index = 0;
-        index < jobIds.length;
-        index += LATEST_RUNS_JOB_ID_CHUNK_SIZE
-    ) {
+    for (let index = 0; index < jobIds.length; index += LATEST_RUNS_JOB_ID_CHUNK_SIZE) {
         const chunk = jobIds.slice(index, index + LATEST_RUNS_JOB_ID_CHUNK_SIZE);
         const placeholders = chunk.map(() => "?").join(",");
         const rows = database
@@ -210,9 +206,7 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
     const intervalSeconds =
         definition.intervalSeconds ?? existing?.intervalSeconds ?? 3600;
     const timeOfDay =
-        definition.timeOfDay === undefined
-            ? existing?.timeOfDay
-            : definition.timeOfDay;
+        definition.timeOfDay === undefined ? existing?.timeOfDay : definition.timeOfDay;
     const cronExpression =
         definition.cronExpression === undefined
             ? existing?.cronExpression

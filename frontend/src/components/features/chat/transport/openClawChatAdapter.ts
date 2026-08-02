@@ -1,6 +1,6 @@
+import { parseCanonicalChatEvents } from "../../../../../../contracts/chat/canonical";
+import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chat/canonicalHistory";
 import { asRecord } from "../../../../../../contracts/chat/openClawAdapterValues";
-import { parseCanonicalChatEvents } from "../../../../../../contracts/chatCanonical";
-import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chatCanonicalHistory";
 import type { ChatHistoryMessage } from "../chatTypes";
 import type { ChatRuntimeEvent } from "../domain/chatState";
 import { adaptOpenClawHistory } from "./openClawHistoryAdapter";

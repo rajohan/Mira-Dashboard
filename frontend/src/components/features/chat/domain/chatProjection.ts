@@ -1,10 +1,11 @@
-import { canonicalChatContentFingerprint } from "../../../../../../contracts/chatCanonicalMessage";
+import { canonicalChatContentFingerprint } from "../../../../../../contracts/chat/canonicalMessage";
+import { mergeChatMessageDetails } from "../chatMessageIdentity";
+import { dedupeMessages } from "../chatMessageReconciliation";
 import {
     type ChatHistoryMessage,
     type ChatRow,
     type ChatVisibilitySettings,
 } from "../chatTypes";
-import { dedupeMessages, mergeChatMessageDetails } from "../chatUtilities";
 import { presentStructuredChatMessages, structureChatMessages } from "./chatPresentation";
 import {
     canonicalAssistantDisplay,

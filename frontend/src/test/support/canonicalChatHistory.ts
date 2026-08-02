@@ -1,12 +1,12 @@
-import {
-    canonicalizeOpenClawHistoryMessageResult,
-    canonicalizeOpenClawHistoryPage,
-} from "../../../../contracts/chat/openClawHistoryPageAdapter";
 import type {
     CanonicalChatHistoryMessageResult,
     CanonicalChatHistoryPage,
     CanonicalChatHistoryRow,
-} from "../../../../contracts/chatCanonicalHistory";
+} from "../../../../contracts/chat/canonicalHistory";
+import {
+    canonicalizeOpenClawHistoryMessageResult,
+    canonicalizeOpenClawHistoryPage,
+} from "../../../../contracts/chat/openClawHistoryPageAdapter";
 import { OpenClawChatAdapter as CanonicalOpenClawChatAdapter } from "../../components/features/chat/transport/openClawChatAdapter";
 
 export const TEST_OPENCLAW_SESSION_KEY = "agent:main:main";

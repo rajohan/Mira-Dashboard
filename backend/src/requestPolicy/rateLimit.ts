@@ -2,8 +2,8 @@ import { isIP } from "node:net";
 
 import type { Server } from "bun";
 
-import { isTrustedProxyAddress, requestIp } from "../http.ts";
-import { routeFailureResponse } from "../routeSupport.ts";
+import { isTrustedProxyAddress, requestIp } from "../http/core.ts";
+import { routeFailureResponse } from "../http/routeSupport.ts";
 
 interface RateLimitBucket {
     lastSeenAt: number;

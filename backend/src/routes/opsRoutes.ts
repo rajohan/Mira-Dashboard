@@ -2,12 +2,12 @@ import {
     type LogRotationStatus,
     parseLogRotationSummary,
 } from "../../../contracts/logRotation.ts";
-import { database } from "../database.ts";
-import { json } from "../http.ts";
+import { database } from "../database/connection.ts";
+import { json } from "../http/core.ts";
+import { routeErrorResponse, routeFailureResponse } from "../http/routeSupport.ts";
 import { httpStatusCode } from "../lib/errors.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { routeErrorResponse, routeFailureResponse } from "../routeSupport.ts";
-import { runElevatedLogRotationService } from "../services/logRotation.ts";
+import { runElevatedLogRotationService } from "../services/logRotation/runtime.ts";
 import {
     enqueueAndWaitForJobExecution,
     successfulJobExecutionOutput,

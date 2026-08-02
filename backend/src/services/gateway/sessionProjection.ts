@@ -122,10 +122,7 @@ function transformSession(session: GatewaySession): Session {
     };
 }
 
-function gatewayString(
-    record: Record<string, unknown>,
-    key: string
-): string | undefined {
+function gatewayString(record: Record<string, unknown>, key: string): string | undefined {
     return typeof record[key] === "string" ? record[key] : undefined;
 }
 
@@ -213,7 +210,11 @@ function gatewaySessionFromRecord(record: Record<string, unknown>): GatewaySessi
     };
 }
 
-/** Normalizes one raw Gateway sessions.list response for Dashboard consumers. */
+/**
+ * Normalizes one raw Gateway sessions.list response for Dashboard consumers.
+ * @param response Raw Gateway sessions response.
+ * @returns Normalized Dashboard sessions.
+ */
 export function normalizeGatewaySessionList(response: unknown): Session[] {
     const container = readSessionsResponseContainer(response);
     const sessions = container?.sessions ?? [];

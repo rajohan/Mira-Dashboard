@@ -18,7 +18,7 @@ import {
     useRotateRecoveryCodes,
     useTotpStepUp,
     useWebAuthnStepUp,
-} from "../../../hooks";
+} from "../../../hooks/useAccountSecurity";
 import { messageFromError } from "../../../lib/errorMessage";
 
 type VerificationMode = "mfa" | "password" | undefined;
@@ -70,11 +70,12 @@ export function useAccountSecurityController() {
 
     const isMfaEnabled = Boolean(data?.factors.enabledAt);
     const registeredSecurityKeyCount = data?.factors.webAuthnCredentials.length ?? 0;
-    const canManage = data
-        ? isMfaEnabled
+    let canManage = false;
+    if (data) {
+        canManage = isMfaEnabled
             ? data.recentVerification.mfa
-            : data.recentVerification.password
-        : false;
+            : data.recentVerification.password;
+    }
     const isBusy =
         changePassword.isPending ||
         passwordReauth.isPending ||

@@ -1,6 +1,9 @@
 import { getCacheEntry, parseJsonField } from "../../lib/cacheStore.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
-import { getDatabaseOverview, getIsolatedDatabaseOverview } from "../databaseOverview.ts";
+import {
+    getDatabaseOverview,
+    getIsolatedDatabaseOverview,
+} from "../databaseOverview/service.ts";
 import { nowIso } from "./cacheProducerSupport.ts";
 
 export const DATABASE_SUMMARY_KEY = "database.summary";

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
+import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
-} from "../../contracts/chat.ts";
-import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
+} from "../../contracts/chat/transport.ts";
 import {
     isSameSessionKey,
     OpenClawChatIdentityRegistry,

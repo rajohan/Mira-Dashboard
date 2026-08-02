@@ -1,4 +1,4 @@
-import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chatCanonicalHistory";
+import type { CanonicalChatHistoryRow } from "../../../../../../contracts/chat/canonicalHistory";
 import {
     type ChatHistoryMessage,
     mergeChatAttachments,

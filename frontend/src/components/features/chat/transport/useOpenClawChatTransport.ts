@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 
 import {
-    type ChatSendRequest,
-    type ChatSessionPreferences,
-    parseChatSendResponse,
-    parseOpenClawRuntimeSnapshot,
-} from "../../../../../../contracts/chat";
-import {
     asRecord,
     openClawThroughSequence,
     stringValue,
 } from "../../../../../../contracts/chat/openClawAdapterValues";
+import {
+    type ChatSendRequest,
+    type ChatSessionPreferences,
+    parseChatSendResponse,
+    parseOpenClawRuntimeSnapshot,
+} from "../../../../../../contracts/chat/transport";
 import { useOpenClawSocket } from "../../../../hooks/useOpenClawSocket";
-import type { ChatModelOption } from "../chatUtilities";
+import type { ChatModelOption } from "../chatSettings";
 import type { ChatRuntimeSnapshot, ChatTransport } from "./chatTransport";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 import { OpenClawHistoryLoader } from "./openClawHistoryLoader";

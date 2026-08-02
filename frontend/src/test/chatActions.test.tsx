@@ -3,19 +3,19 @@ import { describe, expect, it, jest } from "bun:test";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { type SetStateAction, useState } from "react";
 
-import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat/transport";
 import type { Session } from "../../../contracts/sessions";
-import type {
-    ChatHistoryMessage,
-    ChatSendAttachment,
+import {
+    type ChatHistoryMessage,
+    type ChatSendAttachment,
 } from "../components/features/chat/chatTypes";
 import { createChatRuntimeState } from "../components/features/chat/domain/chatState";
-import type {
-    ChatRuntimeSnapshot,
-    ChatTransport,
+import {
+    type ChatRuntimeSnapshot,
+    type ChatTransport,
 } from "../components/features/chat/transport/chatTransport";
 import { useChatActions } from "../components/features/chat/useChatActions";
-import type { ChatRuntimeController } from "../components/features/chat/useChatRuntime";
+import { type ChatRuntimeController } from "../components/features/chat/useChatRuntime";
 import { SecurityVerificationCancelledError } from "../lib/securityVerification";
 
 const SESSION_A = "agent:main:main";

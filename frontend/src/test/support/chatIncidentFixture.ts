@@ -2,9 +2,9 @@ import * as v from "valibot";
 
 import { withCanonicalOpenClawEvents } from "../../../../contracts/chat/openClawRuntimeAdapter";
 import { nonNegativeIntegerSchema, parseContract } from "../../../../contracts/runtime";
-import type {
-    ChatHistoryMessage,
-    ChatRow,
+import {
+    type ChatHistoryMessage,
+    type ChatRow,
 } from "../../components/features/chat/chatTypes";
 import { projectCanonicalChat } from "../../components/features/chat/domain/chatCanonicalProjection";
 import {

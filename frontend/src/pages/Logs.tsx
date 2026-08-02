@@ -5,18 +5,15 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "re
 
 import type { LogFile } from "../../../contracts/logs";
 import { logsCollection } from "../collections/logs";
-import { LevelFilter, LogLine } from "../components/features/logs";
+import { LevelFilter } from "../components/features/logs/LevelFilter";
+import { LogLine } from "../components/features/logs/LogLine";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
-import {
-    useDashboardLogContent,
-    useLogContent,
-    useLogFiles,
-    useOpenClawSocket,
-} from "../hooks";
+import { useDashboardLogContent, useLogContent, useLogFiles } from "../hooks/useLogs";
+import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { messageFromError } from "../lib/errorMessage";
 import { formatDateStamp } from "../utils/format";
 import { LINE_OPTIONS, LOG_LEVELS, parseLogLine } from "../utils/logUtilities";

@@ -1,10 +1,8 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { nullableString, objectFallback } from "../../lib/values.ts";
-import {
-    type DockerUpdaterStepResult,
-    isNonblockingRegistrationFailure,
-} from "../dockerUpdater.ts";
-import type { JobExecutionRecord } from "../jobExecutionQueue.ts";
+import { type DockerUpdaterStepResult } from "../dockerUpdater/types.ts";
+import { isNonblockingRegistrationFailure } from "../dockerUpdater/updatePolicy.ts";
+import { type JobExecutionRecord } from "../jobExecutionQueue/repository.ts";
 import { successfulJobExecutionOutput } from "../queuedJobExecution.ts";
 
 interface DockerUpdaterServiceRow {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 
-import { normalizeOpenClawHistoryMessage } from "../../contracts/chat/openClawHistoryNormalizer";
 import {
     canonicalChatImageDisplayUrl,
     canonicalChatLocalMediaPathFromUrl,
@@ -11,12 +10,13 @@ import {
     MAX_CANONICAL_CHAT_TOTAL_IMAGE_DATA_CHARACTERS,
     mergeCanonicalChatImages,
     normalizeCanonicalChatText,
-} from "../../contracts/chatCanonicalMessage";
+} from "../../contracts/chat/canonicalMessage";
 import {
     boundCanonicalChatToolValue,
     MAX_CANONICAL_CHAT_TEXT_CHARACTERS,
     MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
-} from "../../contracts/chatCanonicalUtilities";
+} from "../../contracts/chat/canonicalUtilities";
+import { normalizeOpenClawHistoryMessage } from "../../contracts/chat/openClawHistoryNormalizer";
 
 describe("backend canonical chat media normalization", () => {
     it("rejects absolute Dashboard-shaped media routes without a trusted browser origin", () => {

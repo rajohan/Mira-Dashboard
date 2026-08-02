@@ -22,9 +22,9 @@ import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 
 import type { CacheEnvelope } from "../../../contracts/cache";
-import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat";
 import { normalizeOpenClawHistoryMessage } from "../../../contracts/chat/openClawHistoryNormalizer";
 import { withCanonicalOpenClawEvents } from "../../../contracts/chat/openClawRuntimeAdapter";
+import { OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION } from "../../../contracts/chat/transport";
 import type { DatabaseOverviewResponse } from "../../../contracts/database";
 import type { DashboardDiagnosticsResponse } from "../../../contracts/health";
 import type { AppObservabilityMetrics, Metrics } from "../../../contracts/metrics";
@@ -55,6 +55,21 @@ import {
     sessionsCollection,
 } from "../collections/sessions";
 import {
+    base64ToText,
+    dataUrlToBase64,
+    displayMimeType,
+    readFileAsDataUrl,
+} from "../components/features/chat/chatAttachmentUtilities";
+import {
+    isRecoveredAssistantText,
+    messageDeleteKey,
+    messageIdentity,
+} from "../components/features/chat/chatMessageIdentity";
+import {
+    dedupeMessages,
+    mergeWithRecentOptimisticMessages,
+} from "../components/features/chat/chatMessageReconciliation";
+import {
     attachmentKind,
     type ChatHistoryMessage,
     chatImageDownloadUrl,
@@ -66,17 +81,6 @@ import {
     normalizeText,
     optimisticAttachmentDisplay,
 } from "../components/features/chat/chatTypes";
-import {
-    base64ToText,
-    dataUrlToBase64,
-    dedupeMessages,
-    displayMimeType,
-    isRecoveredAssistantText,
-    mergeWithRecentOptimisticMessages,
-    messageDeleteKey,
-    messageIdentity,
-    readFileAsDataUrl,
-} from "../components/features/chat/chatUtilities";
 import {
     buildSlashCommandSuggestions,
     slashCommandCanonicalName,

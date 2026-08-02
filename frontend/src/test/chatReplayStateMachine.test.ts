@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 
-import type { ChatHistoryMessage, ChatRow } from "../components/features/chat/chatTypes";
+import {
+    type ChatHistoryMessage,
+    type ChatRow,
+} from "../components/features/chat/chatTypes";
 import { projectCanonicalChat } from "../components/features/chat/domain/chatCanonicalProjection";
 import {
     createChatVisibility,

@@ -1,4 +1,4 @@
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { runProcess } from "../../lib/processes.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {

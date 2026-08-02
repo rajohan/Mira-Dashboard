@@ -1,26 +1,27 @@
 import { type Database } from "bun:sqlite";
 
-import { sessionIdleTtlMs } from "../auth.ts";
-import { database, getMiraDatabasePath } from "../database.ts";
-import { validateDatabaseMigrationHistory } from "../databaseMigrationRunner.ts";
+import { sessionIdleTtlMs } from "../auth/sessionService.ts";
+import { database, getMiraDatabasePath } from "../database/connection.ts";
+import { validateDatabaseMigrationHistory } from "../database/migrationRunner.ts";
+import {
+    createVerifiedSqliteBackup,
+    pruneSqliteBackups,
+} from "../database/sqliteBackup.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import {
-    readDashboardReleaseState,
-    resolveDashboardReleasesRoot,
-} from "./releases/manager.ts";
-import { createVerifiedSqliteBackup, pruneSqliteBackups } from "../sqliteBackup.ts";
 import {
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS,
     DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL,
 } from "./deploymentRuntimeResults.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
+import { readDashboardReleaseState } from "./releases/managerOperations.ts";
+import { resolveDashboardReleasesRoot } from "./releases/releaseLayout.ts";
+import { registerScheduledJobAction } from "./scheduledJobs/actionRegistry.ts";
 import {
     getScheduledJob,
-    registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.ts";
+} from "./scheduledJobs/repository.ts";
 
 export const SQLITE_MAINTENANCE_JOB_ID = "database.maintenance";
 const logger = createStructuredLogger("sqlite-maintenance");

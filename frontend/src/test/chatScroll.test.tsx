@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 
 import { act, renderHook } from "@testing-library/react";
 
-import type { ChatRow } from "../components/features/chat/chatTypes";
+import { type ChatRow } from "../components/features/chat/chatTypes";
 import { useChatScroll } from "../components/features/chat/useChatScroll";
 
 const originalAnimationFrame = {

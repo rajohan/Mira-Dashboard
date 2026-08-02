@@ -3,7 +3,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { isPlainRecord } from "../../../../contracts/runtime.ts";
-import { guardedPath, writeTextNoFollowGuarded } from "../../lib/guardedOps.ts";
+import { guardedPath } from "../../lib/guardedOps/core.ts";
+import { writeTextNoFollowGuarded } from "../../lib/guardedOps/write.ts";
 import {
     compareStrings,
     type DashboardReleaseLayout,

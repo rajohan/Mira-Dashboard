@@ -4,7 +4,7 @@ import type { CronJob } from "../../../../../contracts/cron";
 import { messageFromError } from "../../../lib/errorMessage";
 import { formatDate } from "../../../utils/format";
 import { validateJsonString } from "../../../utils/json";
-import { CronJobDetails } from "../cron";
+import { CronJobDetails } from "../cron/CronJobDetails";
 
 interface CronJobEditorProperties {
     deletePending: boolean;

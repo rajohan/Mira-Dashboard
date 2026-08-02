@@ -4,14 +4,14 @@ import {
 } from "../../../../contracts/chat/openClawHistoryPageAdapter.ts";
 import type { Session } from "../../../../contracts/sessions.ts";
 import { MAX_DASHBOARD_SOCKET_REQUEST_TIMEOUT_MS } from "../../../../contracts/socket.ts";
-import type { DashboardSocket } from "../../dashboardSocket.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { hashedLogCorrelation, runWithLogContext } from "../../lib/logContext.ts";
-import type {
-    OpenClawGatewayClientInstance,
-    OpenClawGatewayRequestOptions,
-} from "../../lib/openclawGatewayClient.ts";
-import type { OpenClawChatBridge } from "../chat/openClawChatBridge.ts";
+import {
+    type OpenClawGatewayClientInstance,
+    type OpenClawGatewayRequestOptions,
+} from "../../lib/openclawGatewayClient/client.ts";
+import { type OpenClawChatBridge } from "../chat/openClawChatBridge.ts";
+import type { DashboardSocket } from "./dashboardSocket.ts";
 import { normalizeGatewaySessionList } from "./sessionProjection.ts";
 import type { OpenClawTranscriptImageHydrator } from "./transcriptImageHydrator.ts";
 
@@ -26,15 +26,10 @@ interface PendingRequest {
 
 interface GatewayRequestForwarderOptions {
     broadcast: (message: unknown) => void;
-    publishSessions: (
-        client: OpenClawGatewayClientInstance,
-        sessions: Session[]
-    ) => void;
+    publishSessions: (client: OpenClawGatewayClientInstance, sessions: Session[]) => void;
     readActiveClient: () => OpenClawGatewayClientInstance | undefined;
     readChatBridge: () => OpenClawChatBridge;
-    refreshSessionsAfterRequest: (
-        client: OpenClawGatewayClientInstance
-    ) => Promise<void>;
+    refreshSessionsAfterRequest: (client: OpenClawGatewayClientInstance) => Promise<void>;
     transcriptImageHydrator: OpenClawTranscriptImageHydrator;
 }
 
@@ -92,14 +87,16 @@ export class GatewayRequestForwarder {
         if (method !== "chat.send") {
             return undefined;
         }
-        return this.#options.readChatBridge().captureRequestBoundary(
-            typeof parameters.sessionKey === "string"
-                ? parameters.sessionKey
-                : undefined,
-            typeof parameters.idempotencyKey === "string"
-                ? parameters.idempotencyKey
-                : undefined
-        );
+        return this.#options
+            .readChatBridge()
+            .captureRequestBoundary(
+                typeof parameters.sessionKey === "string"
+                    ? parameters.sessionKey
+                    : undefined,
+                typeof parameters.idempotencyKey === "string"
+                    ? parameters.idempotencyKey
+                    : undefined
+            );
     }
 
     async #requestWithReplayBoundaryInContext(

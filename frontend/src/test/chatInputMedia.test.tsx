@@ -6,7 +6,7 @@ import type { SetStateAction } from "react";
 import {
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
-} from "../components/features/chat/chatUtilities";
+} from "../components/features/chat/chatAttachmentUtilities";
 import { useChatInputMedia } from "../components/features/chat/useChatInputMedia";
 
 function fileList(files: File[]): FileList {

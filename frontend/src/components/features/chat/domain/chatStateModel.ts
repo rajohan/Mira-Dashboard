@@ -1,13 +1,13 @@
 import type {
     CanonicalChatEvent,
     CanonicalChatProviderMetadata,
-} from "../../../../../../contracts/chatCanonical";
+} from "../../../../../../contracts/chat/canonical";
+import { stableChatStringify } from "../chatMessageIdentity";
 import {
     type ChatHistoryMessage,
     type ChatMessageProvenance,
     mergeChatMessageProvenance,
 } from "../chatTypes";
-import { stableChatStringify } from "../chatUtilities";
 
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";

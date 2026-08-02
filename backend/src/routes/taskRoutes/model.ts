@@ -7,7 +7,7 @@ import {
     type TaskAutomationInput,
     type TaskUpdate,
 } from "../../../../contracts/tasks.ts";
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { objectFallback } from "../../lib/values.ts";
 import {
     getOpenClawCronListSnapshot,

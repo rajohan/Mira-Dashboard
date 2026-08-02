@@ -3,10 +3,7 @@ import path from "node:path";
 
 import { errorMessage } from "../../lib/errors.ts";
 import type { LogRotationPolicy } from "./config.ts";
-import {
-    escapeRegExp,
-    resolveLogGlob as resolveGlob,
-} from "./globResolver.ts";
+import { escapeRegExp, resolveLogGlob as resolveGlob } from "./globResolver.ts";
 import { assertSafePath, gzipFile, unlinkVerified } from "./safeFiles.ts";
 
 const ARCHIVE_FAMILY_SUFFIX_RE =
@@ -57,10 +54,7 @@ function isGzipArchivePath(filePath: string): boolean {
     return filePath.endsWith(".gz");
 }
 
-async function sameResolvedPath(
-    firstPath: string,
-    secondPath: string
-): Promise<boolean> {
+async function sameResolvedPath(firstPath: string, secondPath: string): Promise<boolean> {
     if (path.resolve(firstPath) === path.resolve(secondPath)) {
         return true;
     }
@@ -85,8 +79,7 @@ async function addConfiguredArchiveIfInRetentionScope(
     archives.push({
         path: archivePath,
         mtimeMs: stat.mtimeMs,
-        shouldCompress:
-            policy.shouldCompress ?? policy.compress ?? true,
+        shouldCompress: policy.shouldCompress ?? policy.compress ?? true,
     });
 }
 
@@ -205,11 +198,7 @@ export async function applyRetention(
         if (deleteSet.has(archive.path)) {
             continue;
         }
-        const result = await compressArchiveIfNeeded(
-            archive,
-            isDryRun,
-            approvedRoots
-        );
+        const result = await compressArchiveIfNeeded(archive, isDryRun, approvedRoots);
         if (result.compressed) compressed.push(result.archive.path);
         if (result.warning) warnings.push(result.warning);
     }
@@ -221,15 +210,9 @@ export async function applyRetention(
     return { deleted, compressed, warnings };
 }
 
-function archiveRetentionKey(
-    archivePath: string,
-    policy: LogRotationPolicy
-): string {
+function archiveRetentionKey(archivePath: string, policy: LogRotationPolicy): string {
     if (policy.archiveRetentionScope === "basename") {
-        return path.join(
-            path.dirname(archivePath),
-            archiveFamilyBasename(archivePath)
-        );
+        return path.join(path.dirname(archivePath), archiveFamilyBasename(archivePath));
     }
     if (policy.archiveRetentionScope === "parent") {
         return path.dirname(path.dirname(archivePath));

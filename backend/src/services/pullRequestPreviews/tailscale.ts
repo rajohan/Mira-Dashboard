@@ -38,11 +38,9 @@ export async function inspectTailscaleServe(
         runJsonCommand<TailscaleStatus>("tailscale", ["status", "--json"], {
             signal,
         }),
-        runJsonCommand<TailscaleServeStatus>(
-            "tailscale",
-            ["serve", "status", "--json"],
-            { signal }
-        ),
+        runJsonCommand<TailscaleServeStatus>("tailscale", ["serve", "status", "--json"], {
+            signal,
+        }),
     ]);
     const dnsName = tailscaleDnsName(status);
     const port = config.frontendPort;
@@ -106,11 +104,12 @@ export async function enableTailscaleServe(
             await disableOwnedTailscaleServe(config, true);
             onOwnershipChange(false);
         } catch (cleanupError) {
-            throw new AggregateError(
+            const activationError = new AggregateError(
                 [error, cleanupError],
-                "Tailscale Serve activation failed and its route could not be removed",
-                { cause: error }
+                "Tailscale Serve activation failed and its route could not be removed"
             );
+            activationError.cause = cleanupError;
+            throw activationError;
         }
         throw error;
     }
@@ -123,11 +122,7 @@ export async function disableOwnedTailscaleServe(
     if (!isOwned) return;
     const [status, serveStatus] = await Promise.all([
         runJsonCommand<TailscaleStatus>("tailscale", ["status", "--json"]),
-        runJsonCommand<TailscaleServeStatus>("tailscale", [
-            "serve",
-            "status",
-            "--json",
-        ]),
+        runJsonCommand<TailscaleServeStatus>("tailscale", ["serve", "status", "--json"]),
     ]);
     const dnsName = tailscaleDnsName(status);
     const port = config.frontendPort;

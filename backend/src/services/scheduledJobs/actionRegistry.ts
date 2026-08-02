@@ -74,7 +74,12 @@ export function assertValidActionTimeoutMs(timeoutMs: number | undefined): void 
     }
 }
 
-/** Registers one in-process scheduled action handler. */
+/**
+ * Registers one in-process scheduled action handler.
+ * @param actionKey Stable scheduled action key.
+ * @param handler Action handler to register.
+ * @param options Resource and timeout options.
+ */
 export function registerScheduledJobAction(
     actionKey: string,
     handler: ScheduledJobActionHandler,

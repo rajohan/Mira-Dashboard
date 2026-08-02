@@ -18,25 +18,25 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import {
-    AppObservabilityCard,
-    BackupOverviewCard,
-    CacheStatusCard,
-    DatabaseOverviewCard,
-    DockerOverviewCard,
-    GitOverviewCard,
-    JobsOverviewCard,
-    LogRotationCard,
-    QuotaOverviewCard,
-    ReportsOverviewCard,
-    ServiceActionsCard,
-} from "../components/features/dashboard";
+import { AppObservabilityCard } from "../components/features/dashboard/AppObservabilityCard";
+import { BackupOverviewCard } from "../components/features/dashboard/BackupOverviewCard";
+import { CacheStatusCard } from "../components/features/dashboard/CacheStatusCard";
+import { DatabaseOverviewCard } from "../components/features/dashboard/DatabaseOverviewCard";
+import { DockerOverviewCard } from "../components/features/dashboard/DockerOverviewCard";
+import { GitOverviewCard } from "../components/features/dashboard/GitOverviewCard";
+import { JobsOverviewCard } from "../components/features/dashboard/JobsOverviewCard";
+import { LogRotationCard } from "../components/features/dashboard/LogRotationCard";
+import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
+import { ReportsOverviewCard } from "../components/features/dashboard/ReportsOverviewCard";
+import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
 import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";
 import { Alert } from "../components/ui/Alert";
 import { Card } from "../components/ui/Card";
 import { MetricCard } from "../components/ui/MetricCard";
-import { useMetrics, useQuotas, useWeather } from "../hooks";
+import { useMetrics } from "../hooks/useMetrics";
 import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
+import { useQuotas } from "../hooks/useQuotas";
+import { useWeather } from "../hooks/useWeather";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import {
     formatLoad,

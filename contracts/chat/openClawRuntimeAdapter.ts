@@ -4,11 +4,11 @@ import {
     type CanonicalChatLifecycle,
     type CanonicalChatMessage,
     type CanonicalChatToolCall,
-} from "../chatCanonical";
+} from "./canonical";
 import {
     stableCanonicalChatStringify,
     uniqueCanonicalChatIds,
-} from "../chatCanonicalUtilities";
+} from "./canonicalUtilities";
 import {
     asRecord,
     isNonWorkTool,

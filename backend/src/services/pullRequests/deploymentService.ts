@@ -1,18 +1,24 @@
 import type { DeploymentJob } from "../../../../contracts/delivery.ts";
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { errorMessage } from "../../lib/errors.ts";
+import { enqueueJobExecution } from "../jobExecutionQueue/repository.ts";
+import { DEPLOYMENT_WORKER_STABILITY_SECONDS } from "../releases/cutoverCommands.ts";
+import {
+    assertManagedDashboardServiceContract,
+    ensureManagedRuntimeForRelease,
+    scheduleReleaseCutover,
+    scheduleReleaseRollback,
+} from "../releases/cutoverOperations.ts";
+import { didScheduleOrphanedReleaseCutoverRecovery } from "../releases/cutoverRecovery.ts";
 import { stageDashboardRelease } from "../releases/deployment.ts";
+import { readDashboardReleaseState } from "../releases/managerOperations.ts";
+import { resolveDashboardReleasesRoot } from "../releases/releaseLayout.ts";
+import { assertDashboardReleaseRuntimeAvailable } from "../releases/schemaCompatibility.ts";
 import {
-    assertDashboardReleaseRuntimeAvailable,
-    readDashboardReleaseState,
-    resolveDashboardReleasesRoot,
-} from "../releases/manager.ts";
-import { enqueueJobExecution } from "../jobExecutionQueue.ts";
-import {
-    registerDeploymentCutoverRecoveryHandler,
     registerScheduledJobAction,
     ScheduledJobActionError,
-} from "../scheduledJobs.ts";
+} from "../scheduledJobs/actionRegistry.ts";
+import { registerDeploymentCutoverRecoveryHandler } from "../scheduledJobs/runtime.ts";
 import { getDashboardRoot, getDashboardWorktreeRoot } from "./config.ts";
 import {
     acquireDeploymentLock,
@@ -25,15 +31,7 @@ import {
     rollbackIneligibilityReason,
     writeDeploymentJob,
 } from "./deploymentRepository.ts";
-import { runCommand } from "./githubClient.ts";
-import {
-    assertManagedDashboardServiceContract,
-    DEPLOYMENT_WORKER_STABILITY_SECONDS,
-    didScheduleOrphanedReleaseCutoverRecovery,
-    ensureManagedRuntimeForRelease,
-    scheduleReleaseCutover,
-    scheduleReleaseRollback,
-} from "../releases/cutover.ts";
+import { runCommand } from "./githubCommandClient.ts";
 import {
     dateToISOString,
     FULL_COMMIT_SHA_PATTERN,

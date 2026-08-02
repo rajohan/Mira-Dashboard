@@ -1,18 +1,18 @@
 import type {
     CanonicalChatMessage,
     CanonicalChatProviderMetadata,
-} from "../../../../../../contracts/chatCanonical";
+} from "../../../../../../contracts/chat/canonical";
 import {
     canonicalChatContentFingerprint,
     summarizeCanonicalChatValueForFingerprint,
-} from "../../../../../../contracts/chatCanonicalMessage";
+} from "../../../../../../contracts/chat/canonicalMessage";
 import {
     CANONICAL_CHAT_TURN_SCHEMA_VERSION,
     parseCanonicalChatTurns,
     type CanonicalChatTurn,
     type CanonicalChatTurnEntry,
-} from "../../../../../../contracts/chatCanonicalTurn";
-import { stableCanonicalChatStringify } from "../../../../../../contracts/chatCanonicalUtilities";
+} from "../../../../../../contracts/chat/canonicalTurn";
+import { stableCanonicalChatStringify } from "../../../../../../contracts/chat/canonicalUtilities";
 import {
     type ChatHistoryMessage,
     type ChatVisibilitySettings,

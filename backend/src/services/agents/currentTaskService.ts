@@ -2,12 +2,10 @@ import FS from "node:fs";
 import Path from "node:path";
 
 import type { AgentMetadata } from "../../../../contracts/agents.ts";
-import { database } from "../../database.ts";
-import {
-    guardedPath,
-    readTextNoFollowGuarded,
-    writeTextNoFollowGuarded,
-} from "../../lib/guardedOps.ts";
+import { database } from "../../database/connection.ts";
+import { guardedPath } from "../../lib/guardedOps/core.ts";
+import { readTextNoFollowGuarded } from "../../lib/guardedOps/read.ts";
+import { writeTextNoFollowGuarded } from "../../lib/guardedOps/write.ts";
 import { safePathWithinRoot } from "../../lib/safePath.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {

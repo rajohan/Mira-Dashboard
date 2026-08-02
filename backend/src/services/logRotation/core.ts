@@ -3,8 +3,8 @@ import path from "node:path";
 
 import type { LogRotationSummary as LogRotationContractSummary } from "../../../../contracts/logRotation.ts";
 import { errorMessage } from "../../lib/errors.ts";
-import { getProcessReleaseRoot } from "../releases/manifest.ts";
 import { writeCacheSuccess } from "../cacheEntryWriter.ts";
+import { getProcessReleaseRoot } from "../releases/runtimeReleaseIdentity.ts";
 import {
     byteLimitFromMb,
     type LogRotationOptions,
@@ -14,10 +14,15 @@ import {
     shouldCompressPolicy,
     validateLogRotationConfig,
 } from "./config.ts";
-import {
-    resolveLogGlob as resolveGlob,
-} from "./globResolver.ts";
+import { resolveLogGlob as resolveGlob } from "./globResolver.ts";
 import { acquireLogRotationLock, releaseLogRotationLock } from "./lock.ts";
+import {
+    applyArchiveOnlyRetention,
+    applyRetention,
+    hasRotatedInCadence,
+    rotationCadence,
+    type RetentionArchive,
+} from "./retention.ts";
 import {
     archiveBasePath,
     assertSafePath,
@@ -26,13 +31,6 @@ import {
     rotateRename,
     type RotationResult,
 } from "./safeFiles.ts";
-import {
-    applyArchiveOnlyRetention,
-    applyRetention,
-    hasRotatedInCadence,
-    rotationCadence,
-    type RetentionArchive,
-} from "./retention.ts";
 import {
     dateToISOString,
     LOG_ROTATION_STATE_KEY,

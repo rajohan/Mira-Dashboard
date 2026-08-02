@@ -1,5 +1,5 @@
 import type { DashboardMfaMethod as MfaLoginMethod } from "../../../../contracts/accountSecurity.ts";
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { areTimingSafeHashesEqual, randomHex, sha256Hex } from "../mfaCrypto.ts";
 
 const PENDING_LOGIN_TTL_MS = 5 * 60_000;

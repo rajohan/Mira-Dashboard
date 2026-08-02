@@ -44,9 +44,7 @@ function hasImageBlockOmittedData(block: Record<string, unknown>): boolean {
     return block.omitted === true || source?.omitted === true || !source?.data;
 }
 
-function normalizeTranscriptImageBlock(
-    value: unknown
-): ChatImageBlockRecord | undefined {
+function normalizeTranscriptImageBlock(value: unknown): ChatImageBlockRecord | undefined {
     const block = asRecord(value);
     if (block?.type !== "image") {
         return undefined;
@@ -145,8 +143,7 @@ export class OpenClawTranscriptImageHydrator {
             realOpenClawRoot = fs.realpathSync(openClawRoot);
             const realAgentDirectory = fs.realpathSync(agentDirectory);
             if (
-                realAgentDirectory !==
-                path.resolve(realOpenClawRoot, "agents", agentId)
+                realAgentDirectory !== path.resolve(realOpenClawRoot, "agents", agentId)
             ) {
                 return undefined;
             }

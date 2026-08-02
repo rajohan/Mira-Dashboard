@@ -19,9 +19,7 @@ export interface RotationResult {
     warning?: string;
 }
 
-async function ignoreRejection(
-    promise: Promise<unknown> | undefined
-): Promise<void> {
+async function ignoreRejection(promise: Promise<unknown> | undefined): Promise<void> {
     try {
         await promise;
     } catch {
@@ -61,12 +59,7 @@ function fileHandleReadableStream(
             const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, size - position));
             let bytesRead: number;
             try {
-                ({ bytesRead } = await handle.read(
-                    buffer,
-                    0,
-                    buffer.length,
-                    position
-                ));
+                ({ bytesRead } = await handle.read(buffer, 0, buffer.length, position));
             } catch (error) {
                 controller.error(error);
                 return;
@@ -120,9 +113,10 @@ async function gzipFileHandleBytes(
     destination: fs.FileHandle,
     size: number
 ): Promise<void> {
-    const gzipStream = new CompressionStream(
-        "gzip"
-    ) as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
+    const gzipStream = new CompressionStream("gzip") as unknown as ReadableWritablePair<
+        Uint8Array,
+        Uint8Array
+    >;
     await writeStreamToFileHandle(
         fileHandleReadableStream(source, size).pipeThrough(gzipStream),
         destination
@@ -131,10 +125,7 @@ async function gzipFileHandleBytes(
 
 function isUnderRoot(filePath: string, root: string): boolean {
     const relative = path.relative(root, filePath);
-    return (
-        relative === "" ||
-        (!relative.startsWith("..") && !path.isAbsolute(relative))
-    );
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 export async function assertSafePath(
@@ -293,10 +284,7 @@ async function createNoFollowFile(
 ): Promise<fs.FileHandle> {
     const handle = await fs.open(
         filePath,
-        constants.O_WRONLY |
-            constants.O_CREAT |
-            constants.O_EXCL |
-            constants.O_NOFOLLOW,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
         mode
     );
     try {
@@ -390,11 +378,10 @@ export async function rotateCopyTruncate(
     approvedRoots: string[]
 ): Promise<RotationResult> {
     await assertSafeNewFileParent(archivePath, approvedRoots);
-    const destination = await createNoFollowFile(
-        archivePath,
-        file.stat.mode & 0o777,
-        { uid: file.stat.uid, gid: file.stat.gid }
-    );
+    const destination = await createNoFollowFile(archivePath, file.stat.mode & 0o777, {
+        uid: file.stat.uid,
+        gid: file.stat.gid,
+    });
     let isCommitted = false;
     try {
         await copyFileHandleBytes(file.handle, destination, file.stat.size);
@@ -433,11 +420,10 @@ export async function rotateRename(
     await fs.rename(filePath, archivePath);
     await fs.utimes(archivePath, file.stat.atime, new Date());
     try {
-        const replacement = await createNoFollowFile(
-            filePath,
-            file.stat.mode & 0o777,
-            { uid: file.stat.uid, gid: file.stat.gid }
-        );
+        const replacement = await createNoFollowFile(filePath, file.stat.mode & 0o777, {
+            uid: file.stat.uid,
+            gid: file.stat.gid,
+        });
         await replacement.close();
     } catch (error) {
         if (isPathExistsError(error)) {

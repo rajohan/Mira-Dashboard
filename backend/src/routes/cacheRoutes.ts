@@ -6,7 +6,12 @@ import {
     cacheStatusSchema,
 } from "../../../contracts/cache.ts";
 import { jsonObjectSchema, parseContract } from "../../../contracts/runtime.ts";
-import { json } from "../http.ts";
+import { json } from "../http/core.ts";
+import {
+    type ParametersRequest,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../http/routeSupport.ts";
 import {
     type CacheEntryRow,
     getAllCacheEntries,
@@ -16,26 +21,19 @@ import {
 } from "../lib/cacheStore.ts";
 import { httpStatusCode } from "../lib/errors.ts";
 import { stringFallback } from "../lib/values.ts";
-import {
-    type ParametersRequest,
-    routeErrorResponse,
-    routeFailureResponse,
-} from "../routeSupport.ts";
-import {
-    cacheRefreshResourceClass,
-    cacheRefreshScheduledJobId,
-} from "../services/cacheRefresh.ts";
-import { getLatestScheduledJobExecution } from "../services/jobExecutionQueue.ts";
+import { cacheRefreshResourceClass } from "../services/cacheRefresh/cacheProducerRegistry.ts";
+import { cacheRefreshScheduledJobId } from "../services/cacheRefresh/cacheRefreshScheduler.ts";
+import { getLatestScheduledJobExecution } from "../services/jobExecutionQueue/repository.ts";
 import {
     enqueueAndWaitForJobExecution,
     successfulJobExecutionOutput,
     waitForJobExecution,
 } from "../services/queuedJobExecution.ts";
+import { enqueueScheduledJob } from "../services/scheduledJobs/enqueue.ts";
 import {
-    enqueueScheduledJob,
     getScheduledJob,
     listScheduledJobs,
-} from "../services/scheduledJobs.ts";
+} from "../services/scheduledJobs/repository.ts";
 import { getHeartbeatAutomationSnapshot } from "../services/taskAutomation.ts";
 
 const CACHE_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;

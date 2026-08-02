@@ -1,11 +1,11 @@
 import { describe, expect, it, jest } from "bun:test";
 
+import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../contracts/chat/canonicalUtilities.ts";
+import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
 import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeSnapshot,
-} from "../../contracts/chat.ts";
-import { withCanonicalOpenClawEvents } from "../../contracts/chat/openClawRuntimeAdapter.ts";
-import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../contracts/chatCanonicalUtilities.ts";
+} from "../../contracts/chat/transport.ts";
 import { OpenClawChatBridge } from "../src/services/chat/openClawChatBridge.ts";
 import type { OpenClawChatSnapshotStore } from "../src/services/chat/openClawChatPersistence.ts";
 import { envelopeBytes } from "../src/services/chat/openClawChatProviderAdapter.ts";

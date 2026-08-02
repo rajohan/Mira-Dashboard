@@ -2,8 +2,8 @@ import {
     OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
-} from "../../../../contracts/chat.ts";
-import { database } from "../../database.ts";
+} from "../../../../contracts/chat/transport.ts";
+import { database } from "../../database/connection.ts";
 import {
     MAX_CHAT_RUNTIME_SESSIONS,
     type OpenClawChatSnapshotStore,

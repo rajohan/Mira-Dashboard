@@ -1,4 +1,4 @@
-import { database, sqlNullable } from "../database.ts";
+import { database, sqlNullable } from "../database/connection.ts";
 
 export type AuditActorType = "anonymous" | "automation" | "loopback" | "system" | "user";
 export type AuditOutcome =

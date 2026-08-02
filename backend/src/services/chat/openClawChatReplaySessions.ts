@@ -1,8 +1,8 @@
+import { withCurrentCanonicalOpenClawIdentity } from "../../../../contracts/chat/openClawRuntimeAdapter.ts";
 import type {
     OpenClawRuntimeEnvelope,
     OpenClawRuntimeSnapshot,
-} from "../../../../contracts/chat.ts";
-import { withCurrentCanonicalOpenClawIdentity } from "../../../../contracts/chat/openClawRuntimeAdapter.ts";
+} from "../../../../contracts/chat/transport.ts";
 import type { OpenClawChatCompactionSettlements } from "./openClawChatCompactionSettlements.ts";
 import {
     isAgentSessionKey,

@@ -1,5 +1,5 @@
 import type { QuotasResponse, SyntheticQuota } from "../../../contracts/quotas.ts";
-import { database } from "../database.ts";
+import { database } from "../database/connection.ts";
 import { hasQuotaStatus } from "../lib/quotasCache.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";

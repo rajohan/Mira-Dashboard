@@ -19,17 +19,7 @@ import {
     applyDatabaseMigrations,
     migrateDisposableDatabaseCopy,
     validateDatabaseMigrationHistory,
-} from "../src/databaseMigrationRunner.ts";
-import { initialSchemaMigration } from "../src/databaseMigrations/0001InitialSchema.ts";
-import { databaseMigrations } from "../src/databaseMigrations/index.ts";
-import {
-    prepareDatabaseStorage,
-    secureSqliteFilePermissions,
-    sqliteBackupDirectory,
-} from "../src/databaseStorage.ts";
-import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
-import { RELEASE_READINESS_FAILURE_NOTE_PREFIX } from "../src/services/deploymentRuntimeResults.ts";
-import { pruneDatabaseHistory } from "../src/services/sqliteMaintenance.ts";
+} from "../src/database/migrationRunner.ts";
 import {
     createVerifiedSqliteBackup,
     createVerifiedSqliteCutoverSnapshot,
@@ -38,7 +28,17 @@ import {
     pruneSqliteBackups,
     restoreVerifiedSqliteCutoverSnapshot,
     verifySqliteCutoverSnapshot,
-} from "../src/sqliteBackup.ts";
+} from "../src/database/sqliteBackup.ts";
+import {
+    prepareDatabaseStorage,
+    secureSqliteFilePermissions,
+    sqliteBackupDirectory,
+} from "../src/database/storage.ts";
+import { initialSchemaMigration } from "../src/databaseMigrations/0001InitialSchema.ts";
+import { databaseMigrations } from "../src/databaseMigrations/registry.ts";
+import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
+import { RELEASE_READINESS_FAILURE_NOTE_PREFIX } from "../src/services/deploymentRuntimeResults.ts";
+import { pruneDatabaseHistory } from "../src/services/sqliteMaintenance.ts";
 
 const temporaryRoots: string[] = [];
 
@@ -478,7 +478,7 @@ describe("Dashboard SQLite lifecycle", () => {
         const root = temporaryRoot("mira-db-migrations-concurrent-");
         const databasePath = path.join(root, "dashboard.db");
         const databaseModuleUrl = pathToFileURL(
-            path.resolve(import.meta.dirname, "../src/database.ts")
+            path.resolve(import.meta.dirname, "../src/database/connection.ts")
         ).href;
         const childScript = `
             const { database } = await import(${JSON.stringify(databaseModuleUrl)});

@@ -4,29 +4,29 @@ import path from "node:path";
 import {
     assertMiraDatabasePathSafeForEnvironment,
     getMiraDatabasePath,
-} from "../../database.ts";
-import { validateDatabaseMigrationHistory } from "../../databaseMigrationRunner.ts";
-import { resolveDashboardProjectPaths } from "../../lib/dashboardPaths.ts";
-import { resolveManagedBunRuntimeRoot } from "./runtime.ts";
-import { prepareManagedDashboardUnits } from "./systemd.ts";
-import type {
-    DashboardReleaseManagerOptions,
-    DashboardReleaseState,
-} from "./manager.ts";
-import {
-    activateDashboardRelease,
-    pruneDashboardReleases,
-    readDashboardReleaseState,
-    resolveDashboardReleasesRoot,
-    restoreDashboardReleaseAfterFailedActivation,
-    rollbackDashboardRelease,
-} from "./manager.ts";
+} from "../../database/connection.ts";
+import { validateDatabaseMigrationHistory } from "../../database/migrationRunner.ts";
 import {
     createVerifiedSqliteCutoverSnapshot,
     didDiscardSqliteCutoverSnapshot,
     restoreVerifiedSqliteCutoverSnapshot,
     verifySqliteCutoverSnapshot,
-} from "../../sqliteBackup.ts";
+} from "../../database/sqliteBackup.ts";
+import { resolveDashboardProjectPaths } from "../../lib/dashboardPaths.ts";
+import type {
+    DashboardReleaseManagerOptions,
+    DashboardReleaseState,
+} from "./managerModel.ts";
+import {
+    activateDashboardRelease,
+    pruneDashboardReleases,
+    readDashboardReleaseState,
+    restoreDashboardReleaseAfterFailedActivation,
+    rollbackDashboardRelease,
+} from "./managerOperations.ts";
+import { resolveDashboardReleasesRoot } from "./releaseLayout.ts";
+import { resolveManagedBunRuntimeRoot } from "./runtime.ts";
+import { prepareManagedDashboardUnits } from "./systemd.ts";
 
 const COORDINATED_SCHEMA_CUTOVER_FLAG = "--coordinated-schema-cutover";
 const RELEASE_TRANSITION_LOCK_WAIT_MS = 30_000;

@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Activity, LogOut, Menu } from "lucide-react";
 
-import { useHealth } from "../../hooks";
+import { useHealth } from "../../hooks/useHealth";
 import { useOpenClawSocket } from "../../hooks/useOpenClawSocket";
 import { authActions } from "../../stores/authStore";
 import { Button } from "../ui/Button";

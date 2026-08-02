@@ -7,7 +7,8 @@ import type {
     ScheduledJob,
     ScheduledJobPatch,
 } from "../../../contracts/jobs";
-import { CronJobList } from "../components/features/cron";
+import { CronJobList } from "../components/features/cron/CronJobList";
+import { CronJobEditor } from "../components/features/jobs/CronJobEditor";
 import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";
 import {
     type DisableCandidate,
@@ -18,11 +19,8 @@ import {
     type JobsView,
     sortScheduledJobs,
 } from "../components/features/jobs/jobPanelModel";
-import {
-    CronJobEditor,
-    ScheduledJobEditor,
-    ScheduledJobList,
-} from "../components/features/jobs/JobPanels";
+import { ScheduledJobEditor } from "../components/features/jobs/ScheduledJobEditor";
+import { ScheduledJobList } from "../components/features/jobs/ScheduledJobList";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -39,12 +37,14 @@ import {
     useCronJobs,
     useDeleteCronJob,
     useRunCronJobNow,
-    useRunScheduledJobNow,
-    useScheduledJobs,
     useToggleCronJob,
     useUpdateCronJob,
+} from "../hooks/useCron";
+import {
+    useRunScheduledJobNow,
+    useScheduledJobs,
     useUpdateScheduledJob,
-} from "../hooks";
+} from "../hooks/useScheduledJobs";
 import { messageFromError } from "../lib/errorMessage";
 import { getCronJobId, sortCronJobs } from "../utils/cronUtilities";
 import {

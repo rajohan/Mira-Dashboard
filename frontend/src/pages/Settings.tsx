@@ -7,33 +7,35 @@ import {
     parseSystemHostSummary,
     type SystemHostSummary,
 } from "../../../contracts/system";
+import { AccountSecuritySection } from "../components/features/settings/AccountSecuritySection";
+import { AgentAccessSection } from "../components/features/settings/AgentAccessSection";
 import {
-    AccountSecuritySection,
-    AgentAccessSection,
     ChannelSection,
-    HeartbeatSection,
-    ModelSection,
-    SecuritySection,
-    SessionSection,
-    SkillsSection,
+    type ChannelSummary,
+} from "../components/features/settings/ChannelSection";
+import { HeartbeatSection } from "../components/features/settings/HeartbeatSection";
+import { ModelSection } from "../components/features/settings/ModelSection";
+import { SecuritySection } from "../components/features/settings/SecuritySection";
+import { SessionSection } from "../components/features/settings/SessionSection";
+import { SkillsSection } from "../components/features/settings/SkillsSection";
+import {
     ToolSection,
-} from "../components/features/settings";
-import type { ChannelSummary } from "../components/features/settings/ChannelSection";
-import type { ToolSettings } from "../components/features/settings/ToolSection";
+    type ToolSettings,
+} from "../components/features/settings/ToolSection";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { LoadingState } from "../components/ui/LoadingState";
 import { Modal } from "../components/ui/Modal";
+import { useCacheEntry } from "../hooks/useCache";
 import {
-    useCacheEntry,
     useConfig,
     useCreateBackup,
     useRestartGateway,
     useSkills,
     useToggleSkill,
     useUpdateConfig,
-} from "../hooks";
+} from "../hooks/useConfig";
 import { messageFromError } from "../lib/errorMessage";
 import { currentIsoString } from "../utils/date";
 import {

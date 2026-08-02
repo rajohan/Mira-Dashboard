@@ -2,14 +2,17 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { Server } from "bun";
 
+import { database } from "../src/database/connection.ts";
 import {
     authenticateAutomationRequest,
     type AutomationScope,
     requiredAutomationScope,
     validateAutomationCredentials,
-} from "../src/automationAuth.ts";
-import { database } from "../src/database.ts";
-import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
+} from "../src/http/automationAuth.ts";
+import {
+    resetRequestPolicyForTests,
+    withRequestPolicy,
+} from "../src/requestPolicy/evaluator.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const WRITER_VALIDATOR = "a1".repeat(32);

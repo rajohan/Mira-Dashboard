@@ -6,7 +6,7 @@ import {
     useCancelJobExecution,
     useJobExecutions,
     useSetJobWorkerClaimsPaused,
-} from "../../../hooks";
+} from "../../../hooks/useJobExecutions";
 import { messageFromError } from "../../../lib/errorMessage";
 import { cn } from "../../../utils/cn";
 import { formatDate, formatDuration } from "../../../utils/format";

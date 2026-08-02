@@ -95,14 +95,8 @@ export function validateLogRotationConfig(config: LogRotationConfig): void {
         "defaults.approvedRoots"
     );
     validateOptionalStringArray(config.defaults?.paths, "defaults.paths");
-    validateOptionalStringArray(
-        config.defaults?.excludePaths,
-        "defaults.excludePaths"
-    );
-    validateOptionalStringArray(
-        config.defaults?.archivePaths,
-        "defaults.archivePaths"
-    );
+    validateOptionalStringArray(config.defaults?.excludePaths, "defaults.excludePaths");
+    validateOptionalStringArray(config.defaults?.archivePaths, "defaults.archivePaths");
     validatePolicyTypes(config.defaults, "defaults");
     validateOptionalStringArray(config.excludePaths, "excludePaths");
     validateArchiveRetentionScope(
@@ -167,10 +161,7 @@ export function validateLogRotationConfig(config: LogRotationConfig): void {
     }
 }
 
-function validatePolicyTypes(
-    policy: LogRotationPolicy | undefined,
-    label: string
-): void {
+function validatePolicyTypes(policy: LogRotationPolicy | undefined, label: string): void {
     if (policy === undefined) return;
     for (const field of [
         "enabled",
@@ -186,11 +177,7 @@ function validatePolicyTypes(
             throw new TypeError(`${label}.${field} must be a boolean`);
         }
     }
-    for (const field of [
-        "maxSizeMb",
-        "keepDays",
-        "archiveMinAgeMinutes",
-    ] as const) {
+    for (const field of ["maxSizeMb", "keepDays", "archiveMinAgeMinutes"] as const) {
         if (
             policy[field] !== undefined &&
             (typeof policy[field] !== "number" || policy[field] < 0)
@@ -218,10 +205,7 @@ function validateOptionalStringArray(value: unknown, fieldName: string): void {
     }
 }
 
-function validateNonEmptyOptionalStringArray(
-    value: unknown,
-    fieldName: string
-): void {
+function validateNonEmptyOptionalStringArray(value: unknown, fieldName: string): void {
     validateOptionalStringArray(value, fieldName);
     if (Array.isArray(value) && value.length === 0) {
         throw new TypeError(`${fieldName} must include at least one entry`);

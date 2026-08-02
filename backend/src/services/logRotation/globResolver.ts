@@ -40,9 +40,7 @@ export function isMissingPathError(error: unknown): boolean {
 }
 
 export function isPathExistsError(error: unknown): boolean {
-    return (
-        error instanceof Error && "code" in error && String(error.code) === "EEXIST"
-    );
+    return error instanceof Error && "code" in error && String(error.code) === "EEXIST";
 }
 
 function hasGlobMeta(pattern: string): boolean {
@@ -75,7 +73,12 @@ async function appendGlobWildcardCandidates(options: {
     }
 }
 
-/** Resolves the intentionally small supported log-path glob syntax. */
+/**
+ * Resolves the intentionally small supported log-path glob syntax.
+ * @param pattern Absolute or relative log path pattern.
+ * @param options Missing-path handling options.
+ * @returns Matching filesystem paths.
+ */
 export async function resolveLogGlob(
     pattern: string,
     options: { missingOk?: boolean } = {}

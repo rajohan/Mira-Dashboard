@@ -1,6 +1,6 @@
 import { type Database } from "bun:sqlite";
 
-import { database } from "../database.ts";
+import { database } from "../database/connection.ts";
 
 const READ_RETENTION_DAYS = 14;
 const MAX_READ_ITEMS = 300;

@@ -1,6 +1,5 @@
 import type { Session } from "../../../../contracts/sessions.ts";
 import { parseDashboardSocketRequest } from "../../../../contracts/socket.ts";
-import type { DashboardSocket } from "../../dashboardSocket.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {
     subscribeToDashboardLogs,
@@ -10,6 +9,7 @@ import {
     subscribeToLogs as subscribeToServiceLogs,
     unsubscribeFromLogs as unsubscribeFromServiceLogs,
 } from "../logStreams.ts";
+import type { DashboardSocket } from "./dashboardSocket.ts";
 
 const logger = createStructuredLogger("gateway");
 
@@ -99,10 +99,7 @@ export class GatewayDashboardClientHub {
                 subscribeToDashboardLogs(client);
                 return;
             }
-            if (
-                message.type === "unsubscribe" &&
-                message.channel === "dashboard-logs"
-            ) {
+            if (message.type === "unsubscribe" && message.channel === "dashboard-logs") {
                 unsubscribeFromDashboardLogs(client);
                 return;
             }

@@ -18,6 +18,7 @@ import { messageFromError } from "../../../lib/errorMessage";
 import { loadLazyModule } from "../../../lib/lazyImportRecovery";
 import { formatDate } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
+import { previewFromAttachment } from "./chatAttachmentUtilities";
 import { AttachmentList } from "./ChatMessageAttachments";
 import { ActivityIndicator, DeleteMessageButton, TtsButton } from "./ChatMessageControls";
 import { ChatMessageDetails } from "./ChatMessageDetails";
@@ -28,7 +29,6 @@ import {
     chatImageUrl,
     TOOL_ROLE_VARIANTS,
 } from "./chatTypes";
-import { previewFromAttachment } from "./chatUtilities";
 
 export { AttachmentIcon } from "./ChatMessageAttachments";
 

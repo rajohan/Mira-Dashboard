@@ -7,7 +7,7 @@ import type {
     TotpEnrollment,
     TotpFactor as TotpFactorSummary,
 } from "../../../../contracts/accountSecurity.ts";
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import {
     decryptStoredSecret,
     encryptStoredSecret,

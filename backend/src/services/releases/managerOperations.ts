@@ -3,31 +3,10 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "../../database/schemaCompatibility.ts";
 import {
-    applyReleaseLinkState,
-    assertDashboardReleaseRuntimeAvailable,
-    assertDashboardReleaseStateMatches,
-    assertManagedDashboardReleaseRollbackSchemaCompatible,
-    assertReleaseActivationCompatible,
-    assertReleaseCanActivateLiveSchema,
     assertReleaseCommitSha,
-    assertReleaseMigrationHistoryCompatible,
     compareStrings,
-    ensureDashboardReleaseLayout,
-    ensureManagedLauncherExecutable,
-    isSameReleaseDirectoryInode,
-    loadManagedReleaseFromLayout,
-    readActivationReleaseStateFromLayout,
-    readDashboardReleaseStateFromLayout,
-    readReleaseTransitionJournal,
-    recoverInterruptedReleaseTransition,
-    releaseDirectoryIdentity,
-    releaseLinkStateFromDashboardState,
-    removeReleaseTransitionControlFile,
-    replaceReleaseLink,
-    resolveDashboardReleasesRoot,
-    resolveLiveSchemaState,
-    restoreInterruptedReleaseTransition,
     RETIRED_RELEASE_DIRECTORY_PATTERN,
     RELEASE_COMMIT_SHA_PATTERN,
     RELEASE_PUBLICATION_LOCK_WAIT_MS,
@@ -44,21 +23,50 @@ import {
     type ReleaseTransitionJournal,
     STAGING_RELEASE_DIRECTORY_PATTERN,
     STALE_STAGING_RELEASE_AGE_MS,
-    syncDirectory,
-    syncFile,
-    withPreparedReleaseTransition,
-    withReleaseTransitionLock,
-    writeReleaseTransitionJournal,
-} from "./managerCore.ts";
+} from "./managerModel.ts";
 import {
-    DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     loadReleaseManifest,
-    RELEASE_MANIFEST_FILE_NAME,
     verifyReleaseArtifacts,
     verifyReleaseBuildIdentities,
-} from "./manifest.ts";
+} from "./manifestArtifacts.ts";
+import { RELEASE_MANIFEST_FILE_NAME } from "./manifestPolicy.ts";
+import {
+    applyReleaseLinkState,
+    assertDashboardReleaseStateMatches,
+    ensureDashboardReleaseLayout,
+    ensureManagedLauncherExecutable,
+    isSameReleaseDirectoryInode,
+    loadManagedReleaseFromLayout,
+    readActivationReleaseStateFromLayout,
+    readDashboardReleaseStateFromLayout,
+    recoverInterruptedReleaseTransition,
+    releaseDirectoryIdentity,
+    releaseLinkStateFromDashboardState,
+    replaceReleaseLink,
+    resolveDashboardReleasesRoot,
+    restoreInterruptedReleaseTransition,
+} from "./releaseLayout.ts";
 import { hasManagedBunRuntime, pruneManagedBunRuntimes } from "./runtime.ts";
+import {
+    assertDashboardReleaseRuntimeAvailable,
+    assertManagedDashboardReleaseRollbackSchemaCompatible,
+    assertReleaseActivationCompatible,
+    assertReleaseCanActivateLiveSchema,
+    assertReleaseMigrationHistoryCompatible,
+    resolveLiveSchemaState,
+} from "./schemaCompatibility.ts";
 import { MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT } from "./systemdPolicy.ts";
+import {
+    readReleaseTransitionJournal,
+    removeReleaseTransitionControlFile,
+    syncDirectory,
+    syncFile,
+    writeReleaseTransitionJournal,
+} from "./transitionJournal.ts";
+import {
+    withPreparedReleaseTransition,
+    withReleaseTransitionLock,
+} from "./transitionLock.ts";
 
 /**
  * Copies a verified build into the immutable release store while excluding

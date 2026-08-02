@@ -5,9 +5,16 @@ import type {
     RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 
-import { createSession, createUser, getAuthSessionFromSessionId } from "../src/auth.ts";
-import { database } from "../src/database.ts";
-import { createPendingLogin, getPendingLogin } from "../src/services/multiFactorAuth.ts";
+import {
+    createSession,
+    getAuthSessionFromSessionId,
+} from "../src/auth/sessionService.ts";
+import { createUser } from "../src/auth/userRepository.ts";
+import { database } from "../src/database/connection.ts";
+import {
+    createPendingLogin,
+    getPendingLogin,
+} from "../src/services/multiFactorAuth/pendingLoginService.ts";
 import {
     createWebAuthnAuthenticationOptions,
     createWebAuthnRegistrationOptions,
@@ -18,7 +25,7 @@ import {
     type WebAuthnChallengeContext,
     webAuthnConfig,
     type WebAuthnServerAdapter,
-} from "../src/services/webAuthn.ts";
+} from "../src/services/webAuthn/service.ts";
 
 const USER_PREFIX = "webauthn-test-";
 const originalRpId = process.env.MIRA_DASHBOARD_WEBAUTHN_RP_ID;

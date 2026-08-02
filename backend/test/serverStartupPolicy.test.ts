@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { Server } from "bun";
 
-import * as releaseManifestModule from "../src/services/releases/manifest.ts";
+import * as releaseManifestModule from "../src/services/releases/runtimeReleaseIdentity.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
@@ -21,7 +21,7 @@ async function observeServerShutdownTimeout() {
 
 describe("server start scheduler policy", () => {
     it("starts scheduled jobs only in the combined non-production server", async () => {
-        const { shouldStartScheduledJobs } = await import("../src/serverStartPolicy.ts");
+        const { shouldStartScheduledJobs } = await import("../src/server/startPolicy.ts");
 
         expect(shouldStartScheduledJobs({})).toBe(true);
         expect(shouldStartScheduledJobs({ NODE_ENV: "development" })).toBe(true);
@@ -30,7 +30,7 @@ describe("server start scheduler policy", () => {
     });
 
     it("keeps production frontend assets inside the checksummed release", async () => {
-        const { resolveFrontendPath } = await import("../src/frontendAssets.ts");
+        const { resolveFrontendPath } = await import("../src/server/frontendAssets.ts");
         const releaseRoot = "/opt/mira-dashboard/releases/test-release";
         const releaseFrontend = path.join(releaseRoot, "dist");
 
@@ -67,7 +67,7 @@ describe("server start scheduler policy", () => {
     });
 
     it("resolves backend startup entrypoint and gateway token decisions without starting services", async () => {
-        const { resolveGatewayToken } = await import("../src/gatewayToken.ts");
+        const { resolveGatewayToken } = await import("../src/services/gateway/token.ts");
         const { isDirectEntrypoint, shouldStartOnImport, startBackendServerEntrypoint } =
             await import("../src/serverStart.ts");
 
@@ -296,16 +296,18 @@ describe("server start scheduler policy", () => {
     });
 
     it("keeps worker startup blocked until failed executor cleanup is retried", async () => {
-        const backups = await import("../src/services/backups.ts");
-        const cacheRefresh = await import("../src/services/cacheRefresh.ts");
+        const backups = await import("../src/services/backups/scheduling.ts");
+        const cacheRefresh =
+            await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         const dockerActions = await import("../src/services/dockerActions.ts");
-        const dockerUpdater = await import("../src/services/dockerUpdater.ts");
+        const dockerUpdater = await import("../src/services/dockerUpdater/scheduler.ts");
         const execJobs = await import("../src/services/execJobs.ts");
         const gitHygiene = await import("../src/services/gitHygiene.ts");
-        const logRotation = await import("../src/services/logRotation.ts");
+        const logRotation = await import("../src/services/logRotation/scheduler.ts");
         const openclawActions = await import("../src/services/openclawActions.ts");
-        const pullRequests = await import("../src/services/pullRequests.ts");
-        const scheduledJobs = await import("../src/services/scheduledJobs.ts");
+        const pullRequests =
+            await import("../src/services/pullRequests/executionActions.ts");
+        const scheduledJobs = await import("../src/services/scheduledJobs/runtime.ts");
         const sqliteMaintenance = await import("../src/services/sqliteMaintenance.ts");
         const worker = await import("../src/services/jobWorker.ts");
         const cacheRegistrationSpy = jest
@@ -424,8 +426,8 @@ describe("server start scheduler policy", () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
         const originalNodeEnvironment = process.env.NODE_ENV;
         process.env.NODE_ENV = "production";
-        const gatewayModule = await import("../src/gateway.ts");
-        const { database } = await import("../src/database.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
+        const { database } = await import("../src/database/connection.ts");
         const serverStartModule = await import("../src/serverStart.ts");
         database
             .prepare(
@@ -463,7 +465,7 @@ describe("server start scheduler policy", () => {
         const originalNodeEnvironment = process.env.NODE_ENV;
         process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
         process.env.NODE_ENV = "development";
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const jobWorker = await import("../src/services/jobWorker.ts");
         const serverStartModule = await import("../src/serverStart.ts");
         const initSpy = jest
@@ -496,8 +498,8 @@ describe("server start scheduler policy", () => {
         const originalNodeEnvironment = process.env.NODE_ENV;
         process.env.NODE_ENV = "production";
         delete process.env.OPENCLAW_GATEWAY_TOKEN;
-        const gatewayModule = await import("../src/gateway.ts");
-        const { database } = await import("../src/database.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
+        const { database } = await import("../src/database/connection.ts");
         const serverStartModule = await import("../src/serverStart.ts");
         const previousPersistedGatewayToken = database
             .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
@@ -558,7 +560,7 @@ describe("server start scheduler policy", () => {
         const originalNodeEnvironment = process.env.NODE_ENV;
         process.env.NODE_ENV = "production";
         process.env.OPENCLAW_GATEWAY_TOKEN = "broken-token";
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const serverStartModule = await import("../src/serverStart.ts");
         const initSpy = jest
             .spyOn(gatewayModule.default, "init")
@@ -868,7 +870,7 @@ describe("server start scheduler policy", () => {
         let isDeploymentCutoverActive = false;
         try {
             const now = new Date().toISOString();
-            const authModule = await import("../src/auth.ts");
+            const authModule = await import("../src/auth/sessionService.ts");
             getAuthSessionSpy = jest
                 .spyOn(authModule, "getAuthSessionFromSessionId")
                 .mockReturnValue({
@@ -883,7 +885,7 @@ describe("server start scheduler policy", () => {
                     sessionId: "dev-session",
                     username: "mira",
                 });
-            const gatewayModule = await import("../src/gateway.ts");
+            const gatewayModule = await import("../src/services/gateway/runtime.ts");
             handleDashboardClientSpy = jest
                 .spyOn(gatewayModule.default, "handleDashboardClient")
                 .mockImplementation(() => {});
@@ -892,7 +894,7 @@ describe("server start scheduler policy", () => {
             deploymentCutoverSpy = jest
                 .spyOn(deploymentCutoverModule, "isProductionDeploymentCutoverActive")
                 .mockImplementation(() => isDeploymentCutoverActive);
-            const { createServer } = await import("../src/server.ts");
+            const { createServer } = await import("../src/server/app.ts");
             const optionsSymbol = Symbol.for("mira.test.options");
             const server = createServer(0, "127.0.0.1") as Server<unknown> & {
                 [optionsSymbol]: {

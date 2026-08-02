@@ -2,15 +2,15 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import { database } from "../database.ts";
+import { database } from "../database/connection.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import { registerScheduledJobAction } from "./scheduledJobs/actionRegistry.ts";
 import {
     getScheduledJob,
-    registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     upsertScheduledJob,
-} from "./scheduledJobs.ts";
+} from "./scheduledJobs/repository.ts";
 
 interface GitSyncResult {
     changedPaths: string[];

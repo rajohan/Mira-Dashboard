@@ -18,7 +18,7 @@ import {
     writeDeletedMessageKeys,
     writeStoredChatDiagnosticVisibility,
 } from "../components/features/chat/chatPageUtilities";
-import type { ChatPreviewItem } from "../components/features/chat/chatTypes";
+import { type ChatPreviewItem } from "../components/features/chat/chatTypes";
 import { createChatVisibility as createRuntimeVisibility } from "../components/features/chat/domain/chatPresentation";
 import { isSameChatSession } from "../components/features/chat/domain/chatState";
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";

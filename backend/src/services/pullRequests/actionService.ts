@@ -6,14 +6,15 @@ import { cleanupClosedPullRequestPreview } from "../pullRequestPreviews/host.ts"
 import { DASHBOARD_REPO, DEFAULT_BASE } from "./config.ts";
 import {
     buildReviewCommandEnvironment,
-    findPullRequestStackForGuard,
-    getPullRequest,
-    listDashboardPullRequests,
     parseRepoParts,
+    runCommand,
+} from "./githubCommandClient.ts";
+import { getPullRequest, listDashboardPullRequests } from "./githubPullRequestListing.ts";
+import {
+    findPullRequestStackForGuard,
     pullRequestStackMetadata,
     requireStandalonePullRequest,
-    runCommand,
-} from "./githubClient.ts";
+} from "./githubStackClient.ts";
 import {
     applyPullRequestPreviewEligibility,
     normalizePullRequest,

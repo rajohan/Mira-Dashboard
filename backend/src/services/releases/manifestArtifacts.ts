@@ -3,9 +3,10 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { isPlainRecord } from "../../../../contracts/runtime.ts";
-import { databaseMigrationIdentities } from "../../databaseMigrations/index.ts";
-import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "../../databaseSchemaCompatibility.ts";
-import { guardedPath, writeTextNoFollowGuarded } from "../../lib/guardedOps.ts";
+import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "../../database/schemaCompatibility.ts";
+import { databaseMigrationIdentities } from "../../databaseMigrations/registry.ts";
+import { guardedPath } from "../../lib/guardedOps/core.ts";
+import { writeTextNoFollowGuarded } from "../../lib/guardedOps/write.ts";
 import { parseReleaseManifest } from "./manifestParser.ts";
 import {
     assertCommitIdentity,

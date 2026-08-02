@@ -1,9 +1,4 @@
-import {
-    existsSync,
-    readdirSync,
-    realpathSync,
-    rmdirSync,
-} from "node:fs";
+import { existsSync, readdirSync, realpathSync, rmdirSync } from "node:fs";
 import path from "node:path";
 
 import {

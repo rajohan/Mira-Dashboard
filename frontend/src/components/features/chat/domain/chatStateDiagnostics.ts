@@ -2,7 +2,8 @@ import {
     boundCanonicalChatToolValue,
     MAX_CANONICAL_TOOL_RESULT_CHARACTERS,
     truncateCanonicalChatText,
-} from "../../../../../../contracts/chatCanonicalUtilities";
+} from "../../../../../../contracts/chat/canonicalUtilities";
+import { messageDeleteKey, stableChatStringify } from "../chatMessageIdentity";
 import {
     type ChatHistoryMessage,
     type ChatToolCallDisplay,
@@ -11,7 +12,6 @@ import {
     mergeChatImages,
     mergeChatMessageProvenance,
 } from "../chatTypes";
-import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
 import { mergeMessageDetails } from "./chatStateAssistant";
 import {
     MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN,

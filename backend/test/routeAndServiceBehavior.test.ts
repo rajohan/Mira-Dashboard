@@ -21,12 +21,12 @@ import type { Server } from "bun";
 
 import type { SystemHostSummary } from "../../contracts/system.ts";
 import { requestUrl } from "../../test/support/fetch.ts";
-import { database } from "../src/database.ts";
-import type {
-    OpenClawGatewayClientInstance,
-    OpenClawGatewayClientOptions,
-} from "../src/lib/openclawGatewayClient.ts";
-import { runWithRequestAuditContext } from "../src/requestAuditContext.ts";
+import { database } from "../src/database/connection.ts";
+import { runWithRequestAuditContext } from "../src/http/requestAuditContext.ts";
+import {
+    type OpenClawGatewayClientInstance,
+    type OpenClawGatewayClientOptions,
+} from "../src/lib/openclawGatewayClient/client.ts";
 import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
@@ -218,7 +218,7 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
 
 async function startTestScheduledExecutor(): Promise<void> {
     const { startScheduledJobExecutor, stopScheduledJobExecutor } =
-        await import("../src/services/scheduledJobs.ts");
+        await import("../src/services/scheduledJobs/runtime.ts");
     startScheduledJobExecutor();
     cleanupCallbacks.push(stopScheduledJobExecutor);
 }
@@ -280,13 +280,13 @@ afterEach(async () => {
 describe("backend route and service behavior", () => {
     it("auth route validation, login, session, and logout branches", async () => {
         isolateOpenClawEnvironment("mira-auth-route-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         cleanupCallbacks.push(
             gatewayModule.setGatewayClientConstructorForTests(NoopGatewayClient),
             () => gatewayModule.default.shutdown()
         );
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
-        const { createUser } = await import("../src/auth.ts");
+        const { createUser } = await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
 
@@ -469,7 +469,7 @@ describe("backend route and service behavior", () => {
 
     it("registers the first user and initializes Gateway using isolated state", async () => {
         isolateOpenClawEnvironment("mira-first-user-route-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         cleanupCallbacks.push(
             gatewayModule.setGatewayClientConstructorForTests(NoopGatewayClient),
             () => gatewayModule.default.shutdown()
@@ -515,7 +515,7 @@ describe("backend route and service behavior", () => {
 
     it("keeps first-user bootstrap closed until Gateway validation finishes", async () => {
         isolateOpenClawEnvironment("mira-first-user-deferred-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInitAndWait = gateway.initAndWait;
         const gatewayValidation = Promise.withResolvers<void>();
@@ -532,7 +532,7 @@ describe("backend route and service behavior", () => {
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { findUserByUsername, getPersistedGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
 
@@ -583,7 +583,7 @@ describe("backend route and service behavior", () => {
 
     it("rejects closed first-user bootstrap before switching Gateway tokens", async () => {
         isolateOpenClawEnvironment("mira-first-user-closed-switch-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInitAndWait = gateway.initAndWait;
         const validationTokens: string[] = [];
@@ -598,7 +598,7 @@ describe("backend route and service behavior", () => {
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { createUser, getPersistedGatewayToken, persistGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         await createUser(`coverage-${Bun.randomUUIDv7().slice(-8)}`, "correct-password");
         persistGatewayToken("previous-token");
@@ -624,7 +624,7 @@ describe("backend route and service behavior", () => {
         isolateOpenClawEnvironment("mira-first-user-race-close-coverage-");
         rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
         delete process.env.OPENCLAW_GATEWAY_TOKEN;
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInit = gateway.init;
         const originalInitAndWait = gateway.initAndWait;
@@ -645,7 +645,7 @@ describe("backend route and service behavior", () => {
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { createUser, getPersistedGatewayToken, persistGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
         persistGatewayToken("previous-token");
@@ -679,7 +679,7 @@ describe("backend route and service behavior", () => {
         isolateOpenClawEnvironment("mira-first-user-race-shutdown-coverage-");
         rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
         delete process.env.OPENCLAW_GATEWAY_TOKEN;
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalShutdown = gateway.shutdown;
         const originalInitAndWait = gateway.initAndWait;
@@ -699,7 +699,8 @@ describe("backend route and service behavior", () => {
             shutdownCount += 1;
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
-        const { createUser, getPersistedGatewayToken } = await import("../src/auth.ts");
+        const { createUser, getPersistedGatewayToken } =
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
 
@@ -727,7 +728,7 @@ describe("backend route and service behavior", () => {
 
     it("rolls back first-user bootstrap when Gateway initialization fails", async () => {
         isolateOpenClawEnvironment("mira-first-user-rollback-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
@@ -741,7 +742,7 @@ describe("backend route and service behavior", () => {
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
 
@@ -772,7 +773,7 @@ describe("backend route and service behavior", () => {
 
     it("rolls back first-user bootstrap when session creation fails", async () => {
         isolateOpenClawEnvironment("mira-first-user-session-rollback-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
@@ -782,7 +783,7 @@ describe("backend route and service behavior", () => {
         gateway.initAndWait = async () => {};
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
         persistGatewayToken("previous-token");
@@ -816,7 +817,7 @@ describe("backend route and service behavior", () => {
 
     it("removes a newly persisted Gateway token when first-user bootstrap fails without a previous token", async () => {
         isolateOpenClawEnvironment("mira-first-user-token-cleanup-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
@@ -830,7 +831,7 @@ describe("backend route and service behavior", () => {
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { findUserByUsername, getPersistedGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
         database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
@@ -856,7 +857,7 @@ describe("backend route and service behavior", () => {
         isolateOpenClawEnvironment("mira-first-user-env-token-restore-");
         rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
         process.env.OPENCLAW_GATEWAY_TOKEN = "environment-token";
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInit = gateway.init;
         const originalInitAndWait = gateway.initAndWait;
@@ -876,7 +877,7 @@ describe("backend route and service behavior", () => {
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
         persistGatewayToken("persisted-token");
@@ -898,7 +899,7 @@ describe("backend route and service behavior", () => {
 
     it("rejects first-user bootstrap when the Gateway token is invalid", async () => {
         isolateOpenClawEnvironment("mira-first-user-invalid-token-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalInitAndWait = gateway.initAndWait;
         cleanupCallbacks.push(() => {
@@ -914,7 +915,7 @@ describe("backend route and service behavior", () => {
         };
         const { authRoutes } = await import("../src/routes/authRoutes.ts");
         const { findUserByUsername, getPersistedGatewayToken, persistGatewayToken } =
-            await import("../src/auth.ts");
+            await import("../src/auth/userRepository.ts");
         const server = fakeServer();
         const username = `coverage-${Bun.randomUUIDv7().slice(-8)}`;
 
@@ -938,7 +939,7 @@ describe("backend route and service behavior", () => {
 
     it("task route automation, validation, assignment, movement, updates, and deletion", async () => {
         isolateOpenClawEnvironment("mira-task-route-coverage-");
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalRequest = gateway.request;
         const originalSendSessionMessage = gateway.sendSessionMessage;
@@ -967,7 +968,7 @@ describe("backend route and service behavior", () => {
             });
         };
 
-        const { taskRoutes } = await import("../src/routes/taskRoutes.ts");
+        const { taskRoutes } = await import("../src/routes/taskRoutes/handlers.ts");
         const invalidCreate = await taskRoutes["/api/tasks"].POST(
             jsonRequest("/api/tasks", { labels: "bug", title: "Coverage invalid" })
         );
@@ -1386,7 +1387,8 @@ describe("backend route and service behavior", () => {
     });
 
     it("maps job execution validation, missing records, and queue failures", async () => {
-        const jobExecutionQueue = await import("../src/services/jobExecutionQueue.ts");
+        const jobExecutionQueue =
+            await import("../src/services/jobExecutionQueue/repository.ts");
         const { jobExecutionRoutes } =
             await import("../src/routes/jobExecutionRoutes.ts");
         const missingExecutionId = "018f47a2-9b7c-7cc8-a123-456789abcdef";
@@ -1747,7 +1749,7 @@ describe("backend route and service behavior", () => {
     });
 
     it("stores and clears intentional disable metadata for OpenClaw cron jobs", async () => {
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         let shouldFailNextUpdate = false;
         const gatewayRequestSpy = jest
@@ -1970,7 +1972,8 @@ describe("backend route and service behavior", () => {
 
     it("stores and clears intentional disable metadata for Dashboard jobs", async () => {
         const { jobRoutes } = await import("../src/routes/jobRoutes.ts");
-        const { upsertScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const { upsertScheduledJob } =
+            await import("../src/services/scheduledJobs/repository.ts");
         const jobId = `coverage-disable-${Bun.randomUUIDv7()}`;
         cleanupCallbacks.push(() => {
             database.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(jobId);
@@ -2160,7 +2163,8 @@ describe("backend route and service behavior", () => {
 
         const agentId = `separation-${Bun.randomUUIDv7()}`;
         try {
-            const { updateAgentCurrentTask } = await import("../src/services/agents.ts");
+            const { updateAgentCurrentTask } =
+                await import("../src/services/agents/statusService.ts");
             await updateAgentCurrentTask(agentId, "Primary OpenClaw root");
             expect(
                 existsSync(
@@ -2476,7 +2480,7 @@ describe("backend route and service behavior", () => {
             import("../src/routes/cacheRoutes.ts"),
             import("../src/routes/cronRoutes.ts"),
             import("../src/routes/dockerRoutes.ts"),
-            import("../src/gateway.ts"),
+            import("../src/services/gateway/runtime.ts"),
             import("../src/routes/jobRoutes.ts"),
             import("../src/routes/moltbookRoutes.ts"),
             import("../src/routes/pullRequestRoutes.ts"),
@@ -3164,7 +3168,7 @@ describe("backend route and service behavior", () => {
                 .run();
         });
         const { registerDockerUpdaterScheduledJobs } =
-            await import("../src/services/dockerUpdater.ts");
+            await import("../src/services/dockerUpdater/scheduler.ts");
         registerDockerUpdaterScheduledJobs();
         await startTestScheduledExecutor();
         const updaterRun = await dockerRoutes["/api/docker/updater/run"].POST(
@@ -3334,7 +3338,7 @@ describe("backend route and service behavior", () => {
     });
 
     it("aggregates metrics tokens by model, display label, and session type", async () => {
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const getSessionsSpy = jest.spyOn(gateway, "getSessions").mockReturnValue([
             {
@@ -4212,7 +4216,7 @@ describe("backend route and service behavior", () => {
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const { backupRoutes } = await import("../src/routes/backupRoutes.ts");
         const { registerBackupScheduledJobs } =
-            await import("../src/services/backups.ts");
+            await import("../src/services/backups/scheduling.ts");
 
         try {
             registerBackupScheduledJobs();
@@ -4858,7 +4862,8 @@ describe("backend route and service behavior", () => {
     });
 
     it("log rotation config validation and dry-run summaries", async () => {
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const root = createTemporaryRoot("mira-log-rotation-");
         const logFile = path.join(root, "service.log");
@@ -5486,8 +5491,13 @@ describe("backend route and service behavior", () => {
             writable: true,
         });
 
-        const { refreshCacheProducer, refreshMoltbookCache } =
-            await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer, refreshMoltbookCache } = await Promise.all([
+            import("../src/services/cacheRefresh/cacheRefreshRuntime.ts"),
+            import("../src/services/cacheRefresh/moltbookCacheProducer.ts"),
+        ]).then(([module0, module1]) => ({
+            refreshCacheProducer: module0.refreshCacheProducer,
+            refreshMoltbookCache: module1.refreshMoltbookCache,
+        }));
         expect(refreshMoltbookCache()).resolves.toEqual({
             refreshed: [
                 "moltbook.home",
@@ -5568,7 +5578,8 @@ fi
 `
         );
 
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
         database
             .prepare(
                 "DELETE FROM cache_entries WHERE key IN ('backup.kopia.status', 'backup.walg.status', 'log_rotation.state')"
@@ -5659,7 +5670,8 @@ fi
                 timestamp
             );
 
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
         const refreshed = await refreshCacheProducer("log_rotation.state");
         expect(refreshed).toEqual({
             refreshed: ["log_rotation.state"],
@@ -5711,7 +5723,8 @@ fi
         process.env.CODEX_BIN = path.join(codexHome, "missing-codex");
         process.env.QUOTAS_CODEX_HOME = codexHome;
 
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
         expect(refreshCacheProducer("quotas.summary")).resolves.toEqual({
             refreshed: ["quotas.summary"],
         });
@@ -5779,7 +5792,8 @@ esac
         );
         process.env.OPENCLAW_BIN = openclawBin;
 
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
         expect(refreshCacheProducer("system.host")).resolves.toEqual({
             refreshed: ["system.openclaw", "system.host"],
         });
@@ -5829,10 +5843,15 @@ esac
             registerCacheRefreshScheduledJobs,
             seedMissingLocalCacheEntry,
             waitForLocalCacheSeed,
-        } = await import("../src/services/cacheRefresh.ts");
+        } = await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
-        const { runScheduledJob, upsertScheduledJob } =
-            await import("../src/services/scheduledJobs.ts");
+        const { runScheduledJob, upsertScheduledJob } = await Promise.all([
+            import("../src/services/scheduledJobs/enqueue.ts"),
+            import("../src/services/scheduledJobs/repository.ts"),
+        ]).then(([module0, module1]) => ({
+            runScheduledJob: module0.runScheduledJob,
+            upsertScheduledJob: module1.upsertScheduledJob,
+        }));
         const jobs = [
             ["cache.weather", "weather.spydeberg"],
             ["cache.quotas", "quotas.summary"],
@@ -5916,9 +5935,14 @@ esac
 
     it("limits isolated cache jobs and execution to the database-local producer", async () => {
         const { registerCacheRefreshScheduledJobs } =
-            await import("../src/services/cacheRefresh.ts");
-        const { runScheduledJob, upsertScheduledJob } =
-            await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
+        const { runScheduledJob, upsertScheduledJob } = await Promise.all([
+            import("../src/services/scheduledJobs/enqueue.ts"),
+            import("../src/services/scheduledJobs/repository.ts"),
+        ]).then(([module0, module1]) => ({
+            runScheduledJob: module0.runScheduledJob,
+            upsertScheduledJob: module1.upsertScheduledJob,
+        }));
 
         registerCacheRefreshScheduledJobs({
             allowedKeys: ["database.summary"],
@@ -5962,7 +5986,7 @@ esac
 
     it("registers hourly git cache and daily OpenClaw workspace sync jobs", async () => {
         const { registerCacheRefreshScheduledJobs } =
-            await import("../src/services/cacheRefresh.ts");
+            await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         const { registerGitHygieneScheduledJobs } =
             await import("../src/services/gitHygiene.ts");
 

@@ -15,14 +15,14 @@ import {
     parsePullRequestRejectRequest,
     parsePullRequestStackCreateRequest,
 } from "../../../contracts/delivery.ts";
-import { json, jsonWithEtag } from "../http.ts";
-import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
+import { json, jsonWithEtag } from "../http/core.ts";
 import {
     type ParametersRequest,
     readApiJsonOrError,
     routeErrorResponse,
     routeFailureResponse,
-} from "../routeSupport.ts";
+} from "../http/routeSupport.ts";
+import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import {
     getPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
@@ -30,18 +30,24 @@ import {
 } from "../services/pullRequestPreviews/service.ts";
 import {
     getDashboardReleaseStatus,
-    getProductionCheckoutStatus,
-    listDashboardPullRequests,
+    readDeploymentJobs,
+} from "../services/pullRequests/deploymentRepository.ts";
+import {
     prepareAndStartDeployLatest,
     prepareAndStartRollback,
-    readDeploymentJobs,
+} from "../services/pullRequests/deploymentService.ts";
+import {
     runPullRequestApproval,
     runPullRequestBranchUpdate,
     runPullRequestRejection,
     runPullRequestReviewApproval,
     runPullRequestStackCreation,
+} from "../services/pullRequests/executionActions.ts";
+import {
+    listDashboardPullRequests,
     validatePrNumber,
-} from "../services/pullRequests.ts";
+} from "../services/pullRequests/githubPullRequestListing.ts";
+import { getProductionCheckoutStatus } from "../services/pullRequests/worktreeManager.ts";
 
 function routeError(error: unknown, fallback = "Pull request route failed"): Response {
     return routeErrorResponse(undefined, error, {

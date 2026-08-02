@@ -1,7 +1,10 @@
 import type { DashboardUser } from "../../../contracts/auth.ts";
-import type { AutomationPrincipal, AutomationScope } from "../automationAuth.ts";
+import {
+    type AutomationPrincipal,
+    type AutomationScope,
+} from "../http/automationAuth.ts";
+import { routeFailureResponse } from "../http/routeSupport.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { routeFailureResponse } from "../routeSupport.ts";
 import {
     type AuditActor,
     type AuditOutcome,

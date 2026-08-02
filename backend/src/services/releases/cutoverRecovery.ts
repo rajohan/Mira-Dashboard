@@ -7,16 +7,16 @@ import {
     readDeploymentLockExecution,
     writeDeploymentJob,
 } from "../pullRequests/deploymentRepository.ts";
-import { buildCommandEnvironment } from "../pullRequests/githubClient.ts";
+import { buildCommandEnvironment } from "../pullRequests/githubCommandClient.ts";
 import { dateToISOString, FULL_COMMIT_SHA_PATTERN } from "../pullRequests/support.ts";
-import type { OrphanedDeploymentCutover } from "../scheduledJobs.ts";
+import { type OrphanedDeploymentCutover } from "../scheduledJobs/deploymentCutoverReconciler.ts";
 import {
     deploymentJobUpdateCommand,
     DEPLOYMENT_WORKER_STABILITY_SECONDS,
     releaseCutoverShellFunctions,
     shellQuote,
 } from "./cutoverCommands.ts";
-import { resolveDashboardReleasesRoot } from "./manager.ts";
+import { resolveDashboardReleasesRoot } from "./releaseLayout.ts";
 
 export function didScheduleOrphanedReleaseCutoverRecovery(
     cutover: OrphanedDeploymentCutover

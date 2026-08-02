@@ -3,16 +3,17 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { guardedPath, writeTextNoFollowAnchoredGuarded } from "../../lib/guardedOps.ts";
+import { guardedPath } from "../../lib/guardedOps/core.ts";
+import { writeTextNoFollowAnchoredGuarded } from "../../lib/guardedOps/write.ts";
 import { runProcess } from "../../lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "../../lib/safePath.ts";
 import { parseSystemdProperties } from "../../lib/systemdProperties.ts";
+import type { ManagedDashboardRelease } from "./managerModel.ts";
 import {
     MANAGED_DASHBOARD_UNIT_ARTIFACTS,
     MANAGED_DASHBOARD_UNIT_NAMES,
     type ManagedDashboardUnitName,
 } from "./systemdPolicy.ts";
-import type { ManagedDashboardRelease } from "./manager.ts";
 
 const MAX_UNIT_FILE_BYTES = 256 * 1024;
 const SYSTEMCTL_EXECUTABLE = "/usr/bin/systemctl";

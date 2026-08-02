@@ -13,10 +13,7 @@ import path from "node:path";
 
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { ensureRealDirectory } from "./fileSystem.ts";
-import type {
-    PullRequestPreviewConfig,
-    PullRequestPreviewRecord,
-} from "./types.ts";
+import type { PullRequestPreviewConfig, PullRequestPreviewRecord } from "./types.ts";
 import { PREVIEW_RECORD_FORMAT_VERSION } from "./types.ts";
 
 const logger = createStructuredLogger("pull-request-preview-host");

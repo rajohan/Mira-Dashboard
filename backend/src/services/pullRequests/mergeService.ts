@@ -21,15 +21,16 @@ import {
 } from "./deploymentRepository.ts";
 import { startDeployLatest } from "./deploymentService.ts";
 import {
-    getPullRequest,
-    getPullRequestState,
     parseRepoParts,
-    requirePullRequestStack,
-    requireStandalonePullRequest,
     runCommand,
     runGhJson,
     runGhJsonWithResultBody,
-} from "./githubClient.ts";
+} from "./githubCommandClient.ts";
+import { getPullRequest, getPullRequestState } from "./githubPullRequestListing.ts";
+import {
+    requirePullRequestStack,
+    requireStandalonePullRequest,
+} from "./githubStackClient.ts";
 import {
     validateDashboardPrForApproval,
     validateDashboardStackPr,

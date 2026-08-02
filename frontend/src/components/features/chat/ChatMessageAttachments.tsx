@@ -1,8 +1,8 @@
 import { FileText, Image as ImageIcon, Paperclip } from "lucide-react";
 
 import { formatSize } from "../../../utils/format";
+import { previewFromAttachment } from "./chatAttachmentUtilities";
 import type { ChatAttachmentDisplay, ChatPreviewItem } from "./chatTypes";
-import { previewFromAttachment } from "./chatUtilities";
 
 /**
  * Renders the attachment icon UI.

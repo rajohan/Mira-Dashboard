@@ -17,10 +17,7 @@ import {
 } from "./fileSystem.ts";
 import { readPreviewRecord, writePreviewRecord } from "./record.ts";
 import { disableOwnedTailscaleServe } from "./tailscale.ts";
-import type {
-    PullRequestPreviewConfig,
-    PullRequestPreviewRecord,
-} from "./types.ts";
+import type { PullRequestPreviewConfig, PullRequestPreviewRecord } from "./types.ts";
 
 const PREVIEW_READY_TIMEOUT_MS = 90_000;
 const PREVIEW_READY_POLL_MS = 500;
@@ -118,9 +115,7 @@ export function parsePreviewUnitState(output: string): SystemdUnitState {
     };
 }
 
-async function systemdUnitState(
-    unitName: string
-): Promise<SystemdUnitState | undefined> {
+async function systemdUnitState(unitName: string): Promise<SystemdUnitState | undefined> {
     const result = await runProcess(
         "systemctl",
         [
@@ -149,20 +144,26 @@ function lifecycleFromUnit(
 ): PullRequestPreviewLifecycle {
     if (fallback === "failed") return "failed";
     switch (state?.activeState) {
-        case "active":
+        case "active": {
             return fallback === "starting" ? "starting" : "running";
-        case "activating":
+        }
+        case "activating": {
             return "starting";
-        case "deactivating":
+        }
+        case "deactivating": {
             return "stopping";
-        case "failed":
+        }
+        case "failed": {
             return "failed";
-        case "inactive":
+        }
+        case "inactive": {
             return state.result && state.result !== "success" ? "failed" : "stopped";
-        default:
+        }
+        default: {
             return fallback === "running" || fallback === "starting"
                 ? "failed"
                 : fallback;
+        }
     }
 }
 

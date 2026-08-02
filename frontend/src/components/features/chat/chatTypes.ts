@@ -1,9 +1,9 @@
-import type { ChatTransportAttachment } from "../../../../../contracts/chat";
 import type {
     CanonicalChatEvent,
     CanonicalChatProviderMetadata,
-} from "../../../../../contracts/chatCanonical";
-import { extractCanonicalChatImages } from "../../../../../contracts/chatCanonicalMessage";
+} from "../../../../../contracts/chat/canonical";
+import { extractCanonicalChatImages } from "../../../../../contracts/chat/canonicalMessage";
+import type { ChatTransportAttachment } from "../../../../../contracts/chat/transport";
 import { normalizeChatMimeType } from "./media/identity";
 import { mergeChatImages } from "./media/merge";
 import type {
@@ -98,7 +98,12 @@ function chatMessageSourceKey(source: ChatMessageSourceReference): string {
     return `${source.source}\u0000${source.id}\u0000${source.sequence ?? ""}`;
 }
 
-/** Keeps one primary source while retaining every folded source. */
+/**
+ * Keeps one primary source while retaining every folded source.
+ * @param primary Primary source provenance.
+ * @param folded Source provenance folded into the primary row.
+ * @returns Merged provenance when either source is available.
+ */
 export function mergeChatMessageProvenance(
     primary: ChatMessageProvenance | undefined,
     folded: ChatMessageProvenance | undefined
@@ -156,7 +161,11 @@ export interface ChatHistoryMessage {
     provenance?: ChatMessageProvenance;
 }
 
-/** Returns every image carried directly or by a nested tool result. */
+/**
+ * Returns every image carried directly or by a nested tool result.
+ * @param message Chat message to inspect.
+ * @returns Deduplicated images carried by the message.
+ */
 export function allChatMessageImages(message: ChatHistoryMessage): ChatImageBlock[] {
     let images = mergeChatImages(message.images, message.toolResult?.images);
     const toolCalls = message.toolCalls || [];
@@ -184,12 +193,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-/** Extracts images. */
+/**
+ * Extracts canonical images from provider content.
+ * @param content Provider content to inspect.
+ * @returns Extracted image blocks.
+ */
 export function extractImages(content: unknown): ChatImageBlock[] {
     return extractCanonicalChatImages(content);
 }
 
-/** Extracts thinking blocks. */
+/**
+ * Extracts thinking blocks from provider content.
+ * @param content Provider content to inspect.
+ * @returns Extracted thinking blocks.
+ */
 export function extractThinkingBlocks(content: unknown): ChatThinkingDisplay[] {
     if (!Array.isArray(content)) {
         return [];
@@ -210,7 +227,11 @@ export function extractThinkingBlocks(content: unknown): ChatThinkingDisplay[] {
     return blocks;
 }
 
-/** Extracts tool calls. */
+/**
+ * Extracts tool calls from provider content.
+ * @param content Provider content to inspect.
+ * @returns Extracted tool calls.
+ */
 export function extractToolCalls(content: unknown): ChatToolCallDisplay[] {
     if (!Array.isArray(content)) {
         return [];
@@ -229,7 +250,11 @@ export function extractToolCalls(content: unknown): ChatToolCallDisplay[] {
     return toolCalls;
 }
 
-/** Returns the display kind for a MIME type. */
+/**
+ * Returns the display kind for a MIME type.
+ * @param mimeType MIME type to classify.
+ * @returns Attachment display kind.
+ */
 export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] {
     const normalizedMimeType = normalizeChatMimeType(mimeType);
     if (normalizedMimeType.startsWith("image/")) {
@@ -244,7 +269,11 @@ export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] 
     return "file";
 }
 
-/** Converts composer attachments to Gateway transport attachments. */
+/**
+ * Converts composer attachments to Gateway transport attachments.
+ * @param attachments Composer attachments to convert.
+ * @returns Gateway transport attachments.
+ */
 export function chatTransportAttachments(
     attachments: ChatSendAttachment[]
 ): ChatTransportAttachment[] {
@@ -256,7 +285,11 @@ export function chatTransportAttachments(
     }));
 }
 
-/** Creates optimistic attachment rows from composer attachments. */
+/**
+ * Creates optimistic attachment rows from composer attachments.
+ * @param attachments Composer attachments to convert.
+ * @returns Optimistic attachment rows.
+ */
 export function optimisticAttachmentDisplay(
     attachments: ChatSendAttachment[]
 ): ChatAttachmentDisplay[] {
@@ -271,7 +304,11 @@ export function optimisticAttachmentDisplay(
     }));
 }
 
-/** Normalizes text from supported chat content blocks. */
+/**
+ * Normalizes text from supported chat content blocks.
+ * @param content Provider content to normalize.
+ * @returns Normalized display text.
+ */
 export function normalizeText(content: unknown): string {
     if (typeof content === "string") {
         return content;
@@ -289,11 +326,7 @@ export function normalizeText(content: unknown): string {
                 if (typeof block.text === "string") {
                     return block.text;
                 }
-                if (
-                    ["image", "image_url", "input_image"].includes(
-                        String(block.type)
-                    )
-                ) {
+                if (["image", "image_url", "input_image"].includes(String(block.type))) {
                     return "[image]";
                 }
                 return "";
@@ -314,7 +347,12 @@ function isToolRole(role: string): boolean {
     return TOOL_ROLE_VARIANTS.includes(role);
 }
 
-/** Returns whether a history message should be rendered. */
+/**
+ * Returns whether a history message should be rendered.
+ * @param message History message to evaluate.
+ * @param visibility Current chat visibility settings.
+ * @returns Whether the message has visible content.
+ */
 export function isRenderableChatHistoryMessage(
     message: ChatHistoryMessage,
     visibility: ChatVisibilitySettings = DEFAULT_CHAT_VISIBILITY

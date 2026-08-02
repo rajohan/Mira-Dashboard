@@ -15,14 +15,10 @@ import {
     type TaskAssigneeId,
     type TaskAutomationInput,
 } from "../../../contracts/tasks";
-import {
-    COLUMN_CONFIG,
-    getColumnId,
-    NewTaskModal,
-    TaskColumn,
-    TaskDetailModal,
-    TaskOverlay,
-} from "../components/features/tasks";
+import { NewTaskModal } from "../components/features/tasks/NewTaskModal";
+import { TaskColumn } from "../components/features/tasks/TaskColumn";
+import { TaskDetailModal } from "../components/features/tasks/TaskDetailModal";
+import { TaskOverlay } from "../components/features/tasks/TaskOverlay";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
@@ -42,9 +38,11 @@ import {
     useTaskUpdates,
     useUpdateTask,
     useUpdateTaskUpdate,
-} from "../hooks";
+} from "../hooks/useTasks";
 import { messageFromError } from "../lib/errorMessage";
 import {
+    COLUMN_CONFIG,
+    getColumnId,
     getPriority,
     getTaskUpdatedAtMs,
     isTaskMatchSearch,

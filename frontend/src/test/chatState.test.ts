@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../../contracts/chatCanonicalUtilities";
+import { MAX_CANONICAL_TOOL_RESULT_CHARACTERS } from "../../../contracts/chat/canonicalUtilities";
 import {
     acknowledgeChatRun,
     addOptimisticChatRun,

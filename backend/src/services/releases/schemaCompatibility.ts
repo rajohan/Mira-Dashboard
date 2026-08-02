@@ -3,18 +3,16 @@ import { Database } from "bun:sqlite";
 import {
     assertMiraDatabasePathSafeForEnvironment,
     getMiraDatabasePath,
-} from "../../database.ts";
-import { readAppliedDatabaseMigrationHistory } from "../../databaseMigrationRunner.ts";
+} from "../../database/connection.ts";
+import { readAppliedDatabaseMigrationHistory } from "../../database/migrationRunner.ts";
+import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "../../database/schemaCompatibility.ts";
 import {
     type DashboardLiveSchemaState,
     type DashboardReleaseManagerOptions,
     type DashboardReleaseRuntimeAvailabilityOptions,
     type ManagedDashboardRelease,
 } from "./managerModel.ts";
-import {
-    DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
-    type DashboardReleaseManifest,
-} from "./manifest.ts";
+import { type DashboardReleaseManifest } from "./manifestPolicy.ts";
 import { hasManagedBunRuntime, isBunRuntimeVersion } from "./runtime.ts";
 
 function readLiveDatabaseSchemaState(

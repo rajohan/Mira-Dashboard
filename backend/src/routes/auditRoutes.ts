@@ -1,5 +1,5 @@
-import { json } from "../http.ts";
-import { routeFailureResponse } from "../routeSupport.ts";
+import { json } from "../http/core.ts";
+import { routeFailureResponse } from "../http/routeSupport.ts";
 import { listAuditEvents, MAX_AUDIT_PAGE_SIZE } from "../services/auditEvents.ts";
 
 function auditLimit(value: string | null): number | Response {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
-import { isDatabaseSchemaCompatible } from "../src/databaseSchemaCompatibility.ts";
-import { evaluateReadiness, type ReadinessSignals } from "../src/health.ts";
+import { isDatabaseSchemaCompatible } from "../src/database/schemaCompatibility.ts";
+import { evaluateReadiness, type ReadinessSignals } from "../src/server/health.ts";
 
 function readySignals(): ReadinessSignals {
     return {

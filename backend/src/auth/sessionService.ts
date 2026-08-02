@@ -3,7 +3,7 @@ import type {
     DashboardAuthSession,
 } from "../../../contracts/accountSecurity.ts";
 import type { DashboardUser } from "../../../contracts/auth.ts";
-import { database, sqlNullable } from "../database.ts";
+import { database, sqlNullable } from "../database/connection.ts";
 import { hashPassword } from "./userRepository.ts";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -68,9 +68,9 @@ function nowIso(now = new Date()): string {
 }
 
 /**
- * Normalizes a Dashboard username.
- * @param username Username value.
- * @returns Normalized a Dashboard username.
+ * Returns cryptographically secure random bytes as lowercase hex.
+ * @param byteLength Number of random bytes.
+ * @returns Random bytes encoded as lowercase hex.
  */
 function randomHex(byteLength: number): string {
     const bytes = new Uint8Array(byteLength);
@@ -220,10 +220,10 @@ export function hasRecentMfaVerification(
 }
 
 /**
- * Verifies a password with Bun's runtime password hashing API.
- * @param password Password value.
- * @param storedHash Stored hash value.
- * @returns Promise resolving to the verify password result.
+ * Inserts a session and returns its selector-validator token.
+ * @param userId Dashboard user identifier.
+ * @param options Session creation options.
+ * @returns Newly created session token.
  */
 function insertSession(userId: number, options: CreateSessionOptions = {}): string {
     const now = options.now ?? new Date();

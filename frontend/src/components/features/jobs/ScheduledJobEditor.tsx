@@ -2,7 +2,7 @@ import { Play, Save } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 
 import type { ScheduledJob, ScheduledJobPatch } from "../../../../../contracts/jobs";
-import { useScheduledJobRuns } from "../../../hooks";
+import { useScheduledJobRuns } from "../../../hooks/useScheduledJobs";
 import { messageFromError } from "../../../lib/errorMessage";
 import { isCronExpressionValid } from "../../../utils/cronUtilities";
 import {

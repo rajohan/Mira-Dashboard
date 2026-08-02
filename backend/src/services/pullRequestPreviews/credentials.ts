@@ -1,11 +1,5 @@
 import { randomBytes } from "node:crypto";
-import {
-    chmodSync,
-    existsSync,
-    renameSync,
-    rmSync,
-    writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { hasLineBreakOrNullByte } from "../../lib/values.ts";

@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { runProcess } from "../lib/processes.ts";
-import { registerScheduledJobAction } from "./scheduledJobs.ts";
+import { registerScheduledJobAction } from "./scheduledJobs/actionRegistry.ts";
 
 export const OPENCLAW_GATEWAY_RESTART_ACTION = "openclaw.gateway.restart";
 

@@ -1,4 +1,4 @@
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { createNotificationBestEffort } from "./notifications.ts";
 import { hasUpdate, imageRegistry, lookupLatest } from "./registryClient.ts";
 import { insertEventBestEffort } from "./repository.ts";

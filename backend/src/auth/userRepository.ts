@@ -1,5 +1,5 @@
 import type { DashboardUser } from "../../../contracts/auth.ts";
-import { database } from "../database.ts";
+import { database } from "../database/connection.ts";
 import {
     decryptStoredSecret,
     encryptStoredSecret,
@@ -56,9 +56,10 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 /**
- * Returns cryptographically secure random bytes as lowercase hex.
- * @param byteLength Byte length value.
- * @returns cryptographically secure random bytes as lowercase hex.
+ * Verifies a password against a stored Bun password hash.
+ * @param password Candidate password.
+ * @param storedHash Stored password hash.
+ * @returns Whether the password matches the stored hash.
  */
 export async function verifyPassword(
     password: string,

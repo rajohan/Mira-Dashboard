@@ -1,4 +1,4 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import { caughtMessage, nowIso } from "./support.ts";
 import type { JsonRecord } from "./types.ts";

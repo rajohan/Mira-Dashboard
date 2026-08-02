@@ -11,13 +11,11 @@ import { generate } from "otplib";
 import type { WebAuthnCredential } from "../../contracts/accountSecurity.ts";
 import {
     createSession,
-    createUser,
-    findUserById,
     getAuthSessionFromSessionId,
-    verifyPassword,
-} from "../src/auth.ts";
-import { database } from "../src/database.ts";
-import { runWithRequestAuditContext } from "../src/requestAuditContext.ts";
+} from "../src/auth/sessionService.ts";
+import { createUser, findUserById, verifyPassword } from "../src/auth/userRepository.ts";
+import { database } from "../src/database/connection.ts";
+import { runWithRequestAuditContext } from "../src/http/requestAuditContext.ts";
 import { createAccountSecurityRoutes } from "../src/routes/accountSecurityRoutes.ts";
 import { createAuthRoutes } from "../src/routes/authRoutes.ts";
 import { listAuditEvents } from "../src/services/auditEvents.ts";
@@ -28,8 +26,8 @@ import {
 import {
     confirmTotpEnrollment,
     createTotpEnrollment,
-} from "../src/services/multiFactorAuth.ts";
-import type { WebAuthnChallengeContext } from "../src/services/webAuthn.ts";
+} from "../src/services/multiFactorAuth/factorService.ts";
+import { type WebAuthnChallengeContext } from "../src/services/webAuthn/service.ts";
 import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const USER_PREFIX = "auth-route-test-";

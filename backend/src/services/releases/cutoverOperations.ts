@@ -7,7 +7,7 @@ import {
     ROLLBACK_READINESS_FAILURE_NOTE_PREFIX,
 } from "../deploymentRuntimeResults.ts";
 import { type DeploymentCutoverContext } from "../pullRequests/deploymentRepository.ts";
-import { runCommand } from "../pullRequests/githubClient.ts";
+import { runCommand } from "../pullRequests/githubCommandClient.ts";
 import { dateToISOString, FULL_COMMIT_SHA_PATTERN } from "../pullRequests/support.ts";
 import {
     deploymentCutoverHandoffCommand,
@@ -23,17 +23,14 @@ import {
     MANAGED_DASHBOARD_UNITS,
     managedDashboardUnitContract,
 } from "./deployment.ts";
-import {
-    assertDashboardReleaseRuntimeAvailable,
-    loadManagedRelease,
-    type ManagedDashboardRelease,
-    resolveDashboardReleasesRoot,
-} from "./manager.ts";
+import type { ManagedDashboardRelease } from "./managerModel.ts";
+import { loadManagedRelease, resolveDashboardReleasesRoot } from "./releaseLayout.ts";
 import {
     hasManagedBunRuntime,
     installManagedBunRuntime,
     requireManagedBunRuntime,
 } from "./runtime.ts";
+import { assertDashboardReleaseRuntimeAvailable } from "./schemaCompatibility.ts";
 
 export async function assertManagedDashboardServiceContract(
     signal?: AbortSignal

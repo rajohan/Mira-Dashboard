@@ -1,7 +1,7 @@
-import gateway from "../../gateway.ts";
+import { currentRequestAuditContext } from "../../http/requestAuditContext.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
-import { currentRequestAuditContext } from "../../requestAuditContext.ts";
-import { isDevelopmentExternalNotificationSuppressed } from "../../requestPolicy.ts";
+import { isDevelopmentExternalNotificationSuppressed } from "../../requestPolicy/evaluator.ts";
+import gateway from "../../services/gateway/runtime.ts";
 
 const logger = createStructuredLogger("tasks");
 

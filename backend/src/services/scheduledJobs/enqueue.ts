@@ -2,9 +2,9 @@ import type {
     ScheduledJobRun,
     ScheduledJobTriggerType,
 } from "../../../../contracts/jobs.ts";
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 import { errorMessage } from "../../lib/errors.ts";
-import { insertJobExecution } from "../jobExecutionQueue.ts";
+import { insertJobExecution } from "../jobExecutionQueue/repository.ts";
 import { waitForJobExecution } from "../queuedJobExecution.ts";
 import { registeredScheduledJobAction } from "./actionRegistry.ts";
 import { ScheduledJobValidationError } from "./errors.ts";

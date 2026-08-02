@@ -1,11 +1,11 @@
-import { canonicalChatContentFingerprint } from "../../../../../../contracts/chatCanonicalMessage";
+import { canonicalChatContentFingerprint } from "../../../../../../contracts/chat/canonicalMessage";
+import { messageDeleteKey, stableChatStringify } from "../chatMessageIdentity";
 import {
     type ChatHistoryMessage,
     type ChatMessageSourceReference,
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
-import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
 import { hasPrimaryAnswerContent } from "./chatPresentation";
 import type { ChatRunState, ChatSessionRuntimeState } from "./chatState";
 

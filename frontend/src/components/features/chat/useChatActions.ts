@@ -8,11 +8,16 @@ import {
     useState,
 } from "react";
 
-import type { ChatSessionPreferences } from "../../../../../contracts/chat";
+import type { ChatSessionPreferences } from "../../../../../contracts/chat/transport";
 import type { Session } from "../../../../../contracts/sessions";
 import { messageFromError } from "../../../lib/errorMessage";
 import { SecurityVerificationCancelledError } from "../../../lib/securityVerification";
 import { currentIsoString } from "../../../utils/date";
+import { messageIdentity } from "./chatMessageIdentity";
+import {
+    dedupeMessages,
+    rollbackFailedOptimisticMessage,
+} from "./chatMessageReconciliation";
 import { isResetSlashCommand, isSessionActive } from "./chatPageUtilities";
 import { executeChatSlashCommand } from "./chatSlashCommandHandler";
 import {
@@ -21,11 +26,6 @@ import {
     chatTransportAttachments,
     optimisticAttachmentDisplay,
 } from "./chatTypes";
-import {
-    dedupeMessages,
-    messageIdentity,
-    rollbackFailedOptimisticMessage,
-} from "./chatUtilities";
 import { isSameChatSession } from "./domain/chatState";
 import type { ChatTransport } from "./transport/chatTransport";
 import type { ChatRuntimeController } from "./useChatRuntime";

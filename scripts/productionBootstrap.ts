@@ -7,10 +7,10 @@ import {
 } from "../backend/src/lib/dashboardPaths.ts";
 import { runProcess } from "../backend/src/lib/processes.ts";
 import { parseSystemdProperties } from "../backend/src/lib/systemdProperties.ts";
-import { stageDashboardRelease } from "../backend/src/services/releases/deployment.ts";
-import { readDashboardReleaseState } from "../backend/src/services/releases/manager.ts";
-import { MANAGED_DASHBOARD_UNIT_NAMES } from "../backend/src/services/releases/systemdPolicy.ts";
 import { runReleaseLifecycleCommand } from "../backend/src/releaseLifecycle.ts";
+import { stageDashboardRelease } from "../backend/src/services/releases/deployment.ts";
+import { readDashboardReleaseState } from "../backend/src/services/releases/managerOperations.ts";
+import { MANAGED_DASHBOARD_UNIT_NAMES } from "../backend/src/services/releases/systemdPolicy.ts";
 
 const FULL_COMMIT_PATTERN = /^[\da-f]{40}$/u;
 const SYSTEMCTL_EXECUTABLE = "/usr/bin/systemctl";
@@ -146,7 +146,7 @@ async function assertRealDirectory(directoryPath: string, label: string): Promis
 }
 
 export async function initializeProductionBootstrapDatabase(): Promise<void> {
-    const { database } = await import("../backend/src/database.ts");
+    const { database } = await import("../backend/src/database/connection.ts");
     try {
         const quickCheck = database.query("PRAGMA quick_check").all() as Array<
             Record<string, unknown>

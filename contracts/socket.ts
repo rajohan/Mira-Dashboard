@@ -1,6 +1,6 @@
 import * as v from "valibot";
 
-import { canonicalChatEventSchema } from "./chatCanonical";
+import { canonicalChatEventSchema } from "./chat/canonical";
 import {
     finiteNumberSchema,
     jsonObjectSchema,

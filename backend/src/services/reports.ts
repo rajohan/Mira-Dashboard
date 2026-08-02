@@ -5,7 +5,7 @@ import type {
     ReportType,
 } from "../../../contracts/reports.ts";
 import { isPlainRecord } from "../../../contracts/runtime.ts";
-import { database, sqlNullable } from "../database.ts";
+import { database, sqlNullable } from "../database/connection.ts";
 
 export interface ListReportsOptions {
     limit?: number;

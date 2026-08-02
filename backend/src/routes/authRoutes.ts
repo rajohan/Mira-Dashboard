@@ -13,20 +13,18 @@ import {
     parseLoginWebAuthnRequest,
 } from "../../../contracts/auth.ts";
 import type { ContractParser } from "../../../contracts/runtime.ts";
+import { createSession, deleteSession } from "../auth/sessionService.ts";
 import {
     createFirstUser,
-    createSession,
     createUser,
-    deleteSession,
     didDeletePersistedGatewayTokenIfMatches,
     findUserByUsername,
     getPersistedGatewayToken,
     isBootstrapRequired,
     persistGatewayToken,
     verifyPassword,
-} from "../auth.ts";
-import { database } from "../database.ts";
-import gateway from "../gateway.ts";
+} from "../auth/userRepository.ts";
+import { database } from "../database/connection.ts";
 import {
     authSession,
     clearPendingLoginCookie,
@@ -37,10 +35,10 @@ import {
     sessionCookie,
     sessionIdFromCookie,
     withCookies,
-} from "../http.ts";
+} from "../http/core.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../http/routeSupport.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
-import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
 import {
     authenticationThrottleResponse,
     normalizeLoginPassword,
@@ -52,20 +50,23 @@ import {
     clearAuthenticationFailures,
     recordAuthenticationFailure,
 } from "../services/authenticationThrottle.ts";
+import gateway from "../services/gateway/runtime.ts";
+import {
+    mfaMethodsForUser,
+    verifyRecoveryCodeForUser,
+    verifyTotpForUser,
+} from "../services/multiFactorAuth/factorService.ts";
 import {
     consumePendingLogin,
     createPendingLogin,
     getPendingLogin,
-    mfaMethodsForUser,
     type PendingLogin,
     recordPendingLoginFailure,
-    verifyRecoveryCodeForUser,
-    verifyTotpForUser,
-} from "../services/multiFactorAuth.ts";
+} from "../services/multiFactorAuth/pendingLoginService.ts";
 import {
     createWebAuthnAuthenticationOptions,
     verifyWebAuthnAuthentication,
-} from "../services/webAuthn.ts";
+} from "../services/webAuthn/service.ts";
 
 const logger = createStructuredLogger("auth");
 

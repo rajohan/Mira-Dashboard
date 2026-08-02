@@ -12,7 +12,7 @@ import {
     registerScheduledJobAction,
     type ScheduledJobActionContext,
     ScheduledJobActionError,
-} from "./scheduledJobs.ts";
+} from "./scheduledJobs/actionRegistry.ts";
 
 const logger = createStructuredLogger("docker-actions");
 

@@ -1,16 +1,18 @@
 import type { SchedulerMetrics } from "../../../../contracts/metrics.ts";
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { runWithLogContext } from "../../lib/logContext.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {
-    claimNextJobExecution,
-    didHeartbeatJobWorker,
     getJobExecutionSummary,
     type JobExecutionRecord,
+} from "../jobExecutionQueue/repository.ts";
+import {
+    claimNextJobExecution,
+    didHeartbeatJobWorker,
     recoverExpiredJobExecutions,
     registerJobWorker,
     unregisterJobWorker,
-} from "../jobExecutionQueue.ts";
+} from "../jobExecutionQueue/worker.ts";
 import {
     DeploymentCutoverReconciler,
     type DeploymentCutoverRecoveryHandler,

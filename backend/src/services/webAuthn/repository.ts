@@ -1,6 +1,6 @@
 import type { AuthenticatorTransportFuture } from "@simplewebauthn/server";
 
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
 const ALLOWED_TRANSPORTS = new Set<AuthenticatorTransportFuture>([

@@ -1,3 +1,4 @@
+import { stripEquivalentChatTextPrefix } from "../chatMessageIdentity";
 import {
     type ChatHistoryMessage,
     type ChatThinkingDisplay,
@@ -5,7 +6,6 @@ import {
     mergeChatImages,
     mergeChatMessageProvenance,
 } from "../chatTypes";
-import { stripEquivalentChatTextPrefix } from "../chatUtilities";
 import {
     MAX_CHAT_RUNTIME_ASSISTANT_SEGMENTS_PER_RUN,
     type ChatRunState,

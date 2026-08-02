@@ -6,7 +6,7 @@ import { cn } from "../../../utils/cn";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Select } from "../../ui/Select";
-import { selectedChatSpeedLabel, selectedChatThinkingLabel } from "./chatUtilities";
+import { selectedChatSpeedLabel, selectedChatThinkingLabel } from "./chatSettings";
 
 const HEADER_STATUS_REFRESH_MS = 5000;
 

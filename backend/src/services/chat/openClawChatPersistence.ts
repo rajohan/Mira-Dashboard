@@ -1,4 +1,4 @@
-import type { OpenClawRuntimeSnapshot } from "../../../../contracts/chat.ts";
+import type { OpenClawRuntimeSnapshot } from "../../../../contracts/chat/transport.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
 import {
     isExactSessionKey,

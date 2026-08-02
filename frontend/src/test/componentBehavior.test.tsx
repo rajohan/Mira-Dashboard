@@ -19,6 +19,11 @@ import { parseJsonText, requestBodyText, requestUrl } from "../../../test/suppor
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
 import { ChatAttachmentPickerModal } from "../components/features/chat/ChatAttachmentPickerModal";
+import {
+    base64ToText as messageListBase64ToText,
+    CHAT_ATTACHMENT_ACCEPT,
+    previewFromAttachment,
+} from "../components/features/chat/chatAttachmentUtilities";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMarkdown } from "../components/features/chat/ChatMarkdown";
@@ -27,24 +32,21 @@ import {
     getPreCodeBlock,
 } from "../components/features/chat/chatMarkdownUtilities";
 import { ChatMessageDetails } from "../components/features/chat/ChatMessageDetails";
+import { messageIdentity } from "../components/features/chat/chatMessageIdentity";
+import {
+    mergeWithRecentOptimisticMessages,
+    rollbackFailedOptimisticMessage,
+} from "../components/features/chat/chatMessageReconciliation";
 import {
     AttachmentIcon,
     ChatMessagesList,
 } from "../components/features/chat/ChatMessagesList";
+import { chatThinkingOptions } from "../components/features/chat/chatSettings";
 import { executeChatSlashCommand } from "../components/features/chat/chatSlashCommandHandler";
-import type {
-    ChatHistoryMessage,
-    ChatSendAttachment,
-} from "../components/features/chat/chatTypes";
 import {
-    base64ToText as messageListBase64ToText,
-    CHAT_ATTACHMENT_ACCEPT,
-    chatThinkingOptions,
-    previewFromAttachment,
-    mergeWithRecentOptimisticMessages,
-    messageIdentity,
-    rollbackFailedOptimisticMessage,
-} from "../components/features/chat/chatUtilities";
+    type ChatHistoryMessage,
+    type ChatSendAttachment,
+} from "../components/features/chat/chatTypes";
 import { CronJobDetails } from "../components/features/cron/CronJobDetails";
 import { CronJobList } from "../components/features/cron/CronJobList";
 import { BackupOverviewCard } from "../components/features/dashboard/BackupOverviewCard";

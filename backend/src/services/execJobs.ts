@@ -9,8 +9,8 @@ import type {
     ExecStartResponse,
     ExecStopResponse,
 } from "../../../contracts/exec.ts";
-import { ApiRouteError, mapApiError, type MappedApiError } from "../apiErrors.ts";
-import { database } from "../database.ts";
+import { database } from "../database/connection.ts";
+import { ApiRouteError, mapApiError, type MappedApiError } from "../http/apiErrors.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     type BunProcess,
@@ -21,16 +21,19 @@ import {
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { hasLineBreakOrNullByte } from "../lib/values.ts";
 import {
-    cancelJobExecution,
     enqueueJobExecution,
     getJobExecution,
     type JobExecutionRecord,
-} from "./jobExecutionQueue.ts";
+} from "./jobExecutionQueue/repository.ts";
+import { cancelJobExecution } from "./jobExecutionQueue/worker.ts";
 import {
     successfulJobExecutionOutput,
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
-import { registerScheduledJobAction, ScheduledJobActionError } from "./scheduledJobs.ts";
+import {
+    registerScheduledJobAction,
+    ScheduledJobActionError,
+} from "./scheduledJobs/actionRegistry.ts";
 
 const logger = createStructuredLogger("exec-jobs");
 

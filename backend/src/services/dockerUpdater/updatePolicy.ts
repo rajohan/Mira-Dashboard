@@ -1,4 +1,4 @@
-import { database } from "../../database.ts";
+import { database } from "../../database/connection.ts";
 import { registerDockerUpdaterServices } from "./composeDiscovery.ts";
 import { syncDockerUpdaterChangesBestEffort } from "./gitSync.ts";
 import { hasUpdate, imageRegistry } from "./registryClient.ts";

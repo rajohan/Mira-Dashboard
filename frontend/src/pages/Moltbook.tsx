@@ -1,18 +1,16 @@
 import { Flame, MessageCircle, MessageSquare, Newspaper, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
-import {
-    FeedPostCard,
-    MyCommentCard,
-    MyPostCard,
-    ProfileCard,
-} from "../components/features/moltbook";
+import { FeedPostCard } from "../components/features/moltbook/FeedPostCard";
+import { MyCommentCard } from "../components/features/moltbook/MyCommentCard";
+import { MyPostCard } from "../components/features/moltbook/MyPostCard";
+import { ProfileCard } from "../components/features/moltbook/ProfileCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { LoadingState } from "../components/ui/LoadingState";
-import { useMoltbookData } from "../hooks";
+import { useMoltbookData } from "../hooks/useMoltbook";
 
 const TAB_OPTIONS = [
     { value: "feed", label: "Feed", icon: <Newspaper className="size-4" /> },

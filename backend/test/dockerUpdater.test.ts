@@ -11,23 +11,25 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { requestUrl } from "../../test/support/fetch.ts";
-import { database } from "../src/database.ts";
+import { database } from "../src/database/connection.ts";
 import * as processModule from "../src/lib/processes.ts";
+import { registerDockerUpdaterServices } from "../src/services/dockerUpdater/composeDiscovery.ts";
 import {
-    type DockerUpdaterStepResult,
-    isNonblockingRegistrationFailure,
     isSafeTagPatternMatch,
     isSafeTagRegexPattern,
-    pollDockerUpdaterRegistries,
-    registerDockerUpdaterScheduledJobs,
-    registerDockerUpdaterServices,
-    runDockerUpdaterService,
-} from "../src/services/dockerUpdater.ts";
+} from "../src/services/dockerUpdater/registryClient.ts";
+import { pollDockerUpdaterRegistries } from "../src/services/dockerUpdater/registryPolling.ts";
+import { registerDockerUpdaterScheduledJobs } from "../src/services/dockerUpdater/scheduler.ts";
+import { type DockerUpdaterStepResult } from "../src/services/dockerUpdater/types.ts";
 import {
-    runScheduledJob,
+    isNonblockingRegistrationFailure,
+    runDockerUpdaterService,
+} from "../src/services/dockerUpdater/updatePolicy.ts";
+import { runScheduledJob } from "../src/services/scheduledJobs/enqueue.ts";
+import {
     startScheduledJobExecutor,
     stopScheduledJobExecutor,
-} from "../src/services/scheduledJobs.ts";
+} from "../src/services/scheduledJobs/runtime.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 

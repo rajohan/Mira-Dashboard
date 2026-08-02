@@ -1,6 +1,10 @@
 import type { ChatAttachmentDisplay } from "./types";
 
-/** Returns a lowercase MIME type without optional parameters. */
+/**
+ * Returns a lowercase MIME type without optional parameters.
+ * @param mimeType MIME type to normalize.
+ * @returns Normalized MIME type.
+ */
 export function normalizeChatMimeType(mimeType: string): string {
     return mimeType.split(";", 1)[0]?.trim().toLowerCase() || "";
 }
@@ -9,7 +13,11 @@ function unsigned32(value: number): number {
     return value < 0 ? value + 4_294_967_296 : value;
 }
 
-/** Returns a compact fingerprint that incorporates every character. */
+/**
+ * Returns a compact fingerprint that incorporates every character.
+ * @param content Content to fingerprint.
+ * @returns Stable non-cryptographic content fingerprint.
+ */
 export function chatContentFingerprint(content: string): string {
     let firstHash = 2_166_136_261;
     let secondHash = 2_654_435_761;
@@ -23,7 +31,11 @@ export function chatContentFingerprint(content: string): string {
     ).toString(36)}`;
 }
 
-/** Returns attachment content identity independent of transient row IDs. */
+/**
+ * Returns attachment content identity independent of transient row IDs.
+ * @param attachment Attachment to identify.
+ * @returns Stable attachment content identity.
+ */
 export function chatAttachmentIdentity(attachment: ChatAttachmentDisplay): string {
     const content =
         attachment.contentBase64 || attachment.dataUrl || attachment.url || "";

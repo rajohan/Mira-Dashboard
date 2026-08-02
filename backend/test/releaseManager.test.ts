@@ -23,36 +23,42 @@ import path from "node:path";
 import {
     databaseMigrationIdentities,
     type DatabaseMigrationIdentity,
-} from "../src/databaseMigrations/index.ts";
+} from "../src/databaseMigrations/registry.ts";
+import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
+import {
+    RELEASE_TRANSITION_LOCK_FILE_NAME,
+    RELEASE_TRANSITION_LOCK_PROGRAM,
+} from "../src/services/releases/managerModel.ts";
+import {
+    activateDashboardRelease,
+    pruneDashboardReleases,
+    publishVerifiedDashboardRelease,
+    readDashboardReleaseState,
+    restoreDashboardReleaseAfterFailedActivation,
+    rollbackDashboardRelease,
+} from "../src/services/releases/managerOperations.ts";
+import {
+    loadReleaseManifest,
+    writeReleaseManifest,
+} from "../src/services/releases/manifestArtifacts.ts";
+import { parseReleaseManifest } from "../src/services/releases/manifestParser.ts";
+import {
+    databaseMigrationInventorySha256,
+    RELEASE_MANIFEST_FILE_NAME,
+} from "../src/services/releases/manifestPolicy.ts";
+import {
+    ensureDashboardReleaseLayout,
+    loadManagedRelease,
+    managedReleasePath,
+    resolveDashboardReleasesRoot,
+} from "../src/services/releases/releaseLayout.ts";
 import {
     currentBunRuntimeIdentity,
     hasManagedBunRuntime,
     installManagedBunRuntime,
 } from "../src/services/releases/runtime.ts";
-import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
-import {
-    activateDashboardRelease,
-    assertDashboardReleaseRuntimeAvailable,
-    assertReleaseTransitionLockCommandSucceeded,
-    ensureDashboardReleaseLayout,
-    loadManagedRelease,
-    managedReleasePath,
-    pruneDashboardReleases,
-    publishVerifiedDashboardRelease,
-    readDashboardReleaseState,
-    RELEASE_TRANSITION_LOCK_FILE_NAME,
-    RELEASE_TRANSITION_LOCK_PROGRAM,
-    resolveDashboardReleasesRoot,
-    restoreDashboardReleaseAfterFailedActivation,
-    rollbackDashboardRelease,
-} from "../src/services/releases/manager.ts";
-import {
-    databaseMigrationInventorySha256,
-    loadReleaseManifest,
-    parseReleaseManifest,
-    RELEASE_MANIFEST_FILE_NAME,
-    writeReleaseManifest,
-} from "../src/services/releases/manifest.ts";
+import { assertDashboardReleaseRuntimeAvailable } from "../src/services/releases/schemaCompatibility.ts";
+import { assertReleaseTransitionLockCommandSucceeded } from "../src/services/releases/transitionLock.ts";
 import { captureRejection } from "./support/rejections.ts";
 import { createReleaseFixture } from "./support/releaseFixture.ts";
 

@@ -1,6 +1,6 @@
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 
-import { routeFailureResponse } from "../routeSupport.ts";
+import { routeFailureResponse } from "../http/routeSupport.ts";
 import {
     type AuthenticationThrottleKind,
     authenticationThrottleStatus,

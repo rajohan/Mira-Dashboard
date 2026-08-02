@@ -1,10 +1,10 @@
-import type { ChatHistoryMessage } from "../chatTypes";
 import {
-    insertMessagesByTimestamp,
     mergeChatMessageDetails,
     messageIdentity,
     messageMediaIdentity,
-} from "../chatUtilities";
+} from "../chatMessageIdentity";
+import { insertMessagesByTimestamp } from "../chatMessageReconciliation";
+import type { ChatHistoryMessage } from "../chatTypes";
 import { hasPrimaryAnswerContent } from "./chatPresentation";
 import {
     canUseDashboardTurn,

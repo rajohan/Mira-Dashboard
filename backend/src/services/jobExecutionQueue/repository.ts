@@ -4,9 +4,9 @@ import type {
     JobExecutionTriggerType,
     JobResourceClass,
 } from "../../../../contracts/jobs.ts";
-import { database, sqlNullable } from "../../database.ts";
+import { database, sqlNullable } from "../../database/connection.ts";
+import { currentRequestAuditContext } from "../../http/requestAuditContext.ts";
 import { isJobResourceClass, jobResourcePriority } from "../../lib/jobResources.ts";
-import { currentRequestAuditContext } from "../../requestAuditContext.ts";
 import {
     type AuditActor,
     type AuditOutcome,

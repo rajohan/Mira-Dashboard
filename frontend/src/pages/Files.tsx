@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 
-import { FileEditorPanel, FilesSidebar } from "../components/features/files";
+import { FileEditorPanel } from "../components/features/files/FileEditorPanel";
+import { FilesSidebar } from "../components/features/files/FilesSidebar";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { RefreshButton } from "../components/ui/RefreshButton";

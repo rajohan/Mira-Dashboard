@@ -34,6 +34,8 @@ export const fsPromiseOps = Fs.promises as unknown as {
 
 /**
  * Converts a guarded path to a Buffer to avoid direct string path sinks in wrappers.
+ * @param path Guarded path to convert.
+ * @returns Buffer containing the guarded path.
  */
 export function guardedPathBuffer(path: GuardedPath): Buffer {
     return Buffer.from(path);

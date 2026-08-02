@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useState } from "react";
 
-import type { ChatModelOption } from "./chatUtilities";
+import type { ChatModelOption } from "./chatSettings";
 import type { ChatTransport } from "./transport/chatTransport";
 
 /**

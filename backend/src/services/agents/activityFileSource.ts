@@ -2,13 +2,13 @@ import type FS from "node:fs";
 import Path from "node:path";
 
 import { isPlainRecord } from "../../../../contracts/runtime.ts";
+import { guardedPath } from "../../lib/guardedOps/core.ts";
 import {
-    guardedPath,
     readdirGuarded,
     readTextRangeNoFollowGuarded,
     readTextTailNoFollowGuarded,
     statGuarded,
-} from "../../lib/guardedOps.ts";
+} from "../../lib/guardedOps/read.ts";
 import { unknownArray } from "../../lib/values.ts";
 import {
     activityContextsMatch,

@@ -1,6 +1,6 @@
-import gateway from "../../gateway.ts";
 import { CoalescedSnapshot } from "../../lib/coalescedSnapshot.ts";
 import { createStructuredLogger } from "../../lib/structuredLogger.ts";
+import gateway from "../gateway/runtime.ts";
 
 const logger = createStructuredLogger("agents");
 

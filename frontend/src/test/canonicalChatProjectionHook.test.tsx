@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import { renderHook } from "@testing-library/react";
 
-import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
+import { type ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import { createChatRuntimeState } from "../components/features/chat/domain/chatState";
 import { useCanonicalChatProjection } from "../components/features/chat/useCanonicalChatProjection";
 

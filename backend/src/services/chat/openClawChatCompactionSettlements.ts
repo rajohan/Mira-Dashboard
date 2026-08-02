@@ -1,4 +1,4 @@
-import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat.ts";
+import type { OpenClawRuntimeEnvelope } from "../../../../contracts/chat/transport.ts";
 import {
     normalizedSessionKey,
     promotableInterruptedConversationRuns,
@@ -230,7 +230,7 @@ export class OpenClawChatCompactionSettlements {
             return false;
         }
         let didComplete = false;
-        for (const run of runs.values().toArray()) {
+        for (const run of runs.values()) {
             const pendingAt = run.pendingCompactionSettlementAt;
             if (
                 run.completed ||

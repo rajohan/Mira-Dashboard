@@ -6,7 +6,7 @@ import type {
 } from "../../../../contracts/delivery.ts";
 import { errorMessage } from "../../lib/errors.ts";
 import { DEFAULT_BASE, getDashboardRoot, getDashboardWorktreeRoot } from "./config.ts";
-import { runCommand } from "./githubClient.ts";
+import { runCommand } from "./githubCommandClient.ts";
 
 interface GitWorktree {
     path: string;

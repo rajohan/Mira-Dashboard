@@ -6,7 +6,7 @@ import {
     databaseMigrationIdentities,
     type DatabaseMigrationIdentity,
     databaseMigrations,
-} from "../../databaseMigrations/index.ts";
+} from "../../databaseMigrations/registry.ts";
 import {
     MANAGED_DASHBOARD_RUNTIME_LAUNCHER_ARTIFACT,
     MANAGED_DASHBOARD_UNIT_ARTIFACTS,

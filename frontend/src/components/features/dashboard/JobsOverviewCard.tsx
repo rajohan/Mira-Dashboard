@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import type { CronJob } from "../../../../../contracts/cron";
 import type { ScheduledJob } from "../../../../../contracts/jobs";
-import { useCronJobs } from "../../../hooks";
+import { useCronJobs } from "../../../hooks/useCron";
 import { useScheduledJobs } from "../../../hooks/useScheduledJobs";
 import {
     formatCronLastStatus,

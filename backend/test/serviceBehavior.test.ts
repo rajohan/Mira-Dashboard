@@ -19,19 +19,19 @@ import path from "node:path";
 import type { PullRequestSummary } from "../../contracts/delivery.ts";
 import { parseGitWorkspaceSummary } from "../../contracts/git.ts";
 import { parseJsonText, requestUrl } from "../../test/support/fetch.ts";
-import type { DashboardSocket } from "../src/dashboardSocket.ts";
-import { database, sqlNullable } from "../src/database.ts";
+import { database, sqlNullable } from "../src/database/connection.ts";
 import { resolveDashboardProjectPaths } from "../src/lib/dashboardPaths.ts";
 import * as processModule from "../src/lib/processes.ts";
+import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
+import { type DashboardSocket } from "../src/services/gateway/dashboardSocket.ts";
+import {
+    ensureDashboardReleaseLayout,
+    managedReleasePath,
+} from "../src/services/releases/releaseLayout.ts";
 import {
     currentBunRuntimeIdentity,
     installManagedBunRuntime,
 } from "../src/services/releases/runtime.ts";
-import {
-    ensureDashboardReleaseLayout,
-    managedReleasePath,
-} from "../src/services/releases/manager.ts";
-import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import { captureRejection } from "./support/rejections.ts";
 import {
@@ -1234,7 +1234,7 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
 
 async function startTestScheduledExecutor(): Promise<void> {
     const { startScheduledJobExecutor, stopScheduledJobExecutor } =
-        await import("../src/services/scheduledJobs.ts");
+        await import("../src/services/scheduledJobs/runtime.ts");
     startScheduledJobExecutor();
     cleanupCallbacks.push(stopScheduledJobExecutor);
 }
@@ -1281,7 +1281,28 @@ describe("backend service behavior", () => {
             validateStoredSecretConfig,
             verifyPassword,
             persistGatewayToken,
-        } = await import("../src/auth.ts");
+        } = await Promise.all([
+            import("../src/auth/sessionService.ts"),
+            import("../src/auth/userRepository.ts"),
+        ]).then(([module0, module1]) => ({
+            cleanupExpiredSessions: module0.cleanupExpiredSessions,
+            createSession: module0.createSession,
+            createFirstUser: module1.createFirstUser,
+            createUser: module1.createUser,
+            didDeletePersistedGatewayTokenIfMatches:
+                module1.didDeletePersistedGatewayTokenIfMatches,
+            deleteSession: module0.deleteSession,
+            findUserByUsername: module1.findUserByUsername,
+            getAuthUserFromSessionId: module0.getAuthUserFromSessionId,
+            getPersistedGatewayToken: module1.getPersistedGatewayToken,
+            hashPassword: module1.hashPassword,
+            recentAuthenticationTtlMs: module0.recentAuthenticationTtlMs,
+            sessionIdleTtlMs: module0.sessionIdleTtlMs,
+            validateAuthenticationConfig: module0.validateAuthenticationConfig,
+            validateStoredSecretConfig: module1.validateStoredSecretConfig,
+            verifyPassword: module1.verifyPassword,
+            persistGatewayToken: module1.persistGatewayToken,
+        }));
         rememberEnvironment("MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY");
         const configuredSecretEncryptionKey =
             process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;
@@ -1650,7 +1671,8 @@ describe("backend service behavior", () => {
 
     it("records cache failures without claiming a successful update timestamp", async () => {
         const key = `test.cache.${Bun.randomUUIDv7()}`;
-        const { writeCacheFailure } = await import("../src/services/cacheRefresh.ts");
+        const { writeCacheFailure } =
+            await import("../src/services/cacheRefresh/cacheEntryFailure.ts");
 
         try {
             writeCacheFailure({
@@ -1769,11 +1791,11 @@ describe("backend service behavior", () => {
               }
             | undefined;
         const { enqueueDatabaseSummaryRefresh, registerCacheRefreshScheduledJobs } =
-            await import("../src/services/cacheRefresh.ts");
+            await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         const { getCacheEntry } = await import("../src/lib/cacheStore.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const { getScheduledJob, updateScheduledJob } =
-            await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/scheduledJobs/repository.ts");
 
         registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
         const originalJobEnabled =
@@ -1960,11 +1982,18 @@ describe("backend service behavior", () => {
 
     it("reports database-summary refresh results from SQLite maintenance", async () => {
         const { enqueueDatabaseSummaryRefresh } =
-            await import("../src/services/cacheRefresh.ts");
+            await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         const { SQLITE_MAINTENANCE_JOB_ID, registerSqliteMaintenanceScheduledJob } =
             await import("../src/services/sqliteMaintenance.ts");
         const { getScheduledJob, runScheduledJob, updateScheduledJob } =
-            await import("../src/services/scheduledJobs.ts");
+            await Promise.all([
+                import("../src/services/scheduledJobs/repository.ts"),
+                import("../src/services/scheduledJobs/enqueue.ts"),
+            ]).then(([module0, module1]) => ({
+                getScheduledJob: module0.getScheduledJob,
+                runScheduledJob: module1.runScheduledJob,
+                updateScheduledJob: module0.updateScheduledJob,
+            }));
         const originalJob = getScheduledJob(SQLITE_MAINTENANCE_JOB_ID);
         const createdBackupPaths: string[] = [];
         const createdRunIds: number[] = [];
@@ -2050,8 +2079,13 @@ describe("backend service behavior", () => {
     });
 
     it("rejects unsupported and aborted cache refresh producer requests", async () => {
-        const { refreshCacheProducer, waitForLocalCacheSeed } =
-            await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer, waitForLocalCacheSeed } = await Promise.all([
+            import("../src/services/cacheRefresh/cacheRefreshRuntime.ts"),
+            import("../src/services/cacheRefresh/cacheRefreshScheduler.ts"),
+        ]).then(([module0, module1]) => ({
+            refreshCacheProducer: module0.refreshCacheProducer,
+            waitForLocalCacheSeed: module1.waitForLocalCacheSeed,
+        }));
         const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
         expect(refreshCacheProducer("unknown.cache.key")).rejects.toThrow(
             "No backend refresh producer configured for cache key"
@@ -2094,7 +2128,8 @@ describe("backend service behavior", () => {
     it("refreshes supported cache keys through the cache route", async () => {
         rememberEnvironment("MOLTBOOK_API_KEY");
         process.env.MOLTBOOK_API_KEY = "moltbook-key";
-        const { waitForLocalCacheSeed } = await import("../src/services/cacheRefresh.ts");
+        const { waitForLocalCacheSeed } =
+            await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         try {
             await waitForLocalCacheSeed("weather.spydeberg");
         } catch {
@@ -2162,13 +2197,22 @@ describe("backend service behavior", () => {
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
 
         const { cacheRefreshScheduledJobId, registerCacheRefreshScheduledJobs } =
-            await import("../src/services/cacheRefresh.ts");
+            await import("../src/services/cacheRefresh/cacheRefreshScheduler.ts");
         const {
             enqueueScheduledJob,
             startScheduledJobExecutor,
             stopScheduledJobExecutor,
             updateScheduledJob,
-        } = await import("../src/services/scheduledJobs.ts");
+        } = await Promise.all([
+            import("../src/services/scheduledJobs/enqueue.ts"),
+            import("../src/services/scheduledJobs/runtime.ts"),
+            import("../src/services/scheduledJobs/repository.ts"),
+        ]).then(([module0, module1, module2]) => ({
+            enqueueScheduledJob: module0.enqueueScheduledJob,
+            startScheduledJobExecutor: module1.startScheduledJobExecutor,
+            stopScheduledJobExecutor: module1.stopScheduledJobExecutor,
+            updateScheduledJob: module2.updateScheduledJob,
+        }));
         expect(cacheRefreshScheduledJobId("weather.spydeberg")).toBe("cache.weather");
         expect(cacheRefreshScheduledJobId("moltbook.home")).toBeUndefined();
         expect(cacheRefreshScheduledJobId("system.openclaw")).toBe("cache.system");
@@ -2472,7 +2516,7 @@ describe("backend service behavior", () => {
 
         try {
             const { readDeploymentJobs } =
-                await import("../src/services/pullRequests.ts");
+                await import("../src/services/pullRequests/deploymentRepository.ts");
             const jobs = readDeploymentJobs();
 
             expect(jobs.findIndex((job) => job.id === newerId)).toBeLessThan(
@@ -2527,11 +2571,16 @@ describe("backend service behavior", () => {
         process.env.MIRA_DASHBOARD_PROJECT_ROOT = projectRoot;
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
 
-        const { getDashboardReleaseStatus, prepareAndStartRollback } =
-            await import("../src/services/pullRequests.ts");
+        const { getDashboardReleaseStatus, prepareAndStartRollback } = await Promise.all([
+            import("../src/services/pullRequests/deploymentRepository.ts"),
+            import("../src/services/pullRequests/deploymentService.ts"),
+        ]).then(([module0, module1]) => ({
+            getDashboardReleaseStatus: module0.getDashboardReleaseStatus,
+            prepareAndStartRollback: module1.prepareAndStartRollback,
+        }));
         const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
         const { cancelJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
+            await import("../src/services/jobExecutionQueue/worker.ts");
 
         const failedRuntimeId = `test-runtime-failed-${Bun.randomUUIDv7()}`;
         database
@@ -2765,8 +2814,13 @@ describe("backend service behavior", () => {
         );
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
 
-        const { getDashboardReleaseStatus, prepareAndStartRollback } =
-            await import("../src/services/pullRequests.ts");
+        const { getDashboardReleaseStatus, prepareAndStartRollback } = await Promise.all([
+            import("../src/services/pullRequests/deploymentRepository.ts"),
+            import("../src/services/pullRequests/deploymentService.ts"),
+        ]).then(([module0, module1]) => ({
+            getDashboardReleaseStatus: module0.getDashboardReleaseStatus,
+            prepareAndStartRollback: module1.prepareAndStartRollback,
+        }));
         const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
         const executionCountBefore = countRollbackExecutions();
 
@@ -2804,9 +2858,9 @@ describe("backend service behavior", () => {
 
     it("rejects malformed and missing rollback worker executions", async () => {
         const { registerPullRequestExecutionActions } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/executionActions.ts");
         const { enqueueJobExecution, getJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
+            await import("../src/services/jobExecutionQueue/repository.ts");
         registerPullRequestExecutionActions();
         await startTestScheduledExecutor();
 
@@ -2923,10 +2977,18 @@ printf 'scheduled\n'
         process.env.MIRA_DASHBOARD_PROJECT_ROOT = fakeRoot;
 
         const { prepareAndStartRollback, registerPullRequestExecutionActions } =
-            await import("../src/services/pullRequests.ts");
-        const { getJobExecution } = await import("../src/services/jobExecutionQueue.ts");
+            await Promise.all([
+                import("../src/services/pullRequests/deploymentService.ts"),
+                import("../src/services/pullRequests/executionActions.ts"),
+            ]).then(([module0, module1]) => ({
+                prepareAndStartRollback: module0.prepareAndStartRollback,
+                registerPullRequestExecutionActions:
+                    module1.registerPullRequestExecutionActions,
+            }));
+        const { getJobExecution } =
+            await import("../src/services/jobExecutionQueue/repository.ts");
         const { reconcileOrphanedDeploymentCutovers } =
-            await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/scheduledJobs/runtime.ts");
         registerPullRequestExecutionActions();
         await startTestScheduledExecutor();
         const rollback = await prepareAndStartRollback(previousCommit);
@@ -3067,7 +3129,8 @@ printf 'scheduled\n'
             .run(jobId, new Date().toISOString());
 
         try {
-            const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+            const { startDeployLatest } =
+                await import("../src/services/pullRequests/deploymentService.ts");
             expect(() => startDeployLatest()).toThrow(
                 `Dashboard release action already in progress (${jobId})`
             );
@@ -3083,8 +3146,9 @@ printf 'scheduled\n'
     it("labels stale rollback executions as rollback failures", async () => {
         const staleRollbackId = `test-rollback-stale-${Bun.randomUUIDv7()}`;
         const { enqueueJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
-        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+            await import("../src/services/jobExecutionQueue/repository.ts");
+        const { startDeployLatest } =
+            await import("../src/services/pullRequests/deploymentService.ts");
         database
             .prepare(
                 `INSERT INTO deployment_jobs
@@ -3154,9 +3218,10 @@ printf 'scheduled\n'
     });
 
     it("keeps queued deployment locks active beyond the legacy stale window", async () => {
-        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const { startDeployLatest } =
+            await import("../src/services/pullRequests/deploymentService.ts");
         const { cancelJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
+            await import("../src/services/jobExecutionQueue/worker.ts");
         const first = startDeployLatest();
         let replacementId: string | undefined;
         try {
@@ -3216,9 +3281,15 @@ printf 'scheduled\n'
     });
 
     it("fails deployments and releases their locks when worker leases expire", async () => {
-        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
-        const { getJobExecution, recoverExpiredJobExecutions } =
-            await import("../src/services/jobExecutionQueue.ts");
+        const { startDeployLatest } =
+            await import("../src/services/pullRequests/deploymentService.ts");
+        const { getJobExecution, recoverExpiredJobExecutions } = await Promise.all([
+            import("../src/services/jobExecutionQueue/repository.ts"),
+            import("../src/services/jobExecutionQueue/worker.ts"),
+        ]).then(([module0, module1]) => ({
+            getJobExecution: module0.getJobExecution,
+            recoverExpiredJobExecutions: module1.recoverExpiredJobExecutions,
+        }));
         const deployment = startDeployLatest();
         let replacementId: string | undefined;
         try {
@@ -3286,10 +3357,15 @@ printf 'scheduled\n'
     });
 
     it("reserves the deployment lock while a pull request approval is queued", async () => {
-        const { runPullRequestApproval, startDeployLatest } =
-            await import("../src/services/pullRequests.ts");
+        const { runPullRequestApproval, startDeployLatest } = await Promise.all([
+            import("../src/services/pullRequests/executionActions.ts"),
+            import("../src/services/pullRequests/deploymentService.ts"),
+        ]).then(([module0, module1]) => ({
+            runPullRequestApproval: module0.runPullRequestApproval,
+            startDeployLatest: module1.startDeployLatest,
+        }));
         const { cancelJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
+            await import("../src/services/jobExecutionQueue/worker.ts");
         const approval = runPullRequestApproval(11, false, {
             expectedHeadSha: "1".repeat(40),
         });
@@ -3494,15 +3570,31 @@ printf 'scheduled\n'
         process.env.PORT = "4310";
 
         const { registerPullRequestExecutionActions, startDeployLatest } =
-            await import("../src/services/pullRequests.ts");
+            await Promise.all([
+                import("../src/services/pullRequests/executionActions.ts"),
+                import("../src/services/pullRequests/deploymentService.ts"),
+            ]).then(([module0, module1]) => ({
+                registerPullRequestExecutionActions:
+                    module0.registerPullRequestExecutionActions,
+                startDeployLatest: module1.startDeployLatest,
+            }));
         const { enqueueJobExecution, getJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
+            await import("../src/services/jobExecutionQueue/repository.ts");
         const {
             reconcileOrphanedDeploymentCutovers,
             registerScheduledJobAction,
             startScheduledJobExecutor,
             stopScheduledJobExecutor,
-        } = await import("../src/services/scheduledJobs.ts");
+        } = await Promise.all([
+            import("../src/services/scheduledJobs/runtime.ts"),
+            import("../src/services/scheduledJobs/actionRegistry.ts"),
+        ]).then(([module0, module1]) => ({
+            reconcileOrphanedDeploymentCutovers:
+                module0.reconcileOrphanedDeploymentCutovers,
+            registerScheduledJobAction: module1.registerScheduledJobAction,
+            startScheduledJobExecutor: module0.startScheduledJobExecutor,
+            stopScheduledJobExecutor: module0.stopScheduledJobExecutor,
+        }));
         registerPullRequestExecutionActions();
         registerScheduledJobAction("test.after-deploy", () => Promise.try(() => ({})));
         await startTestScheduledExecutor();
@@ -4040,7 +4132,7 @@ printf 'scheduled\n'
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
 
         const { getProductionCheckoutStatus, ensureProductionReadyForDeploy } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/worktreeManager.ts");
 
         const status = await getProductionCheckoutStatus();
         expect(status).toMatchObject({
@@ -4098,7 +4190,7 @@ fi
             ensureProductionCheckout,
             ensureProductionReadyForDeploy,
             getProductionCheckoutStatus,
-        } = await import("../src/services/pullRequests.ts");
+        } = await import("../src/services/pullRequests/worktreeManager.ts");
 
         expect(getProductionCheckoutStatus()).resolves.toMatchObject({
             branch: "feature",
@@ -4130,7 +4222,7 @@ fi
             isDashboardPullRequestOpen,
             listDashboardPullRequests,
             validatePrNumber,
-        } = await import("../src/services/pullRequests.ts");
+        } = await import("../src/services/pullRequests/githubPullRequestListing.ts");
 
         const pullRequests = await listDashboardPullRequests();
         expect(pullRequests.map((pullRequest) => pullRequest.number)).toEqual([
@@ -4194,7 +4286,7 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
 
         const { listDashboardPullRequests } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/githubPullRequestListing.ts");
 
         const pullRequests = await listDashboardPullRequests();
         expect(pullRequests).toEqual([
@@ -4223,7 +4315,7 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
 
         const { listDashboardPullRequests } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/githubPullRequestListing.ts");
 
         const pullRequests = await listDashboardPullRequests();
         expect(pullRequests).toEqual([
@@ -4251,7 +4343,7 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
 
         const { listDashboardPullRequests } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/githubPullRequestListing.ts");
 
         const pullRequests = await listDashboardPullRequests();
         expect(pullRequests).toHaveLength(101);
@@ -4272,7 +4364,7 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
 
         const { createPullRequestStack } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/githubStackClient.ts");
 
         const creation = await createPullRequestStack([21, 22]);
         expect(creation).toEqual({
@@ -4365,7 +4457,7 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
 
         const { validatePullRequestPreviewScope } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/githubStackClient.ts");
         const scope = [
             stackPullRequestSummary(11),
             stackPullRequestSummary(12),
@@ -4420,7 +4512,7 @@ fi
 
     it("excludes fork pull requests from inferred preview stack ancestry", async () => {
         const { pullRequestPreviewScope } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/reviewPolicy.ts");
         const forkBottom = stackPullRequestSummary(11, {
             headRefName: "shared-base",
             isCrossRepository: true,
@@ -4453,8 +4545,15 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.RAJOHAN_GITHUB_TOKEN = "test-review-token";
 
-        const { approvePullRequestReview, listDashboardPullRequests } =
-            await import("../src/services/pullRequests.ts");
+        const { approvePullRequestReview, listDashboardPullRequests } = await Promise.all(
+            [
+                import("../src/services/pullRequests/actionService.ts"),
+                import("../src/services/pullRequests/githubPullRequestListing.ts"),
+            ]
+        ).then(([module0, module1]) => ({
+            approvePullRequestReview: module0.approvePullRequestReview,
+            listDashboardPullRequests: module1.listDashboardPullRequests,
+        }));
         const pullRequests = await listDashboardPullRequests();
         const candidate = pullRequests.find((pullRequest) => pullRequest.number === 22);
         expect(candidate).toMatchObject({
@@ -4489,7 +4588,7 @@ fi
         process.env.RAJOHAN_GITHUB_TOKEN = "test-review-token";
 
         const { approvePullRequestReview } =
-            await import("../src/services/pullRequests.ts");
+            await import("../src/services/pullRequests/actionService.ts");
         const result = await approvePullRequestReview(12);
 
         expect(result).toMatchObject({
@@ -4544,7 +4643,16 @@ fi
             registerPullRequestExecutionActions,
             rejectPullRequest,
             updatePullRequestBranch,
-        } = await import("../src/services/pullRequests.ts");
+        } = await Promise.all([
+            import("../src/services/pullRequests/actionService.ts"),
+            import("../src/services/pullRequests/executionActions.ts"),
+        ]).then(([module0, module1]) => ({
+            approvePullRequestReview: module0.approvePullRequestReview,
+            registerPullRequestExecutionActions:
+                module1.registerPullRequestExecutionActions,
+            rejectPullRequest: module0.rejectPullRequest,
+            updatePullRequestBranch: module0.updatePullRequestBranch,
+        }));
         registerPullRequestExecutionActions();
         cleanupCallbacks.push(() => {
             database
@@ -4761,7 +4869,15 @@ fi
                 approvePullRequest,
                 registerPullRequestExecutionActions,
                 runPullRequestApproval,
-            } = await import("../src/services/pullRequests.ts");
+            } = await Promise.all([
+                import("../src/services/pullRequests/mergeService.ts"),
+                import("../src/services/pullRequests/executionActions.ts"),
+            ]).then(([module0, module1]) => ({
+                approvePullRequest: module0.approvePullRequest,
+                registerPullRequestExecutionActions:
+                    module1.registerPullRequestExecutionActions,
+                runPullRequestApproval: module1.runPullRequestApproval,
+            }));
             expect(
                 await captureRejection(() =>
                     approvePullRequest(11, false, {
@@ -4847,7 +4963,8 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
-        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        const { approvePullRequest } =
+            await import("../src/services/pullRequests/mergeService.ts");
         expect(
             await captureRejection(() =>
                 approvePullRequest(13, false, {
@@ -4924,7 +5041,8 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
-        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        const { approvePullRequest } =
+            await import("../src/services/pullRequests/mergeService.ts");
         const pendingResult = await approvePullRequest(13, false, {
             expectedHeadSha: "3".repeat(40),
             expectedStackHeads: expectedStackHeadsThrough(13),
@@ -5062,8 +5180,13 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
-        const { approvePullRequest, rejectPullRequest } =
-            await import("../src/services/pullRequests.ts");
+        const { approvePullRequest, rejectPullRequest } = await Promise.all([
+            import("../src/services/pullRequests/mergeService.ts"),
+            import("../src/services/pullRequests/actionService.ts"),
+        ]).then(([module0, module1]) => ({
+            approvePullRequest: module0.approvePullRequest,
+            rejectPullRequest: module1.rejectPullRequest,
+        }));
         expect(
             await captureRejection(() =>
                 approvePullRequest(11, false, {
@@ -5107,8 +5230,13 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
-        const { approvePullRequest, rejectPullRequest } =
-            await import("../src/services/pullRequests.ts");
+        const { approvePullRequest, rejectPullRequest } = await Promise.all([
+            import("../src/services/pullRequests/mergeService.ts"),
+            import("../src/services/pullRequests/actionService.ts"),
+        ]).then(([module0, module1]) => ({
+            approvePullRequest: module0.approvePullRequest,
+            rejectPullRequest: module1.rejectPullRequest,
+        }));
         expect(
             await approvePullRequest(11, false, {
                 expectedHeadSha: "1".repeat(40),
@@ -5167,7 +5295,8 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
-        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        const { approvePullRequest } =
+            await import("../src/services/pullRequests/mergeService.ts");
         expect(
             await approvePullRequest(11, false, {
                 expectedHeadSha: "1".repeat(40),
@@ -5212,7 +5341,8 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
-        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        const { approvePullRequest } =
+            await import("../src/services/pullRequests/mergeService.ts");
         const result = await approvePullRequest(12, false, {
             expectedHeadSha: "2".repeat(40),
             expectedStackHeads: expectedStackHeadsThrough(12),
@@ -5246,7 +5376,8 @@ fi
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
-        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        const { approvePullRequest } =
+            await import("../src/services/pullRequests/mergeService.ts");
 
         for (const scenario of ["closed", "head-mismatch", "unconfirmed"] as const) {
             const fakeRoot = createTemporaryRoot(`mira-pr-stack-${scenario}-guard-root-`);
@@ -5307,7 +5438,8 @@ fi
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
-        const { approvePullRequest } = await import("../src/services/pullRequests.ts");
+        const { approvePullRequest } =
+            await import("../src/services/pullRequests/mergeService.ts");
 
         for (const status of ["enqueued", "failed"] as const) {
             const fakeRoot = createTemporaryRoot(`mira-pr-stack-${status}-root-`);
@@ -5411,7 +5543,7 @@ fi
 
         try {
             const { approvePullRequest } =
-                await import("../src/services/pullRequests.ts");
+                await import("../src/services/pullRequests/mergeService.ts");
             const result = await approvePullRequest(11, true, {
                 expectedHeadSha: "1".repeat(40),
             });
@@ -5466,7 +5598,7 @@ fi
 
         try {
             const { listDashboardPullRequests } =
-                await import("../src/services/pullRequests.ts");
+                await import("../src/services/pullRequests/githubPullRequestListing.ts");
             expect(
                 await captureRejection(() => listDashboardPullRequests())
             ).toMatchObject({ message: "GitHub CLI JSON line was too large" });
@@ -5529,7 +5661,15 @@ fi
             approvePullRequestReview,
             rejectPullRequest,
             updatePullRequestBranch,
-        } = await import("../src/services/pullRequests.ts");
+        } = await Promise.all([
+            import("../src/services/pullRequests/mergeService.ts"),
+            import("../src/services/pullRequests/actionService.ts"),
+        ]).then(([module0, module1]) => ({
+            approvePullRequest: module0.approvePullRequest,
+            approvePullRequestReview: module1.approvePullRequestReview,
+            rejectPullRequest: module1.rejectPullRequest,
+            updatePullRequestBranch: module1.updatePullRequestBranch,
+        }));
 
         expect(
             await captureRejection(() =>
@@ -5601,7 +5741,8 @@ fi
             writable: true,
         });
 
-        const { refreshWeatherCache } = await import("../src/services/cacheRefresh.ts");
+        const { refreshWeatherCache } =
+            await import("../src/services/cacheRefresh/weatherCacheProducer.ts");
         expect(refreshWeatherCache()).resolves.toEqual({
             refreshed: ["weather.spydeberg"],
         });
@@ -5694,7 +5835,8 @@ fi
                 });
             });
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
-        const { refreshGitCache } = await import("../src/services/cacheRefresh.ts");
+        const { refreshGitCache } =
+            await import("../src/services/cacheRefresh/gitCacheProducer.ts");
 
         const result = await refreshGitCache();
 
@@ -5839,7 +5981,8 @@ fi
                 ].join("\n"),
             });
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
 
         expect(
             await refreshCacheProducer("quotas.summary", undefined, { force: true })
@@ -6032,7 +6175,8 @@ fi
             });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
 
         expect(
             refreshCacheProducer("weather.spydeberg", undefined, { force: true })
@@ -6117,7 +6261,8 @@ fi
             });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
 
         expect(
             refreshCacheProducer("moltbook", undefined, { force: true })
@@ -6192,7 +6337,8 @@ fi
             return new Response("not found", { status: 404 });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
-        const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
+        const { refreshCacheProducer } =
+            await import("../src/services/cacheRefresh/cacheRefreshRuntime.ts");
         const firstRefresh = refreshCacheProducer("weather.spydeberg", undefined, {
             force: true,
         });
@@ -6254,7 +6400,7 @@ fi
         const closeEvents: Array<{ code: number; reason: string }> = [];
         const identityRoot = createTemporaryRoot("mira-gateway-device-identity-");
         const { loadOrCreateDeviceIdentity, OpenClawGatewayClient } =
-            await import("../src/lib/openclawGatewayClient.ts");
+            await import("../src/lib/openclawGatewayClient/client.ts");
         const deviceIdentity = loadOrCreateDeviceIdentity(
             path.join(identityRoot, "device.json")
         );
@@ -6468,7 +6614,7 @@ fi
     });
 
     it("reports disconnected gateway state without starting a Gateway client", async () => {
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
 
         gateway.shutdown();
@@ -6492,7 +6638,7 @@ fi
 
     it("returns conflict/not-found errors for clearing inactive backup jobs", async () => {
         const { clearNeedsAttentionBackupJob, mapBackupJob } =
-            await import("../src/services/backups.ts");
+            await import("../src/services/backups/backupJobs.ts");
 
         expect(mapBackupJob()).toBeUndefined();
         expect(
@@ -6535,9 +6681,25 @@ fi
             getCurrentBackupJob,
             registerBackupScheduledJobs,
             startManualBackup,
-        } = await import("../src/services/backups.ts");
+        } = await Promise.all([
+            import("../src/services/backups/backupJobs.ts"),
+            import("../src/services/backups/scheduling.ts"),
+            import("../src/services/backups/backupProviders.ts"),
+        ]).then(([module0, module1, module2]) => ({
+            clearNeedsAttentionBackupJob: module0.clearNeedsAttentionBackupJob,
+            getCurrentBackupJob: module0.getCurrentBackupJob,
+            registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+            startManualBackup: module2.startManualBackup,
+        }));
         const { getScheduledJob, runScheduledJob, upsertScheduledJob } =
-            await import("../src/services/scheduledJobs.ts");
+            await Promise.all([
+                import("../src/services/scheduledJobs/repository.ts"),
+                import("../src/services/scheduledJobs/enqueue.ts"),
+            ]).then(([module0, module1]) => ({
+                getScheduledJob: module0.getScheduledJob,
+                runScheduledJob: module1.runScheduledJob,
+                upsertScheduledJob: module0.upsertScheduledJob,
+            }));
 
         try {
             registerBackupScheduledJobs();
@@ -6590,7 +6752,15 @@ fi
         writeFailingWalgPreflightDocker(path.join(fakeBin, "docker"));
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
-            await import("../src/services/backups.ts");
+            await Promise.all([
+                import("../src/services/backups/backupJobs.ts"),
+                import("../src/services/backups/scheduling.ts"),
+                import("../src/services/backups/backupProviders.ts"),
+            ]).then(([module0, module1, module2]) => ({
+                getCurrentBackupJob: module0.getCurrentBackupJob,
+                registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+                startManualBackup: module2.startManualBackup,
+            }));
 
         try {
             registerBackupScheduledJobs();
@@ -6618,7 +6788,15 @@ fi
                 throw new Error("spawn unavailable");
             });
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
-            await import("../src/services/backups.ts");
+            await Promise.all([
+                import("../src/services/backups/backupJobs.ts"),
+                import("../src/services/backups/scheduling.ts"),
+                import("../src/services/backups/backupProviders.ts"),
+            ]).then(([module0, module1, module2]) => ({
+                getCurrentBackupJob: module0.getCurrentBackupJob,
+                registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+                startManualBackup: module2.startManualBackup,
+            }));
 
         try {
             registerBackupScheduledJobs();
@@ -6635,7 +6813,15 @@ fi
 
     it("reuses an already running WAL-G backup job instead of spawning another", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
-            await import("../src/services/backups.ts");
+            await Promise.all([
+                import("../src/services/backups/backupJobs.ts"),
+                import("../src/services/backups/scheduling.ts"),
+                import("../src/services/backups/backupProviders.ts"),
+            ]).then(([module0, module1, module2]) => ({
+                getCurrentBackupJob: module0.getCurrentBackupJob,
+                registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+                startManualBackup: module2.startManualBackup,
+            }));
         const exit = Promise.withResolvers<number>();
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -6698,8 +6884,13 @@ fi
     });
 
     it("trims oversized output in the worker backup primitive", async () => {
-        const { getCurrentBackupJob, startManualBackup } =
-            await import("../src/services/backups.ts");
+        const { getCurrentBackupJob, startManualBackup } = await Promise.all([
+            import("../src/services/backups/backupJobs.ts"),
+            import("../src/services/backups/backupProviders.ts"),
+        ]).then(([module0, module1]) => ({
+            getCurrentBackupJob: module0.getCurrentBackupJob,
+            startManualBackup: module1.startManualBackup,
+        }));
         const largeOutput = `${"x".repeat(100_200)}tail-marker\n`;
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
@@ -6764,7 +6955,15 @@ fi
 
     it("records backup process promise failures after startup", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
-            await import("../src/services/backups.ts");
+            await Promise.all([
+                import("../src/services/backups/backupJobs.ts"),
+                import("../src/services/backups/scheduling.ts"),
+                import("../src/services/backups/backupProviders.ts"),
+            ]).then(([module0, module1, module2]) => ({
+                getCurrentBackupJob: module0.getCurrentBackupJob,
+                registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+                startManualBackup: module2.startManualBackup,
+            }));
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((_command, arguments_) => {
@@ -6822,11 +7021,17 @@ fi
     });
 
     it("cancels queued backups before worker preflight starts", async () => {
-        const { getCurrentBackupJob, registerBackupScheduledJobs } =
-            await import("../src/services/backups.ts");
+        const { getCurrentBackupJob, registerBackupScheduledJobs } = await Promise.all([
+            import("../src/services/backups/backupJobs.ts"),
+            import("../src/services/backups/scheduling.ts"),
+        ]).then(([module0, module1]) => ({
+            getCurrentBackupJob: module0.getCurrentBackupJob,
+            registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+        }));
         const { cancelJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
-        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/jobExecutionQueue/worker.ts");
+        const { enqueueScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
 
         try {
             registerBackupScheduledJobs();
@@ -6853,8 +7058,9 @@ fi
 
     it("marks scheduled backups failed when the spawned process exits nonzero", async () => {
         const { registerBackupScheduledJobs } =
-            await import("../src/services/backups.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/backups/scheduling.ts");
+        const { runScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((_command, arguments_) => {
@@ -6911,8 +7117,9 @@ fi
 
     it("runs scheduled Kopia backups through host preflight and records success", async () => {
         const { registerBackupScheduledJobs } =
-            await import("../src/services/backups.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/backups/scheduling.ts");
+        const { runScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((command, arguments_) => {
@@ -6970,13 +7177,19 @@ fi
     });
 
     it("terminates running WAL-G backups when a scheduled run is aborted", async () => {
-        const { getCurrentBackupJob, registerBackupScheduledJobs } =
-            await import("../src/services/backups.ts");
+        const { getCurrentBackupJob, registerBackupScheduledJobs } = await Promise.all([
+            import("../src/services/backups/backupJobs.ts"),
+            import("../src/services/backups/scheduling.ts"),
+        ]).then(([module0, module1]) => ({
+            getCurrentBackupJob: module0.getCurrentBackupJob,
+            registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+        }));
         const { cancelJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
+            await import("../src/services/jobExecutionQueue/worker.ts");
         const { waitForJobExecution } =
             await import("../src/services/queuedJobExecution.ts");
-        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const { enqueueScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
         const exit = Promise.withResolvers<number>();
         const runProcessCalls: string[] = [];
         const runProcessSpy = jest
@@ -7058,9 +7271,25 @@ fi
             mapBackupJob,
             registerBackupScheduledJobs,
             startManualBackup,
-        } = await import("../src/services/backups.ts");
-        const { runScheduledJob, stopScheduledJobExecutor } =
-            await import("../src/services/scheduledJobs.ts");
+        } = await Promise.all([
+            import("../src/services/backups/scheduling.ts"),
+            import("../src/services/backups/backupJobs.ts"),
+            import("../src/services/backups/backupProviders.ts"),
+        ]).then(([module0, module1, module2]) => ({
+            clearPersistedBackupAttention: module0.clearPersistedBackupAttention,
+            getCurrentBackupJob: module1.getCurrentBackupJob,
+            getPersistedBackupJob: module0.getPersistedBackupJob,
+            mapBackupJob: module1.mapBackupJob,
+            registerBackupScheduledJobs: module0.registerBackupScheduledJobs,
+            startManualBackup: module2.startManualBackup,
+        }));
+        const { runScheduledJob, stopScheduledJobExecutor } = await Promise.all([
+            import("../src/services/scheduledJobs/enqueue.ts"),
+            import("../src/services/scheduledJobs/runtime.ts"),
+        ]).then(([module0, module1]) => ({
+            runScheduledJob: module0.runScheduledJob,
+            stopScheduledJobExecutor: module1.stopScheduledJobExecutor,
+        }));
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((_command, arguments_) => {
@@ -7133,9 +7362,25 @@ fi
             getPersistedBackupJob,
             queueManualBackup,
             registerBackupScheduledJobs,
-        } = await import("../src/services/backups.ts");
+        } = await Promise.all([
+            import("../src/services/backups/scheduling.ts"),
+            import("../src/services/backups/backupJobs.ts"),
+        ]).then(([module0, module1]) => ({
+            clearPersistedBackupAttention: module0.clearPersistedBackupAttention,
+            getCurrentBackupJob: module1.getCurrentBackupJob,
+            getPersistedBackupJob: module0.getPersistedBackupJob,
+            queueManualBackup: module0.queueManualBackup,
+            registerBackupScheduledJobs: module0.registerBackupScheduledJobs,
+        }));
         const { enqueueScheduledJob, runScheduledJob, stopScheduledJobExecutor } =
-            await import("../src/services/scheduledJobs.ts");
+            await Promise.all([
+                import("../src/services/scheduledJobs/enqueue.ts"),
+                import("../src/services/scheduledJobs/runtime.ts"),
+            ]).then(([module0, module1]) => ({
+                enqueueScheduledJob: module0.enqueueScheduledJob,
+                runScheduledJob: module0.runScheduledJob,
+                stopScheduledJobExecutor: module1.stopScheduledJobExecutor,
+            }));
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((_command, arguments_) => {
@@ -7227,13 +7472,14 @@ fi
 
     it("reports recovered backup failures instead of stale running snapshots", async () => {
         const { getPersistedBackupJob, registerBackupScheduledJobs } =
-            await import("../src/services/backups.ts");
+            await import("../src/services/backups/scheduling.ts");
         const {
             claimNextJobExecution,
             recoverExpiredJobExecutions,
             updateJobExecutionOutput,
-        } = await import("../src/services/jobExecutionQueue.ts");
-        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        } = await import("../src/services/jobExecutionQueue/worker.ts");
+        const { enqueueScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
 
         try {
             registerBackupScheduledJobs();
@@ -7279,8 +7525,9 @@ fi
             clearPersistedBackupAttention,
             getPersistedBackupJob,
             registerBackupScheduledJobs,
-        } = await import("../src/services/backups.ts");
-        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        } = await import("../src/services/backups/scheduling.ts");
+        const { enqueueScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
 
         try {
             registerBackupScheduledJobs();
@@ -7392,7 +7639,15 @@ fi
         chmodSync(fakePgrep, 0o755);
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
-            await import("../src/services/backups.ts");
+            await Promise.all([
+                import("../src/services/backups/backupJobs.ts"),
+                import("../src/services/backups/scheduling.ts"),
+                import("../src/services/backups/backupProviders.ts"),
+            ]).then(([module0, module1, module2]) => ({
+                getCurrentBackupJob: module0.getCurrentBackupJob,
+                registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+                startManualBackup: module2.startManualBackup,
+            }));
 
         try {
             registerBackupScheduledJobs();
@@ -7421,7 +7676,17 @@ fi
             mapBackupJob,
             registerBackupScheduledJobs,
             startManualBackup,
-        } = await import("../src/services/backups.ts");
+        } = await Promise.all([
+            import("../src/services/backups/backupJobs.ts"),
+            import("../src/services/backups/scheduling.ts"),
+            import("../src/services/backups/backupProviders.ts"),
+        ]).then(([module0, module1, module2]) => ({
+            clearNeedsAttentionBackupJob: module0.clearNeedsAttentionBackupJob,
+            getCurrentBackupJob: module0.getCurrentBackupJob,
+            mapBackupJob: module0.mapBackupJob,
+            registerBackupScheduledJobs: module1.registerBackupScheduledJobs,
+            startManualBackup: module2.startManualBackup,
+        }));
 
         try {
             registerBackupScheduledJobs();
@@ -7460,7 +7725,8 @@ fi
         const configFile = path.join(rotationRoot, "log-rotation.json");
         const logFile = path.join(rotationRoot, "service.log");
         writeFileSync(logFile, "do not touch\n");
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const validBase = {
             approvedRoots: [rotationRoot],
@@ -7609,7 +7875,8 @@ fi
                 ],
             })}\n`
         );
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const summary = await runLogRotationService({
             config: configFile,
@@ -7667,7 +7934,8 @@ fi
                 version: 1,
             })
         );
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const summary = await runLogRotationService({
             config: configFile,
@@ -7716,7 +7984,8 @@ fi
                 version: 1,
             })
         );
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const summary = await runLogRotationService({
             config: configFile,
@@ -7779,7 +8048,8 @@ fi
                 version: 1,
             })
         );
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const summary = await runLogRotationService({
             config: configFile,
@@ -7852,7 +8122,8 @@ fi
                 version: 1,
             })
         );
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const summary = await runLogRotationService({
             config: configFile,
@@ -7922,7 +8193,8 @@ fi
                 version: 1,
             })
         );
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const summary = await runLogRotationService({
             config: configFile,
@@ -7977,7 +8249,7 @@ fi
         process.env.MIRA_DASHBOARD_DB_PATH = configuredDatabasePath;
         process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = configuredLockFile;
         const { runElevatedLogRotationService } =
-            await import("../src/services/logRotation.ts");
+            await import("../src/services/logRotation/runtime.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockResolvedValueOnce({
@@ -8049,7 +8321,8 @@ fi
         writeFileSync(configPath, '{"groups":[],"version":1}\n');
         writeFileSync(configuredLockFile, `${process.pid}\n`);
         process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = configuredLockFile;
-        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+        const { runLogRotationService } =
+            await import("../src/services/logRotation/core.ts");
 
         const summary = await runLogRotationService({
             config: configPath,
@@ -8065,8 +8338,9 @@ fi
 
     it("records scheduled log-rotation failures in cache state", async () => {
         const { registerLogRotationScheduledJobs } =
-            await import("../src/services/logRotation.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/logRotation/scheduler.ts");
+        const { runScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
         const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
             code: 1,
             stderr: "sudo denied",
@@ -8122,8 +8396,9 @@ fi
 
     it("records structured scheduled log-rotation failures when sudo exits cleanly", async () => {
         const { registerLogRotationScheduledJobs } =
-            await import("../src/services/logRotation.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/logRotation/scheduler.ts");
+        const { runScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
         const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
             code: 0,
             stderr: "",
@@ -8189,8 +8464,9 @@ fi
 
     it("records successful scheduled log-rotation runs", async () => {
         const { registerLogRotationScheduledJobs } =
-            await import("../src/services/logRotation.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+            await import("../src/services/logRotation/scheduler.ts");
+        const { runScheduledJob } =
+            await import("../src/services/scheduledJobs/enqueue.ts");
         const runProcessSpy = jest.spyOn(processModule, "runProcess").mockResolvedValue({
             code: 0,
             stderr: "sudo notice",
@@ -8242,7 +8518,7 @@ fi
         process.env.OPENCLAW_HOME = openclawRoot;
         delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
         const { updateAgentCurrentTask, getLatestCompletedTasks } =
-            await import("../src/services/agents.ts");
+            await import("../src/services/agents/statusService.ts");
 
         const agentId = `agent-${Bun.randomUUIDv7()}`;
 
@@ -8590,7 +8866,7 @@ fi
                 .join("\n")
         );
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalGetSessions = gateway.getSessions;
         const originalRequest = gateway.request;
@@ -8650,7 +8926,7 @@ fi
         };
 
         const { buildAgentStatuses, buildSingleAgentStatus, parseAgentsConfig } =
-            await import("../src/services/agents.ts");
+            await import("../src/services/agents/statusService.ts");
 
         expect(parseAgentsConfig()).toMatchObject({
             defaults: { model: { primary: "codex" } },
@@ -9051,7 +9327,17 @@ fi
             registerScheduledJobAction,
             updateScheduledJob,
             upsertScheduledJob,
-        } = await import("../src/services/scheduledJobs.ts");
+        } = await Promise.all([
+            import("../src/services/scheduledJobs/schedule.ts"),
+            import("../src/services/scheduledJobs/repository.ts"),
+            import("../src/services/scheduledJobs/actionRegistry.ts"),
+        ]).then(([module0, module1, module2]) => ({
+            calculateNextRunAt: module0.calculateNextRunAt,
+            listScheduledJobRuns: module1.listScheduledJobRuns,
+            registerScheduledJobAction: module2.registerScheduledJobAction,
+            updateScheduledJob: module1.updateScheduledJob,
+            upsertScheduledJob: module1.upsertScheduledJob,
+        }));
         const jobId = `test-job-validation-${Bun.randomUUIDv7()}`;
 
         try {
@@ -9171,7 +9457,7 @@ fi
         process.env.OPENCLAW_HOME = openclawHome;
         process.env.OPENCLAW_PACKAGE_ROOT = packageRoot;
 
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalRequest = gateway.request;
         const patchCalls: unknown[] = [];
@@ -9411,7 +9697,7 @@ fi
             routeRoot,
             "dashboard-openclaw-home"
         );
-        const gatewayModule = await import("../src/gateway.ts");
+        const gatewayModule = await import("../src/services/gateway/runtime.ts");
         const gateway = gatewayModule.default;
         const originalRequest = gateway.request;
         const originalGetSessions = gateway.getSessions;
@@ -10000,7 +10286,14 @@ fi
             );
             process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
             const { registerDockerUpdaterScheduledJobs, registerDockerUpdaterServices } =
-                await import("../src/services/dockerUpdater.ts");
+                await Promise.all([
+                    import("../src/services/dockerUpdater/scheduler.ts"),
+                    import("../src/services/dockerUpdater/composeDiscovery.ts"),
+                ]).then(([module0, module1]) => ({
+                    registerDockerUpdaterScheduledJobs:
+                        module0.registerDockerUpdaterScheduledJobs,
+                    registerDockerUpdaterServices: module1.registerDockerUpdaterServices,
+                }));
             registerDockerUpdaterScheduledJobs();
             expect(registerDockerUpdaterServices()).toMatchObject({
                 isOk: true,
@@ -10056,9 +10349,30 @@ fi
             stopScheduledJobExecutor,
             updateScheduledJob,
             upsertScheduledJob,
-        } = await import("../src/services/scheduledJobs.ts");
+        } = await Promise.all([
+            import("../src/services/scheduledJobs/schedule.ts"),
+            import("../src/services/scheduledJobs/enqueue.ts"),
+            import("../src/services/scheduledJobs/repository.ts"),
+            import("../src/services/scheduledJobs/errors.ts"),
+            import("../src/services/scheduledJobs/actionRegistry.ts"),
+            import("../src/services/scheduledJobs/runtime.ts"),
+        ]).then(([module0, module1, module2, module3, module4, module5]) => ({
+            calculateNextRunAt: module0.calculateNextRunAt,
+            enqueueScheduledJob: module1.enqueueScheduledJob,
+            getScheduledJob: module2.getScheduledJob,
+            isScheduledJobValidationError: module3.isScheduledJobValidationError,
+            listScheduledJobs: module2.listScheduledJobs,
+            listScheduledJobRuns: module2.listScheduledJobRuns,
+            registerScheduledJobAction: module4.registerScheduledJobAction,
+            removeScheduledJobsNotInAction: module2.removeScheduledJobsNotInAction,
+            runScheduledJob: module1.runScheduledJob,
+            startScheduledJobExecutor: module5.startScheduledJobExecutor,
+            stopScheduledJobExecutor: module5.stopScheduledJobExecutor,
+            updateScheduledJob: module2.updateScheduledJob,
+            upsertScheduledJob: module2.upsertScheduledJob,
+        }));
         const { cancelJobExecution } =
-            await import("../src/services/jobExecutionQueue.ts");
+            await import("../src/services/jobExecutionQueue/worker.ts");
 
         try {
             startScheduledJobExecutor();

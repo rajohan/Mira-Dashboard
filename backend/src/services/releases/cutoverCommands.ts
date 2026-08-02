@@ -1,8 +1,8 @@
 import type { DeploymentJob } from "../../../../contracts/delivery.ts";
-import { getMiraDatabasePath } from "../../database.ts";
+import { getMiraDatabasePath } from "../../database/connection.ts";
 import { resolveDashboardProjectPaths } from "../../lib/dashboardPaths.ts";
 import { resolveBunExecutable } from "../../lib/processes.ts";
-import { JOB_WORKER_HEARTBEAT_MAX_AGE_MS } from "../jobExecutionQueue.ts";
+import { JOB_WORKER_HEARTBEAT_MAX_AGE_MS } from "../jobExecutionQueue/repository.ts";
 import { DASHBOARD_SERVICES } from "../pullRequests/config.ts";
 
 const DEPLOYMENT_CUTOVER_HANDOFF_TIMEOUT_MS = 75_000;

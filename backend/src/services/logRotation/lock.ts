@@ -34,9 +34,7 @@ function resolveLogRotationLockFile(): string {
     );
 }
 
-async function ignoreRejection(
-    promise: Promise<unknown> | undefined
-): Promise<void> {
+async function ignoreRejection(promise: Promise<unknown> | undefined): Promise<void> {
     try {
         await promise;
     } catch {
@@ -145,9 +143,7 @@ async function reclaimStaleLogRotationLock(
     }
 }
 
-async function removeStaleReclaimDirectory(
-    reclaimDirectory: string
-): Promise<boolean> {
+async function removeStaleReclaimDirectory(reclaimDirectory: string): Promise<boolean> {
     let stat: Awaited<ReturnType<typeof fs.stat>>;
     try {
         stat = await fs.stat(reclaimDirectory);

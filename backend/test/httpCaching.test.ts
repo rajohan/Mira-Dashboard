@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { jsonWithEtag } from "../src/http.ts";
+import { jsonWithEtag } from "../src/http/core.ts";
 
 describe("private JSON validators", () => {
     it("returns 304 for a matching ETag without making the response public", () => {
