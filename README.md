@@ -49,8 +49,8 @@ Install all frontend, backend, and tooling dependencies from the repo root:
 bun install --frozen-lockfile
 ```
 
-The repository tracks Bun's moving Canary channel in `.bun-version`. Install or
-upgrade that runtime before working in the repository; the committed Bun config
+The repository pins an exact qualified Bun Canary revision in `.bun-version`.
+Install that revision before working in the repository; the committed Bun config
 keeps the runtime-only `bun-plugin-tailwind` peer from installing a second,
 stale Bun executable into `node_modules`.
 

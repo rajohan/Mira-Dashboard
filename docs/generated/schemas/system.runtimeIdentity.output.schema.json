@@ -1,0 +1,25 @@
+{
+  "$id": "urn:mira-dashboard:system.runtimeIdentity.output",
+  "type": "object",
+  "properties": {
+    "revision": {
+      "type": "string",
+      "description": "Full Bun Git revision."
+    },
+    "version": {
+      "type": "string",
+      "description": "Bun semantic version."
+    },
+    "versionWithRevision": {
+      "type": "string",
+      "description": "Human-readable Bun canary version and short revision."
+    }
+  },
+  "required": [
+    "revision",
+    "version",
+    "versionWithRevision"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

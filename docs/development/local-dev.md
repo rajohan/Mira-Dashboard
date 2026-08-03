@@ -12,11 +12,11 @@ From the repository or PR worktree:
 bun install --frozen-lockfile
 ```
 
-`.bun-version` selects Bun Canary. The root Bun config deliberately does not
-auto-install peer dependencies: required library peers are direct dependencies,
-while the `bun-plugin-tailwind` Bun peer is supplied by the selected runtime.
-This prevents a stable npm Bun executable from shadowing Canary in repository
-scripts.
+`.bun-version` selects the exact qualified Bun Canary revision. The root Bun
+config deliberately does not auto-install peer dependencies: required library
+peers are direct dependencies, while the `bun-plugin-tailwind` Bun peer is
+supplied by the selected runtime. This prevents a stable npm Bun executable from
+shadowing Canary in repository scripts.
 
 When Bun 1.4 is stable, re-test installs with peer auto-installation enabled.
 Remove `[install] peer = false` once `bun-plugin-tailwind` no longer installs a

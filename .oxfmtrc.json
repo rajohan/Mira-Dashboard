@@ -5,6 +5,8 @@
         "**/coverage/**",
         "**/data/**",
         "**/dist/**",
+        "docs/generated/**",
+        "migrations/**",
         "**/node_modules/**",
         "**/*.min.css",
         "**/*.min.js"

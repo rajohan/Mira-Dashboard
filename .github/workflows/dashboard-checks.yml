@@ -13,6 +13,72 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    greenfield-foundation:
+        name: greenfield-foundation
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up pinned Bun revision
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version-file: .bun-version
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Type-check qualification probes
+              run: bun run typecheck:qualification
+
+            - name: Type-check greenfield source
+              run: bun run typecheck:greenfield
+
+            - name: Test qualification probes
+              run: bun run test:qualification
+
+            - name: Test greenfield source
+              run: bun run test:greenfield
+
+            - name: Test documentation generator
+              run: bun run test:greenfield:docs
+
+            - name: Verify generated documentation
+              run: bun run docs:check
+
+            - name: Verify migration graph
+              run: bun run db:check
+
+    drizzle-migration-conflicts:
+        name: drizzle-migration-conflicts
+        if: github.event_name == 'pull_request'
+        permissions:
+            contents: read
+            pull-requests: write
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up pinned Bun revision
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version-file: .bun-version
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Check migration conflicts
+              uses: drizzle-team/drizzle-orm/actions/check@748058e837d9c4247330e3d45580cbdae52bffda
+              with:
+                  config: drizzle.config.ts
+
     frontend-checks:
         name: frontend-checks
         runs-on: ubuntu-latest

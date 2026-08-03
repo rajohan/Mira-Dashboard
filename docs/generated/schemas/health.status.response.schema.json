@@ -1,0 +1,18 @@
+{
+  "$id": "urn:mira-dashboard:health.status.response",
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [
+        "live",
+        "ready"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
