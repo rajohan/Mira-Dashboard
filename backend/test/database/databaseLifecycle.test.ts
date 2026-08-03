@@ -1283,11 +1283,12 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("preserves unread heartbeat incidents and their linked reports", () => {
+    it("preserves unread heartbeat incidents and their latest linked reports", () => {
         const root = temporaryRoot("mira-db-heartbeat-incident-retention-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
         const oldTimestamp = "2025-01-01T00:00:00.000Z";
+        const latestActiveTimestamp = "2025-01-02T00:00:00.000Z";
         const now = new Date("2026-07-23T12:00:00.000Z");
         try {
             applyDatabaseMigrations(database, databasePath);
@@ -1297,7 +1298,9 @@ describe("Dashboard SQLite lifecycle", () => {
                         type, status, title, body_md, summary, source,
                         source_job_id, created_at, updated_at, occurred_at
                      ) VALUES
-                       ('heartbeat', 'warning', 'Active incident', '', '', 'openclaw',
+                       ('heartbeat', 'warning', 'Superseded combined snapshot', '', '', 'openclaw',
+                        'ops-check', ?, ?, ?),
+                       ('heartbeat', 'warning', 'Latest active snapshot', '', '', 'openclaw',
                         'ops-check', ?, ?, ?),
                        ('heartbeat', 'warning', 'Acknowledged incident', '', '', 'openclaw',
                         'ops-check', ?, ?, ?)`
@@ -1306,6 +1309,9 @@ describe("Dashboard SQLite lifecycle", () => {
                     oldTimestamp,
                     oldTimestamp,
                     oldTimestamp,
+                    latestActiveTimestamp,
+                    latestActiveTimestamp,
+                    latestActiveTimestamp,
                     oldTimestamp,
                     oldTimestamp,
                     oldTimestamp
@@ -1314,7 +1320,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 .query("SELECT id, title FROM reports ORDER BY id")
                 .all() as Array<{ id: number; title: string }>;
             const activeReportId = reportIds.find(
-                (report) => report.title === "Active incident"
+                (report) => report.title === "Latest active snapshot"
             )?.id;
             const acknowledgedReportId = reportIds.find(
                 (report) => report.title === "Acknowledged incident"
@@ -1357,13 +1363,13 @@ describe("Dashboard SQLite lifecycle", () => {
                 );
 
             const activeChanges = pruneDatabaseHistory(database, now);
-            expect(activeChanges).toMatchObject({ notifications: 1, reports: 1 });
+            expect(activeChanges).toMatchObject({ notifications: 1, reports: 2 });
             expect(
                 database.query("SELECT title FROM notifications ORDER BY title").all()
             ).toEqual([{ title: "Active incident" }]);
             expect(
                 database.query("SELECT title FROM reports ORDER BY title").all()
-            ).toEqual([{ title: "Active incident" }]);
+            ).toEqual([{ title: "Latest active snapshot" }]);
 
             database
                 .prepare("UPDATE notifications SET is_read = 1 WHERE is_read = 0")

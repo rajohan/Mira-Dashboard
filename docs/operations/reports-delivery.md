@@ -81,7 +81,9 @@ Warning/error reports send every currently active incident, sorted by key. An
 previous run for the same source job:
 
 - a new key creates one unread notification;
-- an unchanged key does not update or reopen its notification;
+- an unchanged key does not create or reopen a notification, reset read state,
+  or change the original notification time; while unread, its report link tracks
+  the latest accepted snapshot;
 - a missing key marks that incident resolved;
 - a resolved key that appears again creates or reopens one notification;
 - multiple simultaneous incidents are tracked independently.
@@ -158,6 +160,11 @@ The notification bell links to:
 ```text
 /reports?reportId=<id>
 ```
+
+For an unread heartbeat incident, `reportId` advances to the latest accepted
+snapshot without changing the notification id or original occurrence time. This
+keeps the current active set available through report retention. Once the
+notification is read manually or by incident recovery, normal retention resumes.
 
 The Reports page can load linked reports outside the first list page through
 the detail endpoint.

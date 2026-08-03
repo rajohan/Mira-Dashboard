@@ -129,18 +129,8 @@ function latestHeartbeatReport(
     return row ? toReport(row) : undefined;
 }
 
-function isLatestHeartbeatSnapshot(
-    report: Report,
-    previous: Report | undefined
-): boolean {
-    if (!previous) return true;
-
-    const occurredAtDifference =
-        Date.parse(report.occurredAt) - Date.parse(previous.occurredAt);
-    return (
-        occurredAtDifference > 0 ||
-        (occurredAtDifference === 0 && report.id >= previous.id)
-    );
+function isLatestHeartbeatReport(report: Report): boolean {
+    return latestHeartbeatReport(report.source, report.sourceJobId)?.id === report.id;
 }
 
 function heartbeatIncidentNotificationDedupeKey(
@@ -157,6 +147,19 @@ function heartbeatIncidentNotificationDedupeKey(
         )
         .digest("hex");
     return `${HEARTBEAT_INCIDENT_NOTIFICATION_PREFIX}${fingerprint}`;
+}
+
+function reportNotificationMetadata(
+    report: Report,
+    heartbeatIncident?: HeartbeatIncident
+): string {
+    return JSON.stringify({
+        heartbeatIncidentKey: heartbeatIncident?.key,
+        reportId: report.id,
+        reportStatus: report.status,
+        reportType: report.type,
+        sourceJobId: report.sourceJobId,
+    });
 }
 
 function resolveHeartbeatIncident(report: Report, incidentKey: string): void {
@@ -189,6 +192,24 @@ function resolveAllHeartbeatIncidents(report: Report): void {
         );
 }
 
+function refreshUnreadHeartbeatIncidentLink(
+    report: Report,
+    heartbeatIncident: HeartbeatIncident
+): void {
+    database
+        .prepare(
+            `UPDATE notifications
+             SET metadata_json = ?, updated_at = ?
+             WHERE dedupe_key = ?
+               AND is_read = 0`
+        )
+        .run(
+            reportNotificationMetadata(report, heartbeatIncident),
+            nowIso(),
+            heartbeatIncidentNotificationDedupeKey(report, heartbeatIncident.key)
+        );
+}
+
 function createReportNotification(
     report: Report,
     heartbeatIncident?: HeartbeatIncident
@@ -217,13 +238,7 @@ function createReportNotification(
             heartbeatIncident
                 ? heartbeatIncidentNotificationDedupeKey(report, heartbeatIncident.key)
                 : notificationDedupeKey(report),
-            JSON.stringify({
-                heartbeatIncidentKey: heartbeatIncident?.key,
-                reportId: report.id,
-                reportStatus: report.status,
-                reportType: report.type,
-                sourceJobId: report.sourceJobId,
-            }),
+            reportNotificationMetadata(report, heartbeatIncident),
             now,
             now,
             report.occurredAt
@@ -282,7 +297,7 @@ function createReportInTransaction(input: CreateReportInput): Report {
         if (!currentIncidents) {
             throw new Error("Heartbeat report is missing a valid incident snapshot");
         }
-        if (!isLatestHeartbeatSnapshot(report, previousHeartbeat)) return report;
+        if (!isLatestHeartbeatReport(report)) return report;
 
         if (report.status === "ok") {
             resolveAllHeartbeatIncidents(report);
@@ -300,11 +315,11 @@ function createReportInTransaction(input: CreateReportInput): Report {
         }
 
         const previousKeys = new Set(previousIncidents.map((incident) => incident.key));
-        if (shouldNotify) {
-            for (const incident of currentIncidents) {
-                if (!previousKeys.has(incident.key)) {
-                    createReportNotification(report, incident);
-                }
+        for (const incident of currentIncidents) {
+            if (previousKeys.has(incident.key)) {
+                refreshUnreadHeartbeatIncidentLink(report, incident);
+            } else if (shouldNotify) {
+                createReportNotification(report, incident);
             }
         }
         return report;

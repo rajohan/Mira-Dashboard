@@ -1326,35 +1326,73 @@ describe("Mira Dashboard backend integration", () => {
             )
         ).toEqual(cacheNotification);
 
-        await postHeartbeat("error", "2026-06-24T10:00:00.000Z", [
-            blockedTaskKey,
-            cacheFailureKey,
-        ]);
+        const repeatedParallelFailure = await postHeartbeat(
+            "error",
+            "2026-06-24T10:00:00.000Z",
+            [blockedTaskKey, cacheFailureKey]
+        );
         const repeatedParallelNotifications = await listIncidentNotifications();
         expect(repeatedParallelNotifications).toHaveLength(2);
         expect(
             repeatedParallelNotifications.find((item) => item.id === cacheNotification.id)
-        ).toEqual(cacheNotification);
+        ).toMatchObject({
+            id: cacheNotification.id,
+            isRead: false,
+            metadata: {
+                heartbeatIncidentKey: cacheFailureKey,
+                reportId: repeatedParallelFailure.body.report.id,
+            },
+            occurredAt: cacheNotification.occurredAt,
+        });
 
-        await postHeartbeat("warning", "2026-06-24T10:15:00.000Z", [blockedTaskKey]);
+        const partialRecovery = await postHeartbeat(
+            "warning",
+            "2026-06-24T10:15:00.000Z",
+            [cacheFailureKey]
+        );
         const partiallyRecoveredNotifications = await listIncidentNotifications();
         expect(partiallyRecoveredNotifications).toHaveLength(2);
-        expect(partiallyRecoveredNotifications.every((item) => item.isRead)).toBe(true);
-
-        const cacheRecurrence = await postHeartbeat("error", "2026-06-24T10:30:00.000Z", [
-            blockedTaskKey,
-            cacheFailureKey,
-        ]);
-        const cacheRecurrenceNotifications = await listIncidentNotifications();
-        expect(cacheRecurrenceNotifications).toHaveLength(2);
         expect(
-            cacheRecurrenceNotifications.find(
-                (item) => item.metadata.reportId === cacheRecurrence.body.report.id
+            partiallyRecoveredNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === blockedTaskKey
+            )
+        ).toMatchObject({ isRead: true });
+        expect(
+            partiallyRecoveredNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === cacheFailureKey
             )
         ).toMatchObject({
             id: cacheNotification.id,
             isRead: false,
-            metadata: { heartbeatIncidentKey: cacheFailureKey },
+            metadata: { reportId: partialRecovery.body.report.id },
+            occurredAt: cacheNotification.occurredAt,
+        });
+
+        const parallelRecurrence = await postHeartbeat(
+            "error",
+            "2026-06-24T10:30:00.000Z",
+            [blockedTaskKey, cacheFailureKey]
+        );
+        const parallelRecurrenceNotifications = await listIncidentNotifications();
+        expect(parallelRecurrenceNotifications).toHaveLength(2);
+        expect(
+            parallelRecurrenceNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === cacheFailureKey
+            )
+        ).toMatchObject({
+            id: cacheNotification.id,
+            isRead: false,
+            metadata: { reportId: parallelRecurrence.body.report.id },
+            occurredAt: cacheNotification.occurredAt,
+        });
+        expect(
+            parallelRecurrenceNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === blockedTaskKey
+            )
+        ).toMatchObject({
+            id: firstNotifications[0]!.id,
+            isRead: false,
+            metadata: { reportId: parallelRecurrence.body.report.id },
             occurredAt: "2026-06-24T10:30:00.000Z",
         });
 
@@ -1380,6 +1418,28 @@ describe("Mira Dashboard backend integration", () => {
             },
             occurredAt: "2026-06-24T12:00:00.000Z",
         });
+
+        const correctedRecovery = await postHeartbeat(
+            "ok",
+            "2026-06-24T11:30:00.000Z",
+            undefined,
+            "2026-06-24T12:00:00.000Z"
+        );
+        expect(correctedRecovery.body.report.id).toBe(recurrence.body.report.id);
+        const correctedRecoveryNotifications = await listIncidentNotifications();
+        expect(correctedRecoveryNotifications.every((item) => item.isRead)).toBe(true);
+
+        const staleBackwardCorrection = await postHeartbeat(
+            "warning",
+            "2026-06-24T10:45:00.000Z",
+            [blockedTaskKey],
+            "2026-06-24T12:00:00.000Z"
+        );
+        expect(staleBackwardCorrection.body.report.id).toBe(recurrence.body.report.id);
+        const staleBackwardCorrectionNotifications = await listIncidentNotifications();
+        expect(staleBackwardCorrectionNotifications.every((item) => item.isRead)).toBe(
+            true
+        );
 
         const reports = await api<{
             items: Array<{ sourceJobId?: string }>;
