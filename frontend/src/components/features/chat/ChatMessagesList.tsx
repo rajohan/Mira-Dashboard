@@ -41,6 +41,7 @@ interface ChatMessagesListProperties {
     isLoadingHistory: boolean;
     messagesContainerRef: RefObject<HTMLDivElement | undefined>;
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
+    newMessageCount?: number;
     onDeleteMessage: (messageKey: string, deleteKeys?: readonly string[]) => void;
     onDynamicContentLoad: () => void;
     onFollow: () => void;
@@ -60,6 +61,7 @@ export function ChatMessagesList({
     isLoadingHistory,
     messagesContainerRef,
     messagesVirtualizer,
+    newMessageCount = 0,
     onDeleteMessage,
     onDynamicContentLoad,
     onFollow,
@@ -100,11 +102,19 @@ export function ChatMessagesList({
         >
             {!isAtBottom && chatRows.length > 0 ? (
                 <button
-                    className="sticky top-2 z-10 float-right mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600 sm:mr-2"
+                    aria-label={
+                        newMessageCount > 0
+                            ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"}. Scroll to bottom`
+                            : "Follow messages to bottom"
+                    }
+                    aria-live={newMessageCount > 0 ? "polite" : undefined}
+                    className="sticky top-2 z-10 float-right mb-2 rounded-full border border-primary-500 bg-primary-700 px-3 py-1 text-xs font-medium text-primary-100 shadow-lg transition-colors hover:bg-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-300 sm:mr-2"
                     onClick={onFollow}
                     type="button"
                 >
-                    ↓ Follow
+                    {newMessageCount > 0
+                        ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"} ↓`
+                        : "↓ Follow"}
                 </button>
             ) : undefined}
 

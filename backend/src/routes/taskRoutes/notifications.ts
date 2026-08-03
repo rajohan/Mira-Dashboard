@@ -4,6 +4,7 @@ import { isDevelopmentExternalNotificationSuppressed } from "../../requestPolicy
 import gateway from "../../services/gateway/runtime.ts";
 
 const logger = createStructuredLogger("tasks");
+const MIRA_TASK_TRACKING_AUTOMATION_ID = "openclaw-task-tracking";
 
 type MiraTaskNotificationEvent =
     | "assigned"
@@ -43,7 +44,11 @@ export async function notifyMira(
     task: { id: number; title: string }
 ) {
     if (isDevelopmentExternalNotificationSuppressed()) return;
-    const isAutomation = currentRequestAuditContext()?.actor.type === "automation";
+    const actor = currentRequestAuditContext()?.actor;
+    if (actor?.type === "automation" && actor.id === MIRA_TASK_TRACKING_AUTOMATION_ID) {
+        return;
+    }
+    const isAutomation = actor?.type === "automation";
     try {
         await gateway.sendSessionMessage(
             "main",

@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { type ReactNode, useLayoutEffect, useRef } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 import { serializeForDisplay } from "../../../lib/displayValue";
 import type {
@@ -90,6 +90,89 @@ function isMatchingToolResult(
     );
 }
 
+const DETAIL_BOTTOM_THRESHOLD_PX = 8;
+
+/**
+ * Keeps long detail output reachable without taking over the surrounding chat scroll.
+ * @returns Rendered scrollable detail content.
+ */
+function ScrollableDetailContent({
+    ariaLabel,
+    children,
+    className,
+    contentKey,
+    shouldFollowContent = false,
+}: {
+    ariaLabel: string;
+    children: ReactNode;
+    className: string;
+    contentKey: string;
+    shouldFollowContent?: boolean;
+}) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const shouldStickToBottomRef = useRef(shouldFollowContent);
+    const [canScrollFurther, setCanScrollFurther] = useState(false);
+
+    const synchronizeScrollState = (container: HTMLDivElement) => {
+        const canScroll =
+            container.scrollHeight - container.scrollTop - container.clientHeight >
+            DETAIL_BOTTOM_THRESHOLD_PX;
+        setCanScrollFurther((previous) =>
+            previous === canScroll ? previous : canScroll
+        );
+        return canScroll;
+    };
+
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        if (!container) {
+            return;
+        }
+        if (shouldFollowContent && shouldStickToBottomRef.current) {
+            container.scrollTop = container.scrollHeight;
+        }
+        synchronizeScrollState(container);
+    }, [contentKey, shouldFollowContent]);
+
+    const scrollToBottom = () => {
+        const container = containerRef.current;
+        if (!container) {
+            return;
+        }
+        container.scrollTop = container.scrollHeight;
+        shouldStickToBottomRef.current = true;
+        setCanScrollFurther(false);
+    };
+
+    return (
+        <div className="relative min-w-0">
+            <div
+                ref={containerRef}
+                aria-label={`${ariaLabel} scroll area`}
+                className={className}
+                onScroll={(event) => {
+                    const canScroll = synchronizeScrollState(event.currentTarget);
+                    if (shouldFollowContent) {
+                        shouldStickToBottomRef.current = !canScroll;
+                    }
+                }}
+            >
+                {children}
+            </div>
+            {canScrollFurther ? (
+                <button
+                    type="button"
+                    aria-label={`Scroll ${ariaLabel.toLowerCase()} to bottom`}
+                    className="absolute right-2 bottom-2 rounded-full bg-accent-500 px-2.5 py-1 text-[10px] font-medium text-white shadow-lg transition-colors hover:bg-accent-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-300"
+                    onClick={scrollToBottom}
+                >
+                    ↓ Bottom
+                </button>
+            ) : undefined}
+        </div>
+    );
+}
+
 /**
  * Renders tool result images.
  * @returns Rendered tool result images.
@@ -144,28 +227,14 @@ function ToolResultImages({
  * @returns Rendered thinking blocks while following the bottom unless the user scrolls up.
  */
 function ThinkingBlocks({ blocks }: { blocks: ChatHistoryMessage["thinking"] }) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const shouldStickToBottomRef = useRef(true);
     const textSignature = blocks?.map((block) => block.text).join("\n") || "";
 
-    useLayoutEffect(() => {
-        const container = containerRef.current;
-        if (!container || !shouldStickToBottomRef.current) {
-            return;
-        }
-
-        container.scrollTop = container.scrollHeight;
-    }, [textSignature]);
-
     return (
-        <div
-            ref={containerRef}
+        <ScrollableDetailContent
+            ariaLabel="Thinking / working"
             className="max-h-80 space-y-2 overflow-y-auto pr-1"
-            onScroll={(event) => {
-                const element = event.currentTarget;
-                shouldStickToBottomRef.current =
-                    element.scrollHeight - element.scrollTop - element.clientHeight < 8;
-            }}
+            contentKey={textSignature}
+            shouldFollowContent
         >
             {blocks?.map((block) => (
                 <pre
@@ -178,7 +247,7 @@ function ThinkingBlocks({ blocks }: { blocks: ChatHistoryMessage["thinking"] }) 
                     {block.text}
                 </pre>
             ))}
-        </div>
+        </ScrollableDetailContent>
     );
 }
 
@@ -371,9 +440,15 @@ export function ChatMessageDetails({
                               ) : undefined}
                               <ToolSection label="Tool input">
                                   {formattedArguments ? (
-                                      <pre className="max-h-64 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
-                                          {formattedArguments}
-                                      </pre>
+                                      <ScrollableDetailContent
+                                          ariaLabel={`${label} tool input`}
+                                          className="max-h-64 overflow-auto"
+                                          contentKey={formattedArguments}
+                                      >
+                                          <pre className="font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
+                                              {formattedArguments}
+                                          </pre>
+                                      </ScrollableDetailContent>
                                   ) : (
                                       <span className="text-amber-200/80">
                                           No arguments
@@ -383,9 +458,15 @@ export function ChatMessageDetails({
                               {toolResult ? (
                                   <ToolSection label="Tool output">
                                       {toolResult.content.trim() ? (
-                                          <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
-                                              {toolResult.content}
-                                          </pre>
+                                          <ScrollableDetailContent
+                                              ariaLabel={`${label} tool output`}
+                                              className="max-h-72 overflow-auto"
+                                              contentKey={toolResult.content}
+                                          >
+                                              <pre className="font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
+                                                  {toolResult.content}
+                                              </pre>
+                                          </ScrollableDetailContent>
                                       ) : (
                                           <span className="text-amber-200/80">
                                               No text output
@@ -417,9 +498,15 @@ export function ChatMessageDetails({
                     tone={message.toolResult?.isError ? "danger" : "default"}
                 >
                     {message.toolResult?.content.trim() ? (
-                        <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
-                            {message.toolResult.content}
-                        </pre>
+                        <ScrollableDetailContent
+                            ariaLabel="Standalone tool result"
+                            className="max-h-72 overflow-auto"
+                            contentKey={message.toolResult.content}
+                        >
+                            <pre className="font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
+                                {message.toolResult.content}
+                            </pre>
+                        </ScrollableDetailContent>
                     ) : (
                         <span className="text-primary-300">No text output</span>
                     )}

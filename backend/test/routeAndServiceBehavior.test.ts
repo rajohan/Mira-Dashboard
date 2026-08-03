@@ -1041,6 +1041,113 @@ describe("backend route and service behavior", () => {
             `Task deleted: #${automatedTaskNumber}. A scoped automation changed this Mira task; review it in Dashboard when the current work is clear.`
         );
 
+        const notificationCountBeforeMiraAutomation = taskNotifications.length;
+        const miraAutomationTaskCreate = await runWithRequestAuditContext(
+            {
+                actor: { id: "openclaw-task-tracking", type: "automation" },
+                requestId: "mira-task-tracking-create",
+            },
+            () =>
+                taskRoutes["/api/tasks"].POST(
+                    jsonRequest("/api/tasks", {
+                        assignee: "mira-2026",
+                        labels: ["todo"],
+                        title: "Mira automation notification coverage",
+                    })
+                )
+        );
+        const miraAutomationTask = await responseJson(miraAutomationTaskCreate);
+        const miraAutomationTaskNumber = Number(miraAutomationTask.number);
+        expect(taskNotifications).toHaveLength(notificationCountBeforeMiraAutomation);
+
+        await runWithRequestAuditContext(
+            {
+                actor: { id: "openclaw-task-tracking", type: "automation" },
+                requestId: "mira-task-tracking-assign-raymond",
+            },
+            () =>
+                taskRoutes["/api/tasks/:id/assign"].POST(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/assign`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({ assignee: "rajohan" }),
+                            method: "POST",
+                        }
+                    )
+                )
+        );
+        await runWithRequestAuditContext(
+            {
+                actor: { id: "openclaw-task-tracking", type: "automation" },
+                requestId: "mira-task-tracking-assign-mira",
+            },
+            () =>
+                taskRoutes["/api/tasks/:id/assign"].POST(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/assign`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({ assignee: "mira-2026" }),
+                            method: "POST",
+                        }
+                    )
+                )
+        );
+        await runWithRequestAuditContext(
+            {
+                actor: { id: "openclaw-task-tracking", type: "automation" },
+                requestId: "mira-task-tracking-patch",
+            },
+            () =>
+                taskRoutes["/api/tasks/:id"].PATCH(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({
+                                labels: ["done"],
+                                title: "Mira automation notification coverage updated",
+                            }),
+                            method: "PATCH",
+                        }
+                    )
+                )
+        );
+        await runWithRequestAuditContext(
+            {
+                actor: { id: "openclaw-task-tracking", type: "automation" },
+                requestId: "mira-task-tracking-progress",
+            },
+            () =>
+                taskRoutes["/api/tasks/:id/updates"].POST(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/updates`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({
+                                author: "rajohan",
+                                messageMd: "Payload author must not override the actor",
+                            }),
+                            method: "POST",
+                        }
+                    )
+                )
+        );
+        runWithRequestAuditContext(
+            {
+                actor: { id: "openclaw-task-tracking", type: "automation" },
+                requestId: "mira-task-tracking-delete",
+            },
+            () =>
+                taskRoutes["/api/tasks/:id"].DELETE(
+                    requestWithParameters(`/api/tasks/${miraAutomationTaskNumber}`, {
+                        id: String(miraAutomationTaskNumber),
+                    })
+                )
+        );
+        expect(taskNotifications).toHaveLength(notificationCountBeforeMiraAutomation);
+
         const enriched = await taskRoutes["/api/tasks/:id"].GET(
             requestWithParameters(`/api/tasks/${id}`, { id: String(id) })
         );

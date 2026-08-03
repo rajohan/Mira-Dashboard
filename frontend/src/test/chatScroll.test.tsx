@@ -148,6 +148,56 @@ describe("chat scroll", () => {
         unmount();
     });
 
+    it("counts new conversation messages while scrolled up and clears on follow", () => {
+        const activity: ChatRow = {
+            key: "activity",
+            kind: "typing",
+            message: { content: "Thinking", role: "assistant", text: "Thinking" },
+        };
+        const initialRows = [chatRow("first", "assistant"), activity];
+        const stickToBottomRef = { current: false };
+        const { result, rerender, unmount } = renderHook(
+            ({ rows }: { rows: ChatRow[] }) =>
+                useChatScroll(rows, "agent:main:main", jest.fn(), stickToBottomRef),
+            { initialProps: { rows: initialRows } }
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 1000 },
+        });
+        result.current.messagesContainerRef.current = container;
+        animationFrameState.frames.clear();
+        stickToBottomRef.current = false;
+        container.scrollTop = 120;
+        act(() => result.current.handleScroll());
+
+        const firstNewMessage = chatRow("new-answer", "assistant");
+        rerender({ rows: [initialRows[0]!, firstNewMessage, activity] });
+        expect(result.current.newMessageCount).toBe(1);
+
+        const toolRow = chatRow("new-tool", "tool");
+        rerender({
+            rows: [initialRows[0]!, firstNewMessage, toolRow, activity],
+        });
+        expect(result.current.newMessageCount).toBe(1);
+
+        rerender({
+            rows: [
+                initialRows[0]!,
+                firstNewMessage,
+                toolRow,
+                chatRow("second-answer", "assistant"),
+                activity,
+            ],
+        });
+        expect(result.current.newMessageCount).toBe(2);
+
+        act(() => result.current.followToBottom());
+        expect(result.current.newMessageCount).toBe(0);
+        unmount();
+    });
+
     it("does not force a queued bottom follow after the user scrolls away", () => {
         const row: ChatRow = {
             key: "answer",
