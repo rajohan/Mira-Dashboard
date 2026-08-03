@@ -1,0 +1,805 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const AUTOMATION_VALIDATOR = "ab".repeat(32);
+const AUTOMATION_CREDENTIALS = JSON.stringify([
+    {
+        id: "native-reader",
+        scopes: ["tasks:read"],
+        tokenHash: new Bun.CryptoHasher("sha256")
+            .update(AUTOMATION_VALIDATOR)
+            .digest("hex"),
+    },
+]);
+
+const state: {
+    baseUrl: string;
+    child?: ReturnType<typeof Bun.spawn>;
+    passwordSessionToken: string;
+    revokedSessionToken: string;
+    sessionToken: string;
+    staleSessionToken: string;
+    temporaryRoot: string;
+} = {
+    baseUrl: "",
+    passwordSessionToken: "",
+    revokedSessionToken: "",
+    sessionToken: "",
+    staleSessionToken: "",
+    temporaryRoot: "",
+};
+
+async function api<T>(
+    endpoint: string,
+    options: RequestInit = {}
+): Promise<{ body: T; status: number }> {
+    const headers = new Headers(options.headers);
+    headers.set("Content-Type", "application/json");
+    headers.set(
+        "Cookie",
+        `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`
+    );
+    const response = await fetch(`${state.baseUrl}${endpoint}`, {
+        ...options,
+        headers,
+    });
+    const text = await response.text();
+    return {
+        body: text ? (JSON.parse(text) as T) : (undefined as T),
+        status: response.status,
+    };
+}
+
+function json(method: string, body: unknown): RequestInit {
+    return { body: JSON.stringify(body), method };
+}
+
+function canRemoveTemporaryRoot(temporaryRoot: string): boolean {
+    return (
+        temporaryRoot !== "" &&
+        path.isAbsolute(temporaryRoot) &&
+        path.basename(temporaryRoot).startsWith("mira-dashboard-bun-test-")
+    );
+}
+
+async function connectDashboardSocket(sessionToken: string): Promise<WebSocket> {
+    const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws", {
+        headers: {
+            Cookie: `mira_dashboard_session=${encodeURIComponent(sessionToken)}`,
+        },
+    });
+    await new Promise<void>((resolve, reject) => {
+        const onMessage = (): void => {
+            cleanup();
+            resolve();
+        };
+        const onError = (): void => {
+            cleanup();
+            ws.close();
+            reject(new Error("WebSocket failed"));
+        };
+        const cleanup = (): void => {
+            clearTimeout(timer);
+            ws.removeEventListener("message", onMessage);
+            ws.removeEventListener("error", onError);
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            ws.close();
+            reject(new Error("Timed out waiting for ws state"));
+        }, 1000);
+        ws.addEventListener("message", onMessage);
+        ws.addEventListener("error", onError);
+    });
+    return ws;
+}
+
+function nextSocketMessage(
+    ws: WebSocket,
+    request: Record<string, unknown> & { id: string }
+): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+        const onMessage = (event: MessageEvent): void => {
+            const response = JSON.parse(String(event.data)) as Record<string, unknown>;
+            if (response.id !== request.id) return;
+            clearTimeout(timer);
+            ws.removeEventListener("message", onMessage);
+            resolve(response);
+        };
+        const timer = setTimeout(() => {
+            ws.removeEventListener("message", onMessage);
+            reject(new Error("Timed out waiting for ws response"));
+        }, 1000);
+        ws.addEventListener("message", onMessage);
+        ws.send(JSON.stringify(request));
+    });
+}
+
+async function drainReader(
+    reader: { read: () => Promise<{ done: boolean; value?: Uint8Array }> },
+    decoder: TextDecoder
+): Promise<void> {
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            decoder.decode(next.value, { stream: true });
+        }
+        decoder.decode();
+    } catch {
+        // Test cleanup should not fail because the child stdout stream closed.
+    }
+}
+
+describe("Bun-native dashboard backend", () => {
+    beforeAll(async () => {
+        state.temporaryRoot = await fs.mkdtemp(
+            path.join(os.tmpdir(), "mira-dashboard-bun-test-")
+        );
+        const workspaceRoot = path.join(state.temporaryRoot, "workspace");
+        const openclawRoot = path.join(state.temporaryRoot, "openclaw");
+        const frontendRoot = path.join(state.temporaryRoot, "frontend");
+        const dockerRoot = path.join(state.temporaryRoot, "docker");
+        const composeWrapper = path.join(state.temporaryRoot, "compose-wrapper.sh");
+        await fs.mkdir(path.join(openclawRoot, "hooks", "transforms"), {
+            recursive: true,
+        });
+        await fs.mkdir(path.join(frontendRoot, "assets"), { recursive: true });
+        await fs.mkdir(dockerRoot, { recursive: true });
+        await fs.mkdir(workspaceRoot, { recursive: true });
+        await fs.mkdir(path.join(workspaceRoot, "notes"), { recursive: true });
+        await fs.writeFile(path.join(workspaceRoot, "README.md"), "hello workspace\n");
+        await fs.writeFile(path.join(openclawRoot, "openclaw.json"), "{}\n");
+        await fs.writeFile(composeWrapper, "#!/bin/sh\nprintf 'compose:%s\\n' \"$*\"\n");
+        await fs.chmod(composeWrapper, 0o755);
+        await fs.writeFile(
+            path.join(frontendRoot, "index.html"),
+            '<!doctype html><html><body><div id="root"></div></body></html>'
+        );
+        await fs.writeFile(
+            path.join(frontendRoot, "index-fixture.js"),
+            "export const isOk = true;\n"
+        );
+        const serverScript = path.join(state.temporaryRoot, "native-server.ts");
+        const serverModulePath = path.resolve(
+            import.meta.dirname,
+            "../../src/server/app.ts"
+        );
+        const authSessionModulePath = path.resolve(
+            import.meta.dirname,
+            "../../src/auth/sessionRepository.ts"
+        );
+        const authUserModulePath = path.resolve(
+            import.meta.dirname,
+            "../../src/auth/userRepository.ts"
+        );
+        const databaseModulePath = path.resolve(
+            import.meta.dirname,
+            "../../src/database/connection.ts"
+        );
+        const dockerActionsModulePath = path.resolve(
+            import.meta.dirname,
+            "../../src/services/dockerActions.ts"
+        );
+        const execJobsModulePath = path.resolve(
+            import.meta.dirname,
+            "../../src/services/execJobs.ts"
+        );
+        const scheduledJobsModulePath = path.resolve(
+            import.meta.dirname,
+            "../../src/services/scheduledJobs/runtime.ts"
+        );
+        const serverModuleUrl = pathToFileURL(serverModulePath).href;
+        const authSessionModuleUrl = pathToFileURL(authSessionModulePath).href;
+        const authUserModuleUrl = pathToFileURL(authUserModulePath).href;
+        const databaseModuleUrl = pathToFileURL(databaseModulePath).href;
+        const dockerActionsModuleUrl = pathToFileURL(dockerActionsModulePath).href;
+        const execJobsModuleUrl = pathToFileURL(execJobsModulePath).href;
+        const scheduledJobsModuleUrl = pathToFileURL(scheduledJobsModulePath).href;
+        await fs.writeFile(
+            serverScript,
+            [
+                `import { createServer } from ${JSON.stringify(serverModuleUrl)};`,
+                `import { createSession } from ${JSON.stringify(authSessionModuleUrl)};`,
+                `import { createUser } from ${JSON.stringify(authUserModuleUrl)};`,
+                `import { database } from ${JSON.stringify(databaseModuleUrl)};`,
+                `import { registerDockerExecutionActions } from ${JSON.stringify(dockerActionsModuleUrl)};`,
+                `import { registerExecExecutionActions } from ${JSON.stringify(execJobsModuleUrl)};`,
+                `import { startScheduledJobExecutor, stopScheduledJobExecutor } from ${JSON.stringify(scheduledJobsModuleUrl)};`,
+                "registerDockerExecutionActions();",
+                "registerExecExecutionActions();",
+                "startScheduledJobExecutor('development', { tickIntervalMs: 10 });",
+                "const user = await createUser('native-test-user', 'native-test-password');",
+                "const passwordUser = await createUser('native-password-user', 'native-test-password');",
+                "const passwordSessionToken = createSession(passwordUser.id, { userAgent: 'Native password test' });",
+                "const verifiedAt = new Date().toISOString();",
+                "database.prepare('UPDATE users SET mfa_enabled_at = ?, updated_at = ? WHERE id = ?').run(verifiedAt, verifiedAt, user.id);",
+                "const sessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: verifiedAt, userAgent: 'Native Bun test' });",
+                "const revokedSessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: verifiedAt, userAgent: 'Native revoked test' });",
+                "const staleSessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: new Date(Date.now() - 20 * 60_000).toISOString(), userAgent: 'Native stale test' });",
+                "const server = createServer(0);",
+                "console.log(JSON.stringify({ passwordSessionToken, port: server.port, revokedSessionToken, sessionToken, staleSessionToken }));",
+                "process.on('SIGTERM', () => { Promise.all([server.stop(true), stopScheduledJobExecutor()]).then(() => process.exit(0)).catch(() => process.exit(1)); });",
+            ].join("\n")
+        );
+
+        const child = Bun.spawn({
+            cmd: ["bun", serverScript],
+            cwd: path.resolve(import.meta.dirname, "../.."),
+            env: {
+                ...process.env,
+                MIRA_DASHBOARD_DB_PATH: path.join(
+                    state.temporaryRoot,
+                    "dashboard.database"
+                ),
+                MIRA_DASHBOARD_AUTOMATION_CREDENTIALS: AUTOMATION_CREDENTIALS,
+                MIRA_DASHBOARD_FRONTEND_PATH: frontendRoot,
+                MIRA_DOCKER_COMPOSE_WRAPPER: composeWrapper,
+                MIRA_DOCKER_ROOT: dockerRoot,
+                OPENCLAW_HOME: openclawRoot,
+                MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "",
+                WORKSPACE_ROOT: workspaceRoot,
+            },
+            stderr: "inherit",
+            stdin: "ignore",
+            stdout: "pipe",
+        });
+        state.child = child;
+        let stdout = "";
+        const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
+        const decoder = new TextDecoder();
+        const startupTimeoutMs = 10_000;
+        while (!stdout.includes("\n")) {
+            const exited = (async () => {
+                const code = await child.exited;
+                return { code, done: true as const };
+            })();
+            let startupTimer: Timer | undefined;
+            const startupTimeout = new Promise<never>((_resolve, reject) => {
+                startupTimer = setTimeout(
+                    () => reject(new Error("Native server startup timed out")),
+                    startupTimeoutMs
+                );
+            });
+            let next:
+                | Awaited<ReturnType<typeof reader.read>>
+                | { code: number; done: true };
+            try {
+                next = await Promise.race([reader.read(), exited, startupTimeout]);
+            } finally {
+                if (startupTimer) clearTimeout(startupTimer);
+            }
+            if ("code" in next) {
+                throw new Error(`Native server exited early: ${next.code}`);
+            }
+            if (next.done) {
+                throw new Error("Native server exited before printing port");
+            }
+            stdout += decoder.decode(next.value, { stream: true });
+        }
+        const firstLine = stdout.split("\n").find((line) => line.trim());
+        if (!firstLine) {
+            throw new Error("Native server did not print port");
+        }
+        void drainReader(reader, decoder);
+        const {
+            passwordSessionToken,
+            port,
+            revokedSessionToken,
+            sessionToken,
+            staleSessionToken,
+        } = JSON.parse(firstLine) as {
+            passwordSessionToken: string;
+            port: number;
+            revokedSessionToken: string;
+            sessionToken: string;
+            staleSessionToken: string;
+        };
+        state.baseUrl = `http://127.0.0.1:${port}`;
+        state.passwordSessionToken = passwordSessionToken;
+        state.revokedSessionToken = revokedSessionToken;
+        state.sessionToken = sessionToken;
+        state.staleSessionToken = staleSessionToken;
+    });
+
+    afterAll(async () => {
+        state.child?.kill("SIGTERM");
+        if (state.child) {
+            let shutdownTimer: Timer | undefined;
+            let didExitGracefully: boolean;
+            try {
+                didExitGracefully = await Promise.race([
+                    (async () => {
+                        await state.child!.exited;
+                        return true;
+                    })(),
+                    new Promise<false>((resolve) => {
+                        shutdownTimer = setTimeout(() => resolve(false), 1000);
+                    }),
+                ]);
+            } finally {
+                if (shutdownTimer) clearTimeout(shutdownTimer);
+            }
+            if (!didExitGracefully) {
+                state.child.kill("SIGKILL");
+                try {
+                    await state.child.exited;
+                } catch {
+                    // Process termination during cleanup should not fail the suite.
+                }
+            }
+        }
+        if (canRemoveTemporaryRoot(state.temporaryRoot)) {
+            await fs.rm(state.temporaryRoot, { recursive: true, force: true });
+        }
+    });
+
+    it("reports health and auth bootstrap state", async () => {
+        const live = await api<{ status: string; uptimeSeconds: number }>(
+            "/api/health/live"
+        );
+        expect(live.status).toBe(200);
+        expect(live.body.status).toBe("isOk");
+        expect(live.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
+        const liveHead = await api<undefined>("/api/health/live", {
+            method: "HEAD",
+        });
+        expect(liveHead).toEqual({ body: undefined, status: 200 });
+
+        const retiredHealth = await fetch(`${state.baseUrl}/health`);
+        expect(retiredHealth.status).toBe(404);
+        expect(await retiredHealth.text()).toBe("Not found");
+
+        const bootstrap = await api<{
+            hasGatewayToken: boolean;
+            isBootstrapRequired: boolean;
+        }>("/api/auth/bootstrap");
+        expect(bootstrap.status).toBe(200);
+        expect(bootstrap.body).toEqual({
+            hasGatewayToken: false,
+            isBootstrapRequired: false,
+        });
+    });
+
+    it("does not grant loopback API access when forwarded client headers are present", async () => {
+        const response = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: { "x-real-ip": "10.0.0.25" },
+        });
+        expect(response.status).toBe(401);
+    });
+
+    it("does not grant loopback API access to a rebound host or browser origin", async () => {
+        const port = new URL(state.baseUrl).port;
+        const reboundOrigin = `http://evil.example:${port}`;
+        const reboundHost = { Host: `evil.example:${port}` };
+        const originResponse = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: {
+                ...reboundHost,
+                Origin: reboundOrigin,
+            },
+        });
+        expect(originResponse.status).toBe(401);
+
+        const originlessResponse = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: reboundHost,
+        });
+        expect(originlessResponse.status).toBe(401);
+    });
+
+    it("enforces scoped automation credentials in the native server", async () => {
+        const forwardedClient = { "x-real-ip": "203.0.113.25" };
+        const authorization = `Bearer native-reader.${AUTOMATION_VALIDATOR}`;
+        const allowed = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: { ...forwardedClient, authorization },
+        });
+        expect(allowed.status).toBe(200);
+
+        const denied = await fetch(`${state.baseUrl}/api/exec/start`, {
+            headers: { ...forwardedClient, authorization },
+            method: "POST",
+        });
+        expect(denied.status).toBe(403);
+        expect(denied.json()).resolves.toEqual({
+            error: {
+                code: "automation_scope_denied",
+                message: "Automation credential scope denied",
+                requestId: expect.any(String),
+            },
+        });
+
+        const invalid = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: {
+                ...forwardedClient,
+                authorization: `Bearer native-reader.${"ff".repeat(32)}`,
+            },
+        });
+        expect(invalid.status).toBe(401);
+        expect(invalid.json()).resolves.toEqual({
+            error: {
+                code: "invalid_automation_credential",
+                message: "Invalid automation credential",
+                requestId: expect.any(String),
+            },
+        });
+    });
+
+    it("rate limits auth routes using native Bun policy", async () => {
+        let latest = new Response();
+        for (let index = 0; index < 21; index += 1) {
+            latest = await fetch(`${state.baseUrl}/api/auth/bootstrap`, {
+                headers: { "x-forwarded-for": "203.0.113.44" },
+            });
+        }
+
+        expect(latest.status).toBe(429);
+        expect(latest.headers.get("ratelimit-policy")).toBe("20;w=60");
+        expect(latest.headers.get("retry-after")).toBeTruthy();
+        expect(await latest.json()).toEqual({
+            error: {
+                code: "rate_limited",
+                message: "Too many authentication attempts, please try again later",
+                requestId: expect.any(String),
+            },
+        });
+    });
+
+    it("accepts authenticated native dashboard WebSocket connections", async () => {
+        const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws", {
+            headers: {
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
+            },
+        });
+        const message = await new Promise<Record<string, unknown>>((resolve, reject) => {
+            const timer = setTimeout(
+                () => reject(new Error("Timed out waiting for ws state")),
+                1000
+            );
+            ws.addEventListener("message", (event) => {
+                clearTimeout(timer);
+                resolve(JSON.parse(String(event.data)) as Record<string, unknown>);
+            });
+            ws.addEventListener("error", () => {
+                clearTimeout(timer);
+                reject(new Error("WebSocket failed"));
+            });
+        });
+        ws.close();
+
+        expect(message).toMatchObject({
+            gatewayConnected: false,
+            sessions: [],
+            type: "state",
+        });
+    });
+
+    it("revalidates WebSocket sessions and requires fresh MFA for Gateway mutations", async () => {
+        const passwordSocket = await connectDashboardSocket(state.passwordSessionToken);
+        const enrollmentRequired = await nextSocketMessage(passwordSocket, {
+            id: "password-mutation",
+            method: "chat.send",
+            params: { message: "test" },
+            type: "req",
+            userActivity: true,
+        });
+        expect(enrollmentRequired).toMatchObject({
+            code: "mfa_enrollment_required",
+            id: "password-mutation",
+            isOk: false,
+            type: "response",
+        });
+        const readOnly = await nextSocketMessage(passwordSocket, {
+            id: "password-read",
+            method: "sessions.list",
+            params: {},
+            type: "req",
+        });
+        expect(readOnly).toMatchObject({
+            error: "Gateway not connected",
+            id: "password-read",
+            isOk: false,
+            type: "response",
+        });
+        const fullMessageRead = await nextSocketMessage(passwordSocket, {
+            id: "password-full-message-read",
+            method: "chat.message.get",
+            params: {
+                messageId: "history-message-1",
+                sessionKey: "agent:main:main",
+            },
+            type: "req",
+        });
+        expect(fullMessageRead).toMatchObject({
+            error: "Gateway not connected",
+            id: "password-full-message-read",
+            isOk: false,
+            type: "response",
+        });
+        passwordSocket.close();
+
+        const staleSocket = await connectDashboardSocket(state.staleSessionToken);
+        const stepUpRequired = await nextSocketMessage(staleSocket, {
+            id: "stale-mutation",
+            method: "sessions.patch",
+            params: { key: "agent:main:main" },
+            type: "req",
+        });
+        expect(stepUpRequired).toMatchObject({
+            code: "step_up_required",
+            id: "stale-mutation",
+            isOk: false,
+            type: "response",
+        });
+        staleSocket.close();
+
+        const revokedSocket = await connectDashboardSocket(state.revokedSessionToken);
+        const logout = await fetch(`${state.baseUrl}/api/auth/logout`, {
+            headers: {
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.revokedSessionToken)}`,
+            },
+            method: "POST",
+        });
+        expect(logout.status).toBe(200);
+        const closed = new Promise<CloseEvent>((resolve) => {
+            revokedSocket.addEventListener("close", resolve, { once: true });
+        });
+        revokedSocket.send(
+            JSON.stringify({
+                id: "revoked-read",
+                method: "sessions.list",
+                params: {},
+                type: "req",
+            })
+        );
+        const closeEvent = await closed;
+        expect(closeEvent.code).toBe(4401);
+    });
+
+    it("serves the app shell and hashed static assets", async () => {
+        const appRoute = await fetch(`${state.baseUrl}/tasks`);
+        expect(appRoute.status).toBe(200);
+        expect(appRoute.headers.get("content-type")).toContain("text/html");
+        expect(appRoute.headers.get("cache-control")).toBe("no-cache");
+        expect(appRoute.headers.get("etag")).toBeTruthy();
+        expect(appRoute.headers.get("last-modified")).toBeTruthy();
+        expect(appRoute.headers.get("content-security-policy")).toContain(
+            `connect-src 'self' ${state.baseUrl.replace(/^http/u, "ws")}`
+        );
+        expect(appRoute.headers.get("permissions-policy")).toContain("microphone=(self)");
+        expect(appRoute.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(appRoute.headers.get("x-frame-options")).toBe("DENY");
+        expect(appRoute.headers.get("x-request-id")).toBeTruthy();
+
+        const rootChunk = await fetch(`${state.baseUrl}/index-fixture.js`);
+        expect(rootChunk.status).toBe(200);
+        expect(rootChunk.headers.get("cache-control")).toBe("no-cache");
+        expect(rootChunk.headers.get("etag")).toBeTruthy();
+        expect(rootChunk.headers.get("last-modified")).toBeTruthy();
+        expect(rootChunk.headers.get("x-request-id")).not.toBe(
+            appRoute.headers.get("x-request-id")
+        );
+
+        const cachedRootChunk = await fetch(`${state.baseUrl}/index-fixture.js`, {
+            headers: {
+                "If-None-Match": rootChunk.headers.get("etag") ?? "",
+            },
+        });
+        expect(cachedRootChunk.status).toBe(304);
+
+        const missingChunk = await fetch(
+            `${state.baseUrl}/assets/index-missing-after-deploy.js`
+        );
+        expect(missingChunk.status).toBe(404);
+        expect(missingChunk.headers.get("content-type")).not.toContain("text/html");
+    });
+
+    it("preserves same-origin terminal execution and rejects cross-site mutations", async () => {
+        const browserHeaders = {
+            "Content-Type": "application/json",
+            Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
+            Origin: state.baseUrl,
+            "Sec-Fetch-Site": "same-origin",
+        };
+        const changedDirectory = await fetch(`${state.baseUrl}/api/terminal/cd`, {
+            body: JSON.stringify({ cwd: "/", path: "tmp" }),
+            headers: browserHeaders,
+            method: "POST",
+        });
+        expect(changedDirectory.status).toBe(200);
+        expect(changedDirectory.json()).resolves.toEqual({
+            newCwd: "/tmp",
+        });
+
+        const started = await fetch(`${state.baseUrl}/api/exec/start`, {
+            body: JSON.stringify({
+                args: ["-lc", "printf terminal-policy-ok"],
+                command: "bash",
+                cwd: "/tmp",
+            }),
+            headers: browserHeaders,
+            method: "POST",
+        });
+        expect(started.status).toBe(200);
+        const terminalRequestId = started.headers.get("x-request-id");
+        expect(terminalRequestId).toBeTruthy();
+        const { jobId } = (await started.json()) as { jobId: string };
+
+        let terminalResult:
+            | {
+                  code?: number;
+                  status: "done" | "running" | "signaled";
+                  stdout: string;
+              }
+            | undefined;
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+            const response = await api<{
+                code?: number;
+                status: "done" | "running" | "signaled";
+                stdout: string;
+            }>(`/api/exec/${encodeURIComponent(jobId)}`);
+            const result = response.body;
+            terminalResult = result;
+            if (result.status === "done") break;
+            await Bun.sleep(100);
+        }
+        expect(terminalResult).toMatchObject({
+            code: 0,
+            status: "done",
+            stdout: "terminal-policy-ok",
+        });
+
+        const auditPage = await api<{
+            events: Array<{
+                action: string;
+                actor: { id: string; type: string };
+                metadata: Record<string, unknown>;
+                outcome: string;
+                requestId?: string;
+                target: { id: string; type: string };
+            }>;
+        }>("/api/audit-events?limit=100");
+        expect(auditPage.status).toBe(200);
+        expect(auditPage.body.events).toContainEqual(
+            expect.objectContaining({
+                action: "job.enqueue",
+                actor: { id: "1:native-test-user", type: "user" },
+                outcome: "accepted",
+                requestId: terminalRequestId,
+                target: { id: jobId, type: "job-execution" },
+            })
+        );
+        expect(auditPage.body.events).toContainEqual(
+            expect.objectContaining({
+                action: "job.execute",
+                actor: { id: "1:native-test-user", type: "user" },
+                outcome: "succeeded",
+                requestId: terminalRequestId,
+                target: { id: jobId, type: "job-execution" },
+            })
+        );
+        expect(
+            JSON.stringify(
+                auditPage.body.events
+                    .filter((event) => event.target.id === jobId)
+                    .map((event) => event.metadata)
+            )
+        ).not.toContain("terminal-policy-ok");
+
+        const rejected = await fetch(`${state.baseUrl}/api/terminal/cd`, {
+            body: JSON.stringify({ cwd: "/", path: "tmp" }),
+            headers: {
+                "Content-Type": "application/json",
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
+                Origin: "https://evil.example",
+                "Sec-Fetch-Site": "cross-site",
+            },
+            method: "POST",
+        });
+        expect(rejected.status).toBe(403);
+        expect(rejected.json()).resolves.toEqual({
+            error: {
+                code: "forbidden_origin",
+                message: "Forbidden request origin",
+                requestId: expect.any(String),
+            },
+        });
+    });
+
+    it("creates, moves, updates, and deletes tasks through native routes", async () => {
+        const created = await api<{
+            assignees: Array<{ login: string }>;
+            labels: Array<{ name: string }>;
+            number: number;
+            title: string;
+        }>(
+            "/api/tasks",
+            json("POST", {
+                assignee: "rajohan",
+                body: "Exercise native Bun routes",
+                labels: ["priority-high"],
+                title: "Functional Bun backend test",
+            })
+        );
+        expect(created.status).toBe(201);
+        expect(created.body.title).toBe("Functional Bun backend test");
+        expect(created.body.labels.map((label) => label.name)).toContain("todo");
+        expect(created.body.assignees[0]?.login).toBe("rajohan");
+
+        const moved = await api<{ labels: Array<{ name: string }>; state: string }>(
+            `/api/tasks/${created.body.number}/move`,
+            json("POST", { columnLabel: "done" })
+        );
+        expect(moved.status).toBe(200);
+        expect(moved.body.state).toBe("CLOSED");
+        expect(moved.body.labels.map((label) => label.name)).toContain("done");
+
+        const update = await api<{ messageMd: string }>(
+            `/api/tasks/${created.body.number}/updates`,
+            json("POST", { author: "rajohan", messageMd: "Verified through Bun" })
+        );
+        expect(update.status).toBe(201);
+        expect(update.body.messageMd).toBe("Verified through Bun");
+
+        const deleted = await api<{ isOk: boolean }>(
+            `/api/tasks/${created.body.number}`,
+            { method: "DELETE" }
+        );
+        expect(deleted.status).toBe(200);
+        expect(deleted.body.isOk).toBe(true);
+    });
+
+    it("uses isolated workspace and config roots", async () => {
+        const files = await api<{ files: Array<{ path: string }>; root: string }>(
+            "/api/files"
+        );
+        expect(files.status).toBe(200);
+        expect(files.body.root).toBe(path.join(state.temporaryRoot, "workspace"));
+        expect(files.body.files.map((file) => file.path)).toContain("README.md");
+
+        const readFile = await api<{ content: string }>("/api/files/README.md");
+        expect(readFile.status).toBe(200);
+        expect(readFile.body.content).toBe("hello workspace\n");
+
+        const writeFile = await api<{ isSuccess: boolean; path: string }>(
+            "/api/files/notes/test.md",
+            json("PUT", { content: "created in temp workspace\n" })
+        );
+        expect(writeFile.status).toBe(200);
+        expect(writeFile.body).toMatchObject({ isSuccess: true, path: "notes/test.md" });
+
+        const traversal = await api<{ error: string }>("/api/files/..%2Foutside.txt");
+        expect(traversal.status).toBe(403);
+
+        const config = await api<{ content: string; relativePath: string }>(
+            "/api/config-files/openclaw.json"
+        );
+        expect(config.status).toBe(200);
+        expect(config.body).toMatchObject({
+            content: "{}\n",
+            relativePath: "openclaw.json",
+        });
+    });
+
+    it("allows valid dotted Docker Compose service names", async () => {
+        const result = await api<{ output: string }>(
+            "/api/docker/stack/action",
+            json("POST", { action: "restart", service: "api.v1" })
+        );
+        expect(result.status).toBe(200);
+        expect(result.body.output).toBe("compose:restart api.v1");
+    });
+
+    it("rejects Docker Compose service names that look like options", async () => {
+        const result = await api<{ error: { message: string } }>(
+            "/api/docker/stack/action",
+            json("POST", { action: "restart", service: "--profile" })
+        );
+        expect(result.status).toBe(400);
+        expect(result.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.service"),
+        });
+    });
+});
