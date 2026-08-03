@@ -1283,6 +1283,100 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
+    it("preserves unread heartbeat incidents and their linked reports", () => {
+        const root = temporaryRoot("mira-db-heartbeat-incident-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        const oldTimestamp = "2025-01-01T00:00:00.000Z";
+        const now = new Date("2026-07-23T12:00:00.000Z");
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO reports (
+                        type, status, title, body_md, summary, source,
+                        source_job_id, created_at, updated_at, occurred_at
+                     ) VALUES
+                       ('heartbeat', 'warning', 'Active incident', '', '', 'openclaw',
+                        'ops-check', ?, ?, ?),
+                       ('heartbeat', 'warning', 'Acknowledged incident', '', '', 'openclaw',
+                        'ops-check', ?, ?, ?)`
+                )
+                .run(
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp
+                );
+            const reportIds = database
+                .query("SELECT id, title FROM reports ORDER BY id")
+                .all() as Array<{ id: number; title: string }>;
+            const activeReportId = reportIds.find(
+                (report) => report.title === "Active incident"
+            )?.id;
+            const acknowledgedReportId = reportIds.find(
+                (report) => report.title === "Acknowledged incident"
+            )?.id;
+            if (!activeReportId || !acknowledgedReportId) {
+                throw new Error("Heartbeat retention fixtures were not created");
+            }
+            database
+                .prepare(
+                    `INSERT INTO notifications (
+                        title, description, type, source, dedupe_key,
+                        metadata_json, is_read, created_at, updated_at, occurred_at
+                     ) VALUES
+                       ('Active incident', '', 'warning', 'openclaw',
+                        'report:heartbeat:incident:active', ?, 0, ?, ?, ?),
+                       ('Acknowledged incident', '', 'warning', 'openclaw',
+                        'report:heartbeat:incident:acknowledged', ?, 1, ?, ?, ?)`
+                )
+                .run(
+                    JSON.stringify({
+                        heartbeatIncidentKey: "system:gateway:unreachable",
+                        reportId: activeReportId,
+                        reportStatus: "warning",
+                        reportType: "heartbeat",
+                        sourceJobId: "ops-check",
+                    }),
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    JSON.stringify({
+                        heartbeatIncidentKey: "system:database:unreachable",
+                        reportId: acknowledgedReportId,
+                        reportStatus: "warning",
+                        reportType: "heartbeat",
+                        sourceJobId: "ops-check",
+                    }),
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp
+                );
+
+            const activeChanges = pruneDatabaseHistory(database, now);
+            expect(activeChanges).toMatchObject({ notifications: 1, reports: 1 });
+            expect(
+                database.query("SELECT title FROM notifications ORDER BY title").all()
+            ).toEqual([{ title: "Active incident" }]);
+            expect(
+                database.query("SELECT title FROM reports ORDER BY title").all()
+            ).toEqual([{ title: "Active incident" }]);
+
+            database
+                .prepare("UPDATE notifications SET is_read = 1 WHERE is_read = 0")
+                .run();
+            const acknowledgedChanges = pruneDatabaseHistory(database, now);
+            expect(acknowledgedChanges).toMatchObject({ notifications: 1, reports: 1 });
+            expect(database.query("SELECT id FROM notifications").all()).toEqual([]);
+            expect(database.query("SELECT id FROM reports").all()).toEqual([]);
+        } finally {
+            database.close();
+        }
+    });
+
     it("preserves the latest meaningful runtime result for managed release slots", () => {
         const root = temporaryRoot("mira-db-release-runtime-retention-");
         const databasePath = path.join(root, "dashboard.db");
