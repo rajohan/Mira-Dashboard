@@ -9,7 +9,7 @@ const CURRENT_DATABASE_SCHEMA_VERSION = databaseMigrations.at(-1)?.version ?? 0;
  * remain bounded by the live schema.
  */
 export const DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY = Object.freeze({
-    maximum: 8,
+    maximum: 9,
     minimum: 6,
     target: CURRENT_DATABASE_SCHEMA_VERSION,
 });

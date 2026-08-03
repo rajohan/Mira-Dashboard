@@ -73,13 +73,13 @@ const CURRENT_BUN_RUNTIME_IDENTITY = currentBunRuntimeIdentity();
 const TEST_FUTURE_MIGRATIONS: DatabaseMigrationIdentity[] = [
     {
         checksum: "9".repeat(64),
-        name: "test-migration-9",
-        version: 9,
+        name: "test-migration-10",
+        version: 10,
     },
     {
         checksum: "a".repeat(64),
-        name: "test-migration-10",
-        version: 10,
+        name: "test-migration-11",
+        version: 11,
     },
 ];
 
@@ -780,15 +780,15 @@ describe("Dashboard immutable release manager", () => {
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "c".repeat(64),
-            schemaMaximum: 9,
+            schemaMaximum: 10,
             schemaMinimum: 6,
-            schemaTarget: 9,
+            schemaTarget: 10,
         });
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
 
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
-        ).rejects.toThrow("cannot roll back after SQLite schema 9");
+        ).rejects.toThrow("cannot roll back after SQLite schema 10");
         expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
         expect(existsSync(path.join(root, "previous"))).toBe(false);
     });
@@ -871,27 +871,27 @@ describe("Dashboard immutable release manager", () => {
         const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
         await createManagedRelease(root, THIRD_COMMIT);
         await rewriteManifest(rollbackPath, {
-            schemaMaximum: 9,
+            schemaMaximum: 10,
         });
         await rewriteManifest(migratedPath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 9,
-            schemaMinimum: 8,
-            schemaTarget: 9,
+            schemaMaximum: 10,
+            schemaMinimum: 9,
+            schemaTarget: 10,
         });
 
-        let liveSchemaVersion = 8;
+        let liveSchemaVersion = 9;
         const options = {
             hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
         await activateDashboardRelease(FIRST_COMMIT, root, options);
         await activateDashboardRelease(SECOND_COMMIT, root, options);
-        liveSchemaVersion = 9;
+        liveSchemaVersion = 10;
         await rollbackDashboardRelease(root, options);
 
         expect(activateDashboardRelease(THIRD_COMMIT, root, options)).rejects.toThrow(
-            "Activation release cannot open live SQLite schema 9"
+            "Activation release cannot open live SQLite schema 10"
         );
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(FIRST_COMMIT);
@@ -903,32 +903,32 @@ describe("Dashboard immutable release manager", () => {
         const currentPath = await createManagedRelease(root, FIRST_COMMIT);
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(currentPath, {
-            schemaMaximum: 9,
+            schemaMaximum: 10,
         });
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 9,
-            schemaMinimum: 8,
-            schemaTarget: 9,
+            schemaMaximum: 10,
+            schemaMinimum: 9,
+            schemaTarget: 10,
         });
         await activateDashboardRelease(FIRST_COMMIT, root, {
             hasRuntime: () => true,
-            readLiveSchemaState: () => testLiveSchemaState(8),
+            readLiveSchemaState: () => testLiveSchemaState(9),
         });
 
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 hasRuntime: () => true,
                 readLiveSchemaState: () =>
-                    testLiveSchemaState(9, {
-                        9: {
+                    testLiveSchemaState(10, {
+                        10: {
                             ...TEST_FUTURE_MIGRATIONS[0]!,
                             checksum: "f".repeat(64),
                         },
                     }),
             })
         ).rejects.toThrow(
-            "Activation release SQLite migration 9 identity does not match live history"
+            "Activation release SQLite migration 10 identity does not match live history"
         );
     });
 
@@ -938,12 +938,12 @@ describe("Dashboard immutable release manager", () => {
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 9,
-            schemaMinimum: 9,
-            schemaTarget: 9,
+            schemaMaximum: 10,
+            schemaMinimum: 10,
+            schemaTarget: 10,
         });
 
-        let liveSchemaVersion = 8;
+        let liveSchemaVersion = 9;
         const options = {
             hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
@@ -958,7 +958,7 @@ describe("Dashboard immutable release manager", () => {
             current: { commitSha: FIRST_COMMIT },
         });
         expect(activateDashboardRelease(SECOND_COMMIT, root, options)).rejects.toThrow(
-            "cannot roll back after SQLite schema 9"
+            "cannot roll back after SQLite schema 10"
         );
 
         await runReleaseLifecycleCommand(
@@ -966,15 +966,15 @@ describe("Dashboard immutable release manager", () => {
             root,
             options
         );
-        liveSchemaVersion = 9;
+        liveSchemaVersion = 10;
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 hasRuntime: () => true,
-                readLiveSchemaState: () => testLiveSchemaState(10),
+                readLiveSchemaState: () => testLiveSchemaState(11),
             })
-        ).rejects.toThrow("Activation release cannot open live SQLite schema 10");
+        ).rejects.toThrow("Activation release cannot open live SQLite schema 11");
         expect(rollbackDashboardRelease(root, options)).rejects.toThrow(
-            "Rollback release cannot open SQLite schema 9"
+            "Rollback release cannot open SQLite schema 10"
         );
         expect(readlinkSync(path.join(root, "current"))).toBe(
             `releases/${SECOND_COMMIT}`
@@ -986,16 +986,16 @@ describe("Dashboard immutable release manager", () => {
         const compatibleOldPath = await createManagedRelease(root, FIRST_COMMIT);
         const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(compatibleOldPath, {
-            schemaMaximum: 9,
+            schemaMaximum: 10,
         });
         await rewriteManifest(migratedPath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 9,
-            schemaMinimum: 9,
-            schemaTarget: 9,
+            schemaMaximum: 10,
+            schemaMinimum: 10,
+            schemaTarget: 10,
         });
 
-        let liveSchemaVersion = 8;
+        let liveSchemaVersion = 9;
         const options = {
             hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
@@ -1005,7 +1005,7 @@ describe("Dashboard immutable release manager", () => {
             ...options,
             schemaCutoverMode: "coordinated",
         });
-        liveSchemaVersion = 9;
+        liveSchemaVersion = 10;
 
         const oldCode = await rollbackDashboardRelease(root, options);
         expect(oldCode.current?.commitSha).toBe(FIRST_COMMIT);

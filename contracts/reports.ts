@@ -110,6 +110,15 @@ export const reportCreateInputSchema = v.pipe(
     reportCreateRequestSchema,
     v.transform((input) => ({
         ...input,
+        ...(input.type === "heartbeat" && {
+            metadata: {
+                ...input.metadata,
+                heartbeatIncidents: v.parse(
+                    heartbeatIncidentsSchema,
+                    input.metadata?.heartbeatIncidents
+                ),
+            },
+        }),
         status: input.status ?? ("ok" as const),
     }))
 );

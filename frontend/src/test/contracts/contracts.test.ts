@@ -550,6 +550,36 @@ describe("shared runtime contracts", () => {
             type: "custom",
         });
         expect(
+            parseCreateReportInput({
+                bodyMd: "Heartbeat needs attention.",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: " Tasks:ABC:Blocked ",
+                            summary: " Blocked task needs attention. ",
+                        },
+                    ],
+                    run: "hourly",
+                },
+                source: "openclaw",
+                sourceJobId: "ops-check",
+                status: "warning",
+                title: "Heartbeat warning",
+                type: "heartbeat",
+            })
+        ).toMatchObject({
+            metadata: {
+                heartbeatIncidents: [
+                    {
+                        key: "tasks:abc:blocked",
+                        summary: "Blocked task needs attention.",
+                    },
+                ],
+                run: "hourly",
+            },
+            status: "warning",
+        });
+        expect(
             captureContractError(() =>
                 parseCreateReportInput({
                     bodyMd: "Body",
