@@ -41,7 +41,8 @@
   tests across runtime identity, Drizzle/Bun SQLite, and tRPC Fetch/SSE. The database evidence
   covers strict SQLite tables, check/foreign-key/partial-unique/index constraints, synchronous
   transactions and rollback, prepared and parameterized raw SQL, native-client access,
-  Valibot schemas generated from Drizzle, and an index-backed query plan.
+  Valibot schemas generated from Drizzle, and an index-backed query plan. New SQLite setup code
+  uses the current `Database.run()` API rather than Bun's deprecated `Database.exec()` alias.
 - The tRPC evidence covers validated queries and mutations through `Bun.serve`, tracked SSE
   delivery through the official `httpSubscriptionLink`, a server-forced reconnect, resume from
   the last event ID without duplicate delivery, bounded per-subscriber buffering, and subscriber

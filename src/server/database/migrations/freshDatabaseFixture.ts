@@ -16,7 +16,7 @@ export const migrationsDirectory = path.resolve(
  */
 export function openFreshMigratedDatabase() {
     const sqlite = new Database(":memory:", { strict: true });
-    sqlite.exec("PRAGMA foreign_keys = ON");
+    sqlite.run("PRAGMA foreign_keys = ON");
 
     try {
         const orm = drizzle({ client: sqlite });

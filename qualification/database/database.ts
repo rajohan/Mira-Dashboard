@@ -42,7 +42,7 @@ const qualificationDatabaseSql = `
  */
 export function createQualificationDatabase() {
     const sqlite = new Database(":memory:", { strict: true });
-    sqlite.exec(qualificationDatabaseSql);
+    sqlite.run(qualificationDatabaseSql);
 
     const orm = drizzle({ client: sqlite });
 
