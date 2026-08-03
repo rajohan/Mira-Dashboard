@@ -1,3 +1,4 @@
+import { ArrowDown } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 const DETAIL_BOTTOM_THRESHOLD_PX = 8;
@@ -79,10 +80,15 @@ export function ScrollableDetailContent({
                 <button
                     type="button"
                     aria-label={`Scroll ${ariaLabel.toLowerCase()} to bottom`}
-                    className="absolute right-2 bottom-2 rounded-full bg-accent-500 px-2.5 py-1 text-[10px] font-medium text-white shadow-lg transition-colors hover:bg-accent-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-300"
+                    className="absolute bottom-3 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent-500 px-2.5 py-1.5 text-xs font-medium text-white shadow-lg transition-colors hover:bg-accent-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-300"
                     onClick={scrollToBottom}
                 >
-                    ↓ Bottom
+                    <ArrowDown
+                        aria-hidden="true"
+                        className="size-4 shrink-0"
+                        strokeWidth={2.5}
+                    />
+                    Bottom
                 </button>
             ) : undefined}
         </div>

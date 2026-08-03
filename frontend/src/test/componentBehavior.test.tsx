@@ -1145,11 +1145,17 @@ describe("shared component helpers", () => {
 
         fireEvent.scroll(thinkingScrollArea);
         fireEvent.scroll(toolOutputScrollArea);
-        fireEvent.click(
-            screen.getByRole("button", {
-                name: "Scroll thinking / working to bottom",
-            })
+        const thinkingBottomButton = screen.getByRole("button", {
+            name: "Scroll thinking / working to bottom",
+        });
+        expect(thinkingBottomButton).toHaveClass(
+            "bottom-3",
+            "left-1/2",
+            "-translate-x-1/2"
         );
+        expect(thinkingBottomButton).not.toHaveClass("right-2");
+        expect(thinkingBottomButton.querySelector("svg")).toHaveClass("size-4");
+        fireEvent.click(thinkingBottomButton);
         fireEvent.click(
             screen.getByRole("button", {
                 name: "Scroll bash tool output to bottom",
@@ -2824,6 +2830,7 @@ describe("shared component helpers", () => {
         expect(newMessageButton).toHaveClass("bg-primary-700");
         expect(newMessageButton).toHaveClass("border-primary-600", "text-primary-100");
         expect(newMessageButton).not.toHaveClass("bg-accent-500");
+        expect(newMessageButton.querySelector("svg")).toHaveClass("size-4");
         fireEvent.click(newMessageButton);
         expect(onUserScrollIntent).not.toHaveBeenCalled();
         Object.defineProperties(messagesContainerRef.current!, {

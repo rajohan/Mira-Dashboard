@@ -1,5 +1,5 @@
 import type { Virtualizer } from "@tanstack/react-virtual";
-import { Loader2 } from "lucide-react";
+import { ArrowDown, Loader2 } from "lucide-react";
 import type { KeyboardEvent, PointerEvent, RefObject } from "react";
 
 import { Button } from "../../ui/Button";
@@ -115,9 +115,14 @@ export function ChatMessagesList({
                     type="button"
                     variant="secondary"
                 >
+                    <ArrowDown
+                        aria-hidden="true"
+                        className="size-4 shrink-0"
+                        strokeWidth={2.5}
+                    />
                     {newMessageCount > 0
-                        ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"} ↓`
-                        : "↓ Follow"}
+                        ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"}`
+                        : "Follow"}
                 </Button>
             ) : undefined}
 
