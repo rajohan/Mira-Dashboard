@@ -40,17 +40,15 @@ export function appendOpenClawHistory(
     existing: ChatHistoryMessage[],
     rows: CanonicalChatHistoryRow[] | undefined
 ): ChatHistoryMessage[] {
-    const normalized = (rows || []).map(
-        (row): ChatHistoryMessage => ({
-            ...row.message,
-            provenance: {
-                id: row.id,
-                provider: row.provider,
-                sequence: row.sequence,
-                source: "openclaw-history",
-            },
-        })
-    );
+    const normalized = (rows || []).map((row): ChatHistoryMessage => ({
+        ...row.message,
+        provenance: {
+            id: row.id,
+            provider: row.provider,
+            sequence: row.sequence,
+            source: "openclaw-history",
+        },
+    }));
     const result: ChatHistoryMessage[] = [...existing];
     for (const message of normalized) {
         if (!message.toolResult || !message.role.toLowerCase().startsWith("tool")) {
