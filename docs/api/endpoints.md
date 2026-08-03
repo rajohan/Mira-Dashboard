@@ -100,8 +100,11 @@ Allowed task assignees are currently `mira-2026` and `rajohan`.
 Report types: `daily_brief`, `daily_summary`, `heartbeat`, `custom`.
 Report statuses: `ok`, `warning`, `error`.
 Heartbeat reports require `source`, `sourceJobId`, and a status-consistent
-`metadata.heartbeatIncidents` snapshot. Warning/error heartbeats cannot set
-`notify:false`.
+`metadata.heartbeatIncidents` snapshot. The array is the complete replacement
+snapshot for that heartbeat stream, not a delta: omitting an active incident
+resolves it. Every entry requires `key` and `summary`; use the canonical key
+format `<category>:<stable-resource-id>:<condition>`. Warning/error heartbeats
+cannot set `notify:false`.
 
 Create body:
 
