@@ -106,6 +106,17 @@ describe("append-only audit events", () => {
     it("paginates deterministically and preserves target provenance", () => {
         const actor = { id: "mira-automation", type: "automation" } as const;
         const requestId = Bun.randomUUIDv7();
+        const latestEvent = database
+            .prepare(
+                `SELECT occurred_at
+                 FROM audit_events
+                 ORDER BY occurred_at DESC, id DESC
+                 LIMIT 1`
+            )
+            .get() as { occurred_at: string } | undefined;
+        const paginationStart = latestEvent
+            ? new Date(latestEvent.occurred_at).getTime() + 1
+            : Date.now();
         const targets = [
             `audit-page-a-${Bun.randomUUIDv7()}`,
             `audit-page-b-${Bun.randomUUIDv7()}`,
@@ -115,7 +126,7 @@ describe("append-only audit events", () => {
             writeAuditEvent({
                 actor,
                 action: "audit.pagination",
-                occurredAt: `2099-01-01T00:00:0${index}.000Z`,
+                occurredAt: new Date(paginationStart + index).toISOString(),
                 outcome: "accepted",
                 requestId,
                 targetId,
