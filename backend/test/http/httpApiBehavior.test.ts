@@ -856,9 +856,12 @@ describe("Mira Dashboard backend integration", () => {
                 title: "HEARTBEAT_OK",
                 bodyMd: "All checks passed.",
                 summary: "All checks passed.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:ok:2026-06-23T06:30",
                 metadata: { heartbeatIncidents: [] },
                 occurredAt: "2026-06-23T06:30:00.000Z",
+                notify: false,
             })
         );
         expect(heartbeatOk.status).toBe(201);
@@ -871,6 +874,8 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat warning",
                 bodyMd: "Git check needs attention.",
                 summary: "Git check needs attention.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:warning:git",
                 metadata: {
                     heartbeatIncidents: [
@@ -896,6 +901,8 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat warning",
                 bodyMd: "Cache check needs attention.",
                 summary: "Cache check needs attention.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:warning:cache",
                 metadata: {
                     heartbeatIncidents: [
@@ -921,6 +928,8 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat status change",
                 bodyMd: "Status-changing check needs attention.",
                 summary: "Status-changing check needs attention.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:status-changing",
                 metadata: {
                     heartbeatIncidents: [
@@ -944,6 +953,8 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat status change",
                 bodyMd: "Status-changing check failed.",
                 summary: "Status-changing check failed.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:status-changing",
                 metadata: {
                     heartbeatIncidents: [
@@ -1096,9 +1107,12 @@ describe("Mira Dashboard backend integration", () => {
                 title: "HEARTBEAT_OK",
                 bodyMd: "Status-changing check recovered.",
                 summary: "Status-changing check recovered.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:status-changing",
                 metadata: { heartbeatIncidents: [] },
                 occurredAt: "2026-06-23T07:20:00.000Z",
+                notify: false,
             })
         );
         expect(changingHeartbeatOk.body.report.id).toBe(
@@ -1155,6 +1169,58 @@ describe("Mira Dashboard backend integration", () => {
         expect(missingIncidentSnapshot.status).toBe(400);
         expect(missingIncidentSnapshot.body.error.message).toContain(
             "heartbeat metadata.heartbeatIncidents"
+        );
+
+        const missingStreamIdentity = await api<ApiErrorResponse>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Heartbeat needs attention.",
+                summary: "Heartbeat needs attention.",
+                sourceJobId,
+                dedupeKey: "heartbeat:missing-stream-identity",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: blockedTaskKey,
+                            summary: "Blocked task needs attention.",
+                        },
+                    ],
+                },
+            })
+        );
+        expect(missingStreamIdentity.status).toBe(400);
+        expect(missingStreamIdentity.body.error.message).toContain(
+            "heartbeat source and sourceJobId are required"
+        );
+
+        const mutedFailure = await api<ApiErrorResponse>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Heartbeat needs attention.",
+                summary: "Heartbeat needs attention.",
+                source: "openclaw",
+                sourceJobId,
+                dedupeKey: "heartbeat:muted-failure",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: blockedTaskKey,
+                            summary: "Blocked task needs attention.",
+                        },
+                    ],
+                },
+                notify: false,
+            })
+        );
+        expect(mutedFailure.status).toBe(400);
+        expect(mutedFailure.body.error.message).toContain(
+            "warning/error heartbeat reports cannot disable notifications"
         );
 
         const postHeartbeat = (

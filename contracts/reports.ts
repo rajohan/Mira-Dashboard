@@ -81,6 +81,19 @@ const reportCreateRequestSchema = v.pipe(
         title: trimmedNonEmptyStringSchema,
         type: reportTypeSchema,
     }),
+    v.check(
+        (input) =>
+            input.type !== "heartbeat" ||
+            (input.source !== undefined && input.sourceJobId !== undefined),
+        "heartbeat source and sourceJobId are required"
+    ),
+    v.check(
+        (input) =>
+            input.type !== "heartbeat" ||
+            (input.status ?? "ok") === "ok" ||
+            input.notify !== false,
+        "warning/error heartbeat reports cannot disable notifications"
+    ),
     v.check((input) => {
         if (input.type !== "heartbeat") return true;
         const parsed = v.safeParse(

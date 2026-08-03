@@ -136,8 +136,8 @@ function heartbeatIncidentNotificationDedupeKey(
     const fingerprint = createHash("sha256")
         .update(
             JSON.stringify([
-                report.source ?? "reports",
-                report.sourceJobId ?? "heartbeat",
+                report.source ?? null,
+                report.sourceJobId ?? null,
                 incidentKey,
             ])
         )

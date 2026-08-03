@@ -99,6 +99,9 @@ Allowed task assignees are currently `mira-2026` and `rajohan`.
 
 Report types: `daily_brief`, `daily_summary`, `heartbeat`, `custom`.
 Report statuses: `ok`, `warning`, `error`.
+Heartbeat reports require `source`, `sourceJobId`, and a status-consistent
+`metadata.heartbeatIncidents` snapshot. Warning/error heartbeats cannot set
+`notify:false`.
 
 Create body:
 

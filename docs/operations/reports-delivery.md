@@ -87,7 +87,9 @@ previous run for the same source job:
 - multiple simultaneous incidents are tracked independently.
 
 Heartbeat requests without a valid `heartbeatIncidents` snapshot are rejected;
-there is no run-key notification fallback.
+there is no run-key notification fallback. Heartbeat `source` and `sourceJobId`
+are required so incident streams cannot collide, and warning/error heartbeats
+cannot disable notifications.
 
 ## API Contract
 
