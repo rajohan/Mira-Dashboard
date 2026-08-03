@@ -81,12 +81,10 @@ function fakeTransport(snapshotPromise: Promise<ChatRuntimeSnapshot>, generation
         models: jest.fn(() => Promise.try(() => [])),
         patchSession: jest.fn(async () => {}),
         send: jest.fn(() => Promise.try(() => ({}))),
-        snapshot: jest.fn(
-            async (): Promise<VersionedChatRuntimeSnapshot> => ({
-                schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
-                ...(await snapshotPromise),
-            })
-        ),
+        snapshot: jest.fn(async (): Promise<VersionedChatRuntimeSnapshot> => ({
+            schemaVersion: OPENCLAW_RUNTIME_SNAPSHOT_SCHEMA_VERSION,
+            ...(await snapshotPromise),
+        })),
         subscribe: (listener) => {
             listeners.add(listener);
             return () => listeners.delete(listener);

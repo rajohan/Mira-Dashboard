@@ -209,12 +209,10 @@ export const cacheRoutes = {
     "/api/cache/status": {
         GET: () => {
             const rows = getCacheStatusEntries();
-            const entries = rows.map(
-                (row): CacheEnvelope<null> => ({
-                    ...mapCacheRowForResponse(row, { includeData: false }),
-                    data: null,
-                })
-            );
+            const entries = rows.map((row): CacheEnvelope<null> => ({
+                ...mapCacheRowForResponse(row, { includeData: false }),
+                data: null,
+            }));
             return json({
                 count: entries.length,
                 entries,
