@@ -30,6 +30,7 @@ import {
     isUserMessage,
     orderedRuns,
     projectedMessageDeleteIdentity,
+    projectedMessageRowIdentityAliases,
     projectedMessageRowKey,
 } from "./chatProjectionIdentity";
 import {
@@ -392,6 +393,7 @@ export function renderChatProjectionRows(
     const generatedRowKeys = new Set<string>();
     return messages.flatMap((message, messageIndex) => {
         const identity = messageDeleteIdentities[messageIndex]!;
+        const identityKeys = projectedMessageRowIdentityAliases(message, runs);
         const matchDeleteKeys = identity.baseKeys.map((baseKey) => {
             const occurrence = deleteKeyOccurrences.get(baseKey) ?? 0;
             deleteKeyOccurrences.set(baseKey, occurrence + 1);
@@ -426,6 +428,7 @@ export function renderChatProjectionRows(
             : [
                   {
                       deleteKeys,
+                      identityKeys: identityKeys.length > 0 ? identityKeys : undefined,
                       key: rowKey,
                       kind:
                           message.local === true &&

@@ -178,6 +178,8 @@ export function allChatMessageImages(message: ChatHistoryMessage): ChatImageBloc
 /** Represents one chat row. */
 export interface ChatRow {
     deleteKeys?: string[];
+    /** Runtime reconciliation aliases for this visible row. */
+    identityKeys?: string[];
     key: string;
     kind: "message" | "status" | "stream" | "typing";
     message: ChatHistoryMessage;

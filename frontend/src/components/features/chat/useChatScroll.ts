@@ -10,28 +10,17 @@ import {
 } from "react";
 
 import type { ChatRow } from "./chatTypes";
+import {
+    chatUnreadMessageIdentities,
+    type ChatUnreadMessageIdentity,
+    countAddedChatUnreadMessages,
+} from "./chatUnreadMessages";
 
 const BOTTOM_THRESHOLD_PX = 32;
 const STRUCTURAL_BOTTOM_STABLE_FRAMES = 2;
 const STRUCTURAL_BOTTOM_MAX_WAIT_FRAMES = 12;
 const ESTIMATED_MESSAGE_ROW_HEIGHT_PX = 160;
 const ESTIMATED_TYPING_ROW_HEIGHT_PX = 76;
-
-function isConversationMessageRow(row: ChatRow): boolean {
-    const role = row.message.role.toLowerCase();
-    if (
-        (row.kind !== "message" && row.kind !== "stream") ||
-        (role !== "assistant" && role !== "user")
-    ) {
-        return false;
-    }
-
-    return Boolean(
-        row.message.text.trim() ||
-        row.message.attachments?.length ||
-        row.message.images?.length
-    );
-}
 
 /**
  * Owns sticky-bottom state and delegates viewport anchoring to the virtualizer.
@@ -60,6 +49,7 @@ export function useChatScroll(
     const resumeStickyBottomRef = useRef<() => void>(() => {});
     const structuralBottomFollowRef = useRef(false);
     const wasStickyWhenDocumentHiddenRef = useRef(false);
+    const previousUnreadMessageIdentitiesRef = useRef<ChatUnreadMessageIdentity[]>([]);
     const previousRowKeysRef = useRef<string[]>([]);
     const previousComposerLayoutKeyRef = useRef(composerLayoutKey);
     const previousIsLoadingHistoryRef = useRef(false);
@@ -225,10 +215,11 @@ export function useChatScroll(
         const isSessionChanged = previousSessionKeyRef.current !== selectedSessionKey;
         const previousRowKeys = previousRowKeysRef.current;
         const rowKeys = rows.map((row) => row.key);
-        const previousRowKeySet = new Set(previousRowKeys);
-        const addedConversationMessageCount = rows.filter(
-            (row) => !previousRowKeySet.has(row.key) && isConversationMessageRow(row)
-        ).length;
+        const unreadMessageIdentities = chatUnreadMessageIdentities(rows);
+        const addedConversationMessageCount = countAddedChatUnreadMessages(
+            previousUnreadMessageIdentitiesRef.current,
+            unreadMessageIdentities
+        );
         const isInitialHistoryLoad = previousRowKeys.length === 0 && rowKeys.length > 0;
         const didRowKeysChange =
             previousRowKeys.length !== rowKeys.length ||
@@ -243,6 +234,7 @@ export function useChatScroll(
         const didComposerLayoutChange =
             previousComposerLayoutKeyRef.current !== composerLayoutKey;
         previousSessionKeyRef.current = selectedSessionKey;
+        previousUnreadMessageIdentitiesRef.current = unreadMessageIdentities;
         previousRowKeysRef.current = rowKeys;
         previousIsLoadingHistoryRef.current = isLoadingHistory;
         previousComposerLayoutKeyRef.current = composerLayoutKey;

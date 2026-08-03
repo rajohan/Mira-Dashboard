@@ -13,13 +13,19 @@ import {
     routeFailureResponse,
 } from "../../http/routeSupport.ts";
 import {
-    type Assignee,
+    type DatabaseTask,
     type DatabaseTaskUpdate,
     nowIso,
     safeId,
+    taskById,
     toFrontendTaskUpdate,
 } from "./model.ts";
 import { notifyMira } from "./notifications.ts";
+
+function miraAssignedTask(id: number): DatabaseTask | undefined {
+    const task = taskById(id);
+    return task?.assignee === TASK_ASSIGNEES.mira.id ? task : undefined;
+}
 
 export const taskUpdateRoutes = {
     "/api/tasks/:id/updates": {
@@ -62,7 +68,8 @@ export const taskUpdateRoutes = {
                         status: 400,
                     });
                 }
-                if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
+                const task = taskById(id);
+                if (!task) {
                     return routeFailureResponse({
                         context: "task",
                         message: "Task not found",
@@ -89,11 +96,8 @@ export const taskUpdateRoutes = {
                         "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
                     )
                     .get(Number(result.lastInsertRowid)) as DatabaseTaskUpdate;
-                const task = database
-                    .prepare("SELECT title, assignee FROM tasks WHERE id = ?")
-                    .get(id) as { assignee: Assignee | null | undefined; title: string };
-                if ((task.assignee ?? undefined) === TASK_ASSIGNEES.mira.id) {
-                    void notifyMira("progress", { id, title: task.title });
+                if (task.assignee === TASK_ASSIGNEES.mira.id) {
+                    void notifyMira("comment-added", { id, title: task.title });
                 }
                 return json(toFrontendTaskUpdate(row), { status: 201 });
             } catch (error) {
@@ -129,6 +133,7 @@ export const taskUpdateRoutes = {
                         status: 404,
                     });
                 }
+                const notificationTask = miraAssignedTask(id);
                 const messageMd = body.messageMd.trim();
                 database.transaction(() => {
                     database
@@ -145,6 +150,12 @@ export const taskUpdateRoutes = {
                         "SELECT id, task_id, author, message_md, created_at FROM task_updates WHERE id = ?"
                     )
                     .get(updateId) as DatabaseTaskUpdate;
+                if (notificationTask) {
+                    void notifyMira("comment-edited", {
+                        id,
+                        title: notificationTask.title,
+                    });
+                }
                 return json(toFrontendTaskUpdate(row));
             } catch (error) {
                 return routeErrorResponse(request, error, {
@@ -175,6 +186,7 @@ export const taskUpdateRoutes = {
                     status: 404,
                 });
             }
+            const notificationTask = miraAssignedTask(id);
             try {
                 database.transaction(() => {
                     database
@@ -184,6 +196,12 @@ export const taskUpdateRoutes = {
                         .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
                         .run(nowIso(), id);
                 })();
+                if (notificationTask) {
+                    void notifyMira("comment-deleted", {
+                        id,
+                        title: notificationTask.title,
+                    });
+                }
                 return json({ isOk: true } satisfies TaskMutationResponse);
             } catch (error) {
                 return routeErrorResponse(request, error, {

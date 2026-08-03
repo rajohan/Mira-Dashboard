@@ -198,6 +198,92 @@ describe("chat scroll", () => {
         unmount();
     });
 
+    it("counts visible system answers but ignores system commentary", () => {
+        const initialRows = [chatRow("first", "assistant")];
+        const stickToBottomRef = { current: false };
+        const { result, rerender, unmount } = renderHook(
+            ({ rows }: { rows: ChatRow[] }) =>
+                useChatScroll(rows, "agent:main:main", jest.fn(), stickToBottomRef),
+            { initialProps: { rows: initialRows } }
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 1000 },
+        });
+        result.current.messagesContainerRef.current = container;
+        stickToBottomRef.current = false;
+        container.scrollTop = 120;
+        act(() => result.current.handleScroll());
+
+        const systemAnswer = chatRow("system-answer", "system");
+        rerender({ rows: [...initialRows, systemAnswer] });
+        expect(result.current.newMessageCount).toBe(1);
+
+        const systemCommentary: ChatRow = {
+            ...chatRow("system-commentary", "system"),
+            message: {
+                content: "Still working",
+                intent: "commentary",
+                role: "system",
+                text: "Still working",
+            },
+        };
+        rerender({ rows: [...initialRows, systemAnswer, systemCommentary] });
+        expect(result.current.newMessageCount).toBe(1);
+        unmount();
+    });
+
+    it("does not recount an answer when runtime reconciliation changes its row key", () => {
+        const runtimeAnswer: ChatRow = {
+            key: "response-dashboard-chat-runtime",
+            kind: "stream",
+            message: {
+                content: "Same answer",
+                role: "assistant",
+                text: "Same answer",
+            },
+        };
+        const initialRows = [chatRow("first", "user"), runtimeAnswer];
+        const stickToBottomRef = { current: false };
+        const { result, rerender, unmount } = renderHook(
+            ({ rows }: { rows: ChatRow[] }) =>
+                useChatScroll(rows, "agent:main:main", jest.fn(), stickToBottomRef),
+            { initialProps: { rows: initialRows } }
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 1000 },
+        });
+        result.current.messagesContainerRef.current = container;
+        stickToBottomRef.current = false;
+        container.scrollTop = 120;
+        act(() => result.current.handleScroll());
+
+        const reconciledAnswer: ChatRow = {
+            ...runtimeAnswer,
+            identityKeys: [runtimeAnswer.key],
+            key: "response-provider-history",
+            kind: "message",
+        };
+        rerender({ rows: [initialRows[0]!, reconciledAnswer] });
+        expect(result.current.newMessageCount).toBe(0);
+
+        rerender({
+            rows: [
+                initialRows[0]!,
+                reconciledAnswer,
+                {
+                    ...chatRow("genuinely-new-answer", "assistant"),
+                    identityKeys: ["different-answer-identity"],
+                },
+            ],
+        });
+        expect(result.current.newMessageCount).toBe(1);
+        unmount();
+    });
+
     it("does not force a queued bottom follow after the user scrolls away", () => {
         const row: ChatRow = {
             key: "answer",

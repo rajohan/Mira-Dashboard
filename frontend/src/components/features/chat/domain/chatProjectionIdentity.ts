@@ -6,7 +6,7 @@ import {
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
-import { hasPrimaryAnswerContent } from "./chatAnswerContent";
+import { hasPrimaryAnswerContent, isAnswerCapableRole } from "./chatAnswerContent";
 import type { ChatRunState, ChatSessionRuntimeState } from "./chatState";
 
 export const RUN_START_USER_SKEW_MS = 1000;
@@ -224,6 +224,33 @@ export function projectedMessageRowKey(message: ChatHistoryMessage): string {
     return message.local === true && message.runId
         ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
         : messageDeleteKey(message);
+}
+
+/**
+ * Returns response-row aliases retained by an acknowledged runtime run.
+ * @param message Projected chat message.
+ * @param runs Runtime runs carrying provider and optimistic aliases.
+ * @returns Alternate row keys for the same response.
+ */
+export function projectedMessageRowIdentityAliases(
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
+): string[] {
+    if (
+        !message.runId ||
+        !isAnswerCapableRole(message.role) ||
+        !hasPrimaryAnswerContent(message)
+    ) {
+        return [];
+    }
+    const run = runs.find((candidate) => isRunMatchingMessage(candidate, message));
+    if (!run) {
+        return [];
+    }
+    const rowKey = projectedMessageRowKey(message);
+    return [...new Set([run.runId, ...run.aliases].map((id) => `response-${id}`))].filter(
+        (alias) => alias !== rowKey
+    );
 }
 
 function projectedMessageSourceFacet(message: ChatHistoryMessage): string {
