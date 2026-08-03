@@ -112,7 +112,7 @@ Create body:
     "source": "openclaw",
     "sourceJobId": "ops-check",
     "dedupeKey": "heartbeat:ops-check:2026-06-30T01-25",
-    "metadata": {},
+    "metadata": { "heartbeatIncidents": [] },
     "occurredAt": "2026-06-29T23:25:00.000Z",
     "notify": false
 }

@@ -30,6 +30,26 @@ const normalizedTimestampSchema = v.pipe(
     v.check((value) => !Number.isNaN(Date.parse(value)), "must be a valid timestamp"),
     v.transform((value) => new Date(value).toISOString())
 );
+const heartbeatIncidentKeySchema = v.pipe(
+    v.string(),
+    v.trim(),
+    v.transform((value) => value.toLowerCase()),
+    v.maxLength(200),
+    v.regex(/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*){2}$/u)
+);
+const heartbeatIncidentSchema = v.strictObject({
+    key: heartbeatIncidentKeySchema,
+    summary: v.pipe(v.string(), v.trim(), v.nonEmpty(), v.maxLength(1000)),
+});
+const heartbeatIncidentsSchema = v.pipe(
+    v.array(heartbeatIncidentSchema),
+    v.maxLength(100),
+    v.check(
+        (incidents) =>
+            new Set(incidents.map((incident) => incident.key)).size === incidents.length,
+        "must contain unique incident keys"
+    )
+);
 
 export const reportSchema = v.strictObject({
     bodyMd: v.string(),
@@ -47,19 +67,31 @@ export const reportSchema = v.strictObject({
     updatedAt: nonBlankStringSchema,
 });
 
-const reportCreateRequestSchema = strictJsonObjectSchema({
-    bodyMd: nonBlankStringSchema,
-    dedupeKey: v.optional(trimmedNonEmptyStringSchema),
-    metadata: v.optional(jsonObjectSchema),
-    notify: v.optional(v.boolean()),
-    occurredAt: v.optional(normalizedTimestampSchema),
-    source: v.optional(trimmedNonEmptyStringSchema),
-    sourceJobId: v.optional(trimmedNonEmptyStringSchema),
-    status: v.optional(reportStatusSchema),
-    summary: v.optional(trimmedNonEmptyStringSchema),
-    title: trimmedNonEmptyStringSchema,
-    type: reportTypeSchema,
-});
+const reportCreateRequestSchema = v.pipe(
+    strictJsonObjectSchema({
+        bodyMd: nonBlankStringSchema,
+        dedupeKey: v.optional(trimmedNonEmptyStringSchema),
+        metadata: v.optional(jsonObjectSchema),
+        notify: v.optional(v.boolean()),
+        occurredAt: v.optional(normalizedTimestampSchema),
+        source: v.optional(trimmedNonEmptyStringSchema),
+        sourceJobId: v.optional(trimmedNonEmptyStringSchema),
+        status: v.optional(reportStatusSchema),
+        summary: v.optional(trimmedNonEmptyStringSchema),
+        title: trimmedNonEmptyStringSchema,
+        type: reportTypeSchema,
+    }),
+    v.check((input) => {
+        if (input.type !== "heartbeat") return true;
+        const parsed = v.safeParse(
+            heartbeatIncidentsSchema,
+            input.metadata?.heartbeatIncidents
+        );
+        if (!parsed.success) return false;
+        const status = input.status ?? "ok";
+        return status === "ok" ? parsed.output.length === 0 : parsed.output.length > 0;
+    }, "heartbeat metadata.heartbeatIncidents must be empty for ok and non-empty for warning/error")
+);
 
 export const reportCreateInputSchema = v.pipe(
     reportCreateRequestSchema,
