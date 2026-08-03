@@ -1318,6 +1318,14 @@ describe("Mira Dashboard backend integration", () => {
             occurredAt: "2026-06-24T08:00:00.000Z",
         });
 
+        await postHeartbeat("warning", "2026-06-24T08:00:00.000Z", [blockedTaskKey]);
+        const staleEqualTimeRetryNotifications = await listIncidentNotifications();
+        expect(
+            staleEqualTimeRetryNotifications.find(
+                (item) => item.id === cacheNotification.id
+            )
+        ).toEqual(cacheNotification);
+
         await postHeartbeat("error", "2026-06-24T10:00:00.000Z", [
             blockedTaskKey,
             cacheFailureKey,

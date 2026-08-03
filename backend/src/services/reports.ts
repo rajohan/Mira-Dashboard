@@ -129,6 +129,20 @@ function latestHeartbeatReport(
     return row ? toReport(row) : undefined;
 }
 
+function isLatestHeartbeatSnapshot(
+    report: Report,
+    previous: Report | undefined
+): boolean {
+    if (!previous) return true;
+
+    const occurredAtDifference =
+        Date.parse(report.occurredAt) - Date.parse(previous.occurredAt);
+    return (
+        occurredAtDifference > 0 ||
+        (occurredAtDifference === 0 && report.id >= previous.id)
+    );
+}
+
 function heartbeatIncidentNotificationDedupeKey(
     report: Report,
     incidentKey: string
@@ -268,10 +282,7 @@ function createReportInTransaction(input: CreateReportInput): Report {
         if (!currentIncidents) {
             throw new Error("Heartbeat report is missing a valid incident snapshot");
         }
-        const isLatestSnapshot =
-            !previousHeartbeat ||
-            Date.parse(report.occurredAt) >= Date.parse(previousHeartbeat.occurredAt);
-        if (!isLatestSnapshot) return report;
+        if (!isLatestHeartbeatSnapshot(report, previousHeartbeat)) return report;
 
         if (report.status === "ok") {
             resolveAllHeartbeatIncidents(report);
