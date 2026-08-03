@@ -31,6 +31,10 @@ const activeExecutionControllers = new Map<string, AbortController>();
 const activeExecutionRuns = new Map<string, Promise<void>>();
 const deploymentCutoverReconciler = new DeploymentCutoverReconciler();
 
+export interface ScheduledJobExecutorOptions {
+    tickIntervalMs?: number;
+}
+
 const scheduledJobRuntimeState: {
     scheduler: NodeJS.Timeout | undefined;
     executor: NodeJS.Timeout | undefined;
@@ -289,8 +293,15 @@ function workerIdForRelease(releaseCommit: string): string {
     return `dashboard-worker:${releaseCommit}:${process.pid}:${Bun.randomUUIDv7()}`;
 }
 
-export function startScheduledJobExecutor(releaseCommit = "development"): void {
+export function startScheduledJobExecutor(
+    releaseCommit = "development",
+    options: ScheduledJobExecutorOptions = {}
+): void {
     if (scheduledJobRuntimeState.executor) return;
+    const tickIntervalMs = options.tickIntervalMs ?? executorTickMs;
+    if (!Number.isSafeInteger(tickIntervalMs) || tickIntervalMs < 1) {
+        throw new Error("Job executor tick interval must be a positive integer");
+    }
     scheduledJobRuntimeState.workerId = workerIdForRelease(releaseCommit);
     resetExecutorClaimPause();
     const timestamp = nowIso();
@@ -315,7 +326,7 @@ export function startScheduledJobExecutor(releaseCommit = "development"): void {
         }
     }, executorHeartbeatMs);
     scheduledJobRuntimeState.workerHeartbeat.unref();
-    scheduledJobRuntimeState.executor = setInterval(executorTick, executorTickMs);
+    scheduledJobRuntimeState.executor = setInterval(executorTick, tickIntervalMs);
     scheduledJobRuntimeState.executor.unref();
     executorTick();
 }

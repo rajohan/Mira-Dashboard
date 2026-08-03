@@ -64,6 +64,37 @@ PY
 git diff --check
 ```
 
+## Test Architecture
+
+Dashboard uses Bun test for both applications. Frontend behavior runs through
+happy-dom and Testing Library; backend behavior uses Bun-native integration,
+contract, database, and service tests. Do not add a permanent Playwright,
+Cypress, screenshot, or second browser-runner suite. Use a targeted manual dev
+smoke when a layout engine or browser API cannot be represented faithfully by
+the existing stack.
+
+Test files live under domain-owned directories:
+
+- `frontend/src/test/<domain>` for app, auth, chat, contracts, delivery,
+  development, Docker, files, hooks, pages, settings, shared UI, and tasks;
+- `backend/test/<domain>` for auth, cache, chat, database, delivery,
+  development, Docker, Gateway, HTTP, jobs, observability, and operations;
+- `backend/test/routes` and `backend/test/services` for broader route/service
+  characterization suites that cross more than one domain seam;
+- each `support` directory for reusable fixtures and harnesses, while fixture
+  payloads remain under `fixtures`.
+
+Keep mutable mock, timer, collection, and cleanup state inside a per-suite
+harness factory. Keep pure builders and assertions at module scope so they are
+not recreated for every suite. Prefer event- or dependency-driven test timing
+over production polling delays; test-only timing overrides must preserve the
+production default and still exercise the real runtime path.
+
+Use `test:frontend:changed` or `test:backend:changed` for quick local feedback,
+then run the full affected suite and coverage gate before handoff. New tests
+belong in the narrowest domain directory and should not recreate a general
+omnibus file.
+
 Documentation must be considered for changes to route families, response
 shapes, cache projections, database state, operational workflows, user-facing
 controls, and fallback/error behavior. If none applies, state
