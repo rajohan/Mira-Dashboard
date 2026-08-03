@@ -6,15 +6,22 @@ import {
     useEffectEvent,
     useLayoutEffect,
     useRef,
+    useState,
 } from "react";
 
 import type { ChatRow } from "./chatTypes";
+import {
+    chatUnreadMessageIdentities,
+    type ChatUnreadMessageIdentity,
+    countAddedChatUnreadMessages,
+} from "./chatUnreadMessages";
 
 const BOTTOM_THRESHOLD_PX = 32;
 const STRUCTURAL_BOTTOM_STABLE_FRAMES = 2;
 const STRUCTURAL_BOTTOM_MAX_WAIT_FRAMES = 12;
 const ESTIMATED_MESSAGE_ROW_HEIGHT_PX = 160;
 const ESTIMATED_TYPING_ROW_HEIGHT_PX = 76;
+
 /**
  * Owns sticky-bottom state and delegates viewport anchoring to the virtualizer.
  * @param rows Rows value.
@@ -42,11 +49,13 @@ export function useChatScroll(
     const resumeStickyBottomRef = useRef<() => void>(() => {});
     const structuralBottomFollowRef = useRef(false);
     const wasStickyWhenDocumentHiddenRef = useRef(false);
+    const previousUnreadMessageIdentitiesRef = useRef<ChatUnreadMessageIdentity[]>([]);
     const previousRowKeysRef = useRef<string[]>([]);
     const previousComposerLayoutKeyRef = useRef(composerLayoutKey);
     const previousIsLoadingHistoryRef = useRef(false);
     const previousScrollTopRef = useRef(0);
     const previousSessionKeyRef = useRef("");
+    const [newMessageCount, setNewMessageCount] = useState(0);
 
     const virtualizer = useVirtualizer({
         anchorTo: "end",
@@ -107,6 +116,9 @@ export function useChatScroll(
             cancelBottomFollow();
         }
         const isAtBottom = checkIsAtBottom();
+        if (isAtBottom) {
+            setNewMessageCount(0);
+        }
         const shouldStaySticky =
             isAtBottom ||
             (shouldStickToBottomRef.current &&
@@ -127,6 +139,7 @@ export function useChatScroll(
         previousScrollTopRef.current = container.scrollTop;
         shouldStickToBottomRef.current = true;
         setIsAtBottom(true);
+        setNewMessageCount(0);
     };
 
     const scheduleBottomFollow = (
@@ -183,6 +196,7 @@ export function useChatScroll(
     const followToBottom = () => {
         shouldStickToBottomRef.current = true;
         setIsAtBottom(true);
+        setNewMessageCount(0);
         scheduleBottomFollow(true, true);
     };
     resumeStickyBottomRef.current = followToBottom;
@@ -201,6 +215,11 @@ export function useChatScroll(
         const isSessionChanged = previousSessionKeyRef.current !== selectedSessionKey;
         const previousRowKeys = previousRowKeysRef.current;
         const rowKeys = rows.map((row) => row.key);
+        const unreadMessageIdentities = chatUnreadMessageIdentities(rows);
+        const addedConversationMessageCount = countAddedChatUnreadMessages(
+            previousUnreadMessageIdentitiesRef.current,
+            unreadMessageIdentities
+        );
         const isInitialHistoryLoad = previousRowKeys.length === 0 && rowKeys.length > 0;
         const didRowKeysChange =
             previousRowKeys.length !== rowKeys.length ||
@@ -215,6 +234,7 @@ export function useChatScroll(
         const didComposerLayoutChange =
             previousComposerLayoutKeyRef.current !== composerLayoutKey;
         previousSessionKeyRef.current = selectedSessionKey;
+        previousUnreadMessageIdentitiesRef.current = unreadMessageIdentities;
         previousRowKeysRef.current = rowKeys;
         previousIsLoadingHistoryRef.current = isLoadingHistory;
         previousComposerLayoutKeyRef.current = composerLayoutKey;
@@ -223,6 +243,13 @@ export function useChatScroll(
             previousScrollTopRef.current = 0;
             shouldStickToBottomRef.current = true;
             setIsAtBottom(true);
+            setNewMessageCount(0);
+        } else if (
+            previousRowKeys.length > 0 &&
+            !shouldStickToBottomRef.current &&
+            addedConversationMessageCount > 0
+        ) {
+            setNewMessageCount((previous) => previous + addedConversationMessageCount);
         }
         if (
             rows.length > 0 &&
@@ -273,6 +300,7 @@ export function useChatScroll(
         handleScroll,
         handleUserScrollIntent,
         messagesContainerRef: messagesContainerRef,
+        newMessageCount,
         scheduleBottomFollow,
         followToBottom,
         virtualizer,

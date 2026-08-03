@@ -226,6 +226,29 @@ export function projectedMessageRowKey(message: ChatHistoryMessage): string {
         : messageDeleteKey(message);
 }
 
+/**
+ * Returns response-row aliases retained by an acknowledged runtime run.
+ * @param message Projected chat message.
+ * @param runs Runtime runs carrying provider and optimistic aliases.
+ * @returns Alternate row keys for the same response.
+ */
+export function projectedMessageRowIdentityAliases(
+    message: ChatHistoryMessage,
+    runs: ChatRunState[]
+): string[] {
+    const rowKey = projectedMessageRowKey(message);
+    if (!message.runId || rowKey !== `response-${message.runId}`) {
+        return [];
+    }
+    const run = runs.find((candidate) => isRunMatchingMessage(candidate, message));
+    if (!run) {
+        return [];
+    }
+    return [...new Set([run.runId, ...run.aliases].map((id) => `response-${id}`))].filter(
+        (alias) => alias !== rowKey
+    );
+}
+
 function projectedMessageSourceFacet(message: ChatHistoryMessage): string {
     if (message.intent) {
         return message.intent;

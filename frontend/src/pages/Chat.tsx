@@ -190,6 +190,7 @@ export function Chat() {
         handleScroll: handleMessagesScroll,
         handleUserScrollIntent,
         messagesContainerRef,
+        newMessageCount,
         scheduleBottomFollow,
         virtualizer: messagesVirtualizer,
     } = scroll;
@@ -264,6 +265,7 @@ export function Chat() {
                         chatRows={chatRows}
                         messagesContainerRef={messagesContainerRef}
                         messagesVirtualizer={messagesVirtualizer}
+                        newMessageCount={newMessageCount}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
                         onFollow={followMessagesToBottom}
                         onPreview={setPreviewItem}

@@ -206,6 +206,45 @@ function recoveredNoIdTool(timestamp: string): ChatHistoryMessage {
 }
 
 describe("chat projection", () => {
+    it("retains the optimistic response identity after run acknowledgement", () => {
+        const optimisticRunId = "dashboard-chat-unread";
+        const providerRunId = "provider-unread";
+        const optimisticRuntime = reduceChatRuntime(
+            addOptimisticChatRun(createChatRuntimeState(), SESSION, optimisticRunId),
+            [
+                event(16, {
+                    kind: "assistant",
+                    message: message("assistant", "same answer", optimisticRunId),
+                    mode: "merge",
+                    runId: optimisticRunId,
+                    source: "chat",
+                }),
+            ]
+        );
+        const acknowledgedRuntime = acknowledgeChatRun(
+            optimisticRuntime,
+            SESSION,
+            optimisticRunId,
+            providerRunId
+        );
+        const projectRuntime = (runtime: typeof optimisticRuntime) =>
+            projectChat(
+                [],
+                runtime,
+                SESSION,
+                createChatVisibility(true, true),
+                true,
+                new Set()
+            ).rows.find((row) => row.message.text === "same answer");
+
+        const optimisticRow = projectRuntime(optimisticRuntime);
+        const acknowledgedRow = projectRuntime(acknowledgedRuntime);
+
+        expect(optimisticRow?.key).toBe(`response-${optimisticRunId}`);
+        expect(acknowledgedRow?.key).toBe(`response-${providerRunId}`);
+        expect(acknowledgedRow?.identityKeys).toContain(optimisticRow?.key);
+    });
+
     it("keeps a completed runtime answer in its turn when a follow-up starts", () => {
         const history = [
             {

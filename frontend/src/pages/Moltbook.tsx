@@ -84,14 +84,16 @@ export function Moltbook() {
 
             {/* Feed Tab */}
             {activeTab === "feed" && (
-                <div className="space-y-4 lg:space-y-6">
-                    <FilterButtonGroup
-                        ariaLabel="Moltbook feed sort"
-                        options={SORT_OPTIONS}
-                        value={sort}
-                        onChange={(v) => setSort(v)}
-                        className="w-full [&>button]:flex-1 sm:[&>button]:flex-none"
-                    />
+                <div>
+                    <div className="mb-4 lg:mb-6">
+                        <FilterButtonGroup
+                            ariaLabel="Moltbook feed sort"
+                            options={SORT_OPTIONS}
+                            value={sort}
+                            onChange={(v) => setSort(v)}
+                            className="w-full [&>button]:flex-1 sm:[&>button]:flex-none"
+                        />
+                    </div>
 
                     <div className="space-y-3">
                         {posts.length === 0 ? (

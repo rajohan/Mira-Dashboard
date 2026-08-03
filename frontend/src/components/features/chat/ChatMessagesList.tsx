@@ -1,7 +1,8 @@
 import type { Virtualizer } from "@tanstack/react-virtual";
-import { Loader2 } from "lucide-react";
+import { ArrowDown, Loader2 } from "lucide-react";
 import type { KeyboardEvent, PointerEvent, RefObject } from "react";
 
+import { Button } from "../../ui/Button";
 import { EmptyState } from "../../ui/EmptyState";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { ActivityIndicator } from "./ChatMessageControls";
@@ -41,6 +42,7 @@ interface ChatMessagesListProperties {
     isLoadingHistory: boolean;
     messagesContainerRef: RefObject<HTMLDivElement | undefined>;
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
+    newMessageCount?: number;
     onDeleteMessage: (messageKey: string, deleteKeys?: readonly string[]) => void;
     onDynamicContentLoad: () => void;
     onFollow: () => void;
@@ -60,6 +62,7 @@ export function ChatMessagesList({
     isLoadingHistory,
     messagesContainerRef,
     messagesVirtualizer,
+    newMessageCount = 0,
     onDeleteMessage,
     onDynamicContentLoad,
     onFollow,
@@ -99,13 +102,28 @@ export function ChatMessagesList({
             style={{ overflowAnchor: "none" }}
         >
             {!isAtBottom && chatRows.length > 0 ? (
-                <button
-                    className="sticky top-2 z-10 float-right mb-2 rounded-full bg-accent-500 px-3 py-1 text-xs text-white shadow-lg hover:bg-accent-600 sm:mr-2"
+                <Button
+                    aria-label={
+                        newMessageCount > 0
+                            ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"}. Scroll to bottom`
+                            : "Follow messages to bottom"
+                    }
+                    aria-live={newMessageCount > 0 ? "polite" : undefined}
+                    className="sticky top-2 z-10 float-right mb-2 rounded-full border border-primary-600 px-3 py-1 text-xs shadow-lg sm:mr-2"
                     onClick={onFollow}
+                    size="sm"
                     type="button"
+                    variant="secondary"
                 >
-                    ↓ Follow
-                </button>
+                    <ArrowDown
+                        aria-hidden="true"
+                        className="size-4 shrink-0"
+                        strokeWidth={2.5}
+                    />
+                    {newMessageCount > 0
+                        ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"}`
+                        : "Follow"}
+                </Button>
             ) : undefined}
 
             {isLoadingHistory && chatRows.length === 0 ? (

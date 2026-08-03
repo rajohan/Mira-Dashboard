@@ -52,8 +52,15 @@ export const taskWorkflowRoutes = {
                         .run(sqlNullable(assignee), nowIso(), id);
                     recordEvent(id, "assigned", { assignee });
                 })();
-                if (assignee === TASK_ASSIGNEES.mira.id) {
-                    void notifyMira("assigned", { id, title: existing.title });
+                if (
+                    existing.assignee === TASK_ASSIGNEES.mira.id ||
+                    assignee === TASK_ASSIGNEES.mira.id
+                ) {
+                    void notifyMira("assigned", {
+                        detail: assignee ?? "unassigned",
+                        id,
+                        title: existing.title,
+                    });
                 }
                 return json(toFrontendTask(taskById(id) as DatabaseTask));
             } catch (error) {
@@ -102,6 +109,13 @@ export const taskWorkflowRoutes = {
                         .run(status, JSON.stringify(labels), nowIso(), id);
                     recordEvent(id, "moved", { status });
                 })();
+                if (existing.assignee === TASK_ASSIGNEES.mira.id) {
+                    void notifyMira("moved", {
+                        detail: status,
+                        id,
+                        title: existing.title,
+                    });
+                }
                 return json(toFrontendTask(taskById(id) as DatabaseTask));
             } catch (error) {
                 return routeErrorResponse(request, error, {

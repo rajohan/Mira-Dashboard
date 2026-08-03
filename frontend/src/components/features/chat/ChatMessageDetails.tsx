@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { type ReactNode, useLayoutEffect, useRef } from "react";
+import type { ReactNode } from "react";
 
 import { serializeForDisplay } from "../../../lib/displayValue";
 import type {
@@ -10,6 +10,7 @@ import type {
     ChatVisibilitySettings,
 } from "./chatTypes";
 import { chatImageDownloadUrl, chatImageUrl } from "./chatTypes";
+import { ScrollableDetailContent } from "./ScrollableDetailContent";
 
 /**
  * Formats tool arguments for display.
@@ -144,28 +145,14 @@ function ToolResultImages({
  * @returns Rendered thinking blocks while following the bottom unless the user scrolls up.
  */
 function ThinkingBlocks({ blocks }: { blocks: ChatHistoryMessage["thinking"] }) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const shouldStickToBottomRef = useRef(true);
     const textSignature = blocks?.map((block) => block.text).join("\n") || "";
 
-    useLayoutEffect(() => {
-        const container = containerRef.current;
-        if (!container || !shouldStickToBottomRef.current) {
-            return;
-        }
-
-        container.scrollTop = container.scrollHeight;
-    }, [textSignature]);
-
     return (
-        <div
-            ref={containerRef}
+        <ScrollableDetailContent
+            ariaLabel="Thinking / working"
             className="max-h-80 space-y-2 overflow-y-auto pr-1"
-            onScroll={(event) => {
-                const element = event.currentTarget;
-                shouldStickToBottomRef.current =
-                    element.scrollHeight - element.scrollTop - element.clientHeight < 8;
-            }}
+            contentKey={textSignature}
+            shouldFollowContent
         >
             {blocks?.map((block) => (
                 <pre
@@ -178,7 +165,7 @@ function ThinkingBlocks({ blocks }: { blocks: ChatHistoryMessage["thinking"] }) 
                     {block.text}
                 </pre>
             ))}
-        </div>
+        </ScrollableDetailContent>
     );
 }
 
@@ -371,9 +358,15 @@ export function ChatMessageDetails({
                               ) : undefined}
                               <ToolSection label="Tool input">
                                   {formattedArguments ? (
-                                      <pre className="max-h-64 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
-                                          {formattedArguments}
-                                      </pre>
+                                      <ScrollableDetailContent
+                                          ariaLabel={`${label} tool input`}
+                                          className="max-h-64 overflow-auto"
+                                          contentKey={formattedArguments}
+                                      >
+                                          <pre className="font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
+                                              {formattedArguments}
+                                          </pre>
+                                      </ScrollableDetailContent>
                                   ) : (
                                       <span className="text-amber-200/80">
                                           No arguments
@@ -383,9 +376,15 @@ export function ChatMessageDetails({
                               {toolResult ? (
                                   <ToolSection label="Tool output">
                                       {toolResult.content.trim() ? (
-                                          <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
-                                              {toolResult.content}
-                                          </pre>
+                                          <ScrollableDetailContent
+                                              ariaLabel={`${label} tool output`}
+                                              className="max-h-72 overflow-auto"
+                                              contentKey={toolResult.content}
+                                          >
+                                              <pre className="font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
+                                                  {toolResult.content}
+                                              </pre>
+                                          </ScrollableDetailContent>
                                       ) : (
                                           <span className="text-amber-200/80">
                                               No text output
@@ -417,9 +416,15 @@ export function ChatMessageDetails({
                     tone={message.toolResult?.isError ? "danger" : "default"}
                 >
                     {message.toolResult?.content.trim() ? (
-                        <pre className="max-h-72 overflow-auto font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
-                            {message.toolResult.content}
-                        </pre>
+                        <ScrollableDetailContent
+                            ariaLabel="Standalone tool result"
+                            className="max-h-72 overflow-auto"
+                            contentKey={message.toolResult.content}
+                        >
+                            <pre className="font-mono text-[11px] leading-normal wrap-break-word whitespace-pre-wrap">
+                                {message.toolResult.content}
+                            </pre>
+                        </ScrollableDetailContent>
                     ) : (
                         <span className="text-primary-300">No text output</span>
                     )}

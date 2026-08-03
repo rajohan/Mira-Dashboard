@@ -1084,6 +1084,98 @@ describe("shared component helpers", () => {
         ).toHaveLength(2);
     });
 
+    it("offers scroll-to-bottom controls for long thinking and tool output", () => {
+        render(
+            <ChatMessageDetails
+                shouldExpandToolDetails
+                visibility={{ shouldShowThinking: true, shouldShowTools: true }}
+                message={{
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "Long thinking output" }],
+                    toolCalls: [
+                        {
+                            arguments: { command: "echo hello" },
+                            id: "tool-scroll",
+                            name: "exec",
+                            toolResult: {
+                                content: "Long tool output",
+                                id: "tool-scroll",
+                                name: "exec",
+                            },
+                        },
+                    ],
+                }}
+            />
+        );
+
+        const thinkingScrollArea = screen.getByLabelText(
+            "Thinking / working scroll area"
+        );
+        const toolOutputScrollArea = screen.getByLabelText(
+            "Bash tool output scroll area"
+        );
+        expect(thinkingScrollArea).toHaveAttribute("tabindex", "0");
+        expect(toolOutputScrollArea).toHaveAttribute("tabindex", "0");
+        let thinkingScrollTop = 0;
+        let toolOutputScrollTop = 0;
+        Object.defineProperties(thinkingScrollArea, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 400 },
+            scrollTop: {
+                configurable: true,
+                get: () => thinkingScrollTop,
+                set: (value: number) => {
+                    thinkingScrollTop = value;
+                },
+            },
+        });
+        Object.defineProperties(toolOutputScrollArea, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 500 },
+            scrollTop: {
+                configurable: true,
+                get: () => toolOutputScrollTop,
+                set: (value: number) => {
+                    toolOutputScrollTop = value;
+                },
+            },
+        });
+
+        fireEvent.scroll(thinkingScrollArea);
+        fireEvent.scroll(toolOutputScrollArea);
+        const thinkingBottomButton = screen.getByRole("button", {
+            name: "Scroll thinking / working to bottom",
+        });
+        expect(thinkingBottomButton).toHaveClass(
+            "bottom-3",
+            "left-1/2",
+            "-translate-x-1/2"
+        );
+        expect(thinkingBottomButton).not.toHaveClass("right-2");
+        expect(thinkingBottomButton.querySelector("svg")).toHaveClass("size-4");
+        fireEvent.click(thinkingBottomButton);
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Scroll bash tool output to bottom",
+            })
+        );
+
+        expect(thinkingScrollTop).toBe(400);
+        expect(toolOutputScrollTop).toBe(500);
+        expect(
+            screen.queryByRole("button", {
+                name: "Scroll thinking / working to bottom",
+            })
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", {
+                name: "Scroll bash tool output to bottom",
+            })
+        ).not.toBeInTheDocument();
+    });
+
     it("shows a write path in a collapsed tool bubble", () => {
         render(
             <ChatMessageDetails
@@ -2649,6 +2741,7 @@ describe("shared component helpers", () => {
                 <ChatMessagesList
                     isAtBottom={false}
                     isLoadingHistory={false}
+                    newMessageCount={2}
                     chatRows={[
                         {
                             deleteKeys: ["user", "user-history"],
@@ -2731,7 +2824,14 @@ describe("shared component helpers", () => {
         ).not.toContainElement(screen.getByText("answer"));
         await waitFor(() => expect(onDynamicContentLoad).toHaveBeenCalled());
 
-        await user.click(screen.getByRole("button", { name: /follow/i }));
+        const newMessageButton = screen.getByRole("button", {
+            name: "2 new messages. Scroll to bottom",
+        });
+        expect(newMessageButton).toHaveClass("bg-primary-700");
+        expect(newMessageButton).toHaveClass("border-primary-600", "text-primary-100");
+        expect(newMessageButton).not.toHaveClass("bg-accent-500");
+        expect(newMessageButton.querySelector("svg")).toHaveClass("size-4");
+        fireEvent.click(newMessageButton);
         expect(onUserScrollIntent).not.toHaveBeenCalled();
         Object.defineProperties(messagesContainerRef.current!, {
             clientWidth: { configurable: true, value: 90 },

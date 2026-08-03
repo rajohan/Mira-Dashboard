@@ -216,6 +216,19 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
     return (await response.json()) as Record<string, unknown>;
 }
 
+function runAsMiraTaskTracking<Result>(
+    requestId: string,
+    operation: () => Result
+): Result {
+    return runWithRequestAuditContext(
+        {
+            actor: { id: "openclaw-task-tracking", type: "automation" },
+            requestId,
+        },
+        operation
+    );
+}
+
 async function startTestScheduledExecutor(): Promise<void> {
     const { startScheduledJobExecutor, stopScheduledJobExecutor } =
         await import("../src/services/scheduledJobs/runtime.ts");
@@ -1019,7 +1032,7 @@ describe("backend route and service behavior", () => {
         const automatedTaskNumber = Number(automatedTask.number);
         expect(taskNotifications).toHaveLength(notificationCount + 1);
         expect(taskNotifications.at(-1)).toBe(
-            `Task created: #${automatedTaskNumber}. A scoped automation changed this Mira task; review it in Dashboard when the current work is clear.`
+            `Task created: #${automatedTaskNumber}. A scoped automation created this Mira task; review it in Dashboard when the current work is clear.`
         );
         expect(taskNotifications.at(-1)).not.toContain(
             "Automation task must not enter chat"
@@ -1038,8 +1051,148 @@ describe("backend route and service behavior", () => {
         );
         expect(taskNotifications).toHaveLength(notificationCount + 2);
         expect(taskNotifications.at(-1)).toBe(
-            `Task deleted: #${automatedTaskNumber}. A scoped automation changed this Mira task; review it in Dashboard when the current work is clear.`
+            `Task deleted: #${automatedTaskNumber}. A scoped automation deleted this Mira task; review it in Dashboard when the current work is clear.`
         );
+
+        const notificationCountBeforeMiraAutomation = taskNotifications.length;
+        const miraAutomationTaskCreate = await runAsMiraTaskTracking(
+            "mira-task-tracking-create",
+            () =>
+                taskRoutes["/api/tasks"].POST(
+                    jsonRequest("/api/tasks", {
+                        assignee: "mira-2026",
+                        labels: ["todo"],
+                        title: "Mira automation notification coverage",
+                    })
+                )
+        );
+        expect(miraAutomationTaskCreate.status).toBe(201);
+        const miraAutomationTask = await responseJson(miraAutomationTaskCreate);
+        const miraAutomationTaskNumber = Number(miraAutomationTask.number);
+        expect(taskNotifications).toHaveLength(notificationCountBeforeMiraAutomation);
+
+        const assignRaymondResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-assign-raymond",
+            () =>
+                taskRoutes["/api/tasks/:id/assign"].POST(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/assign`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({ assignee: "rajohan" }),
+                            method: "POST",
+                        }
+                    )
+                )
+        );
+        expect(assignRaymondResponse.status).toBe(200);
+        const assignMiraResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-assign-mira",
+            () =>
+                taskRoutes["/api/tasks/:id/assign"].POST(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/assign`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({ assignee: "mira-2026" }),
+                            method: "POST",
+                        }
+                    )
+                )
+        );
+        expect(assignMiraResponse.status).toBe(200);
+        const patchResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-patch",
+            () =>
+                taskRoutes["/api/tasks/:id"].PATCH(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({
+                                labels: ["done"],
+                                title: "Mira automation notification coverage updated",
+                            }),
+                            method: "PATCH",
+                        }
+                    )
+                )
+        );
+        expect(patchResponse.status).toBe(200);
+        const moveResponse = await runAsMiraTaskTracking("mira-task-tracking-move", () =>
+            taskRoutes["/api/tasks/:id/move"].POST(
+                requestWithParameters(
+                    `/api/tasks/${miraAutomationTaskNumber}/move`,
+                    { id: String(miraAutomationTaskNumber) },
+                    {
+                        body: JSON.stringify({ columnLabel: "in-progress" }),
+                        method: "POST",
+                    }
+                )
+            )
+        );
+        expect(moveResponse.status).toBe(200);
+        const commentResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-comment-add",
+            () =>
+                taskRoutes["/api/tasks/:id/updates"].POST(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/updates`,
+                        { id: String(miraAutomationTaskNumber) },
+                        {
+                            body: JSON.stringify({
+                                author: "rajohan",
+                                messageMd: "Payload author must not override the actor",
+                            }),
+                            method: "POST",
+                        }
+                    )
+                )
+        );
+        expect(commentResponse.status).toBe(201);
+        const comment = await responseJson(commentResponse);
+        const commentId = Number(comment.id);
+        const editCommentResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-comment-edit",
+            () =>
+                taskRoutes["/api/tasks/:id/updates/:updateId"].PATCH(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/updates/${commentId}`,
+                        {
+                            id: String(miraAutomationTaskNumber),
+                            updateId: String(commentId),
+                        },
+                        {
+                            body: JSON.stringify({ messageMd: "Edited by Mira" }),
+                            method: "PATCH",
+                        }
+                    )
+                )
+        );
+        expect(editCommentResponse.status).toBe(200);
+        const deleteCommentResponse = runAsMiraTaskTracking(
+            "mira-task-tracking-comment-delete",
+            () =>
+                taskRoutes["/api/tasks/:id/updates/:updateId"].DELETE(
+                    requestWithParameters(
+                        `/api/tasks/${miraAutomationTaskNumber}/updates/${commentId}`,
+                        {
+                            id: String(miraAutomationTaskNumber),
+                            updateId: String(commentId),
+                        }
+                    )
+                )
+        );
+        expect(deleteCommentResponse.status).toBe(200);
+        const deleteResponse = runAsMiraTaskTracking("mira-task-tracking-delete", () =>
+            taskRoutes["/api/tasks/:id"].DELETE(
+                requestWithParameters(`/api/tasks/${miraAutomationTaskNumber}`, {
+                    id: String(miraAutomationTaskNumber),
+                })
+            )
+        );
+        expect(deleteResponse.status).toBe(200);
+        expect(taskNotifications).toHaveLength(notificationCountBeforeMiraAutomation);
 
         const enriched = await taskRoutes["/api/tasks/:id"].GET(
             requestWithParameters(`/api/tasks/${id}`, { id: String(id) })
@@ -1256,7 +1409,7 @@ describe("backend route and service behavior", () => {
             assignees: [{ login: "mira-2026", name: "mira-2026" }],
         });
         expect(taskNotifications.at(-1)).toBe(
-            `Task assigned: #${id} Coverage route task updated. This task is assigned to Mira and may need attention when the current work is clear.`
+            `Task assigned: #${id} Coverage route task updated → mira-2026. This Mira task's assignment changed; review it in Dashboard when the current work is clear.`
         );
 
         rememberEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE");
@@ -1281,6 +1434,29 @@ describe("backend route and service behavior", () => {
             process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = previousDevelopmentSafeMode;
         }
 
+        const assignAway = await taskRoutes["/api/tasks/:id/assign"].POST(
+            requestWithParameters(
+                `/api/tasks/${id}/assign`,
+                { id: String(id) },
+                { body: JSON.stringify({ assignee: "rajohan" }), method: "POST" }
+            )
+        );
+        expect(assignAway.status).toBe(200);
+        expect(taskNotifications.at(-1)).toBe(
+            `Task assigned: #${id} Coverage route task updated → rajohan. This Mira task's assignment changed; review it in Dashboard when the current work is clear.`
+        );
+        const assignBack = await taskRoutes["/api/tasks/:id/assign"].POST(
+            requestWithParameters(
+                `/api/tasks/${id}/assign`,
+                { id: String(id) },
+                { body: JSON.stringify({ assignee: "mira-2026" }), method: "POST" }
+            )
+        );
+        expect(assignBack.status).toBe(200);
+        expect(taskNotifications.at(-1)).toBe(
+            `Task assigned: #${id} Coverage route task updated → mira-2026. This Mira task's assignment changed; review it in Dashboard when the current work is clear.`
+        );
+
         const invalidMove = await taskRoutes["/api/tasks/:id/move"].POST(
             requestWithParameters(
                 `/api/tasks/${id}/move`,
@@ -1298,6 +1474,9 @@ describe("backend route and service behavior", () => {
             )
         );
         expect(move.json()).resolves.toMatchObject({ state: "OPEN" });
+        expect(taskNotifications.at(-1)).toBe(
+            `Task moved: #${id} Coverage route task updated → in-progress. This Mira task moved columns; review it in Dashboard when the current work is clear.`
+        );
 
         const invalidUpdate = await taskRoutes["/api/tasks/:id/updates"].POST(
             requestWithParameters(
@@ -1333,7 +1512,7 @@ describe("backend route and service behavior", () => {
             taskId: id,
         });
         expect(taskNotifications.at(-1)).toBe(
-            `Task progress: #${id} Coverage route task updated. This existing Mira task has new progress and may need attention when the current work is clear.`
+            `Task comment added: #${id} Coverage route task updated. A comment was added to this Mira task; review it in Dashboard when the current work is clear.`
         );
         expect(typeof updateBody.createdAt).toBe("string");
 
@@ -1368,6 +1547,9 @@ describe("backend route and service behavior", () => {
             author: "mira-2026",
             messageMd: "Raymond update",
         });
+        expect(taskNotifications.at(-1)).toBe(
+            `Task comment edited: #${id} Coverage route task updated. A comment on this Mira task was edited; review it in Dashboard when the current work is clear.`
+        );
 
         const deleteUpdate = taskRoutes["/api/tasks/:id/updates/:updateId"].DELETE(
             requestWithParameters(`/api/tasks/${id}/updates/${updateId}`, {
@@ -1376,13 +1558,16 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(await responseJson(deleteUpdate)).toEqual({ isOk: true });
+        expect(taskNotifications.at(-1)).toBe(
+            `Task comment deleted: #${id} Coverage route task updated. A comment on this Mira task was deleted; review it in Dashboard when the current work is clear.`
+        );
 
         const deleteTask = taskRoutes["/api/tasks/:id"].DELETE(
             requestWithParameters(`/api/tasks/${id}`, { id: String(id) })
         );
         expect(await responseJson(deleteTask)).toEqual({ isOk: true });
         expect(taskNotifications.at(-1)).toBe(
-            `Task deleted: #${id} Coverage route task updated. This Mira-assigned task changed and may need attention when the current work is clear.`
+            `Task deleted: #${id} Coverage route task updated. This Mira task was deleted; review it in Dashboard when the current work is clear.`
         );
     });
 

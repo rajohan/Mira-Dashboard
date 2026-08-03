@@ -2482,10 +2482,10 @@ describe("Mira Dashboard pages", () => {
         });
         expect(contentTabs.parentElement?.tagName).toBe("DIV");
         expect(contentTabs.parentElement?.parentElement).toBe(
-            feedSort.parentElement?.parentElement
+            feedSort.parentElement?.parentElement?.parentElement
         );
         expect(feedSort.parentElement).not.toBe(contentTabs.parentElement);
-        expect(feedSort.parentElement).toHaveClass("space-y-4", "lg:space-y-6");
+        expect(feedSort.parentElement).toHaveClass("mb-4", "lg:mb-6");
 
         view.unmount();
         view.queryClient.clear();
