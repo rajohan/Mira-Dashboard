@@ -19,8 +19,10 @@
   `bed2a17f337d44d00dc26e9ec7a456cc521af4a9e82e02028cc69dddc696437d`. The running production
   release remains on its immutable cached runtime until a verified release activation.
   `.bun-version` pins the full qualified revision
-  `1f447a73ebf6a86912a3f11b00bd6fbb5f82b6c0`; CI resolves that SHA rather than the moving
-  `canary` channel.
+  `1f447a73ebf6a86912a3f11b00bd6fbb5f82b6c0`. Bun does not publish a permanent release tag for
+  each canary commit, so CI uses the moving `canary` asset only as download transport and rejects
+  it before dependency installation unless `Bun.revision` equals the complete qualified SHA.
+  When the channel advances, a new candidate must be qualified and promoted deliberately.
 - The host bootstrap runtime was upgraded to the same selected revision only after the focused
   candidate gates passed. Its installed binary is byte-identical to the downloaded and
   checksum-verified qualification binary. The current production release and both production
@@ -247,8 +249,10 @@ environment against the exact candidate binary:
    bounded concurrency.
 
 The chosen Bun revision is then recorded in `.bun-version`, the release manifest, generated
-runtime documentation, and the production runtime directory. `bun-types` must be lockfile
-pinned to a matching canary snapshot rather than floating independently.
+runtime documentation, and the production runtime directory. CI must validate the runtime's full
+`Bun.revision` before installing dependencies because `setup-bun` accepts release versions and
+channels, not raw commit SHAs. `bun-types` must be lockfile pinned to a matching canary snapshot
+rather than floating independently.
 
 ### Server and build shape
 

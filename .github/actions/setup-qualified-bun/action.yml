@@ -1,0 +1,29 @@
+name: Set up qualified Bun canary
+description: Install the current canary and reject it unless it matches the qualified revision.
+
+runs:
+    using: composite
+    steps:
+        - name: Install Bun canary
+          uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+          with:
+              bun-version: canary
+
+        - name: Verify qualified revision
+          shell: bash
+          run: |
+              set -euo pipefail
+
+              expected_revision="$(tr -d '[:space:]' < .bun-version)"
+              if [[ ! "$expected_revision" =~ ^[0-9a-f]{40}$ ]]; then
+                  echo "::error file=.bun-version::.bun-version must contain one full lowercase Bun commit SHA"
+                  exit 1
+              fi
+
+              actual_revision="$(bun --eval 'process.stdout.write(Bun.revision)')"
+              if [[ "$actual_revision" != "$expected_revision" ]]; then
+                  echo "::error::Bun canary moved: expected $expected_revision, received $actual_revision"
+                  exit 1
+              fi
+
+              echo "Qualified Bun revision: $actual_revision"
