@@ -757,6 +757,9 @@ describe("managed pull request preview", () => {
             );
             expect(worktreeAddIndex).toBeGreaterThanOrEqual(0);
             expect(prepareStateSpy).toHaveBeenCalledTimes(1);
+            expect(prepareStateSpy).toHaveBeenCalledWith(expect.any(Object), {
+                refreshDatabaseSnapshot: true,
+            });
             expect(protectFromCancellation).toHaveBeenCalledTimes(1);
             expect(fetchSpy).toHaveBeenCalledWith(
                 "http://127.0.0.1:5173/api/health/ready",

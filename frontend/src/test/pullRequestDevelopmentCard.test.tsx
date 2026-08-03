@@ -23,7 +23,7 @@ describe("PullRequestDevelopmentCard", () => {
     it("renders the available and unavailable preview states", () => {
         const { rerender } = render(<PullRequestDevelopmentCard preview={undefined} />);
 
-        expect(screen.getByText("Available")).toBeInTheDocument();
+        expect(screen.getByText("Available")).toHaveClass("text-green-400");
         expect(screen.getByText(/fixed PR commit/u)).toBeInTheDocument();
         expect(screen.queryByText(/hot reload/iu)).not.toBeInTheDocument();
         expect(

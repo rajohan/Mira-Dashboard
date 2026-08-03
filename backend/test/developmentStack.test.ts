@@ -539,6 +539,61 @@ describe("development stack", () => {
                     .get()
             ).toEqual({ value: "preserved" });
             reusedSnapshot.close();
+
+            const productionDatabase = new Database(sourceDatabase);
+            productionDatabase
+                .prepare("UPDATE app_config SET value = ? WHERE key = 'theme'")
+                .run("fresh");
+            productionDatabase.close();
+            expect(
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+            ).toEqual({
+                database: "snapshot-created",
+                releases: "reused",
+                workspace: "reused",
+            });
+            const refreshedSnapshot = new Database(config.databasePath, {
+                readonly: true,
+            });
+            expect(
+                refreshedSnapshot
+                    .query(
+                        "SELECT value FROM app_config WHERE key = 'development-marker'"
+                    )
+                    .get()
+            ).toBeNull();
+            expect(
+                refreshedSnapshot
+                    .query("SELECT value FROM app_config WHERE key = 'theme'")
+                    .get()
+            ).toEqual({ value: "fresh" });
+            refreshedSnapshot.close();
+
+            const staleSidecar = `${config.databasePath}-wal`;
+            writeFileSync(staleSidecar, "stale preview journal");
+            expect(
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+                    .database
+            ).toBe("snapshot-created");
+            expect(existsSync(staleSidecar)).toBe(false);
+
+            symlinkSync(sourceDatabase, staleSidecar);
+            expect(() =>
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+            ).toThrow("Development database sidecar must be a real regular file");
+            rmSync(staleSidecar);
+
+            rmSync(config.databasePath);
+            symlinkSync(sourceDatabase, config.databasePath);
+            expect(() =>
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+            ).toThrow("Development database must be a real regular file");
+            rmSync(config.databasePath);
+            expect(
+                prepareDevelopmentState(config, { refreshDatabaseSnapshot: true })
+                    .database
+            ).toBe("snapshot-created");
+
             rmSync(sourceDatabase);
             expect(prepareDevelopmentState(config)).toEqual({
                 database: "reused",

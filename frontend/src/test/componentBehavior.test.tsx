@@ -103,6 +103,7 @@ import { AppErrorFallback } from "../components/ui/AppErrorFallback";
 import { Badge } from "../components/ui/Badge";
 import { Checkbox } from "../components/ui/Checkbox";
 import { ConnectionStatus } from "../components/ui/ConnectionStatus";
+import { CopyButton } from "../components/ui/CopyButton";
 import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { ProgressBar } from "../components/ui/ProgressBar";
@@ -291,6 +292,87 @@ describe("shared component helpers", () => {
         expect(screen.getByText("inline")).toBeInTheDocument();
         expect(screen.getByText("json")).toBeInTheDocument();
         expect(screen.getByText("sh")).toBeInTheDocument();
+    });
+
+    it("copies chat code and structured file previews", async () => {
+        const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+            navigator,
+            "clipboard"
+        );
+        const writeText = jest.fn(async () => {});
+        const user = userEvent.setup();
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: { writeText },
+        });
+        const view = render(<ChatMarkdown text={'```json\n{"value":1}\n```'} />);
+
+        try {
+            await user.click(screen.getByRole("button", { name: "Copy code" }));
+            await waitFor(() => {
+                expect(writeText).toHaveBeenLastCalledWith('{"value":1}');
+            });
+
+            view.rerender(<JsonPreview content={'{"value": 1}'} />);
+            await user.click(screen.getByRole("button", { name: "Copy JSON" }));
+            await waitFor(() => {
+                expect(writeText).toHaveBeenLastCalledWith('{"value": 1}');
+            });
+
+            view.rerender(<CodePreview language="ts" content="const value = 1;" />);
+            await user.click(screen.getByRole("button", { name: "Copy code" }));
+            await waitFor(() => {
+                expect(writeText).toHaveBeenLastCalledWith("const value = 1;");
+            });
+
+            view.rerender(<MarkdownPreview content="# Notes" />);
+            await user.click(screen.getByRole("button", { name: "Copy Markdown" }));
+            await waitFor(() => {
+                expect(writeText).toHaveBeenLastCalledWith("# Notes");
+            });
+        } finally {
+            view.unmount();
+            if (originalClipboardDescriptor) {
+                Object.defineProperty(
+                    navigator,
+                    "clipboard",
+                    originalClipboardDescriptor
+                );
+            } else {
+                Reflect.deleteProperty(navigator, "clipboard");
+            }
+        }
+    });
+
+    it("reports when clipboard copying is unavailable", async () => {
+        const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+            navigator,
+            "clipboard"
+        );
+        const user = userEvent.setup();
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: undefined,
+        });
+        const view = render(<CopyButton content="notes" label="Copy notes" />);
+
+        try {
+            await user.click(screen.getByRole("button", { name: "Copy notes" }));
+            expect(
+                await screen.findByRole("button", { name: "Copy failed" })
+            ).toBeInTheDocument();
+        } finally {
+            view.unmount();
+            if (originalClipboardDescriptor) {
+                Object.defineProperty(
+                    navigator,
+                    "clipboard",
+                    originalClipboardDescriptor
+                );
+            } else {
+                Reflect.deleteProperty(navigator, "clipboard");
+            }
+        }
     });
 
     it("renders alert variants, right-aligned dismissal, and clamped progress", async () => {

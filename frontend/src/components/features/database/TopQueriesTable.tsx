@@ -1,10 +1,9 @@
 import { createColumnHelper } from "@tanstack/react-table";
-import { Copy } from "lucide-react";
 import { useState } from "react";
 
 import type { DatabaseOverviewResponse } from "../../../../../contracts/database";
-import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
+import { CopyButton } from "../../ui/CopyButton";
 import { EmptyState } from "../../ui/EmptyState";
 import { Modal } from "../../ui/Modal";
 import { DatabaseTableShell } from "./DatabaseTableShell";
@@ -57,7 +56,6 @@ export function TopQueriesTable({
     const [selectedQuery, setSelectedQuery] = useState<
         DatabaseOverviewResponse["topQueries"][number] | undefined
     >();
-    const [copied, setCopied] = useState(false);
 
     if (!enabled) {
         return (
@@ -66,21 +64,6 @@ export function TopQueriesTable({
             </Card>
         );
     }
-
-    /**
-     * Responds to copy events.
-     * @param query Query value.
-     */
-    const handleCopy = async (query: string) => {
-        try {
-            await navigator.clipboard.writeText(query);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-        } catch (error_) {
-            setCopied(false);
-            console.error("Failed to copy query", error_);
-        }
-    };
 
     return (
         <>
@@ -121,10 +104,7 @@ export function TopQueriesTable({
 
             <Modal
                 isOpen={!!selectedQuery}
-                onClose={() => {
-                    setSelectedQuery(undefined);
-                    setCopied(false);
-                }}
+                onClose={() => setSelectedQuery(undefined)}
                 title="Query details"
                 size="3xl"
             >
@@ -138,15 +118,12 @@ export function TopQueriesTable({
                         </div>
 
                         <div className="flex justify-stretch sm:justify-end">
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => void handleCopy(selectedQuery.query)}
+                            <CopyButton
                                 className="w-full sm:w-auto"
-                            >
-                                <Copy className="size-4" />
-                                {copied ? "Copied" : "Copy query"}
-                            </Button>
+                                content={selectedQuery.query}
+                                label="Copy query"
+                                variant="secondary"
+                            />
                         </div>
 
                         <pre className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-900/50 p-3 text-xs wrap-break-word whitespace-pre-wrap text-primary-100 sm:p-4 sm:text-sm">

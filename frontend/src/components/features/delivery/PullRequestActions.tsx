@@ -308,6 +308,7 @@ export function PullRequestActions({ context, pr }: PullRequestActionsProperties
                     {previewActions.blockedMessage}
                 </p>
             ) : undefined}
+            {previewActions.controls}
             {canConfiguredReviewerApproveReview(pr) ? (
                 <Button
                     variant="secondary"
@@ -330,7 +331,6 @@ export function PullRequestActions({ context, pr }: PullRequestActionsProperties
                     {context.isUpdateBranchPending ? "Updating..." : "Update branch"}
                 </Button>
             ) : undefined}
-            {previewActions.controls}
             <Button
                 variant="primary"
                 onClick={() =>

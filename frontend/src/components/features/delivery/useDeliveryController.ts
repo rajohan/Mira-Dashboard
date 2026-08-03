@@ -31,6 +31,20 @@ import {
     indexPullRequestStackCandidates,
 } from "./pullRequestStacks";
 
+type MergePendingAction = Extract<
+    Exclude<PendingAction, undefined>,
+    { type: "merge" | "merge-deploy" }
+>;
+
+function mergeProgressMessage(action: MergePendingAction): string {
+    const target = action.pr.stack
+        ? `stack through PR #${action.pr.number}`
+        : `PR #${action.pr.number}`;
+    return action.type === "merge-deploy"
+        ? `Merging ${target} and preparing deploy...`
+        : `Merging ${target}...`;
+}
+
 /**
  * Owns Delivery data, mutations, confirmations, and derived action context.
  * @returns Delivery page state, derived groups, and actions.
@@ -64,7 +78,9 @@ export function useDeliveryController() {
     const [pendingAction, setPendingAction] = useState<PendingAction>();
     const [lastResult, setLastResult] = useState<string | undefined>();
     const [actionError, setActionError] = useState<string | undefined>();
+    const [actionProgress, setActionProgress] = useState<string | undefined>();
     const isActionPending =
+        actionProgress !== undefined ||
         approvePullRequest.isPending ||
         approvePullRequestReview.isPending ||
         createPullRequestStack.isPending ||
@@ -125,6 +141,8 @@ export function useDeliveryController() {
                         action.pr,
                         action.scope
                     );
+                    setPendingAction(undefined);
+                    setActionProgress(mergeProgressMessage(action));
                     const result = await approvePullRequest.mutateAsync({
                         expectedHeadSha,
                         expectedStackHeads,
@@ -158,6 +176,8 @@ export function useDeliveryController() {
                         action.pr,
                         action.scope
                     );
+                    setPendingAction(undefined);
+                    setActionProgress(mergeProgressMessage(action));
                     const result = await approvePullRequest.mutateAsync({
                         expectedHeadSha,
                         expectedStackHeads,
@@ -273,6 +293,8 @@ export function useDeliveryController() {
             setPendingAction(undefined);
         } catch (error_) {
             setActionError(messageFromError(error_, "Action failed"));
+        } finally {
+            setActionProgress(undefined);
         }
     }
 
@@ -306,6 +328,7 @@ export function useDeliveryController() {
 
     return {
         actionError,
+        actionProgress,
         confirmAction,
         deployments,
         deployBlockedReasonId,

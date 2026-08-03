@@ -1,4 +1,5 @@
 import { Rocket } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import {
     actionLabel,
@@ -32,6 +33,7 @@ import { messageFromError } from "../lib/errorMessage";
 export function Delivery() {
     const {
         actionError,
+        actionProgress,
         confirmAction,
         deployments,
         deployBlockedReasonId,
@@ -61,9 +63,18 @@ export function Delivery() {
         stackCandidates,
         stackGroups,
     } = useDeliveryController();
+    const pageTopRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!actionProgress) return;
+        pageTopRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+        });
+    }, [actionProgress]);
 
     return (
-        <div className="space-y-4 p-3 sm:p-4 lg:p-6">
+        <div ref={pageTopRef} className="space-y-4 p-3 sm:p-4 lg:p-6">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                     <h2 className="flex items-center gap-2 text-xl font-semibold text-primary-100">
@@ -95,6 +106,16 @@ export function Delivery() {
                     ) : undefined}
                 </div>
             </div>
+
+            {actionProgress ? (
+                <div>
+                    <Alert variant="info">
+                        <output className="block text-sm text-blue-300">
+                            {actionProgress}
+                        </output>
+                    </Alert>
+                </div>
+            ) : undefined}
 
             {lastResult ? (
                 <Alert
