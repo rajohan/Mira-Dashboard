@@ -32,6 +32,7 @@ function isConversationMessageRow(row: ChatRow): boolean {
         row.message.images?.length
     );
 }
+
 /**
  * Owns sticky-bottom state and delegates viewport anchoring to the virtualizer.
  * @param rows Rows value.

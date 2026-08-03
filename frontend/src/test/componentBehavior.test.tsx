@@ -1116,6 +1116,8 @@ describe("shared component helpers", () => {
         const toolOutputScrollArea = screen.getByLabelText(
             "Bash tool output scroll area"
         );
+        expect(thinkingScrollArea).toHaveAttribute("tabindex", "0");
+        expect(toolOutputScrollArea).toHaveAttribute("tabindex", "0");
         let thinkingScrollTop = 0;
         let toolOutputScrollTop = 0;
         Object.defineProperties(thinkingScrollArea, {
@@ -2820,6 +2822,7 @@ describe("shared component helpers", () => {
             name: "2 new messages. Scroll to bottom",
         });
         expect(newMessageButton).toHaveClass("bg-primary-700");
+        expect(newMessageButton).toHaveClass("border-primary-600", "text-primary-100");
         expect(newMessageButton).not.toHaveClass("bg-accent-500");
         await user.click(newMessageButton);
         expect(onUserScrollIntent).not.toHaveBeenCalled();

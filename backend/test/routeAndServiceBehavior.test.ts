@@ -216,6 +216,19 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
     return (await response.json()) as Record<string, unknown>;
 }
 
+function runAsMiraTaskTracking<Result>(
+    requestId: string,
+    operation: () => Result
+): Result {
+    return runWithRequestAuditContext(
+        {
+            actor: { id: "openclaw-task-tracking", type: "automation" },
+            requestId,
+        },
+        operation
+    );
+}
+
 async function startTestScheduledExecutor(): Promise<void> {
     const { startScheduledJobExecutor, stopScheduledJobExecutor } =
         await import("../src/services/scheduledJobs/runtime.ts");
@@ -1042,11 +1055,8 @@ describe("backend route and service behavior", () => {
         );
 
         const notificationCountBeforeMiraAutomation = taskNotifications.length;
-        const miraAutomationTaskCreate = await runWithRequestAuditContext(
-            {
-                actor: { id: "openclaw-task-tracking", type: "automation" },
-                requestId: "mira-task-tracking-create",
-            },
+        const miraAutomationTaskCreate = await runAsMiraTaskTracking(
+            "mira-task-tracking-create",
             () =>
                 taskRoutes["/api/tasks"].POST(
                     jsonRequest("/api/tasks", {
@@ -1056,15 +1066,13 @@ describe("backend route and service behavior", () => {
                     })
                 )
         );
+        expect(miraAutomationTaskCreate.status).toBe(201);
         const miraAutomationTask = await responseJson(miraAutomationTaskCreate);
         const miraAutomationTaskNumber = Number(miraAutomationTask.number);
         expect(taskNotifications).toHaveLength(notificationCountBeforeMiraAutomation);
 
-        await runWithRequestAuditContext(
-            {
-                actor: { id: "openclaw-task-tracking", type: "automation" },
-                requestId: "mira-task-tracking-assign-raymond",
-            },
+        const assignRaymondResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-assign-raymond",
             () =>
                 taskRoutes["/api/tasks/:id/assign"].POST(
                     requestWithParameters(
@@ -1077,11 +1085,9 @@ describe("backend route and service behavior", () => {
                     )
                 )
         );
-        await runWithRequestAuditContext(
-            {
-                actor: { id: "openclaw-task-tracking", type: "automation" },
-                requestId: "mira-task-tracking-assign-mira",
-            },
+        expect(assignRaymondResponse.status).toBe(200);
+        const assignMiraResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-assign-mira",
             () =>
                 taskRoutes["/api/tasks/:id/assign"].POST(
                     requestWithParameters(
@@ -1094,11 +1100,9 @@ describe("backend route and service behavior", () => {
                     )
                 )
         );
-        await runWithRequestAuditContext(
-            {
-                actor: { id: "openclaw-task-tracking", type: "automation" },
-                requestId: "mira-task-tracking-patch",
-            },
+        expect(assignMiraResponse.status).toBe(200);
+        const patchResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-patch",
             () =>
                 taskRoutes["/api/tasks/:id"].PATCH(
                     requestWithParameters(
@@ -1114,11 +1118,9 @@ describe("backend route and service behavior", () => {
                     )
                 )
         );
-        await runWithRequestAuditContext(
-            {
-                actor: { id: "openclaw-task-tracking", type: "automation" },
-                requestId: "mira-task-tracking-progress",
-            },
+        expect(patchResponse.status).toBe(200);
+        const progressResponse = await runAsMiraTaskTracking(
+            "mira-task-tracking-progress",
             () =>
                 taskRoutes["/api/tasks/:id/updates"].POST(
                     requestWithParameters(
@@ -1134,18 +1136,15 @@ describe("backend route and service behavior", () => {
                     )
                 )
         );
-        runWithRequestAuditContext(
-            {
-                actor: { id: "openclaw-task-tracking", type: "automation" },
-                requestId: "mira-task-tracking-delete",
-            },
-            () =>
-                taskRoutes["/api/tasks/:id"].DELETE(
-                    requestWithParameters(`/api/tasks/${miraAutomationTaskNumber}`, {
-                        id: String(miraAutomationTaskNumber),
-                    })
-                )
+        expect(progressResponse.status).toBe(201);
+        const deleteResponse = runAsMiraTaskTracking("mira-task-tracking-delete", () =>
+            taskRoutes["/api/tasks/:id"].DELETE(
+                requestWithParameters(`/api/tasks/${miraAutomationTaskNumber}`, {
+                    id: String(miraAutomationTaskNumber),
+                })
+            )
         );
+        expect(deleteResponse.status).toBe(200);
         expect(taskNotifications).toHaveLength(notificationCountBeforeMiraAutomation);
 
         const enriched = await taskRoutes["/api/tasks/:id"].GET(

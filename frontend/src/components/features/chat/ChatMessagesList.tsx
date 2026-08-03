@@ -2,6 +2,7 @@ import type { Virtualizer } from "@tanstack/react-virtual";
 import { Loader2 } from "lucide-react";
 import type { KeyboardEvent, PointerEvent, RefObject } from "react";
 
+import { Button } from "../../ui/Button";
 import { EmptyState } from "../../ui/EmptyState";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { ActivityIndicator } from "./ChatMessageControls";
@@ -101,21 +102,23 @@ export function ChatMessagesList({
             style={{ overflowAnchor: "none" }}
         >
             {!isAtBottom && chatRows.length > 0 ? (
-                <button
+                <Button
                     aria-label={
                         newMessageCount > 0
                             ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"}. Scroll to bottom`
                             : "Follow messages to bottom"
                     }
                     aria-live={newMessageCount > 0 ? "polite" : undefined}
-                    className="sticky top-2 z-10 float-right mb-2 rounded-full border border-primary-500 bg-primary-700 px-3 py-1 text-xs font-medium text-primary-100 shadow-lg transition-colors hover:bg-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-300 sm:mr-2"
+                    className="sticky top-2 z-10 float-right mb-2 rounded-full border border-primary-600 px-3 py-1 text-xs shadow-lg sm:mr-2"
                     onClick={onFollow}
+                    size="sm"
                     type="button"
+                    variant="secondary"
                 >
                     {newMessageCount > 0
                         ? `${newMessageCount} new ${newMessageCount === 1 ? "message" : "messages"} ↓`
                         : "↓ Follow"}
-                </button>
+                </Button>
             ) : undefined}
 
             {isLoadingHistory && chatRows.length === 0 ? (
