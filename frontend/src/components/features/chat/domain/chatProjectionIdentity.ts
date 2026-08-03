@@ -6,7 +6,7 @@ import {
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
-import { hasPrimaryAnswerContent, isAnswerCapableRole } from "./chatAnswerContent";
+import { hasPrimaryAnswerContent } from "./chatAnswerContent";
 import type { ChatRunState, ChatSessionRuntimeState } from "./chatState";
 
 export const RUN_START_USER_SKEW_MS = 1000;
@@ -236,18 +236,14 @@ export function projectedMessageRowIdentityAliases(
     message: ChatHistoryMessage,
     runs: ChatRunState[]
 ): string[] {
-    if (
-        !message.runId ||
-        !isAnswerCapableRole(message.role) ||
-        !hasPrimaryAnswerContent(message)
-    ) {
+    const rowKey = projectedMessageRowKey(message);
+    if (!message.runId || rowKey !== `response-${message.runId}`) {
         return [];
     }
     const run = runs.find((candidate) => isRunMatchingMessage(candidate, message));
     if (!run) {
         return [];
     }
-    const rowKey = projectedMessageRowKey(message);
     return [...new Set([run.runId, ...run.aliases].map((id) => `response-${id}`))].filter(
         (alias) => alias !== rowKey
     );

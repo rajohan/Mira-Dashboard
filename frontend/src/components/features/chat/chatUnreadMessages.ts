@@ -7,7 +7,7 @@ function isConversationMessageRow(row: ChatRow): boolean {
     const role = row.message.role.toLowerCase();
     return (
         (row.kind === "message" || row.kind === "stream") &&
-        (role === "assistant" || role === "system" || role === "user") &&
+        (role === "assistant" || role === "system") &&
         hasPrimaryAnswerContent(row.message)
     );
 }

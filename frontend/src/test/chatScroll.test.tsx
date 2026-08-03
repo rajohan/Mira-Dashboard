@@ -182,11 +182,26 @@ describe("chat scroll", () => {
         });
         expect(result.current.newMessageCount).toBe(1);
 
+        const localUserRow: ChatRow = {
+            ...chatRow("own-message", "user"),
+            message: {
+                content: "own-message",
+                local: true,
+                role: "user",
+                text: "own-message",
+            },
+        };
+        rerender({
+            rows: [initialRows[0]!, firstNewMessage, toolRow, localUserRow, activity],
+        });
+        expect(result.current.newMessageCount).toBe(1);
+
         rerender({
             rows: [
                 initialRows[0]!,
                 firstNewMessage,
                 toolRow,
+                localUserRow,
                 chatRow("second-answer", "assistant"),
                 activity,
             ],
