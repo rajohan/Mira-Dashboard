@@ -2824,7 +2824,7 @@ describe("shared component helpers", () => {
         expect(newMessageButton).toHaveClass("bg-primary-700");
         expect(newMessageButton).toHaveClass("border-primary-600", "text-primary-100");
         expect(newMessageButton).not.toHaveClass("bg-accent-500");
-        await user.click(newMessageButton);
+        fireEvent.click(newMessageButton);
         expect(onUserScrollIntent).not.toHaveBeenCalled();
         Object.defineProperties(messagesContainerRef.current!, {
             clientWidth: { configurable: true, value: 90 },
