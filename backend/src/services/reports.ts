@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
 
-import type {
-    CreateReportInput,
-    Report,
-    ReportStatus,
-    ReportType,
+import * as v from "valibot";
+
+import {
+    heartbeatIncidentsSchema,
+    type CreateReportInput,
+    type HeartbeatIncident,
+    type Report,
+    type ReportStatus,
+    type ReportType,
 } from "../../../contracts/reports.ts";
 import { isPlainRecord } from "../../../contracts/runtime.ts";
 import { database, sqlNullable } from "../database/connection.ts";
@@ -31,14 +35,7 @@ interface ReportRow {
     occurred_at: string;
 }
 
-interface HeartbeatIncident {
-    key: string;
-    summary: string;
-}
-
 const HEARTBEAT_INCIDENT_NOTIFICATION_PREFIX = "report:heartbeat:incident:";
-const HEARTBEAT_INCIDENT_KEY_PATTERN =
-    /^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*){2}$/;
 
 function nowIso(): string {
     return new Date().toISOString();
@@ -102,39 +99,15 @@ function deleteReportNotification(report: Report): void {
         .run(notificationDedupeKey(report));
 }
 
-function heartbeatIncidentKey(value: unknown): string | undefined {
-    if (typeof value !== "string") return undefined;
-    const normalized = value.trim().toLowerCase();
-    if (
-        normalized.length === 0 ||
-        normalized.length > 200 ||
-        !HEARTBEAT_INCIDENT_KEY_PATTERN.test(normalized)
-    ) {
-        return undefined;
-    }
-    return normalized;
-}
-
 function heartbeatIncidents(report: Report): HeartbeatIncident[] | undefined {
     if (report.status === "ok") return [];
 
-    const structuredIncidents = report.metadata.heartbeatIncidents;
-    if (!Array.isArray(structuredIncidents)) return undefined;
-
-    const incidents = new Map<string, HeartbeatIncident>();
-    for (const value of structuredIncidents) {
-        if (!isPlainRecord(value)) return undefined;
-        const key = heartbeatIncidentKey(value.key);
-        if (!key) return undefined;
-        if (typeof value.summary !== "string" || value.summary.trim().length === 0) {
-            return undefined;
-        }
-        incidents.set(key, { key, summary: value.summary.trim() });
-    }
-    return incidents.size > 0
-        ? [...incidents.values()].toSorted((left, right) =>
-              left.key.localeCompare(right.key)
-          )
+    const parsed = v.safeParse(
+        heartbeatIncidentsSchema,
+        report.metadata.heartbeatIncidents
+    );
+    return parsed.success
+        ? parsed.output.toSorted((left, right) => left.key.localeCompare(right.key))
         : undefined;
 }
 
@@ -297,7 +270,7 @@ function createReportInTransaction(input: CreateReportInput): Report {
         }
         const isLatestSnapshot =
             !previousHeartbeat ||
-            Date.parse(report.occurredAt) > Date.parse(previousHeartbeat.occurredAt);
+            Date.parse(report.occurredAt) >= Date.parse(previousHeartbeat.occurredAt);
         if (!isLatestSnapshot) return report;
 
         if (report.status === "ok") {

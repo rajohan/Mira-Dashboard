@@ -41,7 +41,7 @@ const heartbeatIncidentSchema = v.strictObject({
     key: heartbeatIncidentKeySchema,
     summary: v.pipe(v.string(), v.trim(), v.nonEmpty(), v.maxLength(1000)),
 });
-const heartbeatIncidentsSchema = v.pipe(
+export const heartbeatIncidentsSchema = v.pipe(
     v.array(heartbeatIncidentSchema),
     v.maxLength(100),
     v.check(
@@ -126,6 +126,7 @@ export const reportDeleteResponseSchema = v.strictObject({
 
 export type ReportType = v.InferOutput<typeof reportTypeSchema>;
 export type ReportStatus = v.InferOutput<typeof reportStatusSchema>;
+export type HeartbeatIncident = v.InferOutput<typeof heartbeatIncidentSchema>;
 export type Report = v.InferOutput<typeof reportSchema>;
 export type CreateReportInput = v.InferOutput<typeof reportCreateInputSchema>;
 export type ReportsFilters = v.InferOutput<typeof reportsFiltersSchema>;

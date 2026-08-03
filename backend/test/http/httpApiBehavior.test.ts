@@ -1160,7 +1160,8 @@ describe("Mira Dashboard backend integration", () => {
         const postHeartbeat = (
             status: "error" | "ok" | "warning",
             occurredAt: string,
-            problemKeys?: string[]
+            problemKeys?: string[],
+            runKey = occurredAt
         ) =>
             api<{ isOk: boolean; report: { id: number } }>(
                 "/api/reports",
@@ -1174,7 +1175,7 @@ describe("Mira Dashboard backend integration", () => {
                         status === "ok" ? "HEARTBEAT_OK" : "Heartbeat needs attention.",
                     source: "openclaw",
                     sourceJobId,
-                    dedupeKey: `heartbeat:${sourceJobId}:${occurredAt}`,
+                    dedupeKey: `heartbeat:${sourceJobId}:${runKey}`,
                     metadata: problemKeys
                         ? {
                               heartbeatIncidents: problemKeys.map((key) => ({
@@ -1230,21 +1231,25 @@ describe("Mira Dashboard backend integration", () => {
         expect(repeatedNotifications).toHaveLength(1);
         expect(repeatedNotifications[0]).toEqual(readNotification);
 
-        const parallelFailure = await postHeartbeat("error", "2026-06-24T09:00:00.000Z", [
-            cacheFailureKey,
-            blockedTaskKey,
-        ]);
+        const parallelFailure = await postHeartbeat(
+            "error",
+            "2026-06-24T08:00:00.000Z",
+            [cacheFailureKey, blockedTaskKey],
+            "parallel-same-time"
+        );
         const parallelNotifications = await listIncidentNotifications();
         expect(parallelNotifications).toHaveLength(2);
         const cacheNotification = parallelNotifications.find(
             (item) => item.metadata.reportId === parallelFailure.body.report.id
         );
+        expect(cacheNotification).toBeDefined();
+        if (!cacheNotification) throw new Error("Expected cache incident notification");
         expect(cacheNotification).toMatchObject({
             isRead: false,
             metadata: {
                 heartbeatIncidentKey: cacheFailureKey,
             },
-            occurredAt: "2026-06-24T09:00:00.000Z",
+            occurredAt: "2026-06-24T08:00:00.000Z",
         });
 
         await postHeartbeat("error", "2026-06-24T10:00:00.000Z", [
@@ -1254,9 +1259,7 @@ describe("Mira Dashboard backend integration", () => {
         const repeatedParallelNotifications = await listIncidentNotifications();
         expect(repeatedParallelNotifications).toHaveLength(2);
         expect(
-            repeatedParallelNotifications.find(
-                (item) => item.id === cacheNotification?.id
-            )
+            repeatedParallelNotifications.find((item) => item.id === cacheNotification.id)
         ).toEqual(cacheNotification);
 
         await postHeartbeat("warning", "2026-06-24T10:15:00.000Z", [blockedTaskKey]);
@@ -1275,7 +1278,7 @@ describe("Mira Dashboard backend integration", () => {
                 (item) => item.metadata.reportId === cacheRecurrence.body.report.id
             )
         ).toMatchObject({
-            id: cacheNotification?.id,
+            id: cacheNotification.id,
             isRead: false,
             metadata: { heartbeatIncidentKey: cacheFailureKey },
             occurredAt: "2026-06-24T10:30:00.000Z",
