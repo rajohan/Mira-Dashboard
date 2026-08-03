@@ -11,6 +11,11 @@ const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CHAT_RUNTIME_SNAPSHOT_RETENTION_DAYS = 30;
 const MAX_CHAT_RUNTIME_SNAPSHOTS = 200;
 const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
+const ACTIVE_HEARTBEAT_INCIDENT_NOTIFICATION_PREDICATE_SQL = `
+    is_read = 0
+    AND COALESCE(json_extract(metadata_json, '$.reportType'), '') = 'heartbeat'
+    AND COALESCE(json_type(metadata_json, '$.heartbeatIncidentKey'), '') = 'text'
+`;
 
 function retentionCutoff(now: Date, days: number): string {
     return new Date(now.getTime() - days * MILLISECONDS_PER_DAY).toISOString();
@@ -266,20 +271,31 @@ export function pruneDatabaseHistory(
                             ORDER BY occurred_at DESC, id DESC
                             LIMIT -1 OFFSET 5000
                         )
-                 )`
+                 )
+                   AND NOT (
+                       ${ACTIVE_HEARTBEAT_INCIDENT_NOTIFICATION_PREDICATE_SQL}
+                   )`
             )
             .run(retentionCutoff(now, 365)).changes;
         changes.notifications += pruneReadNotifications(databaseConnection, now);
         changes.reports = databaseConnection
             .prepare(
                 `DELETE FROM reports
-                 WHERE occurred_at < ?
-                    OR id IN (
-                        SELECT id
-                        FROM reports
-                        ORDER BY occurred_at DESC, id DESC
-                        LIMIT -1 OFFSET 5000
-                    )`
+                 WHERE (
+                     occurred_at < ?
+                     OR id IN (
+                         SELECT id
+                         FROM reports
+                         ORDER BY occurred_at DESC, id DESC
+                         LIMIT -1 OFFSET 5000
+                     )
+                 )
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM notifications
+                       WHERE ${ACTIVE_HEARTBEAT_INCIDENT_NOTIFICATION_PREDICATE_SQL}
+                         AND json_extract(metadata_json, '$.reportId') = reports.id
+                   )`
             )
             .run(retentionCutoff(now, 365)).changes;
         changes.dockerUpdateEvents = databaseConnection

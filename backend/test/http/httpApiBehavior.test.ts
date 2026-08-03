@@ -856,8 +856,12 @@ describe("Mira Dashboard backend integration", () => {
                 title: "HEARTBEAT_OK",
                 bodyMd: "All checks passed.",
                 summary: "All checks passed.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:ok:2026-06-23T06:30",
+                metadata: { heartbeatIncidents: [] },
                 occurredAt: "2026-06-23T06:30:00.000Z",
+                notify: false,
             })
         );
         expect(heartbeatOk.status).toBe(201);
@@ -870,7 +874,17 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat warning",
                 bodyMd: "Git check needs attention.",
                 summary: "Git check needs attention.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:warning:git",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: "git:mira-dashboard:production-drift",
+                            summary: "Git check needs attention.",
+                        },
+                    ],
+                },
                 occurredAt: "2026-06-23T07:00:00.000Z",
             })
         );
@@ -887,7 +901,17 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat warning",
                 bodyMd: "Cache check needs attention.",
                 summary: "Cache check needs attention.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:warning:cache",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: "cache:system.host:stale",
+                            summary: "Cache check needs attention.",
+                        },
+                    ],
+                },
                 occurredAt: "2026-06-23T07:05:00.000Z",
             })
         );
@@ -904,7 +928,17 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat status change",
                 bodyMd: "Status-changing check needs attention.",
                 summary: "Status-changing check needs attention.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:status-changing",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: "system:gateway:unreachable",
+                            summary: "Status-changing check needs attention.",
+                        },
+                    ],
+                },
                 occurredAt: "2026-06-23T07:10:00.000Z",
             })
         );
@@ -919,7 +953,17 @@ describe("Mira Dashboard backend integration", () => {
                 title: "Heartbeat status change",
                 bodyMd: "Status-changing check failed.",
                 summary: "Status-changing check failed.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:status-changing",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: "system:gateway:unreachable",
+                            summary: "Status-changing check failed.",
+                        },
+                    ],
+                },
                 occurredAt: "2026-06-23T07:15:00.000Z",
             })
         );
@@ -1051,8 +1095,8 @@ describe("Mira Dashboard backend integration", () => {
         );
         expect(changingHeartbeatNotifications).toHaveLength(1);
         expect(changingHeartbeatNotifications[0]).toMatchObject({
-            title: "Heartbeat error",
-            type: "error",
+            title: "Heartbeat warning",
+            type: "warning",
         });
 
         const changingHeartbeatOk = await api<{ isOk: boolean; report: { id: number } }>(
@@ -1063,22 +1107,26 @@ describe("Mira Dashboard backend integration", () => {
                 title: "HEARTBEAT_OK",
                 bodyMd: "Status-changing check recovered.",
                 summary: "Status-changing check recovered.",
+                source: "openclaw",
+                sourceJobId: "delivery-test",
                 dedupeKey: "heartbeat:status-changing",
+                metadata: { heartbeatIncidents: [] },
                 occurredAt: "2026-06-23T07:20:00.000Z",
+                notify: false,
             })
         );
         expect(changingHeartbeatOk.body.report.id).toBe(
             changingHeartbeatWarning.body.report.id
         );
         const notificationsAfterHeartbeatRecovery = await api<{
-            items: Array<{ metadata: Record<string, unknown> }>;
+            items: Array<{ isRead: boolean; metadata: Record<string, unknown> }>;
         }>("/api/notifications?limit=50");
         expect(
-            notificationsAfterHeartbeatRecovery.body.items.some(
+            notificationsAfterHeartbeatRecovery.body.items.find(
                 (item) =>
                     item.metadata.reportId === changingHeartbeatWarning.body.report.id
             )
-        ).toBe(false);
+        ).toMatchObject({ isRead: true });
         expect(
             notificationsAfterHeartbeatRecovery.body.items.some(
                 (item) => item.metadata.reportId === quietCustom.body.report.id
@@ -1098,6 +1146,307 @@ describe("Mira Dashboard backend integration", () => {
                 (item) => item.metadata.reportId === brief.body.report.id
             )
         ).toBe(false);
+    });
+
+    it("notifies once per active heartbeat problem until recovery", async () => {
+        const sourceJobId = "incident-dedupe-test";
+        const blockedTaskKey = "task:395:blocked";
+        const cacheFailureKey = "cache:system.host:error";
+
+        const missingIncidentSnapshot = await api<ApiErrorResponse>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Heartbeat needs attention.",
+                summary: "Heartbeat needs attention.",
+                source: "openclaw",
+                sourceJobId,
+                dedupeKey: "heartbeat:missing-incident-snapshot",
+            })
+        );
+        expect(missingIncidentSnapshot.status).toBe(400);
+        expect(missingIncidentSnapshot.body.error.message).toContain(
+            "heartbeat metadata.heartbeatIncidents"
+        );
+
+        const missingStreamIdentity = await api<ApiErrorResponse>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Heartbeat needs attention.",
+                summary: "Heartbeat needs attention.",
+                sourceJobId,
+                dedupeKey: "heartbeat:missing-stream-identity",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: blockedTaskKey,
+                            summary: "Blocked task needs attention.",
+                        },
+                    ],
+                },
+            })
+        );
+        expect(missingStreamIdentity.status).toBe(400);
+        expect(missingStreamIdentity.body.error.message).toContain(
+            "heartbeat source and sourceJobId are required"
+        );
+
+        const mutedFailure = await api<ApiErrorResponse>(
+            "/api/reports",
+            json("POST", {
+                type: "heartbeat",
+                status: "warning",
+                title: "Heartbeat warning",
+                bodyMd: "Heartbeat needs attention.",
+                summary: "Heartbeat needs attention.",
+                source: "openclaw",
+                sourceJobId,
+                dedupeKey: "heartbeat:muted-failure",
+                metadata: {
+                    heartbeatIncidents: [
+                        {
+                            key: blockedTaskKey,
+                            summary: "Blocked task needs attention.",
+                        },
+                    ],
+                },
+                notify: false,
+            })
+        );
+        expect(mutedFailure.status).toBe(400);
+        expect(mutedFailure.body.error.message).toContain(
+            "warning/error heartbeat reports cannot disable notifications"
+        );
+
+        const postHeartbeat = (
+            status: "error" | "ok" | "warning",
+            occurredAt: string,
+            problemKeys?: string[],
+            runKey = occurredAt
+        ) =>
+            api<{ isOk: boolean; report: { id: number } }>(
+                "/api/reports",
+                json("POST", {
+                    type: "heartbeat",
+                    status,
+                    title: status === "ok" ? "HEARTBEAT_OK" : `Heartbeat ${status}`,
+                    bodyMd:
+                        status === "ok" ? "HEARTBEAT_OK" : "Heartbeat needs attention.",
+                    summary:
+                        status === "ok" ? "HEARTBEAT_OK" : "Heartbeat needs attention.",
+                    source: "openclaw",
+                    sourceJobId,
+                    dedupeKey: `heartbeat:${sourceJobId}:${runKey}`,
+                    metadata: problemKeys
+                        ? {
+                              heartbeatIncidents: problemKeys.map((key) => ({
+                                  key,
+                                  summary: `Incident ${key}`,
+                              })),
+                          }
+                        : { heartbeatIncidents: [] },
+                    occurredAt,
+                    notify: status !== "ok",
+                })
+            );
+        const listIncidentNotifications = async () => {
+            const response = await api<{
+                items: Array<{
+                    id: number;
+                    isRead: boolean;
+                    metadata: Record<string, unknown>;
+                    occurredAt: string;
+                    updatedAt: string;
+                }>;
+            }>("/api/notifications?limit=200");
+            return response.body.items.filter(
+                (item) => item.metadata.sourceJobId === sourceJobId
+            );
+        };
+
+        const firstFailure = await postHeartbeat("warning", "2026-06-24T07:00:00.000Z", [
+            blockedTaskKey,
+        ]);
+        expect(firstFailure.status).toBe(201);
+        const firstNotifications = await listIncidentNotifications();
+        expect(firstNotifications).toHaveLength(1);
+        expect(firstNotifications[0]).toMatchObject({
+            isRead: false,
+            metadata: {
+                heartbeatIncidentKey: blockedTaskKey,
+                reportId: firstFailure.body.report.id,
+            },
+            occurredAt: "2026-06-24T07:00:00.000Z",
+        });
+
+        await api<{ isOk: boolean }>(
+            `/api/notifications/${firstNotifications[0]!.id}/read`,
+            { method: "POST" }
+        );
+        const readNotifications = await listIncidentNotifications();
+        const readNotification = readNotifications[0]!;
+        expect(readNotification.isRead).toBe(true);
+
+        await postHeartbeat("warning", "2026-06-24T08:00:00.000Z", [blockedTaskKey]);
+        const repeatedNotifications = await listIncidentNotifications();
+        expect(repeatedNotifications).toHaveLength(1);
+        expect(repeatedNotifications[0]).toEqual(readNotification);
+
+        const parallelFailure = await postHeartbeat(
+            "error",
+            "2026-06-24T08:00:00.000Z",
+            [cacheFailureKey, blockedTaskKey],
+            "parallel-same-time"
+        );
+        const parallelNotifications = await listIncidentNotifications();
+        expect(parallelNotifications).toHaveLength(2);
+        const cacheNotification = parallelNotifications.find(
+            (item) => item.metadata.reportId === parallelFailure.body.report.id
+        );
+        expect(cacheNotification).toBeDefined();
+        if (!cacheNotification) throw new Error("Expected cache incident notification");
+        expect(cacheNotification).toMatchObject({
+            isRead: false,
+            metadata: {
+                heartbeatIncidentKey: cacheFailureKey,
+            },
+            occurredAt: "2026-06-24T08:00:00.000Z",
+        });
+
+        await postHeartbeat("warning", "2026-06-24T08:00:00.000Z", [blockedTaskKey]);
+        const staleEqualTimeRetryNotifications = await listIncidentNotifications();
+        expect(
+            staleEqualTimeRetryNotifications.find(
+                (item) => item.id === cacheNotification.id
+            )
+        ).toEqual(cacheNotification);
+
+        const repeatedParallelFailure = await postHeartbeat(
+            "error",
+            "2026-06-24T10:00:00.000Z",
+            [blockedTaskKey, cacheFailureKey]
+        );
+        const repeatedParallelNotifications = await listIncidentNotifications();
+        expect(repeatedParallelNotifications).toHaveLength(2);
+        expect(
+            repeatedParallelNotifications.find((item) => item.id === cacheNotification.id)
+        ).toMatchObject({
+            id: cacheNotification.id,
+            isRead: false,
+            metadata: {
+                heartbeatIncidentKey: cacheFailureKey,
+                reportId: repeatedParallelFailure.body.report.id,
+            },
+            occurredAt: cacheNotification.occurredAt,
+        });
+
+        const partialRecovery = await postHeartbeat(
+            "warning",
+            "2026-06-24T10:15:00.000Z",
+            [cacheFailureKey]
+        );
+        const partiallyRecoveredNotifications = await listIncidentNotifications();
+        expect(partiallyRecoveredNotifications).toHaveLength(2);
+        expect(
+            partiallyRecoveredNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === blockedTaskKey
+            )
+        ).toMatchObject({ isRead: true });
+        expect(
+            partiallyRecoveredNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === cacheFailureKey
+            )
+        ).toMatchObject({
+            id: cacheNotification.id,
+            isRead: false,
+            metadata: { reportId: partialRecovery.body.report.id },
+            occurredAt: cacheNotification.occurredAt,
+        });
+
+        const parallelRecurrence = await postHeartbeat(
+            "error",
+            "2026-06-24T10:30:00.000Z",
+            [blockedTaskKey, cacheFailureKey]
+        );
+        const parallelRecurrenceNotifications = await listIncidentNotifications();
+        expect(parallelRecurrenceNotifications).toHaveLength(2);
+        expect(
+            parallelRecurrenceNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === cacheFailureKey
+            )
+        ).toMatchObject({
+            id: cacheNotification.id,
+            isRead: false,
+            metadata: { reportId: parallelRecurrence.body.report.id },
+            occurredAt: cacheNotification.occurredAt,
+        });
+        expect(
+            parallelRecurrenceNotifications.find(
+                (item) => item.metadata.heartbeatIncidentKey === blockedTaskKey
+            )
+        ).toMatchObject({
+            id: firstNotifications[0]!.id,
+            isRead: false,
+            metadata: { reportId: parallelRecurrence.body.report.id },
+            occurredAt: "2026-06-24T10:30:00.000Z",
+        });
+
+        await postHeartbeat("ok", "2026-06-24T11:00:00.000Z");
+        const recoveredNotifications = await listIncidentNotifications();
+        expect(recoveredNotifications).toHaveLength(2);
+        expect(recoveredNotifications.every((item) => item.isRead)).toBe(true);
+
+        const recurrence = await postHeartbeat("warning", "2026-06-24T12:00:00.000Z", [
+            blockedTaskKey,
+        ]);
+        const recurrenceNotifications = await listIncidentNotifications();
+        expect(recurrenceNotifications).toHaveLength(2);
+        expect(
+            recurrenceNotifications.find(
+                (item) => item.metadata.reportId === recurrence.body.report.id
+            )
+        ).toMatchObject({
+            isRead: false,
+            metadata: {
+                heartbeatIncidentKey: blockedTaskKey,
+                reportId: recurrence.body.report.id,
+            },
+            occurredAt: "2026-06-24T12:00:00.000Z",
+        });
+
+        const correctedRecovery = await postHeartbeat(
+            "ok",
+            "2026-06-24T11:30:00.000Z",
+            undefined,
+            "2026-06-24T12:00:00.000Z"
+        );
+        expect(correctedRecovery.body.report.id).toBe(recurrence.body.report.id);
+        const correctedRecoveryNotifications = await listIncidentNotifications();
+        expect(correctedRecoveryNotifications.every((item) => item.isRead)).toBe(true);
+
+        const staleBackwardCorrection = await postHeartbeat(
+            "warning",
+            "2026-06-24T10:45:00.000Z",
+            [blockedTaskKey],
+            "2026-06-24T12:00:00.000Z"
+        );
+        expect(staleBackwardCorrection.body.report.id).toBe(recurrence.body.report.id);
+        const staleBackwardCorrectionNotifications = await listIncidentNotifications();
+        expect(staleBackwardCorrectionNotifications.every((item) => item.isRead)).toBe(
+            true
+        );
+
+        const reports = await api<{
+            items: Array<{ sourceJobId?: string }>;
+        }>("/api/reports?type=heartbeat&limit=200");
+        expect(
+            reports.body.items.filter((item) => item.sourceJobId === sourceJobId)
+        ).toHaveLength(8);
     });
 
     it("loads, validates, clamps, and persists dashboard settings", async () => {

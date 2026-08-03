@@ -6,6 +6,7 @@ import { auditEventsMigration } from "./0005AuditEvents.ts";
 import { multiFactorAuthenticationMigration } from "./0006MultiFactorAuthentication.ts";
 import { deploymentRetentionIndexMigration } from "./0007DeploymentRetentionIndex.ts";
 import { workerControlMigration } from "./0008WorkerControl.ts";
+import { heartbeatReportLookupIndexMigration } from "./0009HeartbeatReportLookupIndex.ts";
 import type { DatabaseMigration } from "./types.ts";
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
@@ -17,6 +18,7 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
     multiFactorAuthenticationMigration,
     deploymentRetentionIndexMigration,
     workerControlMigration,
+    heartbeatReportLookupIndexMigration,
 ];
 
 export interface DatabaseMigrationIdentity {

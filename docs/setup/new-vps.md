@@ -209,11 +209,11 @@ Healthy response shape:
 {
     "checks": {
         "database": {
-            "currentSchemaVersion": 8,
-            "maximumCompatibleSchemaVersion": 8,
+            "currentSchemaVersion": 9,
+            "maximumCompatibleSchemaVersion": 9,
             "minimumCompatibleSchemaVersion": 6,
             "ready": true,
-            "targetSchemaVersion": 8
+            "targetSchemaVersion": 9
         },
         "frontend": { "ready": true },
         "release": {

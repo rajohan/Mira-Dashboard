@@ -237,7 +237,7 @@ describe("database overview service", () => {
                 backup: { count: 0, current: false, reviewAgeHours: 48 },
                 foreignKeysEnabled: true,
                 journalMode: "wal",
-                migrations: { applied: 8, current: true, latest: 8 },
+                migrations: { applied: 9, current: true, latest: 9 },
                 permissions: { secure: true },
                 status: "review",
                 walAutoCheckpointPages: 1000,

@@ -1,8 +1,14 @@
-import type {
-    CreateReportInput,
-    Report,
-    ReportStatus,
-    ReportType,
+import { createHash } from "node:crypto";
+
+import * as v from "valibot";
+
+import {
+    heartbeatIncidentsSchema,
+    type CreateReportInput,
+    type HeartbeatIncident,
+    type Report,
+    type ReportStatus,
+    type ReportType,
 } from "../../../contracts/reports.ts";
 import { isPlainRecord } from "../../../contracts/runtime.ts";
 import { database, sqlNullable } from "../database/connection.ts";
@@ -28,6 +34,8 @@ interface ReportRow {
     updated_at: string;
     occurred_at: string;
 }
+
+const HEARTBEAT_INCIDENT_NOTIFICATION_PREFIX = "report:heartbeat:incident:";
 
 function nowIso(): string {
     return new Date().toISOString();
@@ -80,11 +88,6 @@ function notificationTitle(report: Report): string {
 }
 
 function notificationDedupeKey(report: Report): string {
-    if (report.type === "heartbeat") {
-        return report.dedupeKey
-            ? `report:heartbeat:${report.dedupeKey}`
-            : `report:heartbeat:${report.id}`;
-    }
     return report.dedupeKey
         ? `report:${report.dedupeKey}`
         : `report:${report.type}:${report.id}`;
@@ -96,7 +99,121 @@ function deleteReportNotification(report: Report): void {
         .run(notificationDedupeKey(report));
 }
 
-function createReportNotification(report: Report): void {
+function heartbeatIncidents(report: Report): HeartbeatIncident[] | undefined {
+    if (report.status === "ok") return [];
+
+    const parsed = v.safeParse(
+        heartbeatIncidentsSchema,
+        report.metadata.heartbeatIncidents
+    );
+    return parsed.success
+        ? parsed.output.toSorted((left, right) => left.key.localeCompare(right.key))
+        : undefined;
+}
+
+function latestHeartbeatReport(
+    source: string | undefined,
+    sourceJobId: string | undefined
+): Report | undefined {
+    const row = database
+        .prepare(
+            `SELECT id, type, status, title, body_md, summary, source, source_job_id, dedupe_key, metadata_json, created_at, updated_at, occurred_at
+             FROM reports
+             WHERE type = 'heartbeat'
+               AND source IS ?
+               AND source_job_id IS ?
+             ORDER BY occurred_at DESC, id DESC
+             LIMIT 1`
+        )
+        .get(sqlNullable(source), sqlNullable(sourceJobId)) as ReportRow | undefined;
+    return row ? toReport(row) : undefined;
+}
+
+function isLatestHeartbeatReport(report: Report): boolean {
+    return latestHeartbeatReport(report.source, report.sourceJobId)?.id === report.id;
+}
+
+function heartbeatIncidentNotificationDedupeKey(
+    report: Report,
+    incidentKey: string
+): string {
+    const fingerprint = createHash("sha256")
+        .update(
+            JSON.stringify([
+                report.source ?? null,
+                report.sourceJobId ?? null,
+                incidentKey,
+            ])
+        )
+        .digest("hex");
+    return `${HEARTBEAT_INCIDENT_NOTIFICATION_PREFIX}${fingerprint}`;
+}
+
+function reportNotificationMetadata(
+    report: Report,
+    heartbeatIncident?: HeartbeatIncident
+): string {
+    return JSON.stringify({
+        heartbeatIncidentKey: heartbeatIncident?.key,
+        reportId: report.id,
+        reportStatus: report.status,
+        reportType: report.type,
+        sourceJobId: report.sourceJobId,
+    });
+}
+
+function resolveHeartbeatIncident(report: Report, incidentKey: string): void {
+    database
+        .prepare(
+            `UPDATE notifications
+             SET is_read = 1, updated_at = ?
+             WHERE dedupe_key = ?
+               AND is_read = 0`
+        )
+        .run(nowIso(), heartbeatIncidentNotificationDedupeKey(report, incidentKey));
+}
+
+function resolveAllHeartbeatIncidents(report: Report): void {
+    database
+        .prepare(
+            `UPDATE notifications
+             SET is_read = 1, updated_at = ?
+             WHERE source IS ?
+               AND json_extract(metadata_json, '$.reportType') = 'heartbeat'
+               AND json_extract(metadata_json, '$.sourceJobId') IS ?
+               AND dedupe_key LIKE ?
+               AND is_read = 0`
+        )
+        .run(
+            nowIso(),
+            report.source ?? "reports",
+            sqlNullable(report.sourceJobId),
+            `${HEARTBEAT_INCIDENT_NOTIFICATION_PREFIX}%`
+        );
+}
+
+function refreshUnreadHeartbeatIncidentLink(
+    report: Report,
+    heartbeatIncident: HeartbeatIncident
+): void {
+    database
+        .prepare(
+            `UPDATE notifications
+             SET metadata_json = ?, updated_at = ?
+             WHERE dedupe_key = ?
+               AND is_read = 0`
+        )
+        .run(
+            reportNotificationMetadata(report, heartbeatIncident),
+            nowIso(),
+            heartbeatIncidentNotificationDedupeKey(report, heartbeatIncident.key)
+        );
+}
+
+function createReportNotification(
+    report: Report,
+    heartbeatIncident?: HeartbeatIncident
+): void {
     const now = nowIso();
     database
         .prepare(
@@ -115,26 +232,27 @@ function createReportNotification(report: Report): void {
         )
         .run(
             notificationTitle(report),
-            report.summary || report.title,
+            heartbeatIncident?.summary || report.summary || report.title,
             notificationTypeForReport(report.status),
             sqlNullable(report.source ?? "reports"),
-            notificationDedupeKey(report),
-            JSON.stringify({
-                reportId: report.id,
-                reportStatus: report.status,
-                reportType: report.type,
-                sourceJobId: report.sourceJobId,
-            }),
+            heartbeatIncident
+                ? heartbeatIncidentNotificationDedupeKey(report, heartbeatIncident.key)
+                : notificationDedupeKey(report),
+            reportNotificationMetadata(report, heartbeatIncident),
             now,
             now,
             report.occurredAt
         );
 }
 
-export function createReport(input: CreateReportInput): Report {
+function createReportInTransaction(input: CreateReportInput): Report {
     const now = nowIso();
     const occurredAt = input.occurredAt ?? now;
     const status = input.status ?? "ok";
+    const previousHeartbeat =
+        input.type === "heartbeat"
+            ? latestHeartbeatReport(input.source, input.sourceJobId)
+            : undefined;
     const row = database
         .prepare(
             `INSERT INTO reports (
@@ -173,12 +291,50 @@ export function createReport(input: CreateReportInput): Report {
     }
 
     const report = toReport(row);
-    if (shouldCreateNotification(report, input.notify ?? true)) {
+    const shouldNotify = shouldCreateNotification(report, input.notify ?? true);
+    if (report.type === "heartbeat") {
+        const currentIncidents = heartbeatIncidents(report);
+        if (!currentIncidents) {
+            throw new Error("Heartbeat report is missing a valid incident snapshot");
+        }
+        if (!isLatestHeartbeatReport(report)) return report;
+
+        if (report.status === "ok") {
+            resolveAllHeartbeatIncidents(report);
+            return report;
+        }
+
+        const previousIncidents = previousHeartbeat
+            ? (heartbeatIncidents(previousHeartbeat) ?? [])
+            : [];
+        const currentKeys = new Set(currentIncidents.map((incident) => incident.key));
+        for (const incident of previousIncidents) {
+            if (!currentKeys.has(incident.key)) {
+                resolveHeartbeatIncident(report, incident.key);
+            }
+        }
+
+        const previousKeys = new Set(previousIncidents.map((incident) => incident.key));
+        for (const incident of currentIncidents) {
+            if (previousKeys.has(incident.key)) {
+                refreshUnreadHeartbeatIncidentLink(report, incident);
+            } else if (shouldNotify) {
+                createReportNotification(report, incident);
+            }
+        }
+        return report;
+    }
+
+    if (shouldNotify) {
         createReportNotification(report);
     } else {
         deleteReportNotification(report);
     }
     return report;
+}
+
+export function createReport(input: CreateReportInput): Report {
+    return database.transaction(createReportInTransaction)(input);
 }
 
 export function listReports(options: ListReportsOptions = {}): Report[] {

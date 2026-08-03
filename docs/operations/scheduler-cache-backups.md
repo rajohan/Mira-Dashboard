@@ -231,25 +231,28 @@ The `database.maintenance` job is enabled by default at `02:40`, uses the
 
 History retention keeps:
 
-| Data                                        | Retention                                                                             |
-| ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| completed scheduled runs and job executions | 90 days and at most 20,000 rows each                                                  |
-| done tasks with events and progress updates | deleted after 365 idle days; retained tasks keep at most 5,000 rows per history table |
-| non-active deployment jobs                  | 90 days and at most 500 rows                                                          |
-| completed agent task history                | 90 days and at most 10,000 rows                                                       |
-| reports and their linked notifications      | 365 days and at most 5,000 reports                                                    |
-| read notifications                          | 14 days and at most 300 rows                                                          |
-| Docker update events                        | 180 days and at most 5,000 rows                                                       |
-| stale worker heartbeats                     | 24 hours                                                                              |
-| expired auth sessions                       | removed after expiry                                                                  |
-| chat replay snapshots and events            | 30 days and at most 200 snapshots globally; orphan events removed                     |
+| Data                                        | Retention                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| completed scheduled runs and job executions | 90 days and at most 20,000 rows each                                                       |
+| done tasks with events and progress updates | deleted after 365 idle days; retained tasks keep at most 5,000 rows per history table      |
+| non-active deployment jobs                  | 90 days and at most 500 rows                                                               |
+| completed agent task history                | 90 days and at most 10,000 rows                                                            |
+| reports and their linked notifications      | 365 days and at most 5,000 reports, excluding reports pinned by unread heartbeat incidents |
+| read notifications                          | 14 days and at most 300 rows                                                               |
+| Docker update events                        | 180 days and at most 5,000 rows                                                            |
+| stale worker heartbeats                     | 24 hours                                                                                   |
+| expired auth sessions                       | removed after expiry                                                                       |
+| chat replay snapshots and events            | 30 days and at most 200 snapshots globally; orphan events removed                          |
 
 Active, queued, and running execution/deployment rows are preserved. SQLite
 snapshot retention is 5 orphan-safety cutover snapshots/2 days, 14
 scheduled/14 days, 20 pre-deploy/90 days, and 20 pre-migration/180 days. Normal
 successful or recovered cutovers discard their UUID-bound snapshot immediately;
-the retention bound is a crash-recovery fallback. Unread notifications are
-preserved. The job does not run automatic `VACUUM`.
+the retention bound is a crash-recovery fallback. Unread standalone
+notifications are preserved. An unread heartbeat incident notification and its
+linked report are preserved until the notification is read manually or by
+incident recovery. Other report-linked notifications follow report retention.
+The job does not run automatic `VACUUM`.
 
 ## Operational Checks
 

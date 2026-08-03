@@ -118,10 +118,10 @@ describe("Dashboard SQLite lifecycle", () => {
             const first = applyDatabaseMigrations(database, databasePath);
             const second = applyDatabaseMigrations(database, databasePath);
 
-            expect(first.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+            expect(first.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
             expect(first.backup).toBeUndefined();
             expect(second).toEqual({ applied: [] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(8);
+            expect(validateDatabaseMigrationHistory(database)).toBe(9);
             expect(
                 database
                     .query(
@@ -149,6 +149,7 @@ describe("Dashboard SQLite lifecycle", () => {
                                'idx_chat_runtime_snapshots_retention',
                                'idx_notifications_read_retention',
                                'idx_notifications_report_id',
+                               'idx_reports_heartbeat_stream_latest',
                                'idx_reports_retention',
                                'idx_task_updates_task_created'
                            )
@@ -162,6 +163,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 { name: "idx_docker_update_events_retention" },
                 { name: "idx_notifications_read_retention" },
                 { name: "idx_notifications_report_id" },
+                { name: "idx_reports_heartbeat_stream_latest" },
                 { name: "idx_reports_retention" },
                 { name: "idx_task_updates_task_created" },
             ]);
@@ -263,7 +265,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 3 database with migrations 4 through 8", () => {
+    it("upgrades an existing version 3 database with migrations 4 through 9", () => {
         const root = temporaryRoot("mira-db-migrations-v3-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -272,9 +274,9 @@ describe("Dashboard SQLite lifecycle", () => {
 
             expect(validateDatabaseMigrationHistory(database)).toBe(3);
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [4, 5, 6, 7, 8],
+                applied: [4, 5, 6, 7, 8, 9],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(8);
+            expect(validateDatabaseMigrationHistory(database)).toBe(9);
             expect(
                 database
                     .query(
@@ -306,7 +308,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 4 database with migrations 5 through 8", () => {
+    it("upgrades an existing version 4 database with migrations 5 through 9", () => {
         const root = temporaryRoot("mira-db-migrations-v4-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -315,9 +317,9 @@ describe("Dashboard SQLite lifecycle", () => {
 
             expect(validateDatabaseMigrationHistory(database)).toBe(4);
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [5, 6, 7, 8],
+                applied: [5, 6, 7, 8, 9],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(8);
+            expect(validateDatabaseMigrationHistory(database)).toBe(9);
             expect(
                 database
                     .query(
@@ -387,9 +389,9 @@ describe("Dashboard SQLite lifecycle", () => {
                 database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
             ).toEqual({ count: 2 });
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [6, 7, 8],
+                applied: [6, 7, 8, 9],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(8);
+            expect(validateDatabaseMigrationHistory(database)).toBe(9);
             expect(
                 database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
             ).toEqual({ count: 0 });
@@ -415,9 +417,9 @@ describe("Dashboard SQLite lifecycle", () => {
             expect(legacyIndex.sql).toContain("'restart-scheduled'");
 
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [7, 8],
+                applied: [7, 8, 9],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(8);
+            expect(validateDatabaseMigrationHistory(database)).toBe(9);
 
             const currentIndex = database
                 .query(
@@ -443,6 +445,38 @@ describe("Dashboard SQLite lifecycle", () => {
             expect(plan.map((row) => row.detail).join("\n")).toContain(
                 "USING COVERING INDEX idx_deployment_jobs_retention"
             );
+        } finally {
+            database.close();
+        }
+    });
+
+    it("uses the heartbeat stream index after upgrading version 8", () => {
+        const root = temporaryRoot("mira-db-migrations-v8-heartbeat-index-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        try {
+            seedMigrationVersion(database, 8);
+
+            expect(migrateDisposableDatabaseCopy(database)).toEqual({ applied: [9] });
+            expect(validateDatabaseMigrationHistory(database)).toBe(9);
+
+            const plan = database
+                .query(
+                    `EXPLAIN QUERY PLAN
+                     SELECT id, type, status, title, body_md, summary, source,
+                            source_job_id, dedupe_key, metadata_json, created_at,
+                            updated_at, occurred_at
+                     FROM reports
+                     WHERE type = 'heartbeat'
+                       AND source IS 'openclaw'
+                       AND source_job_id IS 'ops-check'
+                     ORDER BY occurred_at DESC, id DESC
+                     LIMIT 1`
+                )
+                .all() as Array<{ detail: string }>;
+            const details = plan.map((row) => row.detail).join("\n");
+            expect(details).toContain("USING INDEX idx_reports_heartbeat_stream_latest");
+            expect(details).not.toContain("USE TEMP B-TREE");
         } finally {
             database.close();
         }
@@ -520,7 +554,7 @@ describe("Dashboard SQLite lifecycle", () => {
         try {
             expect(
                 database.query("SELECT COUNT(*) AS count FROM schema_migrations").get()
-            ).toEqual({ count: 8 });
+            ).toEqual({ count: 9 });
         } finally {
             database.close();
         }
@@ -546,7 +580,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 );
 
             const result = applyDatabaseMigrations(database, databasePath);
-            expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+            expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
             expect(result.backup).toMatchObject({
                 kind: "pre-migration",
                 restoreVerified: true,
@@ -600,23 +634,23 @@ describe("Dashboard SQLite lifecycle", () => {
                 .prepare(
                     `INSERT INTO schema_migrations (
                         version, name, checksum, applied_at
-                     ) VALUES (9, 'unknown', 'unknown', ?)`
+                     ) VALUES (10, 'unknown', 'unknown', ?)`
                 )
                 .run("2026-07-23T00:00:00.000Z");
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
-                "incompatible SQLite migration version 9"
+                "incompatible SQLite migration version 10"
             );
             database
                 .prepare(
-                    "UPDATE schema_migrations SET name = ?, checksum = ? WHERE version = 9"
+                    "UPDATE schema_migrations SET name = ?, checksum = ? WHERE version = 10"
                 )
                 .run("future-additive", "a".repeat(64));
-            expect(validateDatabaseMigrationHistory(database, 9)).toBe(9);
-            expect(() => validateDatabaseMigrationHistory(database, 8)).toThrow(
-                "incompatible SQLite migration version 9"
+            expect(validateDatabaseMigrationHistory(database, 10)).toBe(10);
+            expect(() => validateDatabaseMigrationHistory(database, 9)).toThrow(
+                "incompatible SQLite migration version 10"
             );
 
-            database.prepare("DELETE FROM schema_migrations WHERE version = 9").run();
+            database.prepare("DELETE FROM schema_migrations WHERE version = 10").run();
             database.prepare("DELETE FROM schema_migrations WHERE version = 2").run();
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
                 "not contiguous"
@@ -823,8 +857,8 @@ describe("Dashboard SQLite lifecycle", () => {
         expect(preflightResult).toMatchObject({
             backup: { kind: "pre-deploy", restoreVerified: true },
             migrationTest: {
-                applied: [1, 2, 3, 4, 5, 6, 7, 8],
-                currentVersion: 8,
+                applied: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+                currentVersion: 9,
             },
         });
         expect(getSqliteBackupInventory(databasePath).count).toBe(1);
@@ -1244,6 +1278,106 @@ describe("Dashboard SQLite lifecycle", () => {
                     )
                     .get(cappedTaskId, cappedTaskId)
             ).toEqual({ events: 5000, updates: 5000 });
+        } finally {
+            database.close();
+        }
+    });
+
+    it("preserves unread heartbeat incidents and their latest linked reports", () => {
+        const root = temporaryRoot("mira-db-heartbeat-incident-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        const oldTimestamp = "2025-01-01T00:00:00.000Z";
+        const latestActiveTimestamp = "2025-01-02T00:00:00.000Z";
+        const now = new Date("2026-07-23T12:00:00.000Z");
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO reports (
+                        type, status, title, body_md, summary, source,
+                        source_job_id, created_at, updated_at, occurred_at
+                     ) VALUES
+                       ('heartbeat', 'warning', 'Superseded combined snapshot', '', '', 'openclaw',
+                        'ops-check', ?, ?, ?),
+                       ('heartbeat', 'warning', 'Latest active snapshot', '', '', 'openclaw',
+                        'ops-check', ?, ?, ?),
+                       ('heartbeat', 'warning', 'Acknowledged incident', '', '', 'openclaw',
+                        'ops-check', ?, ?, ?)`
+                )
+                .run(
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    latestActiveTimestamp,
+                    latestActiveTimestamp,
+                    latestActiveTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp
+                );
+            const reportIds = database
+                .query("SELECT id, title FROM reports ORDER BY id")
+                .all() as Array<{ id: number; title: string }>;
+            const activeReportId = reportIds.find(
+                (report) => report.title === "Latest active snapshot"
+            )?.id;
+            const acknowledgedReportId = reportIds.find(
+                (report) => report.title === "Acknowledged incident"
+            )?.id;
+            if (!activeReportId || !acknowledgedReportId) {
+                throw new Error("Heartbeat retention fixtures were not created");
+            }
+            database
+                .prepare(
+                    `INSERT INTO notifications (
+                        title, description, type, source, dedupe_key,
+                        metadata_json, is_read, created_at, updated_at, occurred_at
+                     ) VALUES
+                       ('Active incident', '', 'warning', 'openclaw',
+                        'report:heartbeat:incident:active', ?, 0, ?, ?, ?),
+                       ('Acknowledged incident', '', 'warning', 'openclaw',
+                        'report:heartbeat:incident:acknowledged', ?, 1, ?, ?, ?)`
+                )
+                .run(
+                    JSON.stringify({
+                        heartbeatIncidentKey: "system:gateway:unreachable",
+                        reportId: activeReportId,
+                        reportStatus: "warning",
+                        reportType: "heartbeat",
+                        sourceJobId: "ops-check",
+                    }),
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    JSON.stringify({
+                        heartbeatIncidentKey: "system:database:unreachable",
+                        reportId: acknowledgedReportId,
+                        reportStatus: "warning",
+                        reportType: "heartbeat",
+                        sourceJobId: "ops-check",
+                    }),
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp
+                );
+
+            const activeChanges = pruneDatabaseHistory(database, now);
+            expect(activeChanges).toMatchObject({ notifications: 1, reports: 2 });
+            expect(
+                database.query("SELECT title FROM notifications ORDER BY title").all()
+            ).toEqual([{ title: "Active incident" }]);
+            expect(
+                database.query("SELECT title FROM reports ORDER BY title").all()
+            ).toEqual([{ title: "Latest active snapshot" }]);
+
+            database
+                .prepare("UPDATE notifications SET is_read = 1 WHERE is_read = 0")
+                .run();
+            const acknowledgedChanges = pruneDatabaseHistory(database, now);
+            expect(acknowledgedChanges).toMatchObject({ notifications: 1, reports: 1 });
+            expect(database.query("SELECT id FROM notifications").all()).toEqual([]);
+            expect(database.query("SELECT id FROM reports").all()).toEqual([]);
         } finally {
             database.close();
         }

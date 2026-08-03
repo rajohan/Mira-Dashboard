@@ -30,30 +30,68 @@ quota usage from `/api/v1/key`; low account balance text from `/api/v1/credits`
 is informational unless quota calls fail or the key quota itself crosses the
 warning thresholds.
 
-## Heartbeat Dedupe Keys
+## Heartbeat Run and Incident Keys
 
-OK heartbeats use run-time history keys with minute precision:
+Every heartbeat report uses a run-time history key with minute precision:
 
 ```text
 heartbeat:ops-check:<YYYY-MM-DDTHH-mm>
 ```
 
-Warnings/errors should use:
+The report key must stay unique per run, including for warnings and errors. This
+preserves the complete heartbeat history. Notification deduplication is driven
+separately by the full active incident snapshot in
+`metadata.heartbeatIncidents`:
 
-```text
-heartbeat:ops-check:<runId>:<status>:<problemKey>
+```json
+{
+    "heartbeatIncidents": [
+        {
+            "key": "task:394:blocked",
+            "summary": "Task #394 is blocked and needs attention."
+        },
+        {
+            "key": "cache:database.summary:stale",
+            "summary": "The database summary cache is stale."
+        }
+    ]
+}
 ```
 
-Examples:
+Each key uses the canonical shape `<category>:<stable-resource-id>:<condition>`.
+Keys are lowercase, contain no timestamps or severity, and must remain exactly
+the same while the same problem persists. Examples across heartbeat checks:
 
 ```text
-heartbeat:ops-check:2026-06-30T01-20
-heartbeat:ops-check:2026-06-30T01-20:warning:git-dirty
-heartbeat:ops-check:2026-06-30T01-20:error:dashboard-health
+task:394:blocked
+cache:database.summary:stale
+cron:workspace-sync:failed
+dashboard-job:cache-refresh:stuck
+docker:postgres:unhealthy
+database:dashboard-sqlite:review
+quota:openrouter:near-exhaustion
+git:mira-dashboard:production-drift
+weather:spydeberg:heavy-precipitation
+moltbook:home:request-failed
+heartbeat:collection:schema-mismatch
 ```
 
-This preserves heartbeat history while preventing separate warning/error
-problems from overwriting each other.
+Warning/error reports send every currently active incident, sorted by key. An
+`ok` report sends an empty array. Dashboard diffs the snapshot against the
+previous run for the same source job:
+
+- a new key creates one unread notification;
+- an unchanged key does not create or reopen a notification, reset read state,
+  or change the original notification time; while unread, its report link tracks
+  the latest accepted snapshot;
+- a missing key marks that incident resolved;
+- a resolved key that appears again creates or reopens one notification;
+- multiple simultaneous incidents are tracked independently.
+
+Heartbeat requests without a valid `heartbeatIncidents` snapshot are rejected;
+there is no run-key notification fallback. Heartbeat `source` and `sourceJobId`
+are required so incident streams cannot collide, and warning/error heartbeats
+cannot disable notifications.
 
 ## API Contract
 
@@ -73,9 +111,14 @@ Content-Type: application/json
     "summary": "Git workspace needs attention.",
     "source": "openclaw",
     "sourceJobId": "ops-check",
-    "dedupeKey": "heartbeat:ops-check:2026-06-30T01-20:warning:git-dirty",
+    "dedupeKey": "heartbeat:ops-check:2026-06-30T01-20",
     "metadata": {
-        "problemKey": "git-dirty"
+        "heartbeatIncidents": [
+            {
+                "key": "git:mira-workspace:production-drift",
+                "summary": "The Mira workspace has production drift."
+            }
+        ]
     },
     "occurredAt": "2026-06-29T23:20:00.000Z",
     "notify": true
@@ -104,6 +147,7 @@ Report notifications store:
 
 ```json
 {
+    "heartbeatIncidentKey": "git:mira-workspace:production-drift",
     "reportId": 123,
     "reportStatus": "warning",
     "reportType": "heartbeat",
@@ -116,6 +160,11 @@ The notification bell links to:
 ```text
 /reports?reportId=<id>
 ```
+
+For an unread heartbeat incident, `reportId` advances to the latest accepted
+snapshot without changing the notification id or original occurrence time. This
+keeps the current active set available through report retention. Once the
+notification is read manually or by incident recovery, normal retention resumes.
 
 The Reports page can load linked reports outside the first list page through
 the detail endpoint.

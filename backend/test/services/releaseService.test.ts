@@ -350,7 +350,7 @@ describe("backend release services", () => {
             managedReleasePath(releasesRoot, currentCommit),
             currentCommit,
             {
-                commitTitle: "Schema 8 dashboard release",
+                commitTitle: "Schema 9 dashboard release",
             }
         );
         const previousReleasePath = managedReleasePath(releasesRoot, previousCommit);
@@ -383,8 +383,8 @@ describe("backend release services", () => {
             current: {
                 commitSha: currentCommit,
                 schema: {
-                    maximumCompatible: 8,
-                    target: 8,
+                    maximumCompatible: 9,
+                    target: 9,
                 },
             },
             previous: {
@@ -396,11 +396,11 @@ describe("backend release services", () => {
             },
             rollback: {
                 available: false,
-                reason: "Rollback release cannot open SQLite schema 8",
+                reason: "Rollback release cannot open SQLite schema 9",
             },
         });
         expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
-            "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 8"
+            "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 9"
         );
         const response = await pullRequestRoutes[
             "/api/pull-requests/releases/rollback"
@@ -408,7 +408,7 @@ describe("backend release services", () => {
         expect(response.status).toBe(409);
         expect(response.json()).resolves.toMatchObject(
             apiErrorExpectation(
-                "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 8"
+                "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 9"
             )
         );
         expect(countRollbackExecutions()).toBe(executionCountBefore);
@@ -1609,7 +1609,7 @@ printf 'scheduled\n'
                     .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
                     .get(schemaBlockedRedeploy.id)
             ).toEqual({
-                note: "Automatic redeploy fallback is not eligible: Rollback release cannot open SQLite schema 8",
+                note: "Automatic redeploy fallback is not eligible: Rollback release cannot open SQLite schema 9",
                 status: "failed",
             });
             await executeSuccessfulGuardianPath(restartCommand);
