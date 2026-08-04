@@ -17,7 +17,7 @@
         "deploy:bootstrap": "bash scripts/bootstrapProduction.sh",
         "deploy:prepare": "bun run build:frontend && bun run deploy:prepare:backend && bun run release:manifest",
         "deploy:prepare:backend": "bun run build:backend && bun --cwd backend dist/databasePreflight.js",
-        "db:check": "drizzle-kit check --config drizzle.config.ts --output json",
+        "db:check": "bun scripts/checkGreenfieldDatabase.ts",
         "db:generate": "drizzle-kit generate --config drizzle.config.ts --output json",
         "docs:check": "bun scripts/generateGreenfieldDocs.ts --check",
         "docs:generate": "bun scripts/generateGreenfieldDocs.ts",
@@ -40,6 +40,7 @@
         "test:backend:coverage": "bun scripts/runCoverage.ts backend 85 src/",
         "test:greenfield": "bun test src/server",
         "test:greenfield:docs": "bun test scripts/documentation",
+        "test:greenfield:tooling": "bun test scripts/checkGreenfieldDatabase.test.ts",
         "test:qualification": "bun test qualification",
         "typecheck:greenfield": "bun node_modules/typescript/bin/tsc -p tsconfig.server.json --noEmit",
         "typecheck:qualification": "bun node_modules/typescript/bin/tsc -p tsconfig.qualification.json --noEmit"

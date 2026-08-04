@@ -69,6 +69,49 @@ describe("qualification event feed", () => {
         expect(eventFeed.activeSubscriberCount).toBe(0);
     });
 
+    test("rejects a resume cursor ahead of the feed tail", async () => {
+        const eventFeed = new QualificationEventFeed();
+        const subscription = eventFeed.subscribe({
+            afterId: "100",
+            signal: new AbortController().signal,
+        });
+
+        let resumeError: unknown;
+        try {
+            await subscription.next();
+        } catch (error) {
+            resumeError = error;
+        }
+        expect(resumeError).toBeInstanceOf(Error);
+        expect((resumeError as Error).message).toBe(
+            "Qualification event resume cursor is ahead of feed tail"
+        );
+        expect(eventFeed.activeSubscriberCount).toBe(0);
+    });
+
+    test("accepts a resume cursor at the feed tail", async () => {
+        const eventFeed = new QualificationEventFeed();
+        const abortController = new AbortController();
+        eventFeed.publish({ kind: "qualification.changed", value: 1 });
+        const subscription = eventFeed.subscribe({
+            afterId: "1",
+            signal: abortController.signal,
+        });
+        const nextEvent = subscription.next();
+        eventFeed.publish({ kind: "qualification.changed", value: 2 });
+
+        const deliveredEvent = await nextEvent;
+        if (deliveredEvent.done) {
+            throw new Error("Tail subscription ended before returning a live event");
+        }
+        expect(deliveredEvent.value.id).toBe("2");
+
+        abortController.abort();
+        const completedSubscription = await subscription.next();
+        expect(completedSubscription.done).toBeTrue();
+        expect(eventFeed.activeSubscriberCount).toBe(0);
+    });
+
     test("fails and detaches a subscriber that exceeds its queue budget", async () => {
         const eventFeed = new QualificationEventFeed();
         const abortController = new AbortController();

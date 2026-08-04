@@ -37,7 +37,7 @@
 - The same install refreshed `oxlint-config-presets` to `0.1.18` and
   `@microlink/react-json-view` to `1.31.26`. The lockfile was regenerated with the qualified
   Bun canary. No production service or release was changed.
-- The first executable qualification slice passes on the exact candidate revision: eight Bun
+- The first executable qualification slice passes on the exact candidate revision: ten Bun
   tests across runtime identity, Drizzle/Bun SQLite, and tRPC Fetch/SSE. The database evidence
   covers strict SQLite tables, check/foreign-key/partial-unique/index constraints, synchronous
   transactions and rollback, prepared and parameterized raw SQL, native-client access,
@@ -48,13 +48,15 @@
   the last event ID without duplicate delivery, bounded per-subscriber buffering, and subscriber
   cleanup after client abort. `eventsource` is injected only into the Bun-side client test. The
   explicit liveness/readiness boundary preserves both `GET` and bodyless `HEAD` probes, and the
-  generated raw-HTTP reference is sourced from that same method contract.
+  generated raw-HTTP reference is sourced from separate method-specific response contracts.
 - These focused gates currently pass on the exact candidate: qualification and greenfield
-  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 8/8
-  qualification tests, 31/31 greenfield server/database tests, and 4/4 documentation tests.
+  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 10/10
+  qualification tests, 31/31 greenfield server/database tests, 4/4 documentation tests, and 4/4
+  database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
-  while retention advances, and deterministic failure/cleanup when a slow subscriber exceeds its
-  queue budget. Repository-wide Oxlint and Oxfmt pass after the consolidated review fixes.
+  while retention advances, explicit rejection of a cursor ahead of the feed tail, acceptance at
+  the exact tail, and deterministic failure/cleanup when a slow subscriber exceeds its queue
+  budget. Repository-wide Oxlint and Oxfmt pass after the consolidated review fixes.
   Reverse-proxy behavior, rolling-release reconnect, and sustained slow-consumer pressure remain
   open Phase 0 gates; this result does not mark all mandatory spikes complete.
 - The first production-shaped database slice is implemented as seven small Drizzle schema
@@ -75,8 +77,11 @@
   integrity failures, transactional rollback, unknown-schema rejection, Valibot round-trips, and
   query plans; the migration/database subset passes 26/26 tests.
 - Migration graph validation runs through the read-only `drizzle-kit check` CLI in the foundation
-  job. The PR workflow never combines execution of contributor-controlled code with a
-  `pull-requests: write` token, so the same gate works for trusted branches and forks. It
+  job. A non-writing `drizzle-kit generate --explain` pass must also report `no_changes`, so a
+  TypeScript schema edit cannot drift from the reviewed migration snapshot. A controlled
+  schema-only negative probe confirms that the gate prints the planned statement and fails before
+  writing a migration. The PR workflow never combines execution of contributor-controlled code
+  with a `pull-requests: write` token, so the same gate works for trusted branches and forks. It
   complements rather than replaces Dashboard's checksum, generated-SQL review,
   temporary-database introspection, restore, and query-plan gates. Drizzle-generated Valibot
   select/insert schemas cover all seven tables, with narrow operation schemas only for mutable

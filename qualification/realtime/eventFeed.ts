@@ -129,6 +129,11 @@ export class QualificationEventFeed {
     ): AsyncGenerator<QualificationEventRecord> {
         const afterSequence = parseResumeSequence(options.afterId);
         this.observedResumeIds.push(options.afterId);
+        const replayBoundary = this.#sequence;
+
+        if (afterSequence > replayBoundary) {
+            throw new Error("Qualification event resume cursor is ahead of feed tail");
+        }
 
         const firstRetainedSequence = Number(
             this.#events.at(0)?.id ?? this.#sequence + 1
@@ -137,7 +142,6 @@ export class QualificationEventFeed {
             throw new Error("Qualification event resume cursor is outside retention");
         }
 
-        const replayBoundary = this.#sequence;
         const replayEvents = [...this.#events];
         const queue = new BoundedAsyncQueue<QualificationEventRecord>();
         const subscriber = (event: QualificationEventRecord): void => {

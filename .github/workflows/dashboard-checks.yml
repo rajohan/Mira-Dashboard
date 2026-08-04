@@ -46,6 +46,9 @@ jobs:
             - name: Test documentation generator
               run: bun run test:greenfield:docs
 
+            - name: Test greenfield tooling
+              run: bun run test:greenfield:tooling
+
             - name: Verify generated documentation
               run: bun run docs:check
 

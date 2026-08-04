@@ -27,8 +27,15 @@ describe("generated contract documentation", () => {
         expect([...first]).toEqual([...second]);
         expect(first.get("README.md")).toContain("[tRPC procedures](procedures.md)");
         expect(first.get("procedures.md")).toContain("`system.runtimeIdentity`");
-        expect(first.get("raw-http.md")).toContain("`/api/health/ready`");
-        expect(first.get("raw-http.md")).toContain("| GET / HEAD |");
+        const rawHttpDocumentation = first.get("raw-http.md");
+        for (const path of ["/api/health/live", "/api/health/ready"]) {
+            expect(rawHttpDocumentation).toContain(
+                `| GET | \`${path}\` | Public | 200 | [response]`
+            );
+            expect(rawHttpDocumentation).toContain(
+                `| HEAD | \`${path}\` | Public | 200 | No body |`
+            );
+        }
         expect(first.get("realtime-events.md")).toContain(
             "No realtime topics are implemented"
         );

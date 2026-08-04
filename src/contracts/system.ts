@@ -41,20 +41,42 @@ export const systemProcedureContracts = [runtimeIdentityContract] as const;
 export const systemRawHttpContracts = [
     {
         access: { kind: "public" },
-        methods: ["GET", "HEAD"],
+        method: "GET",
         path: "/api/health/live",
-        response: healthStatusSchema,
-        responseSchemaId: "health.status.response",
+        response: {
+            kind: "schema",
+            schema: healthStatusSchema,
+            schemaId: "health.status.response",
+        },
         statusCodes: [200],
         summary: "Confirms that the Bun web process can answer requests.",
     },
     {
         access: { kind: "public" },
-        methods: ["GET", "HEAD"],
+        method: "HEAD",
+        path: "/api/health/live",
+        response: { kind: "none" },
+        statusCodes: [200],
+        summary: "Checks Bun web-process liveness without a response body.",
+    },
+    {
+        access: { kind: "public" },
+        method: "GET",
         path: "/api/health/ready",
-        response: healthStatusSchema,
-        responseSchemaId: "health.status.response",
+        response: {
+            kind: "schema",
+            schema: healthStatusSchema,
+            schemaId: "health.status.response",
+        },
         statusCodes: [200],
         summary: "Confirms that the greenfield foundation is ready to serve traffic.",
+    },
+    {
+        access: { kind: "public" },
+        method: "HEAD",
+        path: "/api/health/ready",
+        response: { kind: "none" },
+        statusCodes: [200],
+        summary: "Checks greenfield readiness without a response body.",
     },
 ] as const satisfies readonly RawHttpContract[];

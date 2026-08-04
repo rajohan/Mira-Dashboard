@@ -22,13 +22,17 @@ export interface ProcedureContract {
     summary: string;
 }
 
-/** Metadata for one raw route whose protocol semantics are HTTP-specific. */
+/** Response-body contract for one raw HTTP operation. */
+export type RawHttpResponseContract =
+    | { kind: "none" }
+    | { kind: "schema"; schema: ContractSchema; schemaId: string };
+
+/** Metadata for one raw HTTP operation. */
 export interface RawHttpContract {
     access: ContractAccess;
-    methods: readonly ("GET" | "HEAD" | "POST")[];
+    method: "GET" | "HEAD" | "POST";
     path: string;
-    response: ContractSchema;
-    responseSchemaId: string;
+    response: RawHttpResponseContract;
     statusCodes: readonly number[];
     summary: string;
 }
