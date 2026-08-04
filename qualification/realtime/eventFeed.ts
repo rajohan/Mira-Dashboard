@@ -62,24 +62,25 @@ class BoundedAsyncQueue<T> {
         });
     }
 
-    push(value: T): void {
+    push(value: T): boolean {
         if (this.#closed) {
-            return;
+            return false;
         }
 
         const pendingRead = this.#pendingReads.shift();
         if (pendingRead) {
             pendingRead.resolve({ done: false, value });
-            return;
+            return true;
         }
 
         if (this.#values.length >= maximumSubscriberQueueSize) {
             this.fail(
                 new Error("Qualification event subscriber exceeded its queue budget")
             );
-            return;
+            return false;
         }
         this.#values.push(value);
+        return true;
     }
 }
 
@@ -145,11 +146,12 @@ export class QualificationEventFeed {
         const replayEvents = [...this.#events];
         const queue = new BoundedAsyncQueue<QualificationEventRecord>();
         const subscriber = (event: QualificationEventRecord): void => {
-            if (Number(event.id) > replayBoundary) {
-                queue.push(event);
+            if (Number(event.id) > replayBoundary && !queue.push(event)) {
+                this.#subscribers.delete(subscriber);
             }
         };
         const abort = (): void => {
+            this.#subscribers.delete(subscriber);
             queue.close();
         };
 

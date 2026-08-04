@@ -46,12 +46,13 @@
 - The tRPC evidence covers validated queries and mutations through `Bun.serve`, tracked SSE
   delivery through the official `httpSubscriptionLink`, a server-forced reconnect, resume from
   the last event ID without duplicate delivery, bounded per-subscriber buffering, and subscriber
-  cleanup after client abort. `eventsource` is injected only into the Bun-side client test. The
+  cleanup after client abort or queue overflow, including while a slow generator is paused at a
+  yielded event. `eventsource` is injected only into the Bun-side client test. The
   explicit liveness/readiness boundary preserves both `GET` and bodyless `HEAD` probes, and the
   generated raw-HTTP reference is sourced from separate method-specific response contracts.
 - These focused gates currently pass on the exact candidate: qualification and greenfield
   TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 10/10
-  qualification tests, 31/31 greenfield server/database tests, 4/4 documentation tests, and 4/4
+  qualification tests, 32/32 greenfield server/database tests, 4/4 documentation tests, and 4/4
   database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
   while retention advances, explicit rejection of a cursor ahead of the feed tail, acceptance at
@@ -74,8 +75,10 @@
   keys and check constraints to be enforced; before success it rejects stored foreign-key,
   CHECK-constraint, or general SQLite integrity failures. Focused tests cover malformed and
   non-object JSON, SQL/snapshot tampering, manifest shape/order, strict tables, enforcement and
-  integrity failures, transactional rollback, unknown-schema rejection, Valibot round-trips, and
-  query plans; the migration/database subset passes 26/26 tests.
+  integrity failures, transactional rollback, unknown-schema rejection, mandatory realtime-event
+  entity identity, Valibot round-trips, and query plans; the migration/database subset passes
+  27/27 tests. Because this baseline is unpublished and targets an empty database, the identity
+  constraint regenerates the single initial migration instead of adding compatibility history.
 - Migration graph validation runs through the read-only `drizzle-kit check` CLI in the foundation
   job. A non-writing `drizzle-kit generate --explain` pass must also report `no_changes`, so a
   TypeScript schema edit cannot drift from the reviewed migration snapshot. A controlled

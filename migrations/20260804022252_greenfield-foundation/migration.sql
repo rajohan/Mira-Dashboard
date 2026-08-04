@@ -67,7 +67,7 @@ CREATE TABLE `notifications` (
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `realtime_events` (
-	`entity_id` text,
+	`entity_id` text NOT NULL,
 	`entity_type` text NOT NULL,
 	`id` integer PRIMARY KEY AUTOINCREMENT,
 	`occurred_at` integer NOT NULL,

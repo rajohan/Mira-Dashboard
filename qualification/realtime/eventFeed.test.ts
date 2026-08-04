@@ -29,9 +29,9 @@ describe("qualification event feed", () => {
         expect(deliveredLiveEvent.value.id).toBe("3");
 
         abortController.abort();
+        expect(eventFeed.activeSubscriberCount).toBe(0);
         const completedSubscription = await subscription.next();
         expect(completedSubscription.done).toBeTrue();
-        expect(eventFeed.activeSubscriberCount).toBe(0);
     });
 
     test("keeps the replay snapshot stable when retention advances", async () => {
@@ -64,9 +64,9 @@ describe("qualification event feed", () => {
         expect(secondReplayEvent.value.id).toBe("2");
 
         abortController.abort();
+        expect(eventFeed.activeSubscriberCount).toBe(0);
         const completedSubscription = await subscription.next();
         expect(completedSubscription.done).toBeTrue();
-        expect(eventFeed.activeSubscriberCount).toBe(0);
     });
 
     test("rejects a resume cursor ahead of the feed tail", async () => {
@@ -107,9 +107,9 @@ describe("qualification event feed", () => {
         expect(deliveredEvent.value.id).toBe("2");
 
         abortController.abort();
+        expect(eventFeed.activeSubscriberCount).toBe(0);
         const completedSubscription = await subscription.next();
         expect(completedSubscription.done).toBeTrue();
-        expect(eventFeed.activeSubscriberCount).toBe(0);
     });
 
     test("fails and detaches a subscriber that exceeds its queue budget", async () => {
@@ -122,6 +122,8 @@ describe("qualification event feed", () => {
         for (let value = 1; value <= 18; value += 1) {
             eventFeed.publish({ kind: "qualification.changed", value });
         }
+        await waitFor(() => eventFeed.activeSubscriberCount === 0);
+
         const deliveredFirstEvent = await firstEvent;
         if (deliveredFirstEvent.done) {
             throw new Error("Slow subscription ended before returning its first event");

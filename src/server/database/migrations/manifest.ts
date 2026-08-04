@@ -8,10 +8,10 @@ export interface MigrationManifestEntry {
 /** Reviewed migration files accepted by the greenfield runtime. */
 export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]>([
     Object.freeze({
-        id: "20260803233257_greenfield-foundation",
+        id: "20260804022252_greenfield-foundation",
         migrationSha256:
-            "ab13c459441d1aea46fc854ebe3359535392901416ba179b415488919f218c5b",
+            "0cb77ce5239335a4b7b848d72322789e4539a7caa011da9a3dd251eba5a9ba6f",
         snapshotSha256:
-            "6867fc6458c9394e265d972b48f8e233a3d190b175fe39808f8e33ed2024d3df",
+            "112163e5fa4dfae881c39839096d37377c30d45488d391fb2731145f3a35551c",
     }),
 ]);

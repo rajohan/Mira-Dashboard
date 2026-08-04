@@ -53,7 +53,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
             v.parse(schemaMigrationInsertSchema, {
                 appliedAt: observedAt,
                 checksum: "a".repeat(64),
-                id: "20260803233257_greenfield-foundation",
+                id: "20260804022252_greenfield-foundation",
                 releaseId: "b".repeat(40),
             })
         ).toBeDefined();
@@ -137,6 +137,15 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 occurredAt: observedAt,
                 operation: "created",
                 payloadJson: "{not-json}",
+                topic: "incidents",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(realtimeEventInsertSchema, {
+                entityType: "incident",
+                occurredAt: observedAt,
+                operation: "created",
+                payloadJson: JSON.stringify({ incidentId }),
                 topic: "incidents",
             })
         ).toThrow();
@@ -245,7 +254,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
             v.parse(schemaMigrationInsertSchema, {
                 appliedAt: observedAt,
                 checksum: "A".repeat(64),
-                id: "20260803233257_greenfield-foundation",
+                id: "20260804022252_greenfield-foundation",
                 releaseId: "b".repeat(40),
             })
         ).toThrow();

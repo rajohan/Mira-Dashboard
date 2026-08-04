@@ -105,11 +105,11 @@ describe("reviewed migration manifest", () => {
             loadVerifiedMigrations({
                 directory,
                 manifest: [
+                    migration,
                     {
                         ...migration,
-                        id: "20260803233258_greenfield-followup",
+                        id: "20200101000000_greenfield-followup",
                     },
-                    migration,
                 ],
             }),
             "Migration manifest is not in runtime application order"

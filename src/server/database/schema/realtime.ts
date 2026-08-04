@@ -5,7 +5,7 @@ import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-cor
 export const realtimeEvents = sqliteTable(
     "realtime_events",
     {
-        entityId: text("entity_id"),
+        entityId: text("entity_id").notNull(),
         entityType: text("entity_type").notNull(),
         id: integer("id").primaryKey({ autoIncrement: true }),
         occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
