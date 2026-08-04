@@ -11,48 +11,26 @@ import {
 import { monitorRunInsertSchema, monitorRunUpdateSchema } from "./monitorRuns.ts";
 import { notificationInsertSchema, notificationUpdateSchema } from "./notifications.ts";
 import {
+    realtimeCursorBoundsSchema,
+    realtimeCursorWindowSchema,
     realtimeEventInsertSchema,
     realtimeEventSelectSchema,
 } from "./realtimeEvents.ts";
 import { reportInsertSchema } from "./reports.ts";
 import { schemaMigrationInsertSchema } from "./schemaMigrations.ts";
-
-const incidentId = "019fc968-1a9b-7760-bf1b-d5b863b0e7b4";
-const monitorRunId = "019fc968-1a9b-7761-8f1b-d5b863b0e7b4";
-const reportId = "019fc968-1a9b-7762-9f1b-d5b863b0e7b4";
-const notificationId = "019fc968-1a9b-7763-af1b-d5b863b0e7b4";
-const observedAt = new Date("2026-08-03T22:00:00.000Z");
-const validIncidentValues = {
-    detailsJson: '{"mount":"/"}',
-    fingerprint: "filesystem:root-pressure",
-    firstSeenAt: observedAt,
-    id: incidentId,
-    kind: "system",
-    lastSeenAt: observedAt,
-    monitorKey: "ops-check",
-    severity: "warning",
-    state: "active",
-    title: "Root filesystem pressure",
-} as const;
-const validObservationValues = {
-    detailsJson: '{"usagePercent":91}',
-    generation: 1,
+import {
+    incidentFingerprint,
     incidentId,
-    kind: "system",
     monitorRunId,
+    notificationId,
     observedAt,
-    severity: "warning",
-    title: "Root filesystem pressure",
-} as const;
-const validRealtimeEventValues = {
-    entityId: incidentId,
-    entityType: "incident",
-    expiresAt: new Date("2026-08-10T22:00:00.000Z"),
-    occurredAt: observedAt,
-    operation: "created",
-    payloadJson: JSON.stringify({ incidentId }),
-    topic: "incidents",
-} as const;
+    reportId,
+    validIncidentValues,
+    validMonitorRunValues,
+    validNotificationValues,
+    validObservationValues,
+    validRealtimeEventValues,
+} from "./testSupport/rows.ts";
 
 describe("Drizzle-generated Valibot row schemas", () => {
     test("validate every foundation table at its database boundary", () => {
@@ -77,17 +55,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
             })
         ).toBeDefined();
 
-        expect(
-            v.parse(monitorRunInsertSchema, {
-                completeSnapshot: true,
-                id: monitorRunId,
-                monitorKey: "ops-check",
-                reportId,
-                startedAt: observedAt,
-                state: "running",
-                submissionSha256: "a".repeat(64),
-            })
-        ).toBeDefined();
+        expect(v.parse(monitorRunInsertSchema, validMonitorRunValues)).toBeDefined();
 
         expect(v.parse(incidentInsertSchema, validIncidentValues)).toBeDefined();
 
@@ -95,19 +63,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
             v.parse(incidentObservationInsertSchema, validObservationValues)
         ).toBeDefined();
 
-        expect(
-            v.parse(notificationInsertSchema, {
-                channel: "dashboard",
-                id: notificationId,
-                incidentGeneration: 1,
-                incidentId,
-                kind: "incident-opened",
-                message: "Root filesystem usage exceeded the warning threshold.",
-                occurredAt: observedAt,
-                severity: "warning",
-                title: "Root filesystem pressure",
-            })
-        ).toBeDefined();
+        expect(v.parse(notificationInsertSchema, validNotificationValues)).toBeDefined();
 
         expect(
             v.parse(realtimeEventInsertSchema, validRealtimeEventValues)
@@ -174,7 +130,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
         expect(
             v.parse(incidentSelectSchema, {
                 detailsJson: "{}",
-                fingerprint: "filesystem:root-pressure",
+                fingerprint: incidentFingerprint,
                 firstSeenAt: observedAt,
                 generation: 1,
                 id: incidentId,
@@ -188,6 +144,104 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 title: "Root filesystem pressure",
             })
         ).toBeDefined();
+    });
+
+    test("accepts only positive safe integer realtime event select IDs", () => {
+        for (const id of [-1, 0, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+            expect(() =>
+                v.parse(realtimeEventSelectSchema, {
+                    ...validRealtimeEventValues,
+                    id,
+                })
+            ).toThrow();
+        }
+
+        for (const id of [1, Number.MAX_SAFE_INTEGER]) {
+            expect(
+                v.parse(realtimeEventSelectSchema, {
+                    ...validRealtimeEventValues,
+                    id,
+                })
+            ).toBeDefined();
+        }
+    });
+
+    test("validates raw realtime cursor aggregates and their cross-field invariants", () => {
+        expect(
+            v.parse(realtimeCursorWindowSchema, {
+                latestIssuedId: 0,
+                newestRetainedId: null,
+                oldestRetainedId: null,
+                retainedEvents: 0,
+            })
+        ).toEqual({
+            latestIssuedId: 0,
+            newestRetainedId: null,
+            oldestRetainedId: null,
+            retainedEvents: 0,
+        });
+        expect(
+            v.parse(realtimeCursorBoundsSchema, {
+                latestIssuedId: 3,
+                newestRetainedId: 3,
+                oldestRetainedId: 1,
+            })
+        ).toEqual({
+            latestIssuedId: 3,
+            newestRetainedId: 3,
+            oldestRetainedId: 1,
+        });
+
+        const invalidBounds = [
+            {
+                latestIssuedId: -1,
+                newestRetainedId: null,
+                oldestRetainedId: null,
+            },
+            {
+                latestIssuedId: 3,
+                newestRetainedId: 3,
+                oldestRetainedId: null,
+            },
+            {
+                latestIssuedId: 3,
+                newestRetainedId: 2,
+                oldestRetainedId: 3,
+            },
+            {
+                latestIssuedId: 2,
+                newestRetainedId: 3,
+                oldestRetainedId: 1,
+            },
+        ] as const;
+        for (const bounds of invalidBounds) {
+            expect(() => v.parse(realtimeCursorBoundsSchema, bounds)).toThrow();
+        }
+
+        expect(() =>
+            v.parse(realtimeCursorWindowSchema, {
+                latestIssuedId: 3,
+                newestRetainedId: 3,
+                oldestRetainedId: 1,
+                retainedEvents: 0,
+            })
+        ).toThrow("Realtime cursor-window aggregates are inconsistent");
+        expect(() =>
+            v.parse(realtimeCursorWindowSchema, {
+                latestIssuedId: 3,
+                newestRetainedId: null,
+                oldestRetainedId: null,
+                retainedEvents: 1,
+            })
+        ).toThrow("Realtime cursor-window aggregates are inconsistent");
+        expect(() =>
+            v.parse(realtimeCursorWindowSchema, {
+                latestIssuedId: 100,
+                newestRetainedId: 3,
+                oldestRetainedId: 1,
+                retainedEvents: 4,
+            })
+        ).toThrow("Realtime cursor-window retained count exceeds its id span");
     });
 
     test("rejects unknown, generated, and constraint-breaking storage fields", () => {
@@ -207,12 +261,6 @@ describe("Drizzle-generated Valibot row schemas", () => {
             v.parse(realtimeEventInsertSchema, {
                 ...validRealtimeEventValues,
                 id: 1,
-            })
-        ).toThrow();
-        expect(() =>
-            v.parse(realtimeEventSelectSchema, {
-                ...validRealtimeEventValues,
-                id: 0,
             })
         ).toThrow();
         expect(() =>

@@ -1,8 +1,16 @@
+import * as v from "valibot";
+
+import { positiveSafeIntegerSchema } from "../../src/shared/validation.ts";
 import type { CgroupV2Limit, CgroupV2Snapshot } from "./cgroupV2.ts";
 import type { CgroupV2AncestorSnapshot } from "./cgroupV2Hierarchy.ts";
 import { assertSseMemoryUnitCgroupPath } from "./unitIdentity.ts";
 
 const mebibyte = 1024 * 1024;
+const positiveCpuValueSchema = positiveSafeIntegerSchema();
+
+function isPositiveCpuValue(value: unknown): value is number {
+    return v.safeParse(positiveCpuValueSchema, value).success;
+}
 
 /** Fixed cgroup and load boundaries for the SSE memory qualification. */
 export const sseMemoryQualificationPolicy = Object.freeze({
@@ -86,11 +94,9 @@ export function assertCgroupAncestorResourcePolicy(
             policy.tasksMax
         );
         if (
-            !Number.isSafeInteger(ancestor.cpuPeriodMicros) ||
-            ancestor.cpuPeriodMicros <= 0 ||
+            !isPositiveCpuValue(ancestor.cpuPeriodMicros) ||
             (ancestor.cpuQuotaMicros !== "max" &&
-                (!Number.isSafeInteger(ancestor.cpuQuotaMicros) ||
-                    ancestor.cpuQuotaMicros <= 0))
+                !isPositiveCpuValue(ancestor.cpuQuotaMicros))
         ) {
             throw new Error(
                 `SSE memory qualification ancestor ${ancestor.path} has an invalid cpu.max policy`
@@ -130,10 +136,8 @@ export function assertCgroupResourcePolicy(
     const cpuQuota = snapshot.cpuQuotaMicros;
     if (
         cpuQuota === "max" ||
-        !Number.isSafeInteger(cpuQuota) ||
-        cpuQuota <= 0 ||
-        !Number.isSafeInteger(snapshot.cpuPeriodMicros) ||
-        snapshot.cpuPeriodMicros <= 0 ||
+        !isPositiveCpuValue(cpuQuota) ||
+        !isPositiveCpuValue(snapshot.cpuPeriodMicros) ||
         BigInt(cpuQuota) * 100n !==
             BigInt(snapshot.cpuPeriodMicros) * BigInt(policy.cpuQuotaPercent)
     ) {

@@ -1,3 +1,8 @@
+import {
+    parseSchemaWithRangeError,
+    positiveSafeIntegerSchema,
+} from "../../src/shared/validation.ts";
+
 /** Process-level memory observed by one qualification sample. */
 export interface ProcessMemorySnapshot {
     rssBytes: number;
@@ -9,6 +14,10 @@ export interface ProcessMemorySampler {
     sample(): ProcessMemorySnapshot;
     stop(): ProcessMemorySnapshot;
 }
+
+const processMemorySampleIntervalSchema = positiveSafeIntegerSchema(
+    "Process memory sample interval must be a positive integer"
+);
 
 /**
  * Reads both resident-set size and Bun's private-memory estimate.
@@ -52,9 +61,7 @@ export function startProcessMemorySampler(
     intervalMs: number,
     readSnapshot: () => ProcessMemorySnapshot = readProcessMemorySnapshot
 ): ProcessMemorySampler {
-    if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
-        throw new RangeError("Process memory sample interval must be a positive integer");
-    }
+    parseSchemaWithRangeError(processMemorySampleIntervalSchema, intervalMs);
     let failure: unknown;
     let peak = initial;
     let stopped = false;

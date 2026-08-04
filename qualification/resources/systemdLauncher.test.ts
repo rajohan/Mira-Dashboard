@@ -166,6 +166,14 @@ describe("SSE memory systemd launcher", () => {
         expect(cancelledHandles).toEqual([handle]);
     });
 
+    test("rejects invalid launcher deadlines before scheduling", () => {
+        for (const delayMs of [0, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN]) {
+            expect(() => createSystemdLauncherDeadline(delayMs)).toThrow(
+                "Systemd launcher deadline must be a positive integer"
+            );
+        }
+    });
+
     test("classifies only the owned deadline signal as a deadline", () => {
         expect(classifySystemdLauncherTermination(null, true, "SIGKILL")).toBeUndefined();
         expect(classifySystemdLauncherTermination("SIGKILL", true, "SIGKILL")).toEqual({

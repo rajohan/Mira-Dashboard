@@ -70,8 +70,13 @@ describe("process memory samples", () => {
     });
 
     test("rejects invalid sample intervals", () => {
-        expect(() =>
-            startProcessMemorySampler({ rssBytes: 1, unsafeFootprintBytes: 1 }, 0)
-        ).toThrow("positive integer");
+        for (const intervalMs of [0, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN]) {
+            expect(() =>
+                startProcessMemorySampler(
+                    { rssBytes: 1, unsafeFootprintBytes: 1 },
+                    intervalMs
+                )
+            ).toThrow("positive integer");
+        }
     });
 });

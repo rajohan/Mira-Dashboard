@@ -6,7 +6,10 @@ import {
 } from "../realtime/eventFeed.ts";
 import { waitFor } from "../test/waitFor.ts";
 import { createQualificationClient } from "./client.ts";
-import { startQualificationServer } from "./server.ts";
+import {
+    qualificationRequestBodyMaximumBytes,
+    startQualificationServer,
+} from "./server.ts";
 
 const servers: Array<ReturnType<typeof startQualificationServer>> = [];
 
@@ -21,6 +24,7 @@ describe("tRPC Fetch and tracked SSE on Bun", () => {
         const eventFeed = new QualificationEventFeed();
         const server = startQualificationServer({
             eventFeed,
+            hostname: "127.0.0.1",
             maximumStreamDurationMs: 300,
             releaseId: "direct-release",
         });
@@ -61,13 +65,42 @@ describe("tRPC Fetch and tracked SSE on Bun", () => {
         expect((payloadError as Error).message).toContain(
             "Qualification event payload must not exceed"
         );
+        let unknownInputError: unknown;
+        try {
+            await client.events.publish.mutate({
+                kind: "qualification.changed",
+                unexpected: true,
+                value: 2,
+            } as never);
+        } catch (error) {
+            unknownInputError = error;
+        }
+        expect(unknownInputError).toBeInstanceOf(Error);
         expect(eventFeed.metricsSnapshot().latestSequence).toBe(1);
+    });
+
+    test("rejects request bodies above the qualification transport budget", async () => {
+        const server = startQualificationServer({
+            eventFeed: new QualificationEventFeed(),
+            hostname: "127.0.0.1",
+            releaseId: "direct-release",
+        });
+        servers.push(server);
+
+        const response = await fetch(new URL("/trpc/events.publish", server.url), {
+            body: "x".repeat(qualificationRequestBodyMaximumBytes + 1),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+        });
+
+        expect(response.status).toBe(413);
     });
 
     test("resumes tracked events after a forced SSE reconnect without duplicates", async () => {
         const eventFeed = new QualificationEventFeed();
         const server = startQualificationServer({
             eventFeed,
+            hostname: "127.0.0.1",
             maximumStreamDurationMs: 300,
             releaseId: "direct-release",
         });

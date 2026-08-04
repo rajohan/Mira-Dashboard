@@ -1,3 +1,11 @@
+import * as v from "valibot";
+
+import {
+    nonnegativeSafeIntegerSchema,
+    parseSchemaWithRangeError,
+    positiveSafeIntegerSchema,
+} from "../../../shared/validation.ts";
+
 interface PendingRead<T> {
     reject: (reason: Error) => void;
     resolve: (result: IteratorResult<T>) => void;
@@ -16,16 +24,34 @@ export interface BoundedAsyncQueueLimits {
 
 export interface BoundedAsyncQueuePushResult {
     readonly accepted: boolean;
+    readonly failure?: Error;
     readonly queuedEventCount: number;
     readonly queuedPayloadBytes: number;
 }
 
-function positiveSafeInteger(value: number, name: string): number {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new RangeError(`${name} must be a positive safe integer`);
+/** Terminal error raised when a bounded queue rejects a value at its budget. */
+export class BoundedAsyncQueueOverflowError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "BoundedAsyncQueueOverflowError";
     }
-    return value;
 }
+
+const boundedAsyncQueueLimitsSchema = v.strictObject({
+    maximumEvents: positiveSafeIntegerSchema(
+        "Bounded async queue maximum events must be a positive safe integer"
+    ),
+    maximumPayloadBytes: positiveSafeIntegerSchema(
+        "Bounded async queue maximum payload bytes must be a positive safe integer"
+    ),
+    overflowErrorMessage: v.string(
+        "Bounded async queue overflow error message must be a string"
+    ),
+});
+
+const payloadBytesSchema = nonnegativeSafeIntegerSchema(
+    "Bounded async queue payload bytes must be a nonnegative safe integer"
+);
 
 /**
  * Abort-friendly async queue with explicit event-count and UTF-8 payload-byte budgets.
@@ -40,19 +66,15 @@ export class BoundedAsyncQueue<T> {
     #queuedPayloadBytes = 0;
 
     constructor(limits: BoundedAsyncQueueLimits) {
-        this.#limits = Object.freeze({
-            maximumEvents: positiveSafeInteger(
-                limits.maximumEvents,
-                "Bounded async queue maximum events"
-            ),
-            maximumPayloadBytes: positiveSafeInteger(
-                limits.maximumPayloadBytes,
-                "Bounded async queue maximum payload bytes"
-            ),
-            overflowErrorMessage: limits.overflowErrorMessage,
-        });
+        this.#limits = Object.freeze(
+            parseSchemaWithRangeError(boundedAsyncQueueLimitsSchema, limits)
+        );
     }
 
+    /**
+     * Terminates immediately, discarding buffered values and resolving pending reads as done.
+     * This is not a graceful drain.
+     */
     close(): void {
         this.#closed = true;
         this.#queuedPayloadBytes = 0;
@@ -91,11 +113,10 @@ export class BoundedAsyncQueue<T> {
     }
 
     push(value: T, payloadBytes: number): BoundedAsyncQueuePushResult {
-        if (!Number.isSafeInteger(payloadBytes) || payloadBytes < 0) {
-            throw new RangeError(
-                "Bounded async queue payload bytes must be a nonnegative safe integer"
-            );
-        }
+        const validatedPayloadBytes = parseSchemaWithRangeError(
+            payloadBytesSchema,
+            payloadBytes
+        );
         if (this.#closed) {
             return this.#pushResult(false);
         }
@@ -108,19 +129,23 @@ export class BoundedAsyncQueue<T> {
 
         if (
             this.#values.length >= this.#limits.maximumEvents ||
-            this.#queuedPayloadBytes + payloadBytes > this.#limits.maximumPayloadBytes
+            validatedPayloadBytes >
+                this.#limits.maximumPayloadBytes - this.#queuedPayloadBytes
         ) {
-            this.fail(new Error(this.#limits.overflowErrorMessage));
+            this.fail(
+                new BoundedAsyncQueueOverflowError(this.#limits.overflowErrorMessage)
+            );
             return this.#pushResult(false);
         }
-        this.#values.push({ payloadBytes, value });
-        this.#queuedPayloadBytes += payloadBytes;
+        this.#values.push({ payloadBytes: validatedPayloadBytes, value });
+        this.#queuedPayloadBytes += validatedPayloadBytes;
         return this.#pushResult(true);
     }
 
     #pushResult(accepted: boolean): BoundedAsyncQueuePushResult {
         return {
             accepted,
+            ...(this.#failure === undefined ? {} : { failure: this.#failure }),
             queuedEventCount: this.#values.length,
             queuedPayloadBytes: this.#queuedPayloadBytes,
         };

@@ -112,18 +112,53 @@ describe("monitoring snapshot normalization", () => {
         );
     });
 
-    test("reports the exact separator policy for each identifier kind", () => {
-        const invalidSegment = snapshot();
-        invalidSegment.problems[0]!.kind = "system:health";
-        expect(() => normalizeMonitoringSnapshot(invalidSegment)).toThrow(
-            "problem.kind must use lowercase alphanumeric segments with '.', '_', or '-' separators"
-        );
+    test("reports the exact separator policy at every identifier call site", () => {
+        const cases = [
+            {
+                expectedMessage:
+                    "problem.kind must use lowercase alphanumeric segments with '.', '_', or '-' separators",
+                mutate: (input: ReturnType<typeof snapshot>) => {
+                    input.problems[0]!.kind = "system:health";
+                },
+            },
+            {
+                expectedMessage:
+                    "problem.condition must use lowercase alphanumeric segments with '.', '_', or '-' separators",
+                mutate: (input: ReturnType<typeof snapshot>) => {
+                    input.problems[0]!.condition = "pressure:high";
+                },
+            },
+            {
+                expectedMessage:
+                    "problem.entityKey must use lowercase alphanumeric segments with '.', '_', ':', or '-' separators",
+                mutate: (input: ReturnType<typeof snapshot>) => {
+                    input.problems[0]!.entityKey = "filesystem/root";
+                },
+            },
+            {
+                expectedMessage:
+                    "monitorKey must use lowercase alphanumeric segments with '.', '_', ':', or '-' separators",
+                mutate: (input: ReturnType<typeof snapshot>) => {
+                    input.monitorKey = "ops/check";
+                },
+            },
+            {
+                expectedMessage:
+                    "report.kind must use lowercase alphanumeric segments with '.', '_', or '-' separators",
+                mutate: (input: ReturnType<typeof snapshot>) => {
+                    input.report.kind = "heartbeat:system";
+                },
+            },
+        ];
 
-        const invalidIdentifier = snapshot();
-        invalidIdentifier.problems[0]!.entityKey = "filesystem/root";
-        expect(() => normalizeMonitoringSnapshot(invalidIdentifier)).toThrow(
-            "problem.entityKey must use lowercase alphanumeric segments with '.', '_', ':', or '-' separators"
-        );
+        for (const { expectedMessage, mutate } of cases) {
+            const invalidSnapshot = snapshot();
+            mutate(invalidSnapshot);
+
+            expect(() => normalizeMonitoringSnapshot(invalidSnapshot)).toThrow(
+                expectedMessage
+            );
+        }
     });
 
     test("canonicalizes problem order and nested JSON key order for idempotency", () => {
@@ -207,6 +242,12 @@ describe("monitoring snapshot normalization", () => {
     test("rejects malformed complete snapshots with a domain-safe error", () => {
         expect(() =>
             normalizeMonitoringSnapshot({ ...snapshot(), completedAtMs: 999 })
+        ).toThrow(MonitoringSnapshotValidationError);
+        expect(() =>
+            normalizeMonitoringSnapshot({
+                ...snapshot(),
+                runId: "9".repeat(10_000),
+            })
         ).toThrow(MonitoringSnapshotValidationError);
         expect(() =>
             normalizeMonitoringSnapshot({ ...snapshot(), problems: [{}] })

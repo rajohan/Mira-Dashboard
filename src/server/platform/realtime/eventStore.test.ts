@@ -1,82 +1,12 @@
-import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 
 import { lte } from "drizzle-orm";
-import { drizzle, type SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
+import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
-import { applyVerifiedMigrations } from "../../database/migrations/applyVerifiedMigrations.ts";
-import {
-    migrationsDirectory,
-    openFreshMigratedDatabase,
-} from "../../database/migrations/freshDatabaseFixture.ts";
-import { loadVerifiedMigrations } from "../../database/migrations/loadVerifiedMigrations.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
-import { createRealtimeEventStore } from "./eventStore.ts";
-
-type FreshDatabase = Awaited<ReturnType<typeof openFreshMigratedDatabase>>;
-
-function insertEvent(
-    database: Pick<FreshDatabase, "orm"> | { orm: SQLiteBunDatabase },
-    topic: string,
-    occurredAtMs: number
-): number {
-    return database.orm
-        .insert(realtimeEvents)
-        .values({
-            entityId: `entity-${occurredAtMs}`,
-            entityType: "qualification",
-            expiresAt: new Date(occurredAtMs + 60_000),
-            occurredAt: new Date(occurredAtMs),
-            operation: "updated",
-            payloadJson: JSON.stringify({ occurredAtMs }),
-            topic,
-        })
-        .returning({ id: realtimeEvents.id })
-        .get().id;
-}
-
-async function openSharedDatabases(): Promise<{
-    close(): void;
-    reader: { orm: SQLiteBunDatabase; sqlite: Database };
-    writer: { orm: SQLiteBunDatabase; sqlite: Database };
-}> {
-    const directory = mkdtempSync(path.join(tmpdir(), "mira-realtime-store-"));
-    const databasePath = path.join(directory, "shared.sqlite");
-    const readerSqlite = new Database(databasePath, { create: true, strict: true });
-    readerSqlite.run("PRAGMA foreign_keys = ON");
-    const readerOrm = drizzle({ client: readerSqlite });
-
-    try {
-        const migrations = await loadVerifiedMigrations({
-            directory: migrationsDirectory,
-        });
-        applyVerifiedMigrations(readerSqlite, migrations, {
-            appliedAt: new Date("2026-08-04T15:00:00.000Z"),
-            releaseId: "0".repeat(40),
-        });
-        readerSqlite.run("PRAGMA journal_mode = WAL");
-        const writerSqlite = new Database(databasePath, { strict: true });
-        writerSqlite.run("PRAGMA foreign_keys = ON");
-        writerSqlite.run("PRAGMA journal_mode = WAL");
-        const writerOrm = drizzle({ client: writerSqlite });
-        return {
-            close(): void {
-                writerSqlite.close(true);
-                readerSqlite.close(true);
-                rmSync(directory, { force: true, recursive: true });
-            },
-            reader: { orm: readerOrm, sqlite: readerSqlite },
-            writer: { orm: writerOrm, sqlite: writerSqlite },
-        };
-    } catch (error) {
-        readerSqlite.close(true);
-        rmSync(directory, { force: true, recursive: true });
-        throw error;
-    }
-}
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { createRealtimeEventStore, realtimeEventStoreLimits } from "./eventStore.ts";
+import { insertEvent, openSharedDatabases } from "./testSupport/eventPump.ts";
 
 describe("realtime event store", () => {
     test("reads cursor bounds and filtered pages without exceeding the page limit", async () => {
@@ -91,9 +21,12 @@ describe("realtime event store", () => {
                 retainedEvents: 0,
             });
 
-            const firstId = insertEvent(database, "topic.a", 1000);
-            const secondId = insertEvent(database, "topic.b", 2000);
-            const thirdId = insertEvent(database, "topic.a", 3000);
+            const firstId = insertEvent(database, { occurredAtMs: 1000 });
+            const secondId = insertEvent(database, {
+                occurredAtMs: 2000,
+                topic: "topic.b",
+            });
+            const thirdId = insertEvent(database, { occurredAtMs: 3000 });
             expect([firstId, secondId, thirdId]).toEqual([1, 2, 3]);
             expect(store.readCursorWindow()).toEqual({
                 latestIssuedId: 3,
@@ -123,6 +56,16 @@ describe("realtime event store", () => {
             });
             expect(firstBatch.events.map((event) => event.id)).toEqual([1]);
             expect(secondBatch.events.map((event) => event.id)).toEqual([3]);
+            expect(
+                store.readBatch({
+                    afterId: 3,
+                    limit: realtimeEventStoreLimits.maximumPageEvents,
+                    topics: Array.from(
+                        { length: realtimeEventStoreLimits.maximumTopicsPerPage },
+                        (_, index) => `topic.${index}`
+                    ),
+                }).events
+            ).toEqual([]);
 
             database.orm.delete(realtimeEvents).where(lte(realtimeEvents.id, 2)).run();
             expect(store.readCursorWindow()).toEqual({
@@ -193,9 +136,9 @@ describe("realtime event store", () => {
         } as unknown as SQLiteBunDatabase;
 
         try {
-            insertEvent(databases.reader, "topic.a", 1000);
-            insertEvent(databases.reader, "topic.a", 2000);
-            insertEvent(databases.reader, "topic.a", 3000);
+            insertEvent(databases.writer, { occurredAtMs: 1000 });
+            insertEvent(databases.writer, { occurredAtMs: 2000 });
+            insertEvent(databases.writer, { occurredAtMs: 3000 });
             const store = createRealtimeEventStore(instrumentedDatabase);
 
             const batch = store.readBatch({ afterId: 0, limit: 1 });
@@ -251,9 +194,78 @@ describe("realtime event store", () => {
                     throw new Error("Invalid options reached SQLite");
                 },
             } as unknown as SQLiteBunDatabase);
-            expect(() => validationOnlyStore.readBatch({ afterId: 0, limit: 0 })).toThrow(
-                "Realtime page limit must be a positive safe integer"
-            );
+
+            const invalidOptions: readonly {
+                expectedMessage: string;
+                options: Parameters<typeof validationOnlyStore.readBatch>[0];
+            }[] = [
+                {
+                    expectedMessage:
+                        "Realtime page cursor must be a nonnegative safe integer",
+                    options: { afterId: -1, limit: 1 },
+                },
+                {
+                    expectedMessage:
+                        "Realtime page cursor must be a nonnegative safe integer",
+                    options: { afterId: 1.5, limit: 1 },
+                },
+                {
+                    expectedMessage:
+                        "Realtime page boundary must be a nonnegative safe integer",
+                    options: { afterId: 0, limit: 1, throughId: -1 },
+                },
+                {
+                    expectedMessage: "Realtime page boundary cannot precede its cursor",
+                    options: { afterId: 2, limit: 1, throughId: 1 },
+                },
+                {
+                    expectedMessage:
+                        "Realtime page limit must be a positive safe integer",
+                    options: { afterId: 0, limit: 0 },
+                },
+                {
+                    expectedMessage: "Realtime page limit exceeds its store budget",
+                    options: {
+                        afterId: 0,
+                        limit: realtimeEventStoreLimits.maximumPageEvents + 1,
+                    },
+                },
+                {
+                    expectedMessage: "Realtime page topic count exceeds its store budget",
+                    options: {
+                        afterId: 0,
+                        limit: 1,
+                        topics: Array.from(
+                            {
+                                length: realtimeEventStoreLimits.maximumTopicsPerPage + 1,
+                            },
+                            (_, index) => `topic.${index}`
+                        ),
+                    },
+                },
+                {
+                    expectedMessage: "Realtime topic is invalid",
+                    options: { afterId: 0, limit: 1, topics: [" topic.a"] },
+                },
+                {
+                    expectedMessage: "Realtime topic is invalid",
+                    options: {
+                        afterId: 0,
+                        limit: 1,
+                        topics: [
+                            "t".repeat(
+                                realtimeEventStoreLimits.maximumTopicCharacters + 1
+                            ),
+                        ],
+                    },
+                },
+            ];
+            for (const { expectedMessage, options } of invalidOptions) {
+                expect(() => validationOnlyStore.readBatch(options)).toThrow(RangeError);
+                expect(() => validationOnlyStore.readBatch(options)).toThrow(
+                    expectedMessage
+                );
+            }
             expect(transactionCalls).toBe(0);
         } finally {
             database.sqlite.close(true);

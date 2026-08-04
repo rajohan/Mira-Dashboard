@@ -1028,6 +1028,12 @@
       "table": "incidents"
     },
     {
+      "value": "length(\"fingerprint\") = 64 AND \"fingerprint\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "incidents_fingerprint_check",
+      "entityType": "checks",
+      "table": "incidents"
+    },
+    {
       "value": "\"generation\" >= 1",
       "name": "incidents_generation_check",
       "entityType": "checks",
@@ -1114,6 +1120,12 @@
     {
       "value": "\"incident_generation\" IS NULL OR \"incident_generation\" >= 1",
       "name": "notifications_incident_generation_check",
+      "entityType": "checks",
+      "table": "notifications"
+    },
+    {
+      "value": "\"read_at\" IS NULL OR \"read_at\" >= \"occurred_at\"",
+      "name": "notifications_read_order_check",
       "entityType": "checks",
       "table": "notifications"
     },

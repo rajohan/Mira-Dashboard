@@ -1,4 +1,9 @@
+import { compareAsc } from "date-fns";
 import * as v from "valibot";
+
+import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
+import { utf8ByteLength } from "../shared/encoding.ts";
+import { lowercaseUuidV7Schema } from "../shared/validation.ts";
 
 export type JsonObject = { readonly [key: string]: JsonValue };
 export type JsonValue =
@@ -10,14 +15,8 @@ export type JsonValue =
     | string;
 
 const maximumJsonDepth = 12;
-const maximumJsonObjectBytes = 64 * 1024;
+export const monitoringJsonObjectMaximumBytes = 64 * 1024;
 const maximumReportBodyCharacters = 1_000_000;
-const maximumTimestampMilliseconds = 8_640_000_000_000_000;
-const uuidV7Pattern =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-
-/** Qualified upper bound for one monitoring realtime payload. */
-export const monitoringRealtimeMaximumPayloadBytes = 8 * 1024;
 
 function isJsonValue(
     value: unknown,
@@ -65,7 +64,7 @@ function isJsonObject(value: unknown): value is JsonObject {
 }
 
 function encodedJsonBytes(value: JsonObject): number {
-    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    return utf8ByteLength(JSON.stringify(value));
 }
 
 function boundedNonBlankString(maximumLength: number) {
@@ -80,46 +79,60 @@ function boundedNonBlankString(maximumLength: number) {
 export const monitoringJsonObjectSchema = v.pipe(
     v.custom<JsonObject>(isJsonObject, "Expected a JSON object."),
     v.check(
-        (value) => encodedJsonBytes(value) <= maximumJsonObjectBytes,
-        `Expected JSON no larger than ${maximumJsonObjectBytes} encoded bytes.`
+        (value) => encodedJsonBytes(value) <= monitoringJsonObjectMaximumBytes,
+        `Expected JSON no larger than ${monitoringJsonObjectMaximumBytes} encoded bytes.`
     )
 );
 
-const timestampMillisecondsSchema = v.pipe(
-    v.number(),
-    v.safeInteger(),
-    v.minValue(0),
-    v.maxValue(maximumTimestampMilliseconds)
+const monitoringTimestampMillisecondsSchema = timestampMillisecondsSchema();
+
+const monitoringRunIdSchema = lowercaseUuidV7Schema(
+    "Expected a lowercase UUIDv7 monitor run id."
 );
 
-const monitoringRunIdSchema = v.pipe(
+/** Shared persisted monitoring kind policy. */
+export const monitoringKindSchema = boundedNonBlankString(100);
+
+/** Shared persisted monitor key policy. */
+export const monitoringMonitorKeySchema = boundedNonBlankString(200);
+
+/** Shared persisted monitoring problem title policy. */
+export const monitoringProblemTitleSchema = boundedNonBlankString(1000);
+
+/** Shared persisted report body policy. */
+export const monitoringReportBodyMarkdownSchema = v.pipe(
     v.string(),
-    v.uuid(),
-    v.regex(uuidV7Pattern, "Expected a lowercase UUIDv7 monitor run id.")
+    v.maxLength(maximumReportBodyCharacters),
+    v.check((value) => value.trim().length > 0, "Expected a non-blank report body.")
 );
+
+/** Shared persisted report source policy. */
+export const monitoringReportSourceSchema = boundedNonBlankString(200);
+
+/** Shared persisted report source-job policy. */
+export const monitoringReportSourceJobIdSchema = boundedNonBlankString(200);
+
+/** Shared persisted report title policy. */
+export const monitoringReportTitleSchema = boundedNonBlankString(500);
 
 /** One observed problem in a complete monitor snapshot. */
 export const monitoringProblemInputSchema = v.strictObject({
     condition: boundedNonBlankString(200),
     details: v.optional(monitoringJsonObjectSchema, {}),
     entityKey: boundedNonBlankString(200),
-    kind: boundedNonBlankString(100),
+    kind: monitoringKindSchema,
     severity: v.picklist(["critical", "error", "info", "warning"]),
-    title: boundedNonBlankString(1000),
+    title: monitoringProblemTitleSchema,
 });
 
 /** Immutable report content stored for every monitor submission. */
 export const monitoringReportInputSchema = v.strictObject({
-    bodyMarkdown: v.pipe(
-        v.string(),
-        v.maxLength(maximumReportBodyCharacters),
-        v.check((value) => value.trim().length > 0, "Expected a non-blank report body.")
-    ),
-    kind: boundedNonBlankString(100),
+    bodyMarkdown: monitoringReportBodyMarkdownSchema,
+    kind: monitoringKindSchema,
     metadata: v.optional(monitoringJsonObjectSchema, {}),
-    source: boundedNonBlankString(200),
-    sourceJobId: boundedNonBlankString(200),
-    title: boundedNonBlankString(500),
+    source: monitoringReportSourceSchema,
+    sourceJobId: monitoringReportSourceJobIdSchema,
+    title: monitoringReportTitleSchema,
 });
 
 const monitoringProblemsInputSchema = v.pipe(
@@ -130,15 +143,15 @@ const monitoringProblemsInputSchema = v.pipe(
 /** Successful full-replacement snapshot accepted by the monitoring domain service. */
 export const completeMonitoringSnapshotInputSchema = v.pipe(
     v.strictObject({
-        completedAtMs: timestampMillisecondsSchema,
-        monitorKey: boundedNonBlankString(200),
+        completedAtMs: monitoringTimestampMillisecondsSchema,
+        monitorKey: monitoringMonitorKeySchema,
         problems: monitoringProblemsInputSchema,
         report: monitoringReportInputSchema,
         runId: monitoringRunIdSchema,
-        startedAtMs: timestampMillisecondsSchema,
+        startedAtMs: monitoringTimestampMillisecondsSchema,
     }),
     v.check(
-        (input) => input.completedAtMs >= input.startedAtMs,
+        (input) => compareAsc(input.completedAtMs, input.startedAtMs) >= 0,
         "Expected completedAtMs to be greater than or equal to startedAtMs."
     )
 );

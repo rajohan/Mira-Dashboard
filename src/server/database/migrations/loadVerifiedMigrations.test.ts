@@ -3,7 +3,7 @@ import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { migrationsDirectory } from "./freshDatabaseFixture.ts";
+import { migrationsDirectory } from "../../test/support/freshDatabase.ts";
 import { loadVerifiedMigrations } from "./loadVerifiedMigrations.ts";
 import { migrationManifest } from "./manifest.ts";
 
@@ -97,6 +97,34 @@ describe("reviewed migration manifest", () => {
         );
     });
 
+    test("reports duplicate ids before malformed checksums", async () => {
+        const directory = await copyMigrationGraph();
+        const migration = reviewedMigration();
+
+        await expectRejection(
+            loadVerifiedMigrations({
+                directory,
+                manifest: [
+                    { ...migration, migrationSha256: "not-a-checksum" },
+                    migration,
+                ],
+            }),
+            "Migration manifest contains an invalid or duplicate folder name"
+        );
+    });
+
+    test("rejects an unknown manifest shape with the folder-name error", async () => {
+        const directory = await copyMigrationGraph();
+
+        await expectRejection(
+            loadVerifiedMigrations({
+                directory,
+                manifest: { entries: [reviewedMigration()] },
+            }),
+            "Migration manifest contains an invalid or duplicate folder name"
+        );
+    });
+
     test("rejects manifest ids outside runtime order", async () => {
         const directory = await copyMigrationGraph();
         const migration = reviewedMigration();
@@ -106,6 +134,25 @@ describe("reviewed migration manifest", () => {
                 directory,
                 manifest: [
                     migration,
+                    {
+                        ...migration,
+                        id: "20200101000000_dashboard-followup",
+                    },
+                ],
+            }),
+            "Migration manifest is not in runtime application order"
+        );
+    });
+
+    test("reports runtime order before malformed checksums", async () => {
+        const directory = await copyMigrationGraph();
+        const migration = reviewedMigration();
+
+        await expectRejection(
+            loadVerifiedMigrations({
+                directory,
+                manifest: [
+                    { ...migration, migrationSha256: "not-a-checksum" },
                     {
                         ...migration,
                         id: "20200101000000_dashboard-followup",
@@ -142,11 +189,38 @@ describe("reviewed migration manifest", () => {
         );
     });
 
+    test("rejects a non-string checksum from an unknown manifest", async () => {
+        const directory = await copyMigrationGraph();
+        const migration = reviewedMigration();
+
+        await expectRejection(
+            loadVerifiedMigrations({
+                directory,
+                manifest: [{ ...migration, migrationSha256: 1 }],
+            }),
+            "Migration manifest contains an invalid SHA-256 checksum"
+        );
+    });
+
     test("rejects unreviewed migration folders", async () => {
         const directory = await copyMigrationGraph();
         await cp(
             `${directory}/${reviewedMigration().id}`,
             `${directory}/20260803215711_unreviewed`,
+            { recursive: true }
+        );
+
+        await expectRejection(
+            loadVerifiedMigrations({ directory }),
+            "Migration directory does not match the reviewed manifest"
+        );
+    });
+
+    test("rejects malformed migration folder names from the filesystem", async () => {
+        const directory = await copyMigrationGraph();
+        await cp(
+            `${directory}/${reviewedMigration().id}`,
+            `${directory}/not-a-migration`,
             { recursive: true }
         );
 

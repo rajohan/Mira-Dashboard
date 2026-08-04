@@ -1,4 +1,8 @@
+import * as v from "valibot";
+
 import { BoundedAsyncQueue } from "../../src/server/platform/realtime/boundedAsyncQueue.ts";
+import { utf8ByteLength } from "../../src/shared/encoding.ts";
+import { nonnegativeDecimalSafeIntegerStringSchema } from "../../src/shared/validation.ts";
 
 /** Data carried by the qualification event stream. */
 export interface QualificationEventData {
@@ -13,12 +17,16 @@ export interface QualificationEventRecord {
     readonly id: string;
 }
 
+const maximumQualificationPayloadBytes = 8 * 1024;
+const maximumQualificationSubscriberQueueEvents = 16;
+
 /** Fixed event and subscriber budgets used by the qualification feed. */
 export const qualificationEventLimits = Object.freeze({
-    maximumPayloadBytes: 8192,
+    maximumPayloadBytes: maximumQualificationPayloadBytes,
     maximumRetainedEvents: 128,
-    maximumSubscriberQueueEvents: 16,
-    maximumSubscriberQueuedPayloadBytes: 16 * 8192,
+    maximumSubscriberQueueEvents: maximumQualificationSubscriberQueueEvents,
+    maximumSubscriberQueuedPayloadBytes:
+        maximumQualificationSubscriberQueueEvents * maximumQualificationPayloadBytes,
 });
 
 /** Point-in-time operational measurements for a qualification event feed. */
@@ -51,9 +59,7 @@ const payloadBudgetErrorMessage = `Qualification event payload exceeds ${qualifi
  * @returns Whether the encoded payload fits within the event budget.
  */
 export function isQualificationEventPayloadWithinLimit(payload: string): boolean {
-    return (
-        encodedPayloadByteLength(payload) <= qualificationEventLimits.maximumPayloadBytes
-    );
+    return utf8ByteLength(payload) <= qualificationEventLimits.maximumPayloadBytes;
 }
 
 /** In-memory qualification model for tracked replay and bounded live delivery. */
@@ -95,7 +101,7 @@ export class QualificationEventFeed {
      * @returns The appended event record.
      */
     publish(data: QualificationEventData): QualificationEventRecord {
-        const payloadBytes = encodedPayloadByteLength(data.payload ?? "");
+        const payloadBytes = utf8ByteLength(data.payload ?? "");
         if (payloadBytes > qualificationEventLimits.maximumPayloadBytes) {
             throw new RangeError(payloadBudgetErrorMessage);
         }
@@ -201,22 +207,18 @@ export class QualificationEventFeed {
     }
 }
 
-function encodedPayloadByteLength(payload: string): number {
-    return Buffer.byteLength(payload, "utf8");
-}
+const resumeSequenceSchema = nonnegativeDecimalSafeIntegerStringSchema(
+    "Qualification event resume cursor is invalid"
+);
 
 function parseResumeSequence(resumeId: string | undefined): number {
     if (resumeId === undefined) {
         return 0;
     }
 
-    const sequence = Number(resumeId);
-    if (
-        !Number.isSafeInteger(sequence) ||
-        sequence < 0 ||
-        String(sequence) !== resumeId
-    ) {
+    const result = v.safeParse(resumeSequenceSchema, resumeId, { abortEarly: true });
+    if (!result.success) {
         throw new Error("Qualification event resume cursor is invalid");
     }
-    return sequence;
+    return result.output;
 }

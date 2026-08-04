@@ -12,8 +12,12 @@ import { createRequestContext } from "../server/trpc/context.ts";
 
 const trpcEndpoint = "/trpc";
 
+/** Transport ceiling sized for the bounded worst-case monitoring snapshot contract. */
+export const serverRequestBodyMaximumBytes = 16 * 1024 * 1024;
+
 /** Bun server startup dependencies and listen options. */
 export interface ServerOptions {
+    hostname?: string;
     port: number;
     readiness: ReadinessState;
 }
@@ -51,6 +55,8 @@ export function createServer(options: ServerOptions) {
             }
             return new Response("Not found", { status: 404 });
         },
+        hostname: options.hostname,
+        maxRequestBodySize: serverRequestBodyMaximumBytes,
         port: options.port,
     });
 }

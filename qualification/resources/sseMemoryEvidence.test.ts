@@ -331,6 +331,14 @@ describe("SSE memory qualification evidence", () => {
             parseSseMemoryQualificationEvidence(JSON.stringify(tamperedInvariant))
         ).toThrow("Active subscribers after cleanup");
 
+        const invalidRevision = {
+            ...evidence,
+            runtime: { ...evidence.runtime, revision: "A".repeat(40) },
+        };
+        expect(() =>
+            parseSseMemoryQualificationEvidence(JSON.stringify(invalidRevision))
+        ).toThrow("Bun revision is not a full commit SHA");
+
         const tamperedDelta = {
             ...evidence,
             memoryEventDelta: { ...evidence.memoryEventDelta, high: 1 },

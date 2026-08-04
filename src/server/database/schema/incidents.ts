@@ -33,6 +33,10 @@ export const incidents = sqliteTable(
             "incidents_details_json_check",
             sql`CASE WHEN json_valid(${table.detailsJson}) THEN json_type(${table.detailsJson}) = 'object' ELSE 0 END`
         ),
+        check(
+            "incidents_fingerprint_check",
+            sql`length(${table.fingerprint}) = 64 AND ${table.fingerprint} NOT GLOB '*[^0-9a-f]*'`
+        ),
         check("incidents_generation_check", sql`${table.generation} >= 1`),
         check("incidents_occurrence_count_check", sql`${table.occurrenceCount} >= 1`),
         check(

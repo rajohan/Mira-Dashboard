@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
 import { livenessStatusSchema, readinessStatusSchema } from "../../contracts/system.ts";
+import { utf8ByteLength } from "../../shared/encoding.ts";
 import type { ReadinessState } from "../platform/readiness/readinessState.ts";
 
 /** HTTP methods supported by health probes. */
@@ -14,7 +15,7 @@ function healthResponse(
     const body = JSON.stringify(payload);
     return new Response(method === "HEAD" ? null : body, {
         headers: {
-            "content-length": String(new TextEncoder().encode(body).byteLength),
+            "content-length": String(utf8ByteLength(body)),
             "content-type": "application/json",
         },
         status: statusCode,

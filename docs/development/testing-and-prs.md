@@ -84,6 +84,26 @@ Test files live under domain-owned directories:
 - each `support` directory for reusable fixtures and harnesses, while fixture
   payloads remain under `fixtures`.
 
+### Greenfield Server Tests
+
+Keep tests owned by one greenfield server module beside that module. Name a
+single suite after its production module. When one production module needs
+several concern-focused suites, use `<module><Concern>.test.ts`, such as
+`eventPumpSubscriptionReplay.test.ts` for `eventPumpSubscription.ts`, without
+recreating an omnibus test file.
+
+- Put shared helpers and harnesses in the owning module's `testSupport/`
+  directory. Production modules must never import from `testSupport/`.
+- Put genuinely cross-domain test infrastructure in `src/server/test/support/`;
+  keep domain-specific helpers with their owner.
+- Reserve `fixtures/` for static payloads; executable builders and lifecycle
+  helpers belong in `testSupport/`.
+- Put contracts spanning multiple modules in `src/server/test/contracts/` and
+  composition-root behavior in `src/server/test/system/`.
+- Keep tests for import-safe shared modules beside them in `src/shared/` or
+  `src/contracts/`; `test:server` discovers all three greenfield roots.
+- Keep runtime qualification tests separate from system composition tests.
+
 Keep mutable mock, timer, collection, and cleanup state inside a per-suite
 harness factory. Keep pure builders and assertions at module scope so they are
 not recreated for every suite. Prefer event- or dependency-driven test timing

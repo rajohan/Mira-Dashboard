@@ -1,13 +1,29 @@
 import { createInsertSchema, createSelectSchema } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
+import {
+    monitoringKindSchema,
+    monitoringReportBodyMarkdownSchema,
+    monitoringReportSourceJobIdSchema,
+    monitoringReportSourceSchema,
+    monitoringReportTitleSchema,
+} from "../../../contracts/monitoring.ts";
 import { reports } from "../schema/reports.ts";
-import { jsonObjectTextAction, uuidV7Action } from "./scalars.ts";
+import {
+    jsonObjectTextSchema,
+    nonnegativeDateSchema,
+    uuidV7TextSchema,
+} from "./scalars.ts";
 
 const reportRefinements = {
-    id: (schema: v.StringSchema<undefined>) => v.pipe(schema, v.uuid(), uuidV7Action),
-    metadataJson: (schema: v.StringSchema<undefined>) =>
-        v.pipe(schema, jsonObjectTextAction),
+    bodyMarkdown: () => monitoringReportBodyMarkdownSchema,
+    id: uuidV7TextSchema,
+    kind: () => monitoringKindSchema,
+    metadataJson: jsonObjectTextSchema,
+    occurredAt: nonnegativeDateSchema,
+    source: () => monitoringReportSourceSchema,
+    sourceJobId: () => monitoringReportSourceJobIdSchema,
+    title: () => monitoringReportTitleSchema,
 };
 
 const generatedReportSelectSchema = createSelectSchema(reports, reportRefinements);

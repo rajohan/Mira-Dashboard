@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
-import { openFreshMigratedDatabase } from "./freshDatabaseFixture.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 
 interface QueryPlanRow {
     detail: string;
 }
+
+const filesystemFingerprint = "a".repeat(64);
+const memoryFingerprint = "b".repeat(64);
+const cpuFingerprint = "c".repeat(64);
 
 const insertIncidentSql = `
     INSERT INTO incidents (
@@ -30,7 +34,7 @@ describe("monitoring schema", () => {
         try {
             database.sqlite.run(insertIncidentSql, [
                 "{}",
-                "filesystem:root:pressure",
+                filesystemFingerprint,
                 "incident-1",
                 "ops-check",
             ]);
@@ -38,7 +42,7 @@ describe("monitoring schema", () => {
             expect(() =>
                 database.sqlite.run(insertIncidentSql, [
                     "{}",
-                    "filesystem:root:pressure",
+                    filesystemFingerprint,
                     "incident-2",
                     "ops-check",
                 ])
@@ -46,7 +50,7 @@ describe("monitoring schema", () => {
             expect(() =>
                 database.sqlite.run(insertIncidentSql, [
                     "{}",
-                    "memory:pressure",
+                    memoryFingerprint,
                     null,
                     "ops-check",
                 ])
@@ -54,11 +58,19 @@ describe("monitoring schema", () => {
             expect(() =>
                 database.sqlite.run(insertIncidentSql, [
                     "not-json",
-                    "cpu:pressure",
+                    cpuFingerprint,
                     "incident-3",
                     "ops-check",
                 ])
             ).toThrow("incidents_details_json_check");
+            expect(() =>
+                database.sqlite.run(insertIncidentSql, [
+                    "{}",
+                    "A".repeat(64),
+                    "incident-4",
+                    "ops-check",
+                ])
+            ).toThrow("incidents_fingerprint_check");
 
             database.sqlite.run(
                 `INSERT INTO notifications (
@@ -74,6 +86,13 @@ describe("monitoring schema", () => {
                 ) VALUES ('dashboard', ?, 1, 'incident-1', 'incident-opened', 'Disk pressure', 1000, 'warning', 'Disk pressure')`,
                 ["notification-1"]
             );
+
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE notifications SET read_at = 999 WHERE id = ?",
+                    ["notification-1"]
+                )
+            ).toThrow("notifications_read_order_check");
 
             expect(() =>
                 database.sqlite.run(
@@ -127,7 +146,7 @@ describe("monitoring schema", () => {
         try {
             database.sqlite.run(insertIncidentSql, [
                 "{}",
-                "filesystem:root:pressure",
+                filesystemFingerprint,
                 "incident-1",
                 "ops-check",
             ]);
@@ -187,7 +206,7 @@ describe("monitoring schema", () => {
         try {
             database.sqlite.run(insertIncidentSql, [
                 "{}",
-                "filesystem:root:pressure",
+                filesystemFingerprint,
                 "incident-1",
                 "ops-check",
             ]);
@@ -226,7 +245,7 @@ describe("monitoring schema", () => {
         try {
             database.sqlite.run(insertIncidentSql, [
                 "{}",
-                "filesystem:root:pressure",
+                filesystemFingerprint,
                 "incident-1",
                 "ops-check",
             ]);

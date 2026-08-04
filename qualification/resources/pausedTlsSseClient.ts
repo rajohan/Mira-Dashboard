@@ -1,8 +1,15 @@
+import * as v from "valibot";
+
+import { nonnegativeSafeIntegerSchema } from "../../src/shared/validation.ts";
+
 const connectedFrame = Buffer.from("event: connected\ndata: {}\n\n", "ascii");
 const headerTerminator = Buffer.from("\r\n\r\n", "ascii");
 const lineTerminator = Buffer.from("\r\n", "ascii");
 const maximumHandshakeBytes = 16 * 1024;
 const maximumChunkSizeLineBytes = 128;
+const chunkSizeSchema = nonnegativeSafeIntegerSchema(
+    "Paused SSE client received an unsafe chunk size"
+);
 
 interface PausedClientState {
     close: ReturnType<typeof Promise.withResolvers<void>>;
@@ -77,7 +84,7 @@ function decodeAvailableChunkedBodyPrefix(
             throw new Error("Paused SSE client received an invalid chunk size");
         }
         const size = Number.parseInt(sizeText, 16);
-        if (!Number.isSafeInteger(size)) {
+        if (!v.safeParse(chunkSizeSchema, size, { abortEarly: true }).success) {
             throw new TypeError("Paused SSE client received an unsafe chunk size");
         }
         cursor = lineEnd + 2;

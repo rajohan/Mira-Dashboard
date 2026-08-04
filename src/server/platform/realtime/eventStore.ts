@@ -1,163 +1,135 @@
-import { and, asc, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, getTableName, gt, inArray, lte, sql } from "drizzle-orm";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
+import {
+    realtimeTopicMaximumCharacters,
+    realtimeTopicSchema,
+} from "../../../contracts/realtime.ts";
+import {
+    nonnegativeSafeIntegerSchema,
+    parseSchemaWithRangeError,
+    positiveSafeIntegerSchema,
+} from "../../../shared/validation.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
-import { realtimeEventSelectSchema } from "../../database/validation/realtimeEvents.ts";
+import {
+    realtimeCursorBoundsSchema,
+    realtimeCursorWindowSchema,
+    realtimeEventSelectSchema,
+} from "../../database/validation/realtimeEvents.ts";
 
 export type StoredRealtimeEvent = v.InferOutput<typeof realtimeEventSelectSchema>;
-
-export interface RealtimeCursorBounds {
-    readonly latestIssuedId: number;
-    readonly newestRetainedId: number | null;
-    readonly oldestRetainedId: number | null;
-}
-
-export interface RealtimeCursorWindow extends RealtimeCursorBounds {
-    readonly retainedEvents: number;
-}
-
-export interface RealtimeEventPageOptions {
-    readonly afterId: number;
-    readonly limit: number;
-    readonly throughId?: number;
-    readonly topics?: readonly string[];
-}
+export type RealtimeCursorBounds = v.InferOutput<typeof realtimeCursorBoundsSchema>;
+export type RealtimeCursorWindow = v.InferOutput<typeof realtimeCursorWindowSchema>;
 
 export interface RealtimeEventBatch {
     readonly bounds: RealtimeCursorBounds;
     readonly events: readonly StoredRealtimeEvent[];
 }
 
+export const realtimeEventStoreLimits = Object.freeze({
+    maximumPageEvents: 256,
+    maximumTopicCharacters: realtimeTopicMaximumCharacters,
+    maximumTopicsPerPage: 64,
+});
+
+const realtimePageCursorSchema = nonnegativeSafeIntegerSchema(
+    "Realtime page cursor must be a nonnegative safe integer"
+);
+
+const realtimePageLimitSchema = v.pipe(
+    positiveSafeIntegerSchema("Realtime page limit must be a positive safe integer"),
+    v.maxValue(
+        realtimeEventStoreLimits.maximumPageEvents,
+        "Realtime page limit exceeds its store budget"
+    )
+);
+
+const realtimePageBoundarySchema = nonnegativeSafeIntegerSchema(
+    "Realtime page boundary must be a nonnegative safe integer"
+);
+
+const realtimePageTopicsSchema = v.pipe(
+    v.array(realtimeTopicSchema, "Realtime page topics must be an array"),
+    v.minLength(1, "Realtime page topics cannot be empty"),
+    v.maxLength(
+        realtimeEventStoreLimits.maximumTopicsPerPage,
+        "Realtime page topic count exceeds its store budget"
+    ),
+    v.readonly()
+);
+
+const realtimeEventPageOptionsObjectSchema = v.strictObject(
+    {
+        afterId: realtimePageCursorSchema,
+        limit: realtimePageLimitSchema,
+        throughId: v.optional(realtimePageBoundarySchema),
+        topics: v.optional(realtimePageTopicsSchema),
+    },
+    "Realtime page options are invalid"
+);
+
+const realtimeEventPageOptionsSchema = v.pipe(
+    realtimeEventPageOptionsObjectSchema,
+    v.check(
+        (options) =>
+            options.throughId === undefined || options.throughId >= options.afterId,
+        "Realtime page boundary cannot precede its cursor"
+    ),
+    v.readonly()
+);
+
+export type RealtimeEventPageOptions = v.InferOutput<
+    typeof realtimeEventPageOptionsSchema
+>;
+
 export interface RealtimeEventStore {
+    /** Reads cursor bounds and page rows from the same SQLite read snapshot. */
     readBatch(options: RealtimeEventPageOptions): RealtimeEventBatch;
+    /**
+     * Reads cursor bounds atomically in one SQL statement. Unlike readBatch, it does
+     * not share a snapshot with a separate page read.
+     */
     readCursorBounds(): RealtimeCursorBounds;
+    /**
+     * Reads cursor bounds and the retained count atomically in one SQL statement.
+     * It does not share a snapshot with a separate page read.
+     */
     readCursorWindow(): RealtimeCursorWindow;
 }
 
-interface CursorWindowRow {
-    latestIssuedId: number;
-    newestRetainedId: number | null;
-    oldestRetainedId: number | null;
-    retainedEvents: number;
+function parsePageOptions(options: RealtimeEventPageOptions): RealtimeEventPageOptions {
+    return parseSchemaWithRangeError(realtimeEventPageOptionsSchema, options);
 }
 
-type CursorBoundsRow = Omit<CursorWindowRow, "retainedEvents">;
-
-function nonnegativeSafeInteger(value: number, name: string): number {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new Error(`${name} must be a nonnegative safe integer`);
-    }
-    return value;
-}
-
-function positiveSafeInteger(value: number, name: string): number {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new RangeError(`${name} must be a positive safe integer`);
-    }
-    return value;
-}
-
-function nullablePositiveSafeInteger(value: number | null, name: string): number | null {
-    if (value === null) {
-        return null;
-    }
-    return positiveSafeInteger(value, name);
-}
-
-function validateCursorBounds(row: CursorBoundsRow | undefined): RealtimeCursorBounds {
-    if (row === undefined) {
-        throw new Error("Realtime cursor-bounds query returned no row");
-    }
-
-    const latestIssuedId = nonnegativeSafeInteger(
-        row.latestIssuedId,
-        "Realtime latest issued id"
-    );
-    const newestRetainedId = nullablePositiveSafeInteger(
-        row.newestRetainedId,
-        "Realtime newest retained id"
-    );
-    const oldestRetainedId = nullablePositiveSafeInteger(
-        row.oldestRetainedId,
-        "Realtime oldest retained id"
-    );
-    if (
-        (oldestRetainedId === null) !== (newestRetainedId === null) ||
-        (oldestRetainedId !== null && newestRetainedId !== null
-            ? oldestRetainedId > newestRetainedId || newestRetainedId > latestIssuedId
-            : false)
-    ) {
-        throw new Error("Realtime cursor bounds are inconsistent");
-    }
-
-    return Object.freeze({
-        latestIssuedId,
-        newestRetainedId,
-        oldestRetainedId,
-    });
-}
-
-function validateCursorWindow(row: CursorWindowRow | undefined): RealtimeCursorWindow {
-    if (row === undefined) {
-        throw new Error("Realtime cursor-window query returned no row");
-    }
-    const bounds = validateCursorBounds(row);
-    const retainedEvents = nonnegativeSafeInteger(
-        row.retainedEvents,
-        "Realtime retained event count"
-    );
-    if ((retainedEvents === 0) !== (bounds.oldestRetainedId === null)) {
-        throw new Error("Realtime cursor-window aggregates are inconsistent");
-    }
-
-    return Object.freeze({
-        ...bounds,
-        retainedEvents,
-    });
-}
-
-function validatePageOptions(options: RealtimeEventPageOptions): void {
-    nonnegativeSafeInteger(options.afterId, "Realtime page cursor");
-    positiveSafeInteger(options.limit, "Realtime page limit");
-    if (options.throughId !== undefined) {
-        nonnegativeSafeInteger(options.throughId, "Realtime page boundary");
-        if (options.throughId < options.afterId) {
-            throw new RangeError("Realtime page boundary cannot precede its cursor");
-        }
-    }
-    if (options.topics?.length === 0) {
-        throw new RangeError("Realtime page topics cannot be empty");
-    }
-}
+const realtimeEventsTableName = getTableName(realtimeEvents);
+const latestIssuedIdSql = sql`
+    COALESCE(
+        (SELECT seq FROM sqlite_sequence WHERE name = ${realtimeEventsTableName}),
+        (SELECT MAX(${realtimeEvents.id}) FROM ${realtimeEvents}),
+        0
+    )
+`;
 
 function queryCursorBounds(database: SQLiteBunDatabase): RealtimeCursorBounds {
-    const rows = database.all<CursorBoundsRow>(sql`
+    const rows = database.all<unknown>(sql`
         SELECT
-            COALESCE(
-                (SELECT seq FROM sqlite_sequence WHERE name = 'realtime_events'),
-                (SELECT MAX(id) FROM realtime_events),
-                0
-            ) AS latestIssuedId,
-            (SELECT MAX(id) FROM realtime_events) AS newestRetainedId,
-            (SELECT MIN(id) FROM realtime_events) AS oldestRetainedId
+            ${latestIssuedIdSql} AS latestIssuedId,
+            (SELECT MAX(${realtimeEvents.id}) FROM ${realtimeEvents}) AS newestRetainedId,
+            (SELECT MIN(${realtimeEvents.id}) FROM ${realtimeEvents}) AS oldestRetainedId
     `);
-    return validateCursorBounds(rows[0]);
+    return Object.freeze(v.parse(realtimeCursorBoundsSchema, rows[0]));
 }
 
 function queryCursorWindow(database: SQLiteBunDatabase): RealtimeCursorWindow {
-    const rows = database.all<CursorWindowRow>(sql`
+    const rows = database.all<unknown>(sql`
         SELECT
-            COALESCE(
-                (SELECT seq FROM sqlite_sequence WHERE name = 'realtime_events'),
-                (SELECT MAX(id) FROM realtime_events),
-                0
-            ) AS latestIssuedId,
-            (SELECT MAX(id) FROM realtime_events) AS newestRetainedId,
-            (SELECT MIN(id) FROM realtime_events) AS oldestRetainedId,
-            (SELECT COUNT(*) FROM realtime_events) AS retainedEvents
+            ${latestIssuedIdSql} AS latestIssuedId,
+            (SELECT MAX(${realtimeEvents.id}) FROM ${realtimeEvents}) AS newestRetainedId,
+            (SELECT MIN(${realtimeEvents.id}) FROM ${realtimeEvents}) AS oldestRetainedId,
+            (SELECT COUNT(*) FROM ${realtimeEvents}) AS retainedEvents
     `);
-    return validateCursorWindow(rows[0]);
+    return Object.freeze(v.parse(realtimeCursorWindowSchema, rows[0]));
 }
 
 function queryPage(
@@ -215,13 +187,15 @@ export function createRealtimeEventStore(
 
     return {
         readBatch(options: RealtimeEventPageOptions): RealtimeEventBatch {
-            validatePageOptions(options);
+            const validatedOptions = parsePageOptions(options);
             return runReadTransaction(
-                (transaction) =>
-                    Object.freeze({
-                        bounds: queryCursorBounds(transaction),
-                        events: queryPage(transaction, options),
-                    }),
+                (transaction) => {
+                    const bounds = queryCursorBounds(transaction);
+                    return Object.freeze({
+                        bounds,
+                        events: queryPage(transaction, validatedOptions),
+                    });
+                },
                 { behavior: "deferred" }
             );
         },

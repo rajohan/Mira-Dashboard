@@ -25,9 +25,11 @@ describe("SSE memory transient-unit identity", () => {
     });
 
     test("rejects invalid user and unit identities", () => {
-        expect(() => expectedSseMemoryUnitCgroupPath(-1, unitName)).toThrow(
-            "user ID is invalid"
-        );
+        for (const userId of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN]) {
+            expect(() => expectedSseMemoryUnitCgroupPath(userId, unitName)).toThrow(
+                "user ID is invalid"
+            );
+        }
         expect(() => expectedSseMemoryUnitCgroupPath(1000, "invalid")).toThrow(
             "unit name is invalid"
         );
