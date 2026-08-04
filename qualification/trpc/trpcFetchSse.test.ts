@@ -1,16 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import {
-    createTRPCClient,
-    httpBatchLink,
-    httpSubscriptionLink,
-    splitLink,
-} from "@trpc/client";
-import { EventSource } from "eventsource";
-
 import { QualificationEventFeed } from "../realtime/eventFeed.ts";
 import { waitFor } from "../test/waitFor.ts";
-import type { QualificationRouter } from "./router.ts";
+import { createQualificationClient } from "./client.ts";
 import { startQualificationServer } from "./server.ts";
 
 const servers: Array<ReturnType<typeof startQualificationServer>> = [];
@@ -21,28 +13,20 @@ afterEach(async () => {
     }
 });
 
-function createQualificationClient(serverUrl: URL) {
-    const url = new URL("/trpc", serverUrl).toString();
-    return createTRPCClient<QualificationRouter>({
-        links: [
-            splitLink({
-                condition: (operation) => operation.type === "subscription",
-                false: httpBatchLink({ url }),
-                true: httpSubscriptionLink({ EventSource, url }),
-            }),
-        ],
-    });
-}
-
 describe("tRPC Fetch and tracked SSE on Bun", () => {
     test("serves validated queries and mutations through Bun.serve", async () => {
         const eventFeed = new QualificationEventFeed();
-        const server = startQualificationServer(eventFeed);
+        const server = startQualificationServer({
+            eventFeed,
+            maximumStreamDurationMs: 300,
+            releaseId: "direct-release",
+        });
         servers.push(server);
-        const client = createQualificationClient(server.url);
+        const client = createQualificationClient({ url: server.url });
 
         expect(await client.runtime.identity.query()).toEqual({
             hasGlobalEventSource: false,
+            releaseId: "direct-release",
             revision: Bun.revision,
             version: Bun.version,
         });
@@ -62,9 +46,13 @@ describe("tRPC Fetch and tracked SSE on Bun", () => {
 
     test("resumes tracked events after a forced SSE reconnect without duplicates", async () => {
         const eventFeed = new QualificationEventFeed();
-        const server = startQualificationServer(eventFeed);
+        const server = startQualificationServer({
+            eventFeed,
+            maximumStreamDurationMs: 300,
+            releaseId: "direct-release",
+        });
         servers.push(server);
-        const client = createQualificationClient(server.url);
+        const client = createQualificationClient({ url: server.url });
         const receivedIds: string[] = [];
         const subscriptionErrors: Error[] = [];
         let startedCount = 0;

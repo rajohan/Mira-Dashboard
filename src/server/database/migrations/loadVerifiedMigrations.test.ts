@@ -27,7 +27,7 @@ async function copyMigrationGraph(): Promise<string> {
 function reviewedMigration() {
     const migration = migrationManifest[0];
     if (!migration) {
-        throw new Error("Expected the greenfield migration manifest to contain one node");
+        throw new Error("Expected the migration manifest to contain one node");
     }
     return migration;
 }
@@ -108,7 +108,7 @@ describe("reviewed migration manifest", () => {
                     migration,
                     {
                         ...migration,
-                        id: "20200101000000_greenfield-followup",
+                        id: "20200101000000_dashboard-followup",
                     },
                 ],
             }),

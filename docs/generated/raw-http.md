@@ -4,7 +4,7 @@
 
 | Method | Path | Access | Status | Response | Summary |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/api/health/live` | Public | 200 | [response](./schemas/health.status.response.schema.json) | Confirms that the Bun web process can answer requests. |
+| GET | `/api/health/live` | Public | 200 | [response](./schemas/health.liveness.response.schema.json) | Confirms that the Bun web process can answer requests. |
 | HEAD | `/api/health/live` | Public | 200 | No body | Checks Bun web-process liveness without a response body. |
-| GET | `/api/health/ready` | Public | 200 | [response](./schemas/health.status.response.schema.json) | Confirms that the greenfield foundation is ready to serve traffic. |
-| HEAD | `/api/health/ready` | Public | 200 | No body | Checks greenfield readiness without a response body. |
+| GET | `/api/health/ready` | Public | 200, 503 | [response](./schemas/health.readiness.response.schema.json) | Reports whether critical application initialization is complete. |
+| HEAD | `/api/health/ready` | Public | 200, 503 | No body | Checks application readiness without a response body. |

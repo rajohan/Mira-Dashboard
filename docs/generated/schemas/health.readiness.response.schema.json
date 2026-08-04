@@ -1,10 +1,10 @@
 {
-  "$id": "urn:mira-dashboard:health.status.response",
+  "$id": "urn:mira-dashboard:health.readiness.response",
   "type": "object",
   "properties": {
     "status": {
       "enum": [
-        "live",
+        "not-ready",
         "ready"
       ],
       "type": "string"

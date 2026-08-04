@@ -20,7 +20,7 @@
   Each immutable Dashboard release still records and reuses the exact revision that built it.
   When Bun 1.4 is officially released, `.bun-version` changes from `canary` to `1.4.0`; CI and
   deployment otherwise keep the same design.
-- The isolated `43783cedd` artifact passes its qualification, greenfield, database,
+- The isolated `43783cedd` artifact passes its qualification, server-foundation, database,
   documentation, build, frontend, and backend gates. The host bootstrap runtime was then
   atomically promoted to that same verified artifact; the current production release and both
   production services were not restarted or changed. A fresh full backend-suite run after host
@@ -28,7 +28,7 @@
 - Phase 0 qualification runs sequentially with host load, available memory, and swap
   checked around every resource-heavy command. No build, install, or broad test gate runs
   while the VPS is already saturated.
-- The greenfield dependency baseline is installed in the worktree: tRPC `11.18.0`, Drizzle
+- The rewrite dependency baseline is installed in the worktree: tRPC `11.18.0`, Drizzle
   ORM/Kit `1.0.0-rc.4`, `@valibot/to-json-schema` `1.7.1`, and the Bun-compatible
   `eventsource` `4.1.0` test ponyfill. `@valibot/to-json-schema` is build-time documentation
   tooling, not part of tRPC validation. Bun 1.4 does not expose a global `EventSource`, so the
@@ -37,7 +37,7 @@
 - The same install refreshed `oxlint-config-presets` to `0.1.18` and
   `@microlink/react-json-view` to `1.31.26`. The lockfile was regenerated with the qualified
   Bun canary. No production service or release was changed.
-- The first executable qualification slice passes on the exact candidate revision: ten Bun
+- The executable qualification suite passes on the exact candidate revision: twelve Bun
   tests across runtime identity, Drizzle/Bun SQLite, and tRPC Fetch/SSE. The database evidence
   covers strict SQLite tables, check/foreign-key/partial-unique/index constraints, synchronous
   transactions and rollback, prepared and parameterized raw SQL, native-client access,
@@ -48,18 +48,22 @@
   the last event ID without duplicate delivery, bounded per-subscriber buffering, and subscriber
   cleanup after client abort or queue overflow, including while a slow generator is paused at a
   yielded event. `eventsource` is injected only into the Bun-side client test. The
-  explicit liveness/readiness boundary preserves both `GET` and bodyless `HEAD` probes, and the
-  generated raw-HTTP reference is sourced from separate method-specific response contracts.
-- These focused gates currently pass on the exact candidate: qualification and greenfield
-  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 10/10
-  qualification tests, 32/32 greenfield server/database tests, 4/4 documentation tests, and 4/4
+  explicit liveness/readiness boundary preserves both `GET` and bodyless `HEAD` probes. Liveness
+  remains `200`; readiness now starts unavailable, returns `503`, and can return `200` only after
+  the composition root explicitly promotes its injected readiness controller. The generated
+  raw-HTTP reference is sourced from separate method-specific response contracts and documents
+  both readiness outcomes.
+- These focused gates currently pass on the exact candidate: qualification and server
+  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 12/12
+  qualification tests, 32/32 server/database tests, 4/4 documentation tests, and 4/4
   database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
   while retention advances, explicit rejection of a cursor ahead of the feed tail, acceptance at
   the exact tail, and deterministic failure/cleanup when a slow subscriber exceeds its queue
   budget. Repository-wide Oxlint and Oxfmt pass after the consolidated review fixes.
-  Reverse-proxy behavior, rolling-release reconnect, and sustained slow-consumer pressure remain
-  open Phase 0 gates; this result does not mark all mandatory spikes complete.
+  A production-shaped topology test now proves HTTPS reverse-proxy streaming and rolling-release
+  reconnect; sustained slow-consumer RSS pressure remains an open Phase 0 resource gate, so this
+  result does not mark all mandatory spikes complete.
 - The first production-shaped database slice is implemented as seven small Drizzle schema
   modules for migration history, realtime events, reports, monitor runs, incidents, incident
   observations, and notifications. Its reviewed first migration applies to an empty database as
@@ -94,6 +98,35 @@
 - The selected Bun revision passes production frontend and backend builds, 705/705 frontend
   tests, and 738/738 backend tests after host promotion. These gates protect current behavior
   while the replacement is still built beside it.
+
+### 2026-08-04 — HTTPS topology and release reconnect qualified
+
+- A Bun TLS reverse proxy now exercises the intended browser-to-proxy-to-loopback topology with a
+  short-lived localhost certificate trusted as a private test CA. The probe never disables TLS
+  verification. It streams the upstream body, strips hop-by-hop headers, propagates cancellation,
+  forwards the test cookie, and overwrites `x-forwarded-proto` with `https`. A dedicated regression
+  test aborts the downstream request before upstream response headers arrive and proves that the
+  proxy immediately cancels the in-flight upstream request.
+- Release A and release B bind the same loopback port behind one stable HTTPS URL. The test receives
+  tracked event `1`, stops release A with an active subscription, writes event `2` while the backend
+  is unavailable, observes a proxy `503`, starts release B, resumes from cursor `1`, replays event
+  `2`, and then receives live event `3` exactly once. Subscription retry is explicit and bounded;
+  queries and mutations are never retried.
+- The proxy and backend reject missing credentials and direct attempts that lack trusted proxy
+  metadata. GET and HEAD liveness/readiness behavior, the expected release identity, immediate
+  subscriber cleanup, deterministic server teardown, and temporary TLS-file cleanup are covered.
+- Runtime-facing code and tooling no longer use temporary `greenfield` names. The production API is
+  `createServer`, scripts use `checkDatabaseSchema.ts` and `generateDocs.ts`, CI uses the
+  `server-foundation` job, and the sole unpublished initial migration is named
+  `20260804022252_dashboard-foundation`. The blueprint keeps its name because it documents the
+  rewrite project itself.
+- The readiness controller is deliberately dependency-injected and initially unavailable. A later
+  composition slice must promote it only after configuration, checksum-verified database startup,
+  and other declared critical dependencies complete; this PR does not pretend those dependencies
+  are wired already.
+- Deterministic queue-overflow tests already prove bounded application buffering. A separate,
+  memory-capped spike will measure sustained proxy/SSE RSS and set the production resource budget;
+  this topology test does not claim an absolute memory bound.
 
 ## Executive Decision
 
@@ -761,7 +794,7 @@ them.
 
 Drizzle Kit v1 stores the migration graph as timestamped directories containing
 `migration.sql` and `snapshot.json`. The new database begins by applying the ordered graph from
-`migrations/`; the first node is the reviewed `*_greenfield-foundation` migration generated from
+`migrations/`; the first node is the reviewed `*_dashboard-foundation` migration generated from
 the Drizzle schema and completed with the tested SQLite `STRICT` table option. Future nodes are
 generated by Drizzle Kit, reviewed as SQL, immutable, checksummed, transactional where SQLite
 permits, and registered in an explicit manifest.

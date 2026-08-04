@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import {
     assertDrizzleKitOutput,
-    checkGreenfieldDatabase,
+    checkDatabaseSchema,
     type DrizzleKitCommandResult,
-} from "./checkGreenfieldDatabase.ts";
+} from "./checkDatabaseSchema.ts";
 
 function commandResult(
     status: string,
@@ -18,12 +18,12 @@ function commandResult(
     };
 }
 
-describe("greenfield Drizzle gate", () => {
+describe("database schema gate", () => {
     test("checks history before a non-writing schema drift comparison", () => {
         const commands: string[][] = [];
         const results = [commandResult("ok"), commandResult("no_changes")];
 
-        checkGreenfieldDatabase((arguments_) => {
+        checkDatabaseSchema((arguments_) => {
             commands.push([...arguments_]);
             const result = results.shift();
             if (!result) throw new Error("Unexpected Drizzle Kit command");
@@ -65,7 +65,7 @@ describe("greenfield Drizzle gate", () => {
         ];
 
         expect(() =>
-            checkGreenfieldDatabase(() => {
+            checkDatabaseSchema(() => {
                 const result = results.shift();
                 if (!result) throw new Error("Unexpected Drizzle Kit command");
                 return result;

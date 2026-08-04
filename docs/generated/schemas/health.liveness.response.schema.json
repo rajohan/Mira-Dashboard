@@ -1,0 +1,14 @@
+{
+  "$id": "urn:mira-dashboard:health.liveness.response",
+  "type": "object",
+  "properties": {
+    "status": {
+      "const": "live"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

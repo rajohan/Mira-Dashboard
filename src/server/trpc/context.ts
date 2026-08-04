@@ -1,4 +1,4 @@
-/** Dependencies supplied to every greenfield tRPC procedure. */
+/** Dependencies supplied to every application tRPC procedure. */
 export interface RequestContext {
     requestId: string;
 }

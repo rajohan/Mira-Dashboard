@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { openFreshMigratedDatabase } from "./freshDatabaseFixture.ts";
 
-describe("greenfield realtime event schema", () => {
+describe("realtime event schema", () => {
     test("requires an entity identity at the storage boundary", async () => {
         const database = await openFreshMigratedDatabase();
 
