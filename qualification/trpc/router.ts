@@ -1,11 +1,24 @@
 import { initTRPC, tracked } from "@trpc/server";
 import * as v from "valibot";
 
-import type { QualificationEventFeed } from "../realtime/eventFeed.ts";
+import {
+    isQualificationEventPayloadWithinLimit,
+    qualificationEventLimits,
+    type QualificationEventFeed,
+} from "../realtime/eventFeed.ts";
 import { readRuntimeIdentity } from "../runtimeCandidate.ts";
+
+const eventPayloadSchema = v.pipe(
+    v.string(),
+    v.check(
+        isQualificationEventPayloadWithinLimit,
+        `Qualification event payload must not exceed ${qualificationEventLimits.maximumPayloadBytes} UTF-8 bytes`
+    )
+);
 
 const eventDataSchema = v.object({
     kind: v.literal("qualification.changed"),
+    payload: v.optional(eventPayloadSchema),
     value: v.number(),
 });
 
