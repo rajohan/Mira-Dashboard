@@ -305,16 +305,6 @@
       "table": "monitor_runs"
     },
     {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "submission_sha256",
-      "entityType": "columns",
-      "table": "monitor_runs"
-    },
-    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -331,6 +321,16 @@
       "default": null,
       "generated": null,
       "name": "state",
+      "entityType": "columns",
+      "table": "monitor_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "submission_sha256",
       "entityType": "columns",
       "table": "monitor_runs"
     },
@@ -877,7 +877,7 @@
         }
       ],
       "isUnique": false,
-      "where": null,
+      "where": "\"monitor_runs\".\"complete_snapshot\" = 1 AND \"monitor_runs\".\"state\" = 'succeeded'",
       "origin": "manual",
       "name": "monitor_runs_monitor_completed_id_idx",
       "entityType": "indexes",

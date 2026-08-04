@@ -457,6 +457,8 @@ describe("monitoring service", () => {
                 .select({ id: notifications.id })
                 .from(notifications)
                 .get()!.id;
+            // IDs are consumed as report, incident, then notification; the existing
+            // notification ID therefore forces a late insert failure.
             const generatedIds = [uuid(50_000), uuid(50_001), existingNotificationId];
             const failingService = serviceFor(database, {
                 generateId: () => generatedIds.shift()!,
