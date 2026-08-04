@@ -1,13 +1,4 @@
-const hopByHopHeaders = [
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-] as const;
+import { createProxyResponseBody, stripHopByHopHeaders } from "./proxyTransport.ts";
 
 /** TLS and loopback target for one qualification reverse proxy. */
 export interface HttpsReverseProxyOptions {
@@ -17,11 +8,8 @@ export interface HttpsReverseProxyOptions {
 }
 
 function forwardedHeaders(request: Request): Headers {
-    const headers = new Headers(request.headers);
-    const forwardedHost = headers.get("host");
-    for (const header of hopByHopHeaders) {
-        headers.delete(header);
-    }
+    const forwardedHost = request.headers.get("host");
+    const headers = stripHopByHopHeaders(request.headers);
     headers.delete("host");
     headers.set("x-forwarded-proto", "https");
     if (forwardedHost !== null) {
@@ -31,45 +19,7 @@ function forwardedHeaders(request: Request): Headers {
 }
 
 function responseHeaders(upstream: Response): Headers {
-    const headers = new Headers(upstream.headers);
-    for (const header of hopByHopHeaders) {
-        headers.delete(header);
-    }
-    return headers;
-}
-
-function streamedBody(
-    body: ReadableStream<Uint8Array>,
-    upstreamController: AbortController,
-    detachRequestAbort: () => void
-): ReadableStream<Uint8Array> {
-    const reader = body.getReader();
-
-    return new ReadableStream<Uint8Array>({
-        async cancel(reason) {
-            upstreamController.abort(reason);
-            detachRequestAbort();
-            await reader.cancel(reason).catch(() => null);
-        },
-        async pull(controller) {
-            try {
-                const next = await reader.read();
-                if (next.done) {
-                    detachRequestAbort();
-                    controller.close();
-                    return;
-                }
-                controller.enqueue(next.value);
-            } catch (error) {
-                detachRequestAbort();
-                if (upstreamController.signal.aborted) {
-                    return;
-                }
-                upstreamController.abort(error);
-                controller.error(error);
-            }
-        },
-    });
+    return stripHopByHopHeaders(upstream.headers);
 }
 
 /**
@@ -98,31 +48,55 @@ export function startHttpsReverseProxy(options: HttpsReverseProxyOptions) {
                 request.signal.addEventListener("abort", abortUpstream, { once: true });
             }
 
+            let headers: Headers;
+            try {
+                headers = forwardedHeaders(request);
+            } catch {
+                detachRequestAbort();
+                upstreamController.abort();
+                return new Response("Invalid Connection request header", {
+                    status: 400,
+                });
+            }
+
             try {
                 const upstream = await fetch(upstreamUrl, {
                     body:
                         request.method === "GET" || request.method === "HEAD"
                             ? undefined
                             : request.body,
-                    headers: forwardedHeaders(request),
+                    headers,
                     keepalive: false,
                     method: request.method,
                     redirect: "manual",
                     signal: upstreamController.signal,
                 });
+                let downstreamHeaders: Headers;
+                try {
+                    downstreamHeaders = responseHeaders(upstream);
+                } catch (error) {
+                    detachRequestAbort();
+                    upstreamController.abort(error);
+                    if (upstream.body !== null) {
+                        await upstream.body.cancel(error).catch(() => null);
+                    }
+                    return new Response("Invalid Connection response header", {
+                        status: 502,
+                    });
+                }
                 if (upstream.body === null) {
                     detachRequestAbort();
                 }
                 return new Response(
                     upstream.body === null
                         ? null
-                        : streamedBody(
+                        : createProxyResponseBody(
                               upstream.body,
                               upstreamController,
                               detachRequestAbort
                           ),
                     {
-                        headers: responseHeaders(upstream),
+                        headers: downstreamHeaders,
                         status: upstream.status,
                         statusText: upstream.statusText,
                     }

@@ -6,6 +6,35 @@ import { startHttpsReverseProxy } from "./httpsReverseProxy.ts";
 import { createTestTlsIdentity } from "./testTlsIdentity.ts";
 import { createTrustedFetch } from "./trustedFetch.ts";
 
+type UpstreamFetch = (request: Request) => Promise<Response> | Response;
+
+async function startProxyHarness(
+    cleanup: AsyncCleanupStack,
+    upstreamFetch: UpstreamFetch
+) {
+    const tlsIdentity = await createTestTlsIdentity();
+    cleanup.defer("qualification TLS identity", () => tlsIdentity.dispose());
+    const upstream = Bun.serve({
+        fetch: upstreamFetch,
+        hostname: "127.0.0.1",
+        port: 0,
+    });
+    cleanup.defer("qualification proxy upstream", () => upstream.stop(true));
+    const proxy = startHttpsReverseProxy({
+        certificate: tlsIdentity.certificate,
+        privateKey: tlsIdentity.privateKey,
+        target: new URL(`http://127.0.0.1:${upstream.port}`),
+    });
+    cleanup.defer("qualification HTTPS proxy", () => proxy.stop(true));
+
+    return {
+        proxy,
+        trustedFetch: createTrustedFetch({
+            certificateAuthority: tlsIdentity.certificate,
+        }),
+    };
+}
+
 describe("qualification HTTPS reverse proxy", () => {
     test("cancels an upstream request before response headers arrive", async () => {
         const cleanup = new AsyncCleanupStack();
@@ -13,10 +42,9 @@ describe("qualification HTTPS reverse proxy", () => {
         let upstreamRequestStarted = false;
 
         try {
-            const tlsIdentity = await createTestTlsIdentity();
-            cleanup.defer("qualification TLS identity", () => tlsIdentity.dispose());
-            const upstream = Bun.serve({
-                async fetch(request) {
+            const { proxy, trustedFetch } = await startProxyHarness(
+                cleanup,
+                async (request) => {
                     upstreamRequestStarted = true;
                     if (request.signal.aborted) {
                         upstreamRequestAborted = true;
@@ -33,22 +61,9 @@ describe("qualification HTTPS reverse proxy", () => {
                         });
                     }
                     return new Response("cancelled");
-                },
-                hostname: "127.0.0.1",
-                port: 0,
-            });
-            cleanup.defer("qualification cancellation upstream", () =>
-                upstream.stop(true)
+                }
             );
-            const proxy = startHttpsReverseProxy({
-                certificate: tlsIdentity.certificate,
-                privateKey: tlsIdentity.privateKey,
-                target: new URL(`http://127.0.0.1:${upstream.port}`),
-            });
-            cleanup.defer("qualification cancellation proxy", () => proxy.stop(true));
-            const trustedFetch = createTrustedFetch({
-                certificateAuthority: tlsIdentity.certificate,
-            });
+            expect(proxy.url.hostname).toBe("127.0.0.1");
             const abortController = new AbortController();
             const pendingRequest = trustedFetch(proxy.url, {
                 signal: abortController.signal,
@@ -66,68 +81,105 @@ describe("qualification HTTPS reverse proxy", () => {
         }
     }, 10_000);
 
-    test("propagates an upstream body failure after response headers", async () => {
+    test("rejects malformed Connection metadata from either hop", async () => {
         const cleanup = new AsyncCleanupStack();
-        let upstreamBody:
-            | ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>
-            | undefined;
+        let upstreamBodyCancelled = false;
+        let upstreamRequestAborted = false;
+        let upstreamRequestCount = 0;
 
         try {
-            const tlsIdentity = await createTestTlsIdentity();
-            cleanup.defer("qualification TLS identity", () => tlsIdentity.dispose());
-            const upstream = Bun.serve({
-                fetch() {
+            const { proxy, trustedFetch } = await startProxyHarness(
+                cleanup,
+                (request) => {
+                    upstreamRequestCount += 1;
+                    request.signal.addEventListener(
+                        "abort",
+                        () => {
+                            upstreamRequestAborted = true;
+                        },
+                        { once: true }
+                    );
                     return new Response(
-                        new ReadableStream<Uint8Array<ArrayBuffer>>({
+                        new ReadableStream<Uint8Array>({
                             start(controller) {
-                                upstreamBody = controller;
                                 controller.enqueue(
-                                    new TextEncoder().encode("qualification chunk")
+                                    new TextEncoder().encode("invalid upstream metadata")
                                 );
                             },
-                        })
+                            cancel() {
+                                upstreamBodyCancelled = true;
+                            },
+                        }),
+                        {
+                            headers: {
+                                connection: '"x-hop"',
+                                "x-hop": "remove",
+                            },
+                        }
                     );
-                },
-                hostname: "127.0.0.1",
-                port: 0,
-            });
-            cleanup.defer("qualification failing-body upstream", () =>
-                upstream.stop(true)
+                }
             );
-            const proxy = startHttpsReverseProxy({
-                certificate: tlsIdentity.certificate,
-                privateKey: tlsIdentity.privateKey,
-                target: new URL(`http://127.0.0.1:${upstream.port}`),
+
+            const invalidRequest = await trustedFetch(proxy.url, {
+                headers: {
+                    connection: '"x-hop"',
+                    "x-hop": "remove",
+                },
             });
-            cleanup.defer("qualification failing-body proxy", () => proxy.stop(true));
-            const trustedFetch = createTrustedFetch({
-                certificateAuthority: tlsIdentity.certificate,
+            expect(invalidRequest.status).toBe(400);
+            expect(upstreamRequestCount).toBe(0);
+
+            const invalidResponse = await trustedFetch(proxy.url);
+            expect(invalidResponse.status).toBe(502);
+            expect(await invalidResponse.text()).toBe(
+                "Invalid Connection response header"
+            );
+            expect(upstreamRequestCount).toBe(1);
+            await waitFor(() => upstreamBodyCancelled || upstreamRequestAborted);
+            expect(upstreamBodyCancelled || upstreamRequestAborted).toBeTrue();
+        } finally {
+            await cleanup.dispose();
+        }
+    }, 10_000);
+
+    test("strips Connection-nominated headers on both proxy hops", async () => {
+        const cleanup = new AsyncCleanupStack();
+        let upstreamHeaders: Headers | undefined;
+
+        try {
+            const { proxy, trustedFetch } = await startProxyHarness(
+                cleanup,
+                (request) => {
+                    upstreamHeaders = new Headers(request.headers);
+                    return new Response("proxied", {
+                        headers: {
+                            connection: "x-upstream-hop, x-second-upstream-hop",
+                            "x-end-to-end-response": "preserved",
+                            "x-second-upstream-hop": "remove",
+                            "x-upstream-hop": "remove",
+                        },
+                    });
+                }
+            );
+
+            const response = await trustedFetch(proxy.url, {
+                headers: {
+                    connection: "X-Request-Hop,\tx-second-request-hop",
+                    "x-end-to-end-request": "preserved",
+                    "x-request-hop": "remove",
+                    "x-second-request-hop": "remove",
+                },
             });
 
-            expect(proxy.url.hostname).toBe("127.0.0.1");
-            const response = await trustedFetch(proxy.url);
-            if (response.body === null) {
-                throw new Error("Qualification proxy response body was missing");
-            }
-            const reader = response.body.getReader();
-            const first = await reader.read();
-            if (first.done) {
-                throw new Error("Qualification proxy stream ended before first chunk");
-            }
-            expect(new TextDecoder().decode(first.value)).toBe("qualification chunk");
-
-            if (upstreamBody === undefined) {
-                throw new Error("Qualification upstream body controller was missing");
-            }
-            upstreamBody.error(new Error("Qualification upstream body failed"));
-
-            let downstreamError: unknown;
-            try {
-                await reader.read();
-            } catch (error) {
-                downstreamError = error;
-            }
-            expect(downstreamError).toBeInstanceOf(Error);
+            expect(response.status).toBe(200);
+            expect(await response.text()).toBe("proxied");
+            expect(upstreamHeaders?.get("x-request-hop")).toBeNull();
+            expect(upstreamHeaders?.get("x-second-request-hop")).toBeNull();
+            expect(upstreamHeaders?.get("x-end-to-end-request")).toBe("preserved");
+            expect(upstreamHeaders?.get("x-forwarded-proto")).toBe("https");
+            expect(response.headers.get("x-upstream-hop")).toBeNull();
+            expect(response.headers.get("x-second-upstream-hop")).toBeNull();
+            expect(response.headers.get("x-end-to-end-response")).toBe("preserved");
         } finally {
             await cleanup.dispose();
         }
