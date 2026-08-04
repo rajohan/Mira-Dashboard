@@ -60,9 +60,13 @@ function streamedBody(
                     return;
                 }
                 controller.enqueue(next.value);
-            } catch {
+            } catch (error) {
                 detachRequestAbort();
-                controller.close();
+                if (upstreamController.signal.aborted) {
+                    return;
+                }
+                upstreamController.abort(error);
+                controller.error(error);
             }
         },
     });
@@ -153,6 +157,6 @@ export function startHttpsReverseProxy(options: HttpsReverseProxyOptions) {
         get upstreamUnavailableCount() {
             return upstreamUnavailableCount;
         },
-        url: new URL(`https://localhost:${server.port}`),
+        url: new URL(`https://127.0.0.1:${server.port}`),
     };
 }

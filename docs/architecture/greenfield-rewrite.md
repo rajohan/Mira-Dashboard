@@ -54,7 +54,7 @@
   raw-HTTP reference is sourced from separate method-specific response contracts and documents
   both readiness outcomes.
 - These focused gates currently pass on the exact candidate: qualification and server
-  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 12/12
+  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 13/13
   qualification tests, 32/32 server/database tests, 4/4 documentation tests, and 4/4
   database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
@@ -106,7 +106,11 @@
   verification. It streams the upstream body, strips hop-by-hop headers, propagates cancellation,
   forwards the test cookie, and overwrites `x-forwarded-proto` with `https`. A dedicated regression
   test aborts the downstream request before upstream response headers arrive and proves that the
-  proxy immediately cancels the in-flight upstream request.
+  proxy immediately cancels the in-flight upstream request. A second regression test receives one
+  upstream chunk and then proves that a genuine body failure reaches the downstream reader as an
+  error instead of being misreported as normal end-of-stream. The published proxy URL matches its
+  `127.0.0.1` listener, and TLS setup reports a direct prerequisite error if OpenSSL lacks `req`
+  with `-addext` support.
 - Release A and release B bind the same loopback port behind one stable HTTPS URL. The test receives
   tracked event `1`, stops release A with an active subscription, writes event `2` while the backend
   is unavailable, observes a proxy `503`, starts release B, resumes from cursor `1`, replays event
@@ -115,8 +119,8 @@
 - The proxy and backend reject missing credentials and direct attempts that lack trusted proxy
   metadata. GET and HEAD liveness/readiness behavior, the expected release identity, immediate
   subscriber cleanup, deterministic server teardown, and temporary TLS-file cleanup are covered.
-- Runtime-facing code and tooling no longer use temporary `greenfield` names. The production API is
-  `createServer`, scripts use `checkDatabaseSchema.ts` and `generateDocs.ts`, CI uses the
+- Runtime-facing code and tooling no longer use temporary `greenfield` names. The rewrite server
+  factory is `createServer`, scripts use `checkDatabaseSchema.ts` and `generateDocs.ts`, CI uses the
   `server-foundation` job, and the sole unpublished initial migration is named
   `20260804022252_dashboard-foundation`. The blueprint keeps its name because it documents the
   rewrite project itself.

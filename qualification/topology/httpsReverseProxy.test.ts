@@ -65,4 +65,71 @@ describe("qualification HTTPS reverse proxy", () => {
             await cleanup.dispose();
         }
     }, 10_000);
+
+    test("propagates an upstream body failure after response headers", async () => {
+        const cleanup = new AsyncCleanupStack();
+        let upstreamBody:
+            | ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>
+            | undefined;
+
+        try {
+            const tlsIdentity = await createTestTlsIdentity();
+            cleanup.defer("qualification TLS identity", () => tlsIdentity.dispose());
+            const upstream = Bun.serve({
+                fetch() {
+                    return new Response(
+                        new ReadableStream<Uint8Array<ArrayBuffer>>({
+                            start(controller) {
+                                upstreamBody = controller;
+                                controller.enqueue(
+                                    new TextEncoder().encode("qualification chunk")
+                                );
+                            },
+                        })
+                    );
+                },
+                hostname: "127.0.0.1",
+                port: 0,
+            });
+            cleanup.defer("qualification failing-body upstream", () =>
+                upstream.stop(true)
+            );
+            const proxy = startHttpsReverseProxy({
+                certificate: tlsIdentity.certificate,
+                privateKey: tlsIdentity.privateKey,
+                target: new URL(`http://127.0.0.1:${upstream.port}`),
+            });
+            cleanup.defer("qualification failing-body proxy", () => proxy.stop(true));
+            const trustedFetch = createTrustedFetch({
+                certificateAuthority: tlsIdentity.certificate,
+            });
+
+            expect(proxy.url.hostname).toBe("127.0.0.1");
+            const response = await trustedFetch(proxy.url);
+            if (response.body === null) {
+                throw new Error("Qualification proxy response body was missing");
+            }
+            const reader = response.body.getReader();
+            const first = await reader.read();
+            if (first.done) {
+                throw new Error("Qualification proxy stream ended before first chunk");
+            }
+            expect(new TextDecoder().decode(first.value)).toBe("qualification chunk");
+
+            if (upstreamBody === undefined) {
+                throw new Error("Qualification upstream body controller was missing");
+            }
+            upstreamBody.error(new Error("Qualification upstream body failed"));
+
+            let downstreamError: unknown;
+            try {
+                await reader.read();
+            } catch (error) {
+                downstreamError = error;
+            }
+            expect(downstreamError).toBeInstanceOf(Error);
+        } finally {
+            await cleanup.dispose();
+        }
+    }, 10_000);
 });
