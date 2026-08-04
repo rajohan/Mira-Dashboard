@@ -54,7 +54,7 @@
   raw-HTTP reference is sourced from separate method-specific response contracts and documents
   both readiness outcomes.
 - These focused gates currently pass on the exact candidate: qualification and server
-  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 64/64
+  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 65/65
   qualification tests, 32/32 server/database tests, 4/4 documentation tests, and 4/4
   database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
@@ -198,19 +198,20 @@
   sufficient success signal, reports the exact failing cgroup path, requires the expected leaf path
   and every controller-bearing ancestor, preserves nested CLI failure causes, rejects malformed or
   encoded HTTP framing and CR/LF cookie injection, and publishes a canonical deeply frozen evidence
-  object. These changes strengthen failure handling and deterministic coverage without changing the
-  measured workload, resource policy, transport, or accepted evidence, so the capped run was not
-  repeated.
+  object. The final launcher correction replaces Bun's cause-ambiguous native timeout with an owned
+  timer and abort signal, so only that exact enforcement can be reported as a deadline; output-cap
+  and external signals remain signal failures even when late. Because this changes the enforcement
+  mechanism, the complete capped qualification was repeated after deterministic tests.
 - The capped run passes on Bun `1.4.0` revision
   `43783cedd5653fa29bb9ac83df34633eae10fe75`. Six rounds and 24 subscriptions completed in
-  7,746 ms. Every slow subscriber detached at the exact 16-event / 131,072-byte application queue
-  boundary; 3,904 events were published in round counts of 712, 632, 672, 624, 640, and 624, while
+  8,283 ms. Every slow subscriber detached at the exact 16-event / 131,072-byte application queue
+  boundary; 3,896 events were published in round counts of 712, 664, 632, 624, 624, and 640, while
   retained events remained capped at 128 and all subscriber and transport counts returned to zero.
-- The exact cgroup peak was 87,310,336 bytes (83.3 MiB), warm current memory was 12,283,904 bytes,
-  and post-cleanup current memory was 43,962,368 bytes. The sampled combined-process RSS rose from
-  48,668,672 bytes to a 105,291,776-byte high-water and ended at 85,848,064 bytes after cleanup;
-  `Bun.unsafe.memoryFootprint()` rose from 30,988,288 bytes to 87,397,376 bytes and ended at
-  67,712,000 bytes. Kernel `high`, `max`, `oom`, `oom_kill`, and group-kill deltas were all zero at
+- The exact cgroup peak was 80,363,520 bytes (76.6 MiB), warm current memory was 12,214,272 bytes,
+  and post-cleanup current memory was 42,340,352 bytes. The sampled combined-process RSS rose from
+  48,848,896 bytes to a 99,102,720-byte high-water and ended at 84,070,400 bytes after cleanup;
+  `Bun.unsafe.memoryFootprint()` rose from 31,156,224 bytes to 81,036,288 bytes and ended at
+  66,049,024 bytes. Kernel `high`, `max`, `oom`, `oom_kill`, and group-kill deltas were all zero at
   both the leaf and every recorded ancestor, no proxy upstream failures occurred, and the verdict
   was `VALIDATED`.
 - These measurements qualify this exact runtime, topology, and fixed workload. They do not claim a

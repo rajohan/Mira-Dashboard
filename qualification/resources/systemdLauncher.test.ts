@@ -6,6 +6,7 @@ import {
     buildSystemdRunSubprocessSpecification,
     buildSystemctlSubprocessSpecification,
     classifySystemdLauncherTermination,
+    createSystemdLauncherDeadline,
     createSseMemoryUnitName,
     ensureTransientUnitStopped,
     formatSystemdLauncherFailure,
@@ -135,17 +136,51 @@ describe("SSE memory systemd launcher", () => {
         ).toThrow("Bun executable must be an absolute path");
     });
 
-    test("classifies signal termination without assuming every SIGKILL is timeout", () => {
-        expect(classifySystemdLauncherTermination(null, 35_001, 35_000)).toBeUndefined();
-        expect(classifySystemdLauncherTermination("SIGKILL", 35_000, 35_000)).toEqual({
+    test("owns deadline firing, abort, and idempotent cancellation", () => {
+        const handle = Object.freeze({ kind: "manual-deadline" });
+        let scheduledCallback: (() => void) | undefined;
+        let scheduledDelayMs: number | undefined;
+        const cancelledHandles: unknown[] = [];
+        const deadline = createSystemdLauncherDeadline(35_000, {
+            cancel(receivedHandle) {
+                cancelledHandles.push(receivedHandle);
+            },
+            schedule(callback, delayMs) {
+                scheduledCallback = callback;
+                scheduledDelayMs = delayMs;
+                return handle;
+            },
+        });
+
+        expect(scheduledDelayMs).toBe(35_000);
+        expect(deadline.didFire()).toBeFalse();
+        expect(deadline.signal.aborted).toBeFalse();
+        if (scheduledCallback === undefined) {
+            throw new Error("Expected the manual deadline callback to be scheduled");
+        }
+        scheduledCallback();
+        expect(deadline.didFire()).toBeTrue();
+        expect(deadline.signal.aborted).toBeTrue();
+        deadline.cancel();
+        deadline.cancel();
+        expect(cancelledHandles).toEqual([handle]);
+    });
+
+    test("classifies only the owned deadline signal as a deadline", () => {
+        expect(classifySystemdLauncherTermination(null, true, "SIGKILL")).toBeUndefined();
+        expect(classifySystemdLauncherTermination("SIGKILL", true, "SIGKILL")).toEqual({
             kind: "deadline",
             signalCode: "SIGKILL",
         });
-        expect(classifySystemdLauncherTermination("SIGKILL", 1000, 35_000)).toEqual({
+        expect(classifySystemdLauncherTermination("SIGKILL", false, "SIGKILL")).toEqual({
             kind: "signal",
             signalCode: "SIGKILL",
         });
-        expect(classifySystemdLauncherTermination("SIGTERM", 1000, 35_000)).toEqual({
+        expect(classifySystemdLauncherTermination("SIGTERM", false, "SIGKILL")).toEqual({
+            kind: "signal",
+            signalCode: "SIGTERM",
+        });
+        expect(classifySystemdLauncherTermination("SIGTERM", true, "SIGKILL")).toEqual({
             kind: "signal",
             signalCode: "SIGTERM",
         });

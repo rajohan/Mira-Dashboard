@@ -52,7 +52,23 @@ export type SystemdLauncherTermination = Readonly<{
     signalCode: NodeJS.Signals;
 }>;
 
-/** Complete bounded subprocess specification consumed by `Bun.spawn`. */
+/** Injectable timer boundary for deterministic deadline-controller tests. */
+export interface SystemdLauncherDeadlineScheduler {
+    cancel(handle: unknown): void;
+    schedule(callback: () => void, delayMs: number): unknown;
+}
+
+/** Owned deadline state that can distinguish its abort from other subprocess signals. */
+export interface SystemdLauncherDeadline {
+    readonly signal: AbortSignal;
+    cancel(): void;
+    didFire(): boolean;
+}
+
+/**
+ * Complete bounded subprocess specification. The outer launcher consumes `timeout` through its
+ * owned abort controller so it can distinguish deadline enforcement from other signals.
+ */
 export interface SystemdSubprocessSpecification {
     argv: readonly string[];
     options: Readonly<{
@@ -239,21 +255,66 @@ export function buildSystemdRunSubprocessSpecification(
     });
 }
 
+const nativeDeadlineScheduler: SystemdLauncherDeadlineScheduler = Object.freeze({
+    cancel(handle: unknown) {
+        clearTimeout(handle as ReturnType<typeof setTimeout>);
+    },
+    schedule(callback: () => void, delayMs: number) {
+        return setTimeout(callback, delayMs);
+    },
+});
+
+/**
+ * Arms one explicitly owned subprocess deadline.
+ * @param delayMs Positive deadline in milliseconds.
+ * @param scheduler Injectable timer boundary used by deterministic tests.
+ * @returns Abort signal, fired state, and idempotent cancellation.
+ */
+export function createSystemdLauncherDeadline(
+    delayMs: number,
+    scheduler: SystemdLauncherDeadlineScheduler = nativeDeadlineScheduler
+): SystemdLauncherDeadline {
+    if (!Number.isSafeInteger(delayMs) || delayMs <= 0) {
+        throw new TypeError("Systemd launcher deadline must be a positive integer");
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    let fired = false;
+    const handle = scheduler.schedule(() => {
+        if (cancelled) return;
+        fired = true;
+        controller.abort();
+    }, delayMs);
+
+    return Object.freeze({
+        cancel() {
+            if (cancelled) return;
+            cancelled = true;
+            scheduler.cancel(handle);
+        },
+        didFire() {
+            return fired;
+        },
+        signal: controller.signal,
+    });
+}
+
 /**
  * Classifies a signal-terminated launcher without conflating every `SIGKILL` with timeout.
  * @param signalCode Signal observed after the launcher exits.
- * @param elapsedMs Monotonic launcher runtime in milliseconds.
- * @param deadlineMs Configured outer launcher deadline in milliseconds.
+ * @param deadlineFired Whether the launcher-owned deadline enforcement fired.
+ * @param deadlineSignal Signal sent by the launcher-owned deadline enforcement.
  * @returns The signal termination reason, or `undefined` for a normal exit.
  */
 export function classifySystemdLauncherTermination(
     signalCode: NodeJS.Signals | null,
-    elapsedMs: number,
-    deadlineMs: number
+    deadlineFired: boolean,
+    deadlineSignal: NodeJS.Signals
 ): SystemdLauncherTermination | undefined {
     if (signalCode === null) return undefined;
     return Object.freeze({
-        kind: elapsedMs >= deadlineMs ? "deadline" : "signal",
+        kind: deadlineFired && signalCode === deadlineSignal ? "deadline" : "signal",
         signalCode,
     });
 }
@@ -395,58 +456,66 @@ export async function runSystemdQualification(
     command: SystemdLauncherCommand
 ): Promise<SystemdLauncherResult> {
     const specification = buildSystemdRunSubprocessSpecification(command);
-    const startedAt = performance.now();
-    const process_ = Bun.spawn([...specification.argv], specification.options);
-    const stderr = new Response(process_.stderr).text();
-    const stdout = new Response(process_.stdout).text();
+    const { timeout: deadlineMs, ...spawnOptions } = specification.options;
     let operationError: unknown;
     let result: SystemdLauncherResult | undefined;
     try {
-        const exitCode = await process_.exited;
-        const elapsedMs = performance.now() - startedAt;
-        const [stderrText, stdoutText] = await Promise.all([stderr, stdout]);
-        const termination = classifySystemdLauncherTermination(
-            process_.signalCode,
-            elapsedMs,
-            specification.options.timeout
-        );
-        if (termination?.kind === "deadline") {
-            const diagnostic = await bestEffortPostMortem(command);
-            throw new Error(
-                formatSystemdLauncherFailure(
-                    `SSE memory qualification launcher exceeded its ${specification.options.timeout} ms outer deadline and was terminated by ${termination.signalCode}`,
-                    stdoutText,
-                    stderrText,
-                    diagnostic
-                )
+        const deadline = createSystemdLauncherDeadline(deadlineMs);
+        try {
+            const process_ = Bun.spawn([...specification.argv], {
+                ...spawnOptions,
+                signal: deadline.signal,
+            });
+            const stderr = new Response(process_.stderr).text();
+            const stdout = new Response(process_.stdout).text();
+            const exitCode = await process_.exited;
+            deadline.cancel();
+            const [stderrText, stdoutText] = await Promise.all([stderr, stdout]);
+            const termination = classifySystemdLauncherTermination(
+                process_.signalCode,
+                deadline.didFire(),
+                spawnOptions.killSignal
             );
-        }
-        if (termination !== undefined) {
-            const diagnostic = await bestEffortPostMortem(command);
-            throw new Error(
-                formatSystemdLauncherFailure(
-                    `SSE memory qualification launcher was terminated by ${termination.signalCode} before its outer deadline; the output bound or an external signal may have stopped it`,
-                    stdoutText,
-                    stderrText,
-                    diagnostic
-                )
-            );
-        }
-        if (exitCode === 0) {
-            result = {
-                exitCode,
-                stderr: stderrText,
-                stdout: stdoutText,
-            };
-        } else {
-            const diagnostic = await bestEffortPostMortem(command);
-            result = {
-                exitCode,
-                stderr: [stderrText.trim(), diagnostic]
-                    .filter((value) => value.length > 0)
-                    .join("\n"),
-                stdout: stdoutText,
-            };
+            if (termination?.kind === "deadline") {
+                const diagnostic = await bestEffortPostMortem(command);
+                throw new Error(
+                    formatSystemdLauncherFailure(
+                        `SSE memory qualification launcher exceeded its ${deadlineMs} ms outer deadline and was terminated by ${termination.signalCode}`,
+                        stdoutText,
+                        stderrText,
+                        diagnostic
+                    )
+                );
+            }
+            if (termination !== undefined) {
+                const diagnostic = await bestEffortPostMortem(command);
+                throw new Error(
+                    formatSystemdLauncherFailure(
+                        `SSE memory qualification launcher was terminated by ${termination.signalCode} without the launcher-owned deadline signal; the output bound or an external signal may have stopped it`,
+                        stdoutText,
+                        stderrText,
+                        diagnostic
+                    )
+                );
+            }
+            if (exitCode === 0) {
+                result = {
+                    exitCode,
+                    stderr: stderrText,
+                    stdout: stdoutText,
+                };
+            } else {
+                const diagnostic = await bestEffortPostMortem(command);
+                result = {
+                    exitCode,
+                    stderr: [stderrText.trim(), diagnostic]
+                        .filter((value) => value.length > 0)
+                        .join("\n"),
+                    stdout: stdoutText,
+                };
+            }
+        } finally {
+            deadline.cancel();
         }
     } catch (error) {
         operationError = error;
