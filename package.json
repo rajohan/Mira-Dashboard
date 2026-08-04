@@ -25,6 +25,7 @@
         "start:backend": "NODE_ENV=production doppler run --config prd --project rajohan -- bun --cwd backend dist/serverStart.js",
         "start:worker": "NODE_ENV=production doppler run --config prd --project rajohan -- bun --cwd backend dist/workerStart.js",
         "release:manifest": "bun scripts/writeReleaseManifest.ts",
+        "qualify:resources:sse": "bun qualification/resources/runSseMemoryQualification.ts",
         "lint": "oxlint .",
         "lint:fix": "oxlint . --fix",
         "format": "oxfmt --write .",

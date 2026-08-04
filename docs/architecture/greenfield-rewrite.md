@@ -54,16 +54,16 @@
   raw-HTTP reference is sourced from separate method-specific response contracts and documents
   both readiness outcomes.
 - These focused gates currently pass on the exact candidate: qualification and server
-  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 17/17
+  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 65/65
   qualification tests, 32/32 server/database tests, 4/4 documentation tests, and 4/4
   database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
   while retention advances, explicit rejection of a cursor ahead of the feed tail, acceptance at
   the exact tail, and deterministic failure/cleanup when a slow subscriber exceeds its queue
   budget. Repository-wide Oxlint and Oxfmt pass after the consolidated review fixes.
-  A production-shaped topology test now proves HTTPS reverse-proxy streaming and rolling-release
-  reconnect; sustained slow-consumer RSS pressure remains an open Phase 0 resource gate, so this
-  result does not mark all mandatory spikes complete.
+  Production-shaped tests now prove HTTPS reverse-proxy streaming, rolling-release reconnect, and
+  bounded slow-consumer behavior inside a verified resource-capped cgroup. Other mandatory
+  qualification areas remain open, so these results do not mark all Phase 0 spikes complete.
 - The first production-shaped database slice is implemented as seven small Drizzle schema
   modules for migration history, realtime events, reports, monitor runs, incidents, incident
   observations, and notifications. Its reviewed first migration applies to an empty database as
@@ -131,9 +131,92 @@
   composition slice must promote it only after configuration, checksum-verified database startup,
   and other declared critical dependencies complete; this PR does not pretend those dependencies
   are wired already.
-- Deterministic queue-overflow tests already prove bounded application buffering. A separate,
-  memory-capped spike will measure sustained proxy/SSE RSS and set the production resource budget;
-  this topology test does not claim an absolute memory bound.
+- Deterministic queue-overflow tests prove bounded application buffering. The following
+  memory-capped spike adds production-shaped proxy/SSE evidence without claiming a universal
+  absolute memory bound.
+
+### 2026-08-04 — Bounded SSE memory qualification passed
+
+- This stacked slice adds a capped measurement for four native Bun TLS clients that verify the
+  short-lived test CA, read the tRPC connected frame through the HTTPS qualification proxy, and
+  immediately pause their socket reads. An initial probe using unread Fetch bodies was rejected:
+  Bun continued draining those sockets into internal buffers, so it did not model a stalled TCP
+  receiver. The native-client probe remains qualification-only and does not change the production
+  or rewrite server composition.
+- The load scenario can run only inside a transient user-systemd cgroup that the child verifies
+  against the exact generated `app.slice` unit path before opening a listener. The qualification
+  cap is 256 MiB `MemoryHigh`, 384 MiB `MemoryMax`, no swap, 32 tasks, 50% of one CPU, and a
+  30-second runtime deadline. The uncapped launcher has a 35-second process deadline and 64 KiB
+  output cap. Every `systemctl` operation has a two-second deadline and 16 KiB output cap; cleanup
+  verifies a graceful stop and escalates to a control-group kill when required.
+- The child also reads every controller-bearing ancestor below the unified cgroup root. It rejects
+  a parent CPU, memory, swap, or process limit stricter than the declared leaf policy, requires the
+  hierarchy and its limits to remain stable, and rejects pressure/OOM counter growth at any parent.
+  This prevents a hidden VPS-level controller from silently changing the measured workload.
+- `memory.max` and the other cgroup limits are the hard safety boundary; cgroup counters are
+  evidence. They are not treated as the complete RSS measurement because shared and file-backed
+  runtime pages can be accounted differently. The result therefore records cgroup current,
+  kernel peak, and events together with combined qualification-process RSS and
+  `Bun.unsafe.memoryFootprint()` at the pre-load baseline, a 20 ms periodic/checkpoint-sampled load
+  high-water, and after cleanup. The exact cgroup `memory.peak` is authoritative for cgroup-accounted
+  memory and hard-limit enforcement; process RSS remains a separate measurement because it can
+  include shared and file-backed pages accounted differently by the cgroup. The process measurement
+  conservatively includes the Bun release server, TLS proxy, and synthetic clients. The fixed
+  32 MiB post-cleanup growth gate applies to the cgroup's total `memory.current`. Post-cleanup RSS
+  and Bun PSS remain diagnostic observations: one cold-baseline transient run cannot distinguish
+  allocator/JIT/TLS page retention from a leak, while absolute and sampled-peak process limits
+  still apply.
+- A repeated capped run exposed why the former shared cleanup-delta gate was invalid: all bounded
+  work and cgroup safety checks completed, but post-cleanup RSS was 33,869,824 bytes above its cold
+  baseline, only 315,392 bytes over the former 32 MiB process threshold. That run was rejected, not
+  retried until lucky. The policy was corrected before the authoritative run so the 32 MiB gate
+  applies only to total cgroup `memory.current`; RSS retains its absolute and sampled-peak growth
+  gates, Bun PSS retains its sampled-peak growth gate, and both remain exact reported evidence.
+- Payload size, per-subscriber event count and queued payload-byte budgets, retained events,
+  clients, rounds, maximum generated events, and maximum duration are fixed in code. The reviewed
+  workload permits at most 1,024 events of 8 KiB per round for six rounds: 48 MiB of generated
+  payload and 192 MiB of live payload fan-out across four clients before framing. Rounds two through
+  six deliberately replay the separately capped 128-event retained window to each client, adding at
+  most 20 MiB and making the complete pre-framing fan-out bound 212 MiB. Each round must prove that
+  transport backpressure reaches tRPC, all four live application queues reach exactly 16 events /
+  128 KiB, and the next publish detaches them while the clients remain paused. Because tRPC's SSE
+  producer is pull-driven, its HTTP request and the proxy request may legitimately remain pending
+  until the stalled downstream pulls again or disconnects. After the paused sockets are
+  terminated, both proxy and release must have zero pending requests.
+- Each round's three-second deadline starts before the first of its four clients connects and
+  covers connection, queue pressure, client termination, and transport cleanup. The enclosing
+  cgroup still enforces a 30-second lifetime and the launcher a 35-second outer deadline.
+- The live queue byte budget covers events not yet pulled across the application iterator boundary;
+  retained replay is bounded separately by the 128-event retention limit. Neither claims to bound
+  objects or bytes already accepted by tRPC transforms, Bun HTTP/Fetch, TLS, the proxy, or kernel
+  buffers; the cgroup is the hard safety boundary for those layers, and process/cgroup observations
+  measure their combined cost. The sustained probe is an explicit
+  local command and is not part of ordinary hosted CI or the general qualification test command.
+  Pure parsers, policy checks, feed limits, evidence rules, launcher construction, and one bounded
+  native-socket mechanism test remain deterministic CI tests.
+- Review hardening now rejects every signal-terminated launcher instead of treating `exited` as a
+  sufficient success signal, reports the exact failing cgroup path, requires the expected leaf path
+  and every controller-bearing ancestor, preserves nested CLI failure causes, rejects malformed or
+  encoded HTTP framing and CR/LF cookie injection, and publishes a canonical deeply frozen evidence
+  object. The final launcher correction replaces Bun's cause-ambiguous native timeout with an owned
+  timer and abort signal, so only that exact enforcement can be reported as a deadline; output-cap
+  and external signals remain signal failures even when late. Because this changes the enforcement
+  mechanism, the complete capped qualification was repeated after deterministic tests.
+- The capped run passes on Bun `1.4.0` revision
+  `43783cedd5653fa29bb9ac83df34633eae10fe75`. Six rounds and 24 subscriptions completed in
+  8,283 ms. Every slow subscriber detached at the exact 16-event / 131,072-byte application queue
+  boundary; 3,896 events were published in round counts of 712, 664, 632, 624, 624, and 640, while
+  retained events remained capped at 128 and all subscriber and transport counts returned to zero.
+- The exact cgroup peak was 80,363,520 bytes (76.6 MiB), warm current memory was 12,214,272 bytes,
+  and post-cleanup current memory was 42,340,352 bytes. The sampled combined-process RSS rose from
+  48,848,896 bytes to a 99,102,720-byte high-water and ended at 84,070,400 bytes after cleanup;
+  `Bun.unsafe.memoryFootprint()` rose from 31,156,224 bytes to 81,036,288 bytes and ended at
+  66,049,024 bytes. Kernel `high`, `max`, `oom`, `oom_kill`, and group-kill deltas were all zero at
+  both the leaf and every recorded ancestor, no proxy upstream failures occurred, and the verdict
+  was `VALIDATED`.
+- These measurements qualify this exact runtime, topology, and fixed workload. They do not claim a
+  universal maximum for Bun, Fetch, TLS, tRPC, or kernel buffers, and they do not replace the
+  broader production resource budget for builds, workers, tests, and privileged jobs.
 
 ## Executive Decision
 

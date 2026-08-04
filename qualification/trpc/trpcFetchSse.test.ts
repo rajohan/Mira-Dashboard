@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { QualificationEventFeed } from "../realtime/eventFeed.ts";
+import {
+    QualificationEventFeed,
+    qualificationEventLimits,
+} from "../realtime/eventFeed.ts";
 import { waitFor } from "../test/waitFor.ts";
 import { createQualificationClient } from "./client.ts";
 import { startQualificationServer } from "./server.ts";
@@ -42,6 +45,23 @@ describe("tRPC Fetch and tracked SSE on Bun", () => {
             },
             id: "1",
         });
+        let payloadError: unknown;
+        try {
+            await client.events.publish.mutate({
+                kind: "qualification.changed",
+                payload: `${"é".repeat(
+                    qualificationEventLimits.maximumPayloadBytes / 2
+                )}a`,
+                value: 2,
+            });
+        } catch (error) {
+            payloadError = error;
+        }
+        expect(payloadError).toBeInstanceOf(Error);
+        expect((payloadError as Error).message).toContain(
+            "Qualification event payload must not exceed"
+        );
+        expect(eventFeed.metricsSnapshot().latestSequence).toBe(1);
     });
 
     test("resumes tracked events after a forced SSE reconnect without duplicates", async () => {
