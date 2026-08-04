@@ -43,16 +43,22 @@ dist/                    Bun production frontend build output
 
 ## Local development
 
-Install all frontend, backend, and tooling dependencies from the repo root:
+The repository selects Bun Canary through `.bun-version`. Install or update that channel before
+installing dependencies:
+
+```bash
+bun upgrade --canary
+```
+
+Then install all frontend, backend, and tooling dependencies from the repo root:
 
 ```bash
 bun install --frozen-lockfile
 ```
 
-The repository pins an exact qualified Bun Canary revision in `.bun-version`.
-Install that revision before working in the repository; the committed Bun config
-keeps the runtime-only `bun-plugin-tailwind` peer from installing a second,
-stale Bun executable into `node_modules`.
+The application targets the Bun 1.4 runtime API. Immutable release manifests still record the
+exact Bun revision used for each build. The committed Bun config keeps the runtime-only
+`bun-plugin-tailwind` peer from installing a second, stale Bun executable into `node_modules`.
 
 Run the complete local dev stack:
 

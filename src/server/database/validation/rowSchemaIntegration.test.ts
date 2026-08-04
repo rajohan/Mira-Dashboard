@@ -8,8 +8,8 @@ import { incidents } from "../schema/incidents.ts";
 import { incidentInsertSchema, incidentSelectSchema } from "./incidents.ts";
 
 describe("Drizzle Valibot database integration", () => {
-    test("round-trips a migrated SQLite row through generated schemas", () => {
-        const database = openFreshMigratedDatabase();
+    test("round-trips a migrated SQLite row through generated schemas", async () => {
+        const database = await openFreshMigratedDatabase();
         const id = "019fc968-1a9b-7760-bf1b-d5b863b0e7b4";
         const observedAt = new Date("2026-08-03T22:00:00.000Z");
 

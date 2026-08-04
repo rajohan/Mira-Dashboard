@@ -9,7 +9,6 @@ import {
 import { EventSource } from "eventsource";
 
 import { QualificationEventFeed } from "../realtime/eventFeed.ts";
-import { runtimeCandidate } from "../runtimeCandidate.ts";
 import { waitFor } from "../test/waitFor.ts";
 import type { QualificationRouter } from "./router.ts";
 import { startQualificationServer } from "./server.ts";
@@ -44,8 +43,8 @@ describe("tRPC Fetch and tracked SSE on Bun", () => {
 
         expect(await client.runtime.identity.query()).toEqual({
             hasGlobalEventSource: false,
-            revision: runtimeCandidate.revision,
-            version: runtimeCandidate.version,
+            revision: Bun.revision,
+            version: Bun.version,
         });
         expect(
             await client.events.publish.mutate({
@@ -92,17 +91,19 @@ describe("tRPC Fetch and tracked SSE on Bun", () => {
                 value: 1,
             });
             await waitFor(() => receivedIds.length === 1);
-            await waitFor(
-                () => eventFeed.observedResumeIds.some((resumeId) => resumeId === "1"),
-                5000
-            );
+            await waitFor(() => eventFeed.activeSubscriberCount === 0, 5000);
+            expect(startedCount).toBe(1);
 
             await client.events.publish.mutate({
                 kind: "qualification.changed",
                 value: 2,
             });
+            expect(receivedIds).toEqual(["1"]);
+
+            await waitFor(() => startedCount >= 2, 5000);
             await waitFor(() => receivedIds.length === 2);
 
+            expect(eventFeed.observedResumeIds.at(1)).toBe("1");
             expect(receivedIds).toEqual(["1", "2"]);
             expect(subscriptionErrors).toEqual([]);
         } finally {

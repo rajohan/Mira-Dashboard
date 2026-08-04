@@ -79,16 +79,14 @@ export function renderRealtimeEvents(
     return `${documentHeader("Realtime Events", "bun run docs:generate")}${body}`;
 }
 
-/** Direct dependency sections needed by package/runtime documentation. */
+/** Direct dependency sections and Bun policy needed by generated documentation. */
 export interface PackageDocumentationInput {
     dependencies: Readonly<Record<string, string>>;
     developmentDependencies: Readonly<Record<string, string>>;
     resolvedVersions: Readonly<Record<string, string>>;
     runtime: {
-        linuxArm64ArchiveSha256: string;
-        linuxArm64ExecutableSha256: string;
-        revision: string;
-        versionWithRevision: string;
+        channel: string;
+        version: string;
     };
 }
 
@@ -111,8 +109,8 @@ function packageRows(
 }
 
 /**
- * Renders exact runtime and direct package facts as Markdown.
- * @param input Runtime manifest and package manifests.
+ * Renders the runtime policy and exact direct package facts as Markdown.
+ * @param input Runtime policy and package manifests.
  * @returns Generated Markdown document.
  */
 export function renderPackagesAndRuntime(input: PackageDocumentationInput): string {
@@ -125,5 +123,5 @@ export function renderPackagesAndRuntime(input: PackageDocumentationInput): stri
         ),
     ].join("\n");
 
-    return `${documentHeader("Packages and Runtime", "bun run docs:generate")}## Bun\n\n| Fact | Value |\n| --- | --- |\n| Version | \`${input.runtime.versionWithRevision}\` |\n| Revision | \`${input.runtime.revision}\` |\n| Linux ARM64 archive asset SHA-256 | \`${input.runtime.linuxArm64ArchiveSha256}\` |\n| Linux ARM64 executable SHA-256 | \`${input.runtime.linuxArm64ExecutableSha256}\` |\n\n## Direct packages\n\n| Package | Declared | Resolved | Scope |\n| --- | --- | --- | --- |\n${packageTable}\n`;
+    return `${documentHeader("Packages and Runtime", "bun run docs:generate")}## Bun\n\n| Fact | Value |\n| --- | --- |\n| Repository channel | \`${input.runtime.channel}\` |\n| Required runtime version | \`${input.runtime.version}\` |\n| Release identity | Exact revision recorded by each immutable release |\n\n## Direct packages\n\n| Package | Declared | Resolved | Scope |\n| --- | --- | --- | --- |\n${packageTable}\n`;
 }

@@ -1,5 +1,6 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
+import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
 import { livenessResponse, readinessResponse } from "../server/rawHttp/health.ts";
 import { appRouter } from "../server/trpc/appRouter.ts";
 import { createRequestContext } from "../server/trpc/context.ts";
@@ -17,6 +18,8 @@ export interface GreenfieldServerOptions {
  * @returns A started Bun server.
  */
 export function createGreenfieldServer(options: GreenfieldServerOptions) {
+    readRuntimeIdentity();
+
     return Bun.serve({
         fetch(request) {
             const pathname = new URL(request.url).pathname;

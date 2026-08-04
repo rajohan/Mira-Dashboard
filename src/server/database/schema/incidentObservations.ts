@@ -22,7 +22,7 @@ export const incidentObservations = sqliteTable(
     (table) => [
         check(
             "incident_observations_details_json_check",
-            sql`json_valid(${table.detailsJson})`
+            sql`CASE WHEN json_valid(${table.detailsJson}) THEN json_type(${table.detailsJson}) = 'object' ELSE 0 END`
         ),
         check("incident_observations_generation_check", sql`${table.generation} >= 1`),
         index("incident_observations_incident_observed_id_idx").on(

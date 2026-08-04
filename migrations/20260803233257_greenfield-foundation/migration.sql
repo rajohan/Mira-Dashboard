@@ -7,7 +7,7 @@ CREATE TABLE `incident_observations` (
 	`observed_at` integer NOT NULL,
 	CONSTRAINT `fk_incident_observations_incident_id_incidents_id_fk` FOREIGN KEY (`incident_id`) REFERENCES `incidents`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `fk_incident_observations_monitor_run_id_monitor_runs_id_fk` FOREIGN KEY (`monitor_run_id`) REFERENCES `monitor_runs`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "incident_observations_details_json_check" CHECK(json_valid("details_json")),
+	CONSTRAINT "incident_observations_details_json_check" CHECK(CASE WHEN json_valid("details_json") THEN json_type("details_json") = 'object' ELSE 0 END),
 	CONSTRAINT "incident_observations_generation_check" CHECK("generation" >= 1)
 ) STRICT;
 --> statement-breakpoint
@@ -25,7 +25,7 @@ CREATE TABLE `incidents` (
 	`severity` text NOT NULL,
 	`state` text NOT NULL,
 	`title` text NOT NULL,
-	CONSTRAINT "incidents_details_json_check" CHECK(json_valid("details_json")),
+	CONSTRAINT "incidents_details_json_check" CHECK(CASE WHEN json_valid("details_json") THEN json_type("details_json") = 'object' ELSE 0 END),
 	CONSTRAINT "incidents_generation_check" CHECK("generation" >= 1),
 	CONSTRAINT "incidents_occurrence_count_check" CHECK("occurrence_count" >= 1),
 	CONSTRAINT "incidents_severity_check" CHECK("severity" IN ('critical', 'error', 'info', 'warning')),
@@ -87,7 +87,7 @@ CREATE TABLE `reports` (
 	`source` text NOT NULL,
 	`source_job_id` text,
 	`title` text NOT NULL,
-	CONSTRAINT "reports_metadata_json_check" CHECK(json_valid("metadata_json"))
+	CONSTRAINT "reports_metadata_json_check" CHECK(CASE WHEN json_valid("metadata_json") THEN json_type("metadata_json") = 'object' ELSE 0 END)
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `schema_migrations` (

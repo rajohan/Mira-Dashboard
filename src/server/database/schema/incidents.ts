@@ -29,7 +29,10 @@ export const incidents = sqliteTable(
         title: text("title").notNull(),
     },
     (table) => [
-        check("incidents_details_json_check", sql`json_valid(${table.detailsJson})`),
+        check(
+            "incidents_details_json_check",
+            sql`CASE WHEN json_valid(${table.detailsJson}) THEN json_type(${table.detailsJson}) = 'object' ELSE 0 END`
+        ),
         check("incidents_generation_check", sql`${table.generation} >= 1`),
         check("incidents_occurrence_count_check", sql`${table.occurrenceCount} >= 1`),
         check(

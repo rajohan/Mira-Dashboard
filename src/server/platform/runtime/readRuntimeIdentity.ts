@@ -1,4 +1,4 @@
-import { runtimeManifest } from "../../../shared/runtimeManifest.ts";
+import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
 
 /** Public runtime identity shape. */
 export interface RuntimeIdentity {
@@ -7,23 +7,33 @@ export interface RuntimeIdentity {
     versionWithRevision: string;
 }
 
+/** Runtime fields observed before the HTTP server is allowed to bind. */
+export type ObservedRuntimeIdentity = Pick<RuntimeIdentity, "revision" | "version">;
+
+const revisionPattern = /^[a-f\d]{40}$/u;
+
 /**
- * Reads and verifies the Bun runtime identity used by the serving process.
- * @returns Exact public runtime identity.
+ * Reads the serving runtime identity and enforces the Bun 1.4 API baseline.
+ * @returns Public runtime identity for diagnostics.
  */
-export function readRuntimeIdentity(): RuntimeIdentity {
-    if (
-        Bun.revision !== runtimeManifest.revision ||
-        Bun.version !== runtimeManifest.version
-    ) {
-        throw new Error(
-            "Serving Bun runtime does not match the qualified runtime manifest"
-        );
+export function readRuntimeIdentity(
+    observedRuntime?: ObservedRuntimeIdentity
+): RuntimeIdentity {
+    const runtime = observedRuntime ?? {
+        revision: Bun.revision,
+        version: Bun.version,
+    };
+
+    if (runtime.version !== bunRuntimePolicy.version) {
+        throw new Error(`Serving Bun runtime must be ${bunRuntimePolicy.version}`);
+    }
+    if (!revisionPattern.test(runtime.revision)) {
+        throw new Error("Serving Bun runtime revision is malformed");
     }
 
     return {
-        revision: Bun.revision,
-        version: Bun.version,
-        versionWithRevision: runtimeManifest.versionWithRevision,
+        revision: runtime.revision,
+        version: runtime.version,
+        versionWithRevision: `${runtime.version}+${runtime.revision.slice(0, 9)}`,
     };
 }

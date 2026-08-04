@@ -15,7 +15,10 @@ export const reports = sqliteTable(
         title: text("title").notNull(),
     },
     (table) => [
-        check("reports_metadata_json_check", sql`json_valid(${table.metadataJson})`),
+        check(
+            "reports_metadata_json_check",
+            sql`CASE WHEN json_valid(${table.metadataJson}) THEN json_type(${table.metadataJson}) = 'object' ELSE 0 END`
+        ),
         index("reports_kind_occurred_id_idx").on(table.kind, table.occurredAt, table.id),
         index("reports_source_job_occurred_id_idx").on(
             table.source,

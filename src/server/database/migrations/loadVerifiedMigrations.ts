@@ -1,14 +1,13 @@
 import { readdir, readFile } from "node:fs/promises";
 
-import { readMigrationFiles } from "drizzle-orm/migrator";
-
 import { migrationManifest, type MigrationManifestEntry } from "./manifest.ts";
+
+export const drizzleStatementBreakpoint = "--> statement-breakpoint";
 
 const migrationIdPattern = /^\d{14}_[a-z\d][a-z\d_-]*$/u;
 const sha256Pattern = /^[a-f\d]{64}$/u;
 
 export interface VerifiedMigration extends MigrationManifestEntry {
-    folderMillis: number;
     statements: readonly string[];
 }
 
@@ -69,33 +68,30 @@ export async function loadVerifiedMigrations(
         throw new Error("Migration directory does not match the reviewed manifest");
     }
 
-    const drizzleMigrations = readMigrationFiles({
-        migrationsFolder: options.directory,
-    });
-    const drizzleByName = new Map(
-        drizzleMigrations.map((migration) => [migration.name, migration])
-    );
+    return Object.freeze(
+        await Promise.all(
+            manifest.map(async (entry) => {
+                const migrationDirectory = `${options.directory}/${entry.id}`;
+                const [migrationSql, snapshot] = await Promise.all([
+                    readFile(`${migrationDirectory}/migration.sql`),
+                    readFile(`${migrationDirectory}/snapshot.json`),
+                ]);
 
-    return Promise.all(
-        manifest.map(async (entry) => {
-            const migration = drizzleByName.get(entry.id);
+                if (sha256(migrationSql) !== entry.migrationSha256) {
+                    throw new Error(`Migration SQL checksum mismatch: ${entry.id}`);
+                }
 
-            if (!migration || migration.hash !== entry.migrationSha256) {
-                throw new Error(`Migration SQL checksum mismatch: ${entry.id}`);
-            }
+                if (sha256(snapshot) !== entry.snapshotSha256) {
+                    throw new Error(`Migration snapshot checksum mismatch: ${entry.id}`);
+                }
 
-            const snapshot = await readFile(
-                `${options.directory}/${entry.id}/snapshot.json`
-            );
-            if (sha256(snapshot) !== entry.snapshotSha256) {
-                throw new Error(`Migration snapshot checksum mismatch: ${entry.id}`);
-            }
-
-            return Object.freeze({
-                ...entry,
-                folderMillis: migration.folderMillis,
-                statements: Object.freeze(migration.sql),
-            });
-        })
+                return Object.freeze({
+                    ...entry,
+                    statements: Object.freeze(
+                        migrationSql.toString().split(drizzleStatementBreakpoint)
+                    ),
+                });
+            })
+        )
     );
 }

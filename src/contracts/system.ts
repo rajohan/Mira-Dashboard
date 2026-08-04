@@ -11,7 +11,7 @@ export const runtimeIdentitySchema = v.strictObject({
     version: v.pipe(v.string(), v.description("Bun semantic version.")),
     versionWithRevision: v.pipe(
         v.string(),
-        v.description("Human-readable Bun canary version and short revision.")
+        v.description("Human-readable Bun version and short diagnostic revision.")
     ),
 });
 
@@ -31,7 +31,7 @@ export const runtimeIdentityContract = {
     name: "system.runtimeIdentity",
     output: runtimeIdentitySchema,
     outputSchemaId: "system.runtimeIdentity.output",
-    summary: "Returns the exact Bun runtime identity of the serving process.",
+    summary: "Returns the Bun runtime identity of the serving process.",
 } as const satisfies ProcedureContract;
 
 /** Implemented system tRPC contracts. */

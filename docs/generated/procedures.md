@@ -4,4 +4,4 @@
 
 | Procedure | Kind | Domain | Access | Input | Output | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
-| `system.runtimeIdentity` | query | system | Public | [input](./schemas/system.runtimeIdentity.input.schema.json) | [output](./schemas/system.runtimeIdentity.output.schema.json) | Returns the exact Bun runtime identity of the serving process. |
+| `system.runtimeIdentity` | query | system | Public | [input](./schemas/system.runtimeIdentity.input.schema.json) | [output](./schemas/system.runtimeIdentity.output.schema.json) | Returns the Bun runtime identity of the serving process. |

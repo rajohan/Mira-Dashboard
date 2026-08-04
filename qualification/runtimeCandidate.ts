@@ -1,5 +1,4 @@
-/** Exact Bun runtime qualified by the greenfield foundation. */
-export { runtimeManifest as runtimeCandidate } from "../src/shared/runtimeManifest.ts";
+export { bunRuntimePolicy } from "../src/shared/bunRuntimePolicy.ts";
 
 /** Runtime properties relevant to the qualification suite. */
 export interface RuntimeIdentity {

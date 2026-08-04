@@ -10,8 +10,8 @@ project.
 - Ubuntu system user with systemd user services available.
 - Git access as `mira-2026`.
 - Doppler CLI installed and authenticated for project/config `rajohan/prd`.
-- Bun Canary installed at `/home/ubuntu/.bun/bin/bun`, matching the exact revision
-  pinned in `.bun-version`.
+- Bun Canary installed at `/home/ubuntu/.bun/bin/bun`, matching the repository
+  `.bun-version` channel.
 - OpenClaw installed and running its gateway.
 - Tailscale or equivalent private access path for the Dashboard UI.
 
@@ -38,17 +38,15 @@ git clone https://github.com/rajohan/Mira-Dashboard.git \
 cd /home/ubuntu/projects/mira-dashboard/production/checkout
 ```
 
-Install Canary and verify that it resolves to the repository's pinned revision before
-bootstrapping a release:
+Select the repository runtime channel before bootstrapping a release:
 
 ```bash
 bun upgrade --canary
 bun --revision
-test "$(bun --revision | sed 's/^.*+//')" = "$(cut -c1-9 .bun-version)"
 ```
 
-If Canary has advanced, use the release's verified runtime artifact instead of
-bootstrapping with a different revision.
+The repository targets Bun 1.4 while `.bun-version` remains on Canary. Each immutable Dashboard
+release records and reuses the exact Bun revision that built it.
 
 ## Configure Secrets
 

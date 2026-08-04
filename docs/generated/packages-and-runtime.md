@@ -6,10 +6,9 @@
 
 | Fact | Value |
 | --- | --- |
-| Version | `1.4.0-canary.1+1f447a73e` |
-| Revision | `1f447a73ebf6a86912a3f11b00bd6fbb5f82b6c0` |
-| Linux ARM64 archive asset SHA-256 | `bed2a17f337d44d00dc26e9ec7a456cc521af4a9e82e02028cc69dddc696437d` |
-| Linux ARM64 executable SHA-256 | `fc8df2fffa371853ff695a2438a3c020148d6d4cb3525b96a467d254761e8525` |
+| Repository channel | `canary` |
+| Required runtime version | `1.4.0` |
+| Release identity | Exact revision recorded by each immutable release |
 
 ## Direct packages
 

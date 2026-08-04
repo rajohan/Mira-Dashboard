@@ -56,5 +56,11 @@ describe("generated contract documentation", () => {
         expect(artifacts.get("packages-and-runtime.md")).toContain(
             "`@valibot/to-json-schema` | `1.7.1` | `1.7.1` | development"
         );
+        expect(artifacts.get("packages-and-runtime.md")).toContain(
+            "| Repository channel | `canary` |"
+        );
+        expect(artifacts.get("packages-and-runtime.md")).toContain(
+            "| Required runtime version | `1.4.0` |"
+        );
     });
 });

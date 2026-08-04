@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 
 import { createGreenfieldServer } from "../../app/server.ts";
-import { runtimeManifest } from "../../shared/runtimeManifest.ts";
+import { bunRuntimePolicy } from "../../shared/bunRuntimePolicy.ts";
+import * as runtimeIdentityModule from "../platform/runtime/readRuntimeIdentity.ts";
 import type { AppRouter } from "../trpc/appRouter.ts";
 
 const servers: Array<ReturnType<typeof createGreenfieldServer>> = [];
@@ -23,9 +24,9 @@ describe("greenfield system foundation", () => {
         });
 
         expect(await client.system.runtimeIdentity.query()).toEqual({
-            revision: runtimeManifest.revision,
-            version: runtimeManifest.version,
-            versionWithRevision: runtimeManifest.versionWithRevision,
+            revision: Bun.revision,
+            version: Bun.version,
+            versionWithRevision: `${Bun.version}+${Bun.revision.slice(0, 9)}`,
         });
         let invalidInputError: unknown;
         try {
@@ -51,5 +52,48 @@ describe("greenfield system foundation", () => {
         expect(await readiness.json()).toEqual({ status: "ready" });
         expect(missing.status).toBe(404);
         expect(misleadingTrpcPrefix.status).toBe(404);
+    });
+
+    test("accepts new canary revisions on Bun 1.4", () => {
+        expect(
+            runtimeIdentityModule.readRuntimeIdentity({
+                revision: "0".repeat(40),
+                version: bunRuntimePolicy.version,
+            })
+        ).toEqual({
+            revision: "0".repeat(40),
+            version: bunRuntimePolicy.version,
+            versionWithRevision: `${bunRuntimePolicy.version}+${"0".repeat(9)}`,
+        });
+    });
+
+    test("rejects a runtime outside the Bun 1.4 baseline", () => {
+        expect(() =>
+            runtimeIdentityModule.readRuntimeIdentity({
+                revision: "0000000000000000000000000000000000000000",
+                version: "1.3.0",
+            })
+        ).toThrow(`Serving Bun runtime must be ${bunRuntimePolicy.version}`);
+    });
+
+    test("runs the runtime guard before invoking Bun.serve", () => {
+        const runtimeError = new Error("simulated unqualified runtime");
+        const runtimeSpy = spyOn(
+            runtimeIdentityModule,
+            "readRuntimeIdentity"
+        ).mockImplementation(() => {
+            throw runtimeError;
+        });
+        const serveSpy = spyOn(Bun, "serve").mockImplementation(() => {
+            throw new Error("Bun.serve must not run before runtime verification");
+        });
+
+        try {
+            expect(() => createGreenfieldServer({ port: 0 })).toThrow(runtimeError);
+            expect(serveSpy).not.toHaveBeenCalled();
+        } finally {
+            serveSpy.mockRestore();
+            runtimeSpy.mockRestore();
+        }
     });
 });

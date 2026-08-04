@@ -34,6 +34,41 @@ describe("qualification event feed", () => {
         expect(eventFeed.activeSubscriberCount).toBe(0);
     });
 
+    test("keeps the replay snapshot stable when retention advances", async () => {
+        const eventFeed = new QualificationEventFeed();
+        const abortController = new AbortController();
+        const retainedEventCount = 128;
+
+        for (let value = 1; value <= retainedEventCount; value += 1) {
+            eventFeed.publish({ kind: "qualification.changed", value });
+        }
+
+        const subscription = eventFeed.subscribe({ signal: abortController.signal });
+        const firstReplayEvent = await subscription.next();
+        if (firstReplayEvent.done) {
+            throw new Error("Replay subscription ended before returning its first event");
+        }
+        expect(firstReplayEvent.value.id).toBe("1");
+
+        eventFeed.publish({
+            kind: "qualification.changed",
+            value: retainedEventCount + 1,
+        });
+
+        const secondReplayEvent = await subscription.next();
+        if (secondReplayEvent.done) {
+            throw new Error(
+                "Replay subscription ended before returning its second event"
+            );
+        }
+        expect(secondReplayEvent.value.id).toBe("2");
+
+        abortController.abort();
+        const completedSubscription = await subscription.next();
+        expect(completedSubscription.done).toBeTrue();
+        expect(eventFeed.activeSubscriberCount).toBe(0);
+    });
+
     test("fails and detaches a subscriber that exceeds its queue budget", async () => {
         const eventFeed = new QualificationEventFeed();
         const abortController = new AbortController();

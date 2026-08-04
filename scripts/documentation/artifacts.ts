@@ -4,7 +4,7 @@ import {
     realtimeEventContracts,
 } from "../../src/contracts/contractRegistry.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
-import { runtimeManifest } from "../../src/shared/runtimeManifest.ts";
+import { bunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
 import { convertContractSchema, type SchemaTypeMode } from "./jsonSchema.ts";
 import {
     type PackageDocumentationInput,
@@ -76,7 +76,7 @@ export function buildDocumentationArtifacts(
         dependencies: packageManifest.dependencies,
         developmentDependencies: packageManifest.devDependencies,
         resolvedVersions: packageManifest.resolvedVersions,
-        runtime: runtimeManifest,
+        runtime: bunRuntimePolicy,
     };
     const artifacts = new Map<string, string>([
         ["README.md", renderGeneratedIndex()],

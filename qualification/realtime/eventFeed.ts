@@ -138,6 +138,7 @@ export class QualificationEventFeed {
         }
 
         const replayBoundary = this.#sequence;
+        const replayEvents = [...this.#events];
         const queue = new BoundedAsyncQueue<QualificationEventRecord>();
         const subscriber = (event: QualificationEventRecord): void => {
             if (Number(event.id) > replayBoundary) {
@@ -152,7 +153,10 @@ export class QualificationEventFeed {
         options.signal.addEventListener("abort", abort, { once: true });
 
         try {
-            for (const event of this.#events) {
+            for (const event of replayEvents) {
+                if (options.signal.aborted) {
+                    return;
+                }
                 const sequence = Number(event.id);
                 if (sequence > afterSequence && sequence <= replayBoundary) {
                     yield event;

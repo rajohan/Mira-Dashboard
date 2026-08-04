@@ -3,8 +3,9 @@
 > **Status:** implementation started. The rewrite is built beside the current production
 > implementation and targets a fresh database with no compatibility layer.
 >
-> **Audit date:** 2026-08-03. Package versions and the Bun canary snapshot in this document
-> are point-in-time facts and must be rechecked at every candidate promotion.
+> **Audit date:** 2026-08-04. Package versions and the Bun canary snapshot in this document
+> are point-in-time facts. They are rechecked during an explicit candidate-promotion round,
+> not for ordinary feature or review commits.
 
 ## Implementation Progress
 
@@ -13,20 +14,17 @@
 - Dashboard task [#396](/tasks/396) tracks the rewrite foundation.
 - The current codebase, deployment/runtime tooling, lint configuration, package graph, and
   approved blueprint were re-audited before implementation changes.
-- The latest official ARM64 Bun canary was rechecked both at implementation start and again
-  before the foundation PR. Bun replaced the artifact during the work, so the selected candidate
-  advanced to `1.4.0-canary.1+1f447a73e`, SHA-256
-  `bed2a17f337d44d00dc26e9ec7a456cc521af4a9e82e02028cc69dddc696437d`. The running production
-  release remains on its immutable cached runtime until a verified release activation.
-  `.bun-version` pins the full qualified revision
-  `1f447a73ebf6a86912a3f11b00bd6fbb5f82b6c0`. Bun does not publish a permanent release tag for
-  each canary commit, so CI uses the moving `canary` asset only as download transport and rejects
-  it before dependency installation unless `Bun.revision` equals the complete qualified SHA.
-  When the channel advances, a new candidate must be qualified and promoted deliberately.
-- The host bootstrap runtime was upgraded to the same selected revision only after the focused
-  candidate gates passed. Its installed binary is byte-identical to the downloaded and
-  checksum-verified qualification binary. The current production release and both production
-  services were not restarted or changed.
+- The repository keeps the existing simple Bun channel model: `.bun-version` selects `canary`,
+  and CI installs it through the official SHA-pinned `oven-sh/setup-bun` action. Application code
+  targets the Bun `1.4.0` runtime API and accepts newer Canary revisions within that version.
+  Each immutable Dashboard release still records and reuses the exact revision that built it.
+  When Bun 1.4 is officially released, `.bun-version` changes from `canary` to `1.4.0`; CI and
+  deployment otherwise keep the same design.
+- The isolated `43783cedd` artifact passes its qualification, greenfield, database,
+  documentation, build, frontend, and backend gates. The host bootstrap runtime was then
+  atomically promoted to that same verified artifact; the current production release and both
+  production services were not restarted or changed. A fresh full backend-suite run after host
+  promotion also passes on the selected artifact.
 - Phase 0 qualification runs sequentially with host load, available memory, and swap
   checked around every resource-heavy command. No build, install, or broad test gate runs
   while the VPS is already saturated.
@@ -39,7 +37,7 @@
 - The same install refreshed `oxlint-config-presets` to `0.1.18` and
   `@microlink/react-json-view` to `1.31.26`. The lockfile was regenerated with the qualified
   Bun canary. No production service or release was changed.
-- The first executable qualification slice passes on the exact candidate revision: seven Bun
+- The first executable qualification slice passes on the exact candidate revision: eight Bun
   tests across runtime identity, Drizzle/Bun SQLite, and tRPC Fetch/SSE. The database evidence
   covers strict SQLite tables, check/foreign-key/partial-unique/index constraints, synchronous
   transactions and rollback, prepared and parameterized raw SQL, native-client access,
@@ -50,10 +48,11 @@
   the last event ID without duplicate delivery, bounded per-subscriber buffering, and subscriber
   cleanup after client abort. `eventsource` is injected only into the Bun-side client test.
 - These focused gates currently pass on the exact candidate: qualification and greenfield
-  TypeScript, Oxlint with typed rules, Oxfmt, deterministic documentation generation,
-  Drizzle migration-graph validation, 7/7 qualification tests, 12/12 greenfield server tests,
-  and 4/4 documentation tests. Direct event-feed tests also prove gap-free replay to live
-  handoff and deterministic failure/cleanup when a slow subscriber exceeds its queue budget.
+  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 8/8
+  qualification tests, 31/31 greenfield server/database tests, and 4/4 documentation tests.
+  Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
+  while retention advances, and deterministic failure/cleanup when a slow subscriber exceeds its
+  queue budget. Repository-wide Oxlint and Oxfmt pass after the consolidated review fixes.
   Reverse-proxy behavior, rolling-release reconnect, and sustained slow-consumer pressure remain
   open Phase 0 gates; this result does not mark all mandatory spikes complete.
 - The first production-shaped database slice is implemented as seven small Drizzle schema
@@ -62,23 +61,29 @@
   SQLite `STRICT` tables and passes integrity, foreign-key, lifecycle-constraint, deduplication,
   datatype, and partial-index query-plan tests. An explicit manifest pins both the SQL and
   snapshot SHA-256 values and rejects tampered or unreviewed migration folders before runtime
-  application. The migration/database subset passes 6/6 focused tests.
-- Drizzle's official migration-conflict action is installed for the first schema PR. CI pins
-  `drizzle-team/drizzle-orm/actions/check` to commit
-  `748058e837d9c4247330e3d45580cbdae52bffda`, not a moving branch. It complements rather than
-  replaces Dashboard's checksum, generated-SQL review, temporary-database introspection,
-  restore, and query-plan gates. Drizzle-generated Valibot select/insert schemas now cover all
-  seven tables, with update schemas only for mutable lifecycle rows. Explicit refinements enforce
-  UUIDv7 identifiers, SQL-aligned counters, checksums, and valid JSON/object text without losing
-  nullable or partial-update semantics. Strict storage schemas reject unknown and caller-supplied
+  application. Review hardening now also enforces object-root JSON in SQLite for report metadata
+  and incident details, regenerates the unpublished initial migration rather than adding
+  compatibility history, and makes every fresh-database fixture apply only checksum-verified
+  statements through Dashboard's native SQLite runner. That runner validates the canonical graph,
+  holds an immediate transaction across validation and application, and records the reviewed SQL
+  checksum in the owned `schema_migrations` ledger. Before any transaction it requires foreign
+  keys and check constraints to be enforced; before success it rejects stored foreign-key,
+  CHECK-constraint, or general SQLite integrity failures. Focused tests cover malformed and
+  non-object JSON, SQL/snapshot tampering, manifest shape/order, strict tables, enforcement and
+  integrity failures, transactional rollback, unknown-schema rejection, Valibot round-trips, and
+  query plans; the migration/database subset passes 26/26 tests.
+- Migration graph validation runs through the read-only `drizzle-kit check` CLI in the foundation
+  job. The PR workflow never combines execution of contributor-controlled code with a
+  `pull-requests: write` token, so the same gate works for trusted branches and forks. It
+  complements rather than replaces Dashboard's checksum, generated-SQL review,
+  temporary-database introspection, restore, and query-plan gates. Drizzle-generated Valibot
+  select/insert schemas cover all seven tables, with narrow operation schemas only for mutable
+  lifecycle rows. Explicit refinements enforce UUIDv7 identifiers, SQL-aligned counters,
+  checksums, and valid JSON/object text. Strict storage schemas reject unknown and caller-supplied
   generated fields, and an integration test round-trips a migrated Drizzle row through Valibot.
-  A separate foundation job checks the qualification probes, greenfield source, generated docs,
-  and local migration graph on every PR and main push.
-- The full existing application also passes on the selected Bun revision: production frontend
-  and backend builds, 705/705 frontend tests, and 738/738 backend tests. This protects current
-  behavior while the replacement is still built beside it.
-
-[#396]: /tasks/396
+- The selected Bun revision passes production frontend and backend builds, 705/705 frontend
+  tests, and 738/738 backend tests after host promotion. These gates protect current behavior
+  while the replacement is still built beside it.
 
 ## Executive Decision
 
@@ -104,7 +109,7 @@ build it as a **Bun-native modular monolith**:
   enqueues them.
 - API, realtime, database, route, configuration, and runtime reference documentation is
   generated and exposed through a new `/docs` page.
-- Releases are immutable, pin an exact Bun revision and digest, and are activated atomically.
+- Releases are immutable, record an exact Bun revision, and are activated atomically.
 
 This design deliberately has **no REST compatibility layer, legacy WebSocket protocol,
 dual database schema, compatibility views, old payload parsers, or runtime fallback path**.
@@ -137,14 +142,14 @@ is recreated manually after cutover through the new system.
   SQLite-specific operations.
 - Automatic schema push/synchronization against production.
 - One global frontend store containing server state, form state, route state, and UI state.
-- Automatically adopting every new Bun canary. Canary promotion is a verified release
-  decision.
+- Custom mirroring or a repository-wide source-revision pin for Bun Canary. CI qualifies the
+  selected channel, while each immutable release records its resolved revision.
 
 ## Decision Record
 
 | Area                     | Greenfield choice                            | Why                                                                                                  |
 | ------------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Runtime/server           | Exact Bun 1.4 canary pin + `Bun.serve`       | Keeps the proven Bun-native deployment model and removes framework duplication.                      |
+| Runtime/server           | Bun 1.4 Canary channel + `Bun.serve`         | Keeps the proven Bun-native deployment model and removes framework duplication.                      |
 | Application API          | tRPC v11 Fetch adapter                       | Browser and automations are permanently TypeScript; end-to-end contracts provide real value.         |
 | Browser realtime         | tRPC SSE with `tracked()` event IDs          | Native Fetch transport, automatic reconnect, resumable events, and no Node WebSocket adapter.        |
 | Gateway transport        | Bun native outbound `WebSocket`              | OpenClaw Gateway is already a WebSocket protocol and remains an external integration boundary.       |
@@ -192,23 +197,21 @@ privileged mutation.
 
 ## Bun 1.4 Runtime Baseline
 
-### Verified canary state
+### Audited qualification state
 
-| Item                               | Verified value                                                     |
-| ---------------------------------- | ------------------------------------------------------------------ |
-| Running production release runtime | `1.4.0-canary.1+e82022145`                                         |
-| Production runtime commit date     | 2026-07-29 00:16:39 UTC                                            |
-| Selected official ARM64 canary     | `1.4.0-canary.1+1f447a73e`                                         |
-| Selected full commit               | `1f447a73ebf6a86912a3f11b00bd6fbb5f82b6c0`                         |
-| Selected commit date               | 2026-08-03 20:25:16 UTC                                            |
-| Canary asset update                | 2026-08-03 21:01:18 UTC                                            |
-| ARM64 asset SHA-256                | `bed2a17f337d44d00dc26e9ec7a456cc521af4a9e82e02028cc69dddc696437d` |
-| ARM64 executable SHA-256           | `fc8df2fffa371853ff695a2438a3c020148d6d4cb3525b96a467d254761e8525` |
+| Item                               | Verified value                             |
+| ---------------------------------- | ------------------------------------------ |
+| Repository channel                 | `canary`                                   |
+| Required runtime version           | `1.4.0`                                    |
+| Running production release runtime | `1.4.0-canary.1+e82022145`                 |
+| Audited qualification candidate    | `1.4.0-canary.1+43783cedd`                 |
+| Audited full revision              | `43783cedd5653fa29bb9ac83df34633eae10fe75` |
+| Audited commit date                | 2026-08-03 22:02:12 UTC                    |
 
-The GitHub `canary` release object's original publication timestamp is stale. Runtime tooling
-must therefore verify the asset digest, the commit named in the release body, and the
-downloaded binary's own `bun --revision`; it must not trust the release title or publication
-timestamp alone.
+The audited revision is evidence for this qualification round, not a repository-wide pin.
+Normal CI resolves the `canary` channel and runs the complete gate set. Release creation then
+captures the resolved revision in the immutable release manifest, preserving exact deployment
+identity without custom Bun download or mirroring infrastructure.
 
 ### What Bun 1.4 changes
 
@@ -248,11 +251,14 @@ environment against the exact candidate binary:
 6. `bun test --isolate` tests for fake timers, leaked handles, deterministic shutdown, and
    bounded concurrency.
 
-The chosen Bun revision is then recorded in `.bun-version`, the release manifest, generated
-runtime documentation, and the production runtime directory. CI must validate the runtime's full
-`Bun.revision` before installing dependencies because `setup-bun` accepts release versions and
-channels, not raw commit SHAs. `bun-types` must be lockfile pinned to a matching canary snapshot
-rather than floating independently.
+`.bun-version` selects the `canary` channel through the official `setup-bun` action. The serving
+process enforces Bun `1.4.0`, while the runtime revision remains diagnostic until release creation
+records it as part of the immutable build identity. When Bun 1.4 is officially released, the
+version file changes to `1.4.0` without redesigning CI or deployment. npm does not publish a
+`bun-types` snapshot for every runtime canary: the repository pins and qualifies the latest
+available snapshot (`1.4.0-canary.20260519T150915`) instead of claiming source-revision parity.
+The types pin is requalified only during an explicit Bun/types upgrade round and is replaced by
+the official Bun 1.4 types when stable ships.
 
 ### Server and build shape
 
@@ -641,13 +647,12 @@ empty database and introspects `sqlite_schema`; every Dashboard-owned table must
 `STRICT`. This explicit, tested SQLite extension is preferable to pretending Drizzle generated
 an invariant it currently cannot represent.
 
-Pull requests that change the migration graph also run Drizzle's official `actions/check`
-composite action, pinned to the exact reviewed Drizzle commit. The required check detects
-non-commutative migration branches and posts a single conflict report on the PR. Branch
-protection requires the branch to be current with its base so a previously green result cannot
-remain stale after a conflicting migration merges. This check detects graph conflicts; it does
-not prove Dashboard-specific constraints, data safety, restore behavior, or runtime schema
-agreement.
+Pull requests run the lockfile-pinned `drizzle-kit check` CLI in the read-only foundation job.
+It validates the snapshot DAG without giving contributor-controlled code a pull-request write
+token. Branch protection requires the branch to be current with its base so a previously green
+result cannot remain stale after a conflicting migration merges. This check detects graph
+conflicts; it does not prove Dashboard-specific constraints, data safety, restore behavior, or
+runtime schema agreement.
 
 At this audit, npm's stable tags are `drizzle-orm@0.45.2` and `drizzle-kit@0.31.10`, while the
 official current Bun guide recommends the v1 release-candidate line and npm's `rc` tag is
@@ -751,12 +756,11 @@ the Drizzle schema and completed with the tested SQLite `STRICT` table option. F
 generated by Drizzle Kit, reviewed as SQL, immutable, checksummed, transactional where SQLite
 permits, and registered in an explicit manifest.
 
-The snapshot files form Drizzle Kit's conflict-analysis DAG, but the Bun runtime migrator reads
-folder names in lexicographic order. Dashboard therefore verifies valid 14-digit timestamp
-prefixes, unique full folder names, manifest order, SQL checksums, snapshot checksums, and the
-absence of unreviewed directories before applying anything. `drizzle-kit check` must be green
-before release; stock Drizzle name-based pending detection is not accepted as the integrity
-boundary.
+The snapshot files form Drizzle Kit's conflict-analysis DAG. Dashboard's runtime loader applies
+the explicit manifest order after verifying valid 14-digit timestamp prefixes, unique full folder
+names, lexicographic ordering, SQL checksums, snapshot checksums, and the absence of unreviewed
+directories. `drizzle-kit check` must be green before release; stock Drizzle name-based pending
+detection is not accepted as the integrity boundary.
 Startup acquires a migration lock, creates and verifies a WAL-safe snapshot before a schema
 change, and rejects unknown or checksum-mismatched history.
 
@@ -893,7 +897,7 @@ Documentation generation is a product feature and a CI invariant, not an optiona
 | Drizzle schema                  | intended tables, columns, types, relations, constraints, and declared indexes                |
 | Applied temporary SQLite schema | tables, columns, checks, foreign keys, indexes, partial predicates                           |
 | Browser route registry          | URL, navigation label, feature owner, query/search schema, required procedures               |
-| Lockfile and Bun manifest       | exact direct versions, Bun revision/digest, build identity                                   |
+| Lockfile and Bun policy         | exact direct versions, selected channel/version, build identity                              |
 
 The database generator compares Drizzle's declared schema with a temporary SQLite database
 created by applying every tracked migration, then inspects `sqlite_schema`,
@@ -1045,7 +1049,8 @@ boundary check unless an evaluated Oxc type-check mode proves equivalent for thi
 - Every repository runs against a real temporary `bun:sqlite` database with foreign keys and
   production PRAGMAs.
 - Migrations are tested only against the new schema's own supported versions, beginning with an
-  empty database, then verified with `foreign_key_check`, `quick_check`, and schema snapshots.
+  empty database, then verified with constraint-enforcement PRAGMAs, `foreign_key_check`, full
+  `integrity_check`, and schema snapshots.
 - tRPC procedures are tested through `createCaller` for domain behavior and through Bun HTTP
   for cookies, headers, aborts, batching, and serialization.
 - Realtime tests force the exact race windows: mutation before subscription, during snapshot,
@@ -1060,8 +1065,8 @@ boundary check unless an evaluated Oxc type-check mode proves equivalent for thi
 
 Hosted CI may parallelize independent jobs within runner limits. On the VPS, `verify` is
 sequential and capped; deployment runs only lightweight artifact, schema-copy, and readiness
-checks. A scheduled latest-canary workflow runs in CI, not production, and reports whether a
-new revision passes qualification.
+checks. Every pull request and `main` run resolves the selected Canary channel and executes the
+qualification job before a release can be promoted.
 
 ## Deployment and Runtime Layout
 
@@ -1090,13 +1095,13 @@ production/
     logs/
 ```
 
-The release manifest contains Git commit, clean-tree state, Bun revision/digest, lockfile hash,
+The release manifest contains Git commit, clean-tree state, Bun revision, lockfile hash,
 direct package versions, schema migration/checksum set, asset hashes, docs hash, build commands,
 and required process roles. It contains no secrets.
 
 Deployment flow:
 
-1. Build and test one artifact using the exact pinned Bun runtime.
+1. Build and test one artifact using the same resolved Bun runtime throughout the build.
 2. Transfer or materialize it into a new immutable release directory and verify every hash.
 3. Acquire the deployment lease, drain active jobs, enter maintenance mode, and quiesce all
    database writers.
@@ -1194,7 +1199,7 @@ compatibility migration inside it.
 - qualify the latest Bun canary, tRPC Fetch/SSE, frontend build mode, Drizzle/native SQLite
   behavior, SQLite concurrency, and the TanStack DB direct-write model;
 - measure current bundle, latency, memory, job, chat, and database baselines; and
-- lock ADRs and exact package/runtime versions.
+- lock ADRs, exact package versions, and the Bun channel/version policy.
 
 **Exit gate:** every architecture risk marked mandatory below has a passing executable spike.
 
@@ -1268,7 +1273,8 @@ The target choices are fixed unless one of these tests disproves the underlying 
    synchronization, optimistic-conflict handling, and route teardown without duplicate rows.
 6. **Drizzle on Bun SQLite:** verify sync transactions, prepared statements, the `sql` tagged
    template, partial/unique indexes, generated migrations, Valibot row schemas, native-client
-   access, and query plans on the exact pinned Drizzle and Bun revisions.
+   access, and query plans on the exact pinned Drizzle version and resolved Bun qualification
+   candidate.
 7. **Bun canary shutdown:** verify graceful SSE, Gateway, prepared-statement, worker lease, and
    child-process cleanup under systemd stop/restart.
 8. **Resource budgets:** measure build/test and representative privileged jobs in cgroups before
@@ -1284,8 +1290,8 @@ The rewrite is ready only when all of the following are true:
 - every item in the frontend parity table has an automated acceptance test or named manual
   check with evidence;
 - every old endpoint is accounted for without preserving the old contract;
-- Bun runtime, type definitions, lockfile, artifact, and generated docs identify the same exact
-  revision set;
+- Bun runtime and generated docs agree on the 1.4 channel policy, the lockfile pins a compatible
+  `bun-types` snapshot, and each immutable artifact records its exact resolved runtime revision;
 - tRPC queries/mutations and SSE subscriptions pass adapter, reconnect, resync, abort, and
   backpressure tests on the production Bun revision;
 - Gateway chat passes streaming, ordering, reconciliation, restart, cancellation, and
@@ -1323,7 +1329,7 @@ not package memory alone:
 - [`bun test`](https://bun.com/docs/test)
 - [Full-stack development server and HTML imports](https://bun.com/docs/bundler/fullstack)
 - [Official canary release asset](https://github.com/oven-sh/bun/releases/tag/canary)
-- [Latest audited Bun commit](https://github.com/oven-sh/bun/commit/1f447a73ebf6a86912a3f11b00bd6fbb5f82b6c0)
+- [Latest audited Bun commit](https://github.com/oven-sh/bun/commit/43783cedd5653fa29bb9ac83df34633eae10fe75)
 
 ### tRPC and validation
 
@@ -1354,7 +1360,7 @@ not package memory alone:
 - [Drizzle Bun SQLite integration](https://orm.drizzle.team/docs/sqlite/connect-bun-sqlite)
 - [Drizzle parameterized SQL operator](https://orm.drizzle.team/docs/sqlite/sql)
 - [Drizzle Valibot integration](https://orm.drizzle.team/docs/valibot)
-- [Drizzle migration conflict action](https://github.com/drizzle-team/drizzle-orm/blob/v1.0.0-rc.4/actions/check/README.md)
+- [Drizzle Kit check](https://orm.drizzle.team/docs/drizzle-kit-check)
 - [SimpleWebAuthn server documentation](https://simplewebauthn.dev/docs/packages/server/)
 - [Oxc type-aware linting](https://oxc.rs/docs/guide/usage/linter/type-aware)
 - [Oxfmt](https://oxc.rs/docs/guide/usage/formatter)

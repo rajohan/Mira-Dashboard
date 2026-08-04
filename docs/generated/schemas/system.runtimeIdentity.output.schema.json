@@ -12,7 +12,7 @@
     },
     "versionWithRevision": {
       "type": "string",
-      "description": "Human-readable Bun canary version and short revision."
+      "description": "Human-readable Bun version and short diagnostic revision."
     }
   },
   "required": [

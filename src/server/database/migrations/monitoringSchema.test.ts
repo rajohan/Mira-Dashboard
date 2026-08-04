@@ -24,8 +24,8 @@ const insertIncidentSql = `
 `;
 
 describe("greenfield monitoring schema", () => {
-    test("enforces incident and notification lifecycle invariants", () => {
-        const database = openFreshMigratedDatabase();
+    test("enforces incident and notification lifecycle invariants", async () => {
+        const database = await openFreshMigratedDatabase();
 
         try {
             database.sqlite.run(insertIncidentSql, [
@@ -119,8 +119,8 @@ describe("greenfield monitoring schema", () => {
         }
     });
 
-    test("uses the declared partial indexes for live incident views", () => {
-        const database = openFreshMigratedDatabase();
+    test("uses the declared partial indexes for live incident views", async () => {
+        const database = await openFreshMigratedDatabase();
 
         try {
             const incidentPlan = database.sqlite
