@@ -310,6 +310,80 @@ function assertProcessMemory(processMemory: SseMemoryEvidenceCandidate["process"
     );
 }
 
+function freezeMemoryEvents(
+    memoryEvents: Readonly<CgroupV2MemoryEvents>
+): Readonly<CgroupV2MemoryEvents> {
+    return Object.freeze({ ...memoryEvents });
+}
+
+function freezeCgroupSnapshot(
+    snapshot: Readonly<CgroupV2Snapshot>
+): Readonly<CgroupV2Snapshot> {
+    return Object.freeze({
+        ...snapshot,
+        memoryEvents: freezeMemoryEvents(snapshot.memoryEvents),
+    });
+}
+
+function freezeAncestorSnapshot(
+    snapshot: Readonly<CgroupV2AncestorSnapshot>
+): Readonly<CgroupV2AncestorSnapshot> {
+    return Object.freeze({
+        ...snapshot,
+        memoryEvents: freezeMemoryEvents(snapshot.memoryEvents),
+    });
+}
+
+function freezeAncestorSnapshots(
+    snapshots: readonly Readonly<CgroupV2AncestorSnapshot>[]
+): readonly Readonly<CgroupV2AncestorSnapshot>[] {
+    return Object.freeze(snapshots.map((snapshot) => freezeAncestorSnapshot(snapshot)));
+}
+
+function freezeProcessMemorySnapshot(
+    snapshot: Readonly<ProcessMemorySnapshot>
+): Readonly<ProcessMemorySnapshot> {
+    return Object.freeze({ ...snapshot });
+}
+
+function freezeQualificationEvidence(
+    candidate: SseMemoryEvidenceCandidate,
+    memoryEventDelta: Readonly<CgroupV2MemoryEvents>
+): Readonly<SseMemoryQualificationEvidence> {
+    const ancestors = Object.freeze({
+        baseline: freezeAncestorSnapshots(candidate.cgroup.ancestors.baseline),
+        final: freezeAncestorSnapshots(candidate.cgroup.ancestors.final),
+    });
+    const cgroup = Object.freeze({
+        ancestors,
+        baseline: freezeCgroupSnapshot(candidate.cgroup.baseline),
+        final: freezeCgroupSnapshot(candidate.cgroup.final),
+        initial: freezeCgroupSnapshot(candidate.cgroup.initial),
+    });
+    const process = Object.freeze({
+        afterCleanup: freezeProcessMemorySnapshot(candidate.process.afterCleanup),
+        baseline: freezeProcessMemorySnapshot(candidate.process.baseline),
+        sampledPeak: freezeProcessMemorySnapshot(candidate.process.sampledPeak),
+    });
+    const rounds = Object.freeze(
+        candidate.rounds.map((round) => Object.freeze({ ...round }))
+    );
+
+    return Object.freeze({
+        cgroup,
+        durationMs: candidate.durationMs,
+        feed: Object.freeze({ ...candidate.feed }),
+        memoryEventDelta: freezeMemoryEvents(memoryEventDelta),
+        process,
+        proxyUpstreamUnavailableCount: candidate.proxyUpstreamUnavailableCount,
+        rounds,
+        runtime: Object.freeze({ ...candidate.runtime }),
+        subscriptionCount: candidate.subscriptionCount,
+        unitName: candidate.unitName,
+        verdict: "VALIDATED",
+    });
+}
+
 /**
  * Validates every bounded-load and memory invariant before publishing evidence.
  * @param candidate Raw qualification measurements.
@@ -408,11 +482,7 @@ export function validateSseMemoryEvidence(
         throw new Error("Bun revision is not a full commit SHA");
     }
 
-    return Object.freeze({
-        ...candidate,
-        memoryEventDelta: eventDelta,
-        verdict: "VALIDATED",
-    });
+    return freezeQualificationEvidence(candidate, eventDelta);
 }
 
 /**

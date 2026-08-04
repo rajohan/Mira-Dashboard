@@ -15,6 +15,8 @@ type QualificationCliArguments =
     | { mode: "child"; resultPath: string; unitName: string }
     | { mode: "parent" };
 
+const qualificationFailureMessage = "SSE memory qualification failed";
+
 function requiredExecutable(name: string): string {
     const executable = Bun.which(name);
     if (executable === null) {
@@ -51,6 +53,19 @@ export function parseSseMemoryCliArguments(
     throw new TypeError(
         "Usage: runSseMemoryQualification.ts [--child --result=/absolute/path --unit=mira-dashboard-sse-memory-<uuid>]"
     );
+}
+
+/**
+ * Formats qualification failures without discarding nested causes or aggregate errors.
+ * @param error Unknown failure caught at the CLI boundary.
+ * @returns Plain-text diagnostic safe for stderr.
+ */
+export function formatSseMemoryQualificationError(error: unknown): string {
+    if (!(error instanceof Error)) return qualificationFailureMessage;
+    const inspected = Bun.inspect(error, { colors: false });
+    return error.message.length > 0 && !inspected.includes(error.message)
+        ? `${error.message}\n${inspected}`
+        : inspected;
 }
 
 async function runChild(resultPath: string, unitName: string): Promise<void> {
@@ -106,9 +121,7 @@ if (import.meta.main) {
     try {
         await main(Bun.argv.slice(2));
     } catch (error) {
-        process.stderr.write(
-            `${error instanceof Error ? error.message : "SSE memory qualification failed"}\n`
-        );
+        process.stderr.write(`${formatSseMemoryQualificationError(error)}\n`);
         process.exitCode = 1;
     }
 }

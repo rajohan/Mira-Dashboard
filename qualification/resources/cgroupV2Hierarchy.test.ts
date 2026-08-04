@@ -23,4 +23,10 @@ describe("cgroup v2 hierarchy", () => {
             );
         }
     });
+
+    test("rejects a leaf directly below the unified root", () => {
+        expect(() => ancestorCgroupV2Paths("/probe.service")).toThrow(
+            "no controller-bearing ancestor"
+        );
+    });
 });

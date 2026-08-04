@@ -134,12 +134,6 @@ export function parseCgroupV2MemoryEvents(value: string): Readonly<CgroupV2Memor
         counters.set(name, parseNonnegativeInteger(counter, `memory.events ${name}`));
     }
 
-    for (const name of requiredMemoryEventNames) {
-        if (!counters.has(name)) {
-            throw new Error(`Invalid cgroup v2 memory.events: missing ${name}`);
-        }
-    }
-
     function getRequiredCounter(name: (typeof requiredMemoryEventNames)[number]) {
         const counter = counters.get(name);
         if (counter === undefined) {
@@ -239,9 +233,10 @@ export async function readCgroupV2ControlFile(
     try {
         return await Bun.file(filePath).text();
     } catch (error) {
-        throw new Error(`Could not read cgroup v2 control file ${fileName}`, {
-            cause: error,
-        });
+        throw new Error(
+            `Could not read cgroup v2 control file ${fileName} for ${cgroupPath}`,
+            { cause: error }
+        );
     }
 }
 

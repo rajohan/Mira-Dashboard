@@ -115,7 +115,7 @@ export function assertCgroupAncestorResourcePolicy(
  */
 export function assertCgroupResourcePolicy(
     snapshot: Readonly<CgroupV2Snapshot>,
-    expectedCgroupPath?: string
+    expectedCgroupPath: string
 ): void {
     const policy = sseMemoryQualificationPolicy.cgroup;
     assertExactLimit("memory.high", snapshot.memoryHighBytes, policy.memoryHighBytes);
@@ -146,7 +146,5 @@ export function assertCgroupResourcePolicy(
             `SSE memory qualification requires OOMPolicy=${policy.oomPolicy}`
         );
     }
-    if (expectedCgroupPath !== undefined) {
-        assertSseMemoryUnitCgroupPath(snapshot.path, expectedCgroupPath);
-    }
+    assertSseMemoryUnitCgroupPath(snapshot.path, expectedCgroupPath);
 }

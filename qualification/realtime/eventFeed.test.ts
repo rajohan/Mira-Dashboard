@@ -155,9 +155,11 @@ describe("qualification event feed", () => {
         const subscription = eventFeed.subscribe({ signal: abortController.signal });
         const firstEvent = subscription.next();
         const maximumPayload = "a".repeat(qualificationEventLimits.maximumPayloadBytes);
+        const overflowEventCount =
+            qualificationEventLimits.maximumSubscriberQueueEvents + 2;
         await waitFor(() => eventFeed.activeSubscriberCount === 1);
 
-        for (let value = 1; value <= 18; value += 1) {
+        for (let value = 1; value <= overflowEventCount; value += 1) {
             eventFeed.publish({
                 kind: "qualification.changed",
                 payload: maximumPayload,
@@ -168,7 +170,7 @@ describe("qualification event feed", () => {
         eventFeed.publish({
             kind: "qualification.changed",
             payload: maximumPayload,
-            value: 19,
+            value: overflowEventCount + 1,
         });
 
         const deliveredFirstEvent = await firstEvent;
@@ -194,12 +196,6 @@ describe("qualification event feed", () => {
             qualificationEventLimits.maximumSubscriberQueueEvents
         );
         expect(metrics.maximumObservedQueuedPayloadBytes).toBe(
-            qualificationEventLimits.maximumSubscriberQueuedPayloadBytes
-        );
-        expect(metrics.maximumObservedQueueDepth).toBeLessThanOrEqual(
-            qualificationEventLimits.maximumSubscriberQueueEvents
-        );
-        expect(metrics.maximumObservedQueuedPayloadBytes).toBeLessThanOrEqual(
             qualificationEventLimits.maximumSubscriberQueuedPayloadBytes
         );
     });

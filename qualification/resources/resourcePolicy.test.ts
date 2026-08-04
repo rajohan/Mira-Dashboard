@@ -92,12 +92,23 @@ describe("SSE memory qualification resource policy", () => {
     });
 
     test("accepts the exact reviewed cgroup policy", () => {
-        expect(() => assertCgroupResourcePolicy(policySnapshot())).not.toThrow();
+        const exactSnapshot = policySnapshot();
+        const alternatePeriodSnapshot = policySnapshot({
+            cpuPeriodMicros: 50_000,
+            cpuQuotaMicros: 25_000,
+        });
+        expect(() =>
+            assertCgroupResourcePolicy(exactSnapshot, exactSnapshot.path)
+        ).not.toThrow();
         expect(() =>
             assertCgroupResourcePolicy(
-                policySnapshot({ cpuPeriodMicros: 50_000, cpuQuotaMicros: 25_000 })
+                alternatePeriodSnapshot,
+                alternatePeriodSnapshot.path
             )
         ).not.toThrow();
+        expect(() =>
+            assertCgroupResourcePolicy(exactSnapshot, "/user.slice/other.service")
+        ).toThrow("expected cgroup");
     });
 
     test("rejects missing, weaker, and stricter memory caps", () => {
@@ -111,7 +122,8 @@ describe("SSE memory qualification resource policy", () => {
             { memorySwapMaxBytes: "max" as const },
             { memorySwapMaxBytes: 1 },
         ]) {
-            expect(() => assertCgroupResourcePolicy(policySnapshot(overrides))).toThrow(
+            const snapshot = policySnapshot(overrides);
+            expect(() => assertCgroupResourcePolicy(snapshot, snapshot.path)).toThrow(
                 "SSE memory qualification requires"
             );
         }
@@ -126,7 +138,8 @@ describe("SSE memory qualification resource policy", () => {
             { cpuQuotaMicros: 60_000 },
             { oomGroup: false },
         ]) {
-            expect(() => assertCgroupResourcePolicy(policySnapshot(overrides))).toThrow(
+            const snapshot = policySnapshot(overrides);
+            expect(() => assertCgroupResourcePolicy(snapshot, snapshot.path)).toThrow(
                 "SSE memory qualification requires"
             );
         }
@@ -134,7 +147,10 @@ describe("SSE memory qualification resource policy", () => {
 
     test("requires ancestors that do not tighten the reviewed leaf policy", () => {
         expect(() =>
-            assertCgroupAncestorResourcePolicy([ancestorSnapshot()])
+            assertCgroupAncestorResourcePolicy([
+                ancestorSnapshot({ path: "/user.slice/user-1001.slice" }),
+                ancestorSnapshot({ path: "/user.slice" }),
+            ])
         ).not.toThrow();
         expect(() => assertCgroupAncestorResourcePolicy([])).toThrow(
             "requires cgroup ancestor evidence"
@@ -150,5 +166,15 @@ describe("SSE memory qualification resource policy", () => {
                 assertCgroupAncestorResourcePolicy([ancestorSnapshot(overrides)])
             ).toThrow("ancestor");
         }
+
+        expect(() =>
+            assertCgroupAncestorResourcePolicy([
+                ancestorSnapshot({ path: "/user.slice/user-1001.slice" }),
+                ancestorSnapshot({
+                    memoryMaxBytes: 256 * 1024 * 1024,
+                    path: "/user.slice",
+                }),
+            ])
+        ).toThrow("/user.slice memory.max");
     });
 });

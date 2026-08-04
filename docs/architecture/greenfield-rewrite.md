@@ -54,7 +54,7 @@
   raw-HTTP reference is sourced from separate method-specific response contracts and documents
   both readiness outcomes.
 - These focused gates currently pass on the exact candidate: qualification and server
-  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 54/54
+  TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 64/64
   qualification tests, 32/32 server/database tests, 4/4 documentation tests, and 4/4
   database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
@@ -194,6 +194,13 @@
   local command and is not part of ordinary hosted CI or the general qualification test command.
   Pure parsers, policy checks, feed limits, evidence rules, launcher construction, and one bounded
   native-socket mechanism test remain deterministic CI tests.
+- Review hardening now rejects every signal-terminated launcher instead of treating `exited` as a
+  sufficient success signal, reports the exact failing cgroup path, requires the expected leaf path
+  and every controller-bearing ancestor, preserves nested CLI failure causes, rejects malformed or
+  encoded HTTP framing and CR/LF cookie injection, and publishes a canonical deeply frozen evidence
+  object. These changes strengthen failure handling and deterministic coverage without changing the
+  measured workload, resource policy, transport, or accepted evidence, so the capped run was not
+  repeated.
 - The capped run passes on Bun `1.4.0` revision
   `43783cedd5653fa29bb9ac83df34633eae10fe75`. Six rounds and 24 subscriptions completed in
   7,746 ms. Every slow subscriber detached at the exact 16-event / 131,072-byte application queue

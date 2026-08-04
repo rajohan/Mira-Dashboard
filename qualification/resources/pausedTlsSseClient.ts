@@ -86,22 +86,25 @@ function decodeAvailableChunkedBodyPrefix(
             availablePayloadBytes,
             maximumBytes - bodyByteLength
         );
-        chunks.push(buffer.subarray(cursor, cursor + copiedPayloadBytes));
+        const payload = buffer.subarray(cursor, cursor + copiedPayloadBytes);
+        if (copiedPayloadBytes < size) {
+            chunks.push(payload);
+            bodyByteLength += copiedPayloadBytes;
+            return Buffer.concat(chunks, bodyByteLength);
+        }
+        const payloadEnd = cursor + size;
+        if (buffer.byteLength < payloadEnd + 2) {
+            return Buffer.concat(chunks, bodyByteLength);
+        }
+        if (!buffer.subarray(payloadEnd, payloadEnd + 2).equals(lineTerminator)) {
+            throw new Error("Paused SSE client received an invalid chunk terminator");
+        }
+        chunks.push(payload);
         bodyByteLength += copiedPayloadBytes;
+        cursor = payloadEnd + 2;
         if (bodyByteLength === maximumBytes) {
             return Buffer.concat(chunks, bodyByteLength);
         }
-        if (availablePayloadBytes < size) {
-            return Buffer.concat(chunks, bodyByteLength);
-        }
-        cursor += size;
-        if (buffer.byteLength < cursor + 2) {
-            return Buffer.concat(chunks, bodyByteLength);
-        }
-        if (!buffer.subarray(cursor, cursor + 2).equals(lineTerminator)) {
-            throw new Error("Paused SSE client received an invalid chunk terminator");
-        }
-        cursor += 2;
         if (size === 0) return Buffer.concat(chunks, bodyByteLength);
     }
     return Buffer.concat(chunks, bodyByteLength);
@@ -211,6 +214,9 @@ export async function openPausedTlsSseClient(
 ): Promise<PausedTlsSseClient> {
     if (publicUrl.protocol !== "https:" || publicUrl.port.length === 0) {
         throw new TypeError("Paused SSE client requires an explicit HTTPS port");
+    }
+    if (/[\r\n]/u.test(cookie)) {
+        throw new TypeError("Paused SSE client cookie must not contain CR or LF");
     }
     const endpoint = new URL("/trpc/events.stream", publicUrl);
     endpoint.searchParams.set("input", JSON.stringify({}));

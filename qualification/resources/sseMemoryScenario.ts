@@ -15,7 +15,6 @@ import {
     maximumProcessMemory,
     readProcessMemorySnapshot,
     type ProcessMemorySnapshot,
-    type ProcessMemorySampler,
     startProcessMemorySampler,
 } from "./processMemory.ts";
 import {
@@ -139,7 +138,6 @@ export async function runSseMemoryScenario(
     const eventFeed = new QualificationEventFeed();
     const roundEvidence: SseMemoryRoundEvidence[] = [];
     let sampledPeak: ProcessMemorySnapshot | undefined;
-    let processSampler: ProcessMemorySampler | undefined;
     let baselineProcess: ProcessMemorySnapshot | undefined;
     let baselineCgroup:
         | Awaited<ReturnType<typeof readCurrentCgroupV2Snapshot>>
@@ -179,11 +177,10 @@ export async function runSseMemoryScenario(
         assertCgroupAncestorResourcePolicy(baselineCgroupAncestors);
         baselineProcess = readProcessMemorySnapshot();
         sampledPeak = baselineProcess;
-        processSampler = startProcessMemorySampler(
+        const activeProcessSampler = startProcessMemorySampler(
             baselineProcess,
             sseMemoryQualificationPolicy.scenario.processSampleIntervalMs
         );
-        const activeProcessSampler = processSampler;
         cleanup.defer("SSE memory process sampler", () => {
             sampledPeak = activeProcessSampler.stop();
         });
@@ -252,7 +249,7 @@ export async function runSseMemoryScenario(
                     });
                 }
                 await Bun.sleep(0);
-                sampledPeak = processSampler.sample();
+                sampledPeak = activeProcessSampler.sample();
                 remainingRoundTime(roundDeadline);
             }
 
@@ -270,7 +267,7 @@ export async function runSseMemoryScenario(
                 remainingRoundTime(roundDeadline)
             );
             traceScenario(`round-${roundIndex + 1}-transport-clean`, startedAt);
-            sampledPeak = processSampler.sample();
+            sampledPeak = activeProcessSampler.sample();
             roundEvidence.push({
                 durationMs: performance.now() - roundStartedAt,
                 eventsPublished: roundPublishedEvents,

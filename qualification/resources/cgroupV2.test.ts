@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { type CgroupV2FileContents, parseCgroupV2Snapshot } from "./cgroupV2.ts";
+import {
+    type CgroupV2FileContents,
+    parseCgroupV2Snapshot,
+    readCgroupV2ControlFile,
+} from "./cgroupV2.ts";
 
 function fileContents(
     overrides: Partial<CgroupV2FileContents> = {}
@@ -125,5 +129,20 @@ describe("cgroup v2 snapshot parsing", () => {
             })
         );
         expect(snapshot.memoryEvents.oomGroupKill).toBe(0);
+    });
+
+    test("identifies the controller and membership path when reads fail", async () => {
+        const missingPath = `/mira-dashboard-missing-${Bun.randomUUIDv7()}`;
+        const failure = await readCgroupV2ControlFile(missingPath, "memory.max").then(
+            () => null,
+            (error: unknown) => error
+        );
+
+        if (!(failure instanceof Error)) {
+            throw new Error("Expected the missing cgroup controller read to fail");
+        }
+        expect(failure.message).toBe(
+            `Could not read cgroup v2 control file memory.max for ${missingPath}`
+        );
     });
 });

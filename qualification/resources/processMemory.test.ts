@@ -52,6 +52,23 @@ describe("process memory samples", () => {
         expect(() => sampler.sample()).toThrow("already stopped");
     });
 
+    test("propagates a stored sampling failure without reading again", () => {
+        let reads = 0;
+        const failure = new Error("read failed");
+        const sampler = startProcessMemorySampler(
+            { rssBytes: 100, unsafeFootprintBytes: 80 },
+            1000,
+            () => {
+                reads += 1;
+                throw failure;
+            }
+        );
+
+        expect(() => sampler.sample()).toThrow("Process memory sampling failed");
+        expect(() => sampler.stop()).toThrow("Process memory sampling failed");
+        expect(reads).toBe(1);
+    });
+
     test("rejects invalid sample intervals", () => {
         expect(() =>
             startProcessMemorySampler({ rssBytes: 1, unsafeFootprintBytes: 1 }, 0)

@@ -55,7 +55,6 @@ interface StoredQualificationEvent {
     readonly record: QualificationEventRecord;
 }
 
-const payloadEncoder = new TextEncoder();
 const queueBudgetErrorMessage =
     "Qualification event subscriber exceeded its queue budget";
 const payloadBudgetErrorMessage = `Qualification event payload exceeds ${qualificationEventLimits.maximumPayloadBytes} UTF-8 bytes`;
@@ -290,7 +289,7 @@ export class QualificationEventFeed {
 }
 
 function encodedPayloadByteLength(payload: string): number {
-    return payloadEncoder.encode(payload).byteLength;
+    return Buffer.byteLength(payload, "utf8");
 }
 
 function parseResumeSequence(resumeId: string | undefined): number {

@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
+import { qualificationEventLimits } from "../realtime/eventFeed.ts";
 import type { CgroupV2Snapshot } from "./cgroupV2.ts";
 import {
     ancestorCgroupV2Paths,
     type CgroupV2AncestorSnapshot,
 } from "./cgroupV2Hierarchy.ts";
+import { sseMemoryQualificationPolicy } from "./resourcePolicy.ts";
 import {
     memoryEventDifference,
     parseSseMemoryQualificationEvidence,
@@ -22,13 +24,26 @@ const cgroupPath = expectedSseMemoryUnitCgroupPath(
     currentQualificationUserId(),
     unitName
 );
+const cgroupPolicy = sseMemoryQualificationPolicy.cgroup;
+const scenarioPolicy = sseMemoryQualificationPolicy.scenario;
+const cpuPeriodMicros = 100_000;
+const cpuQuotaMicros = (cpuPeriodMicros * cgroupPolicy.cpuQuotaPercent) / 100;
+const expectedSubscriptionCount = scenarioPolicy.consumerCount * scenarioPolicy.rounds;
+const eventsPerRound = qualificationEventLimits.maximumSubscriberQueueEvents + 2;
+const totalPublishedEvents = eventsPerRound * scenarioPolicy.rounds;
+const roundDurationMs =
+    Math.min(
+        scenarioPolicy.roundDisconnectTimeoutMs,
+        scenarioPolicy.maximumDurationMs / scenarioPolicy.rounds
+    ) / 2;
+const baselineCgroupMemoryBytes = 80 * mebibyte;
 
 function cgroupSnapshot(
     overrides: Partial<CgroupV2Snapshot> = {}
 ): Readonly<CgroupV2Snapshot> {
     return {
-        cpuPeriodMicros: 100_000,
-        cpuQuotaMicros: 50_000,
+        cpuPeriodMicros,
+        cpuQuotaMicros,
         memoryCurrentBytes: 70 * mebibyte,
         memoryEvents: Object.freeze({
             high: 0,
@@ -38,14 +53,14 @@ function cgroupSnapshot(
             oomGroupKill: 0,
             oomKill: 0,
         }),
-        memoryHighBytes: 256 * mebibyte,
-        memoryMaxBytes: 384 * mebibyte,
-        memoryPeakBytes: 120 * mebibyte,
-        memorySwapMaxBytes: 0,
-        oomGroup: true,
+        memoryHighBytes: cgroupPolicy.memoryHighBytes,
+        memoryMaxBytes: cgroupPolicy.memoryMaxBytes,
+        memoryPeakBytes: cgroupPolicy.memoryHighBytes / 2,
+        memorySwapMaxBytes: cgroupPolicy.memorySwapMaxBytes,
+        oomGroup: cgroupPolicy.oomPolicy === "kill",
         path: cgroupPath,
         pidsCurrent: 8,
-        pidsMax: 32,
+        pidsMax: cgroupPolicy.tasksMax,
         ...overrides,
     };
 }
@@ -68,7 +83,7 @@ function ancestorSnapshots(
         memoryMaxBytes: "max",
         memorySwapMaxBytes: "max",
         path: ancestorPath,
-        pidsMax: 63_029,
+        pidsMax: cgroupPolicy.tasksMax + 1,
         ...overrides,
     }));
 }
@@ -80,18 +95,25 @@ function validCandidate(): SseMemoryEvidenceCandidate {
                 baseline: ancestorSnapshots(),
                 final: ancestorSnapshots(),
             },
-            baseline: cgroupSnapshot({ memoryCurrentBytes: 80 * mebibyte }),
+            baseline: cgroupSnapshot({
+                memoryCurrentBytes: baselineCgroupMemoryBytes,
+            }),
             final: cgroupSnapshot({ memoryCurrentBytes: 72 * mebibyte }),
             initial: cgroupSnapshot({ memoryCurrentBytes: 40 * mebibyte }),
         },
-        durationMs: 4000,
+        durationMs: roundDurationMs * scenarioPolicy.rounds,
         feed: {
             activeSubscribers: 0,
-            droppedSlowSubscribers: 24,
-            latestSequence: 108,
-            maximumObservedQueueDepth: 16,
-            maximumObservedQueuedPayloadBytes: 131_072,
-            retainedEvents: 108,
+            droppedSlowSubscribers: expectedSubscriptionCount,
+            latestSequence: totalPublishedEvents,
+            maximumObservedQueueDepth:
+                qualificationEventLimits.maximumSubscriberQueueEvents,
+            maximumObservedQueuedPayloadBytes:
+                qualificationEventLimits.maximumSubscriberQueuedPayloadBytes,
+            retainedEvents: Math.min(
+                totalPublishedEvents,
+                qualificationEventLimits.maximumRetainedEvents
+            ),
         },
         process: {
             afterCleanup: {
@@ -108,16 +130,16 @@ function validCandidate(): SseMemoryEvidenceCandidate {
             },
         },
         proxyUpstreamUnavailableCount: 0,
-        rounds: Array.from({ length: 6 }, () => ({
-            durationMs: 500,
-            eventsPublished: 18,
+        rounds: Array.from({ length: scenarioPolicy.rounds }, () => ({
+            durationMs: roundDurationMs,
+            eventsPublished: eventsPerRound,
         })),
         runtime: {
             hasGlobalEventSource: false,
             revision: "a".repeat(40),
             version: "1.4.0",
         },
-        subscriptionCount: 24,
+        subscriptionCount: expectedSubscriptionCount,
         unitName,
     };
 }
@@ -134,6 +156,60 @@ describe("SSE memory qualification evidence", () => {
             },
             verdict: "VALIDATED",
         });
+    });
+
+    test("returns a deeply frozen canonical copy", () => {
+        const candidate = validCandidate();
+        const mutableFeed = { ...candidate.feed };
+        const mutableFinalMemoryEvents = {
+            ...candidate.cgroup.final.memoryEvents,
+        };
+        candidate.feed = mutableFeed;
+        candidate.cgroup.final = cgroupSnapshot({
+            memoryEvents: mutableFinalMemoryEvents,
+        });
+
+        const evidence = validateSseMemoryEvidence(candidate);
+        const baselineAncestor = evidence.cgroup.ancestors.baseline.at(0);
+        const finalAncestor = evidence.cgroup.ancestors.final.at(0);
+        const firstRound = evidence.rounds.at(0);
+        if (
+            baselineAncestor === undefined ||
+            finalAncestor === undefined ||
+            firstRound === undefined
+        ) {
+            throw new Error("Expected canonical evidence fixtures");
+        }
+
+        expect(Object.isFrozen(evidence)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.ancestors)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.ancestors.baseline)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.ancestors.final)).toBeTrue();
+        expect(Object.isFrozen(baselineAncestor)).toBeTrue();
+        expect(Object.isFrozen(baselineAncestor.memoryEvents)).toBeTrue();
+        expect(Object.isFrozen(finalAncestor)).toBeTrue();
+        expect(Object.isFrozen(finalAncestor.memoryEvents)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.initial)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.initial.memoryEvents)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.baseline)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.baseline.memoryEvents)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.final)).toBeTrue();
+        expect(Object.isFrozen(evidence.cgroup.final.memoryEvents)).toBeTrue();
+        expect(Object.isFrozen(evidence.feed)).toBeTrue();
+        expect(Object.isFrozen(evidence.memoryEventDelta)).toBeTrue();
+        expect(Object.isFrozen(evidence.process)).toBeTrue();
+        expect(Object.isFrozen(evidence.process.afterCleanup)).toBeTrue();
+        expect(Object.isFrozen(evidence.process.baseline)).toBeTrue();
+        expect(Object.isFrozen(evidence.process.sampledPeak)).toBeTrue();
+        expect(Object.isFrozen(evidence.rounds)).toBeTrue();
+        expect(Object.isFrozen(firstRound)).toBeTrue();
+        expect(Object.isFrozen(evidence.runtime)).toBeTrue();
+
+        mutableFeed.activeSubscribers = 1;
+        mutableFinalMemoryEvents.high = 1;
+        expect(evidence.feed.activeSubscribers).toBe(0);
+        expect(evidence.cgroup.final.memoryEvents.high).toBe(0);
     });
 
     test("rejects memory pressure and sampled process growth", () => {
@@ -200,7 +276,10 @@ describe("SSE memory qualification evidence", () => {
 
         const cgroupRetention = validCandidate();
         cgroupRetention.cgroup.final = cgroupSnapshot({
-            memoryCurrentBytes: 113 * mebibyte,
+            memoryCurrentBytes:
+                baselineCgroupMemoryBytes +
+                scenarioPolicy.maximumPostCleanupCgroupIncreaseBytes +
+                1,
         });
         expect(() => validateSseMemoryEvidence(cgroupRetention)).toThrow(
             "Post-cleanup cgroup memory increase"
@@ -244,12 +323,20 @@ describe("SSE memory qualification evidence", () => {
             parseSseMemoryQualificationEvidence(JSON.stringify(unknownField))
         ).toThrow();
 
-        const tampered = {
+        const tamperedInvariant = {
+            ...evidence,
+            feed: { ...evidence.feed, activeSubscribers: 1 },
+        };
+        expect(() =>
+            parseSseMemoryQualificationEvidence(JSON.stringify(tamperedInvariant))
+        ).toThrow("Active subscribers after cleanup");
+
+        const tamperedDelta = {
             ...evidence,
             memoryEventDelta: { ...evidence.memoryEventDelta, high: 1 },
         };
         expect(() =>
-            parseSseMemoryQualificationEvidence(JSON.stringify(tampered))
+            parseSseMemoryQualificationEvidence(JSON.stringify(tamperedDelta))
         ).toThrow("invalid high");
     });
 });

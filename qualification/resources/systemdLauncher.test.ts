@@ -5,8 +5,10 @@ import {
     buildSystemdLauncherCommand,
     buildSystemdRunSubprocessSpecification,
     buildSystemctlSubprocessSpecification,
+    classifySystemdLauncherTermination,
     createSseMemoryUnitName,
     ensureTransientUnitStopped,
+    formatSystemdLauncherFailure,
     parseSystemdUnitState,
     systemdLauncherProcessPolicy,
     type SystemdLauncherOptions,
@@ -131,6 +133,40 @@ describe("SSE memory systemd launcher", () => {
                 bunExecutable: "bun",
             })
         ).toThrow("Bun executable must be an absolute path");
+    });
+
+    test("classifies signal termination without assuming every SIGKILL is timeout", () => {
+        expect(classifySystemdLauncherTermination(null, 35_001, 35_000)).toBeUndefined();
+        expect(classifySystemdLauncherTermination("SIGKILL", 35_000, 35_000)).toEqual({
+            kind: "deadline",
+            signalCode: "SIGKILL",
+        });
+        expect(classifySystemdLauncherTermination("SIGKILL", 1000, 35_000)).toEqual({
+            kind: "signal",
+            signalCode: "SIGKILL",
+        });
+        expect(classifySystemdLauncherTermination("SIGTERM", 1000, 35_000)).toEqual({
+            kind: "signal",
+            signalCode: "SIGTERM",
+        });
+    });
+
+    test("preserves bounded launcher and post-mortem diagnostics", () => {
+        expect(
+            formatSystemdLauncherFailure(
+                "launcher was terminated",
+                "phase=load\n",
+                "child warning\n",
+                "Result=signal\nMemoryPeak=1048576\n"
+            )
+        ).toBe(
+            [
+                "launcher was terminated",
+                "launcher stdout:\nphase=load",
+                "launcher stderr:\nchild warning",
+                "systemd post-mortem:\nResult=signal\nMemoryPeak=1048576",
+            ].join("\n")
+        );
     });
 
     test("requires HOME only for the child while keeping secrets out", () => {

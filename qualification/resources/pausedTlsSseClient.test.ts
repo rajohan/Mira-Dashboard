@@ -81,6 +81,60 @@ describe("paused native TLS SSE client", () => {
         );
     });
 
+    test("rejects duplicate and encoded response headers", () => {
+        const duplicateContentType = responseHeaders.replace(
+            "Content-Type: text/event-stream",
+            "Content-Type: text/event-stream\r\ncontent-type: text/event-stream"
+        );
+        const compressedResponse = responseHeaders.replace(
+            "Transfer-Encoding: chunked",
+            "Transfer-Encoding: chunked\r\nContent-Encoding: gzip"
+        );
+
+        expect(() => hasConnectedSseFrame(duplicateContentType)).toThrow(
+            "duplicate content-type"
+        );
+        expect(() => hasConnectedSseFrame(compressedResponse)).toThrow(
+            "identity content encoding"
+        );
+    });
+
+    test("rejects invalid chunk sizes and terminators", () => {
+        const connectedFrame = "event: connected\ndata: {}\n\n";
+
+        expect(() => hasConnectedSseFrame(`${responseHeaders}not-hex\r\n`)).toThrow(
+            "invalid chunk size"
+        );
+        expect(() => hasConnectedSseFrame(`${responseHeaders}2\r\nab!!`)).toThrow(
+            "invalid chunk terminator"
+        );
+        expect(() =>
+            hasConnectedSseFrame(`${responseHeaders}1b\r\n${connectedFrame}!!`)
+        ).toThrow("invalid chunk terminator");
+    });
+
+    test("rejects CR and LF in the raw cookie header", async () => {
+        for (const invalidCookie of [
+            `${qualificationCookie}\rInjected: true`,
+            `${qualificationCookie}\nInjected: true`,
+        ]) {
+            const failure = await openPausedTlsSseClient(
+                new URL("https://127.0.0.1:1"),
+                "unused certificate authority",
+                invalidCookie,
+                1
+            ).then(
+                () => null,
+                (error: unknown) => error
+            );
+
+            if (!(failure instanceof Error)) {
+                throw new Error("Expected the invalid cookie to be rejected");
+            }
+            expect(failure.message).toContain("cookie must not contain CR or LF");
+        }
+    });
+
     test("propagates a paused TLS receive window to the bounded event queue", async () => {
         const cleanup = new AsyncCleanupStack();
         let client: PausedTlsSseClient | undefined;
