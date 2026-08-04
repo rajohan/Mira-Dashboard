@@ -226,13 +226,21 @@
   hashes canonical JSON for immutable run idempotency. Bounded JSON objects reject cycles,
   non-JSON values, sparse arrays, excessive depth, and payloads over 64 KiB; report
   bodies and problem counts have separate explicit limits.
-- The synchronous service and narrow Drizzle repository execute every accepted snapshot inside one
-  SQLite `IMMEDIATE` transaction. The transaction inserts the immutable report and monitor run,
+- `Bun.serve` rejects request bodies above 16 MiB before the tRPC Fetch adapter parses them. The
+  transport ceiling covers the bounded worst-case monitoring snapshot, including JSON escaping,
+  while preventing Bun's much larger default request-body allowance from becoming an unauthenticated
+  memory-amplification path.
+- The synchronous transaction core and narrow Drizzle repository execute every accepted snapshot
+  inside one SQLite `IMMEDIATE` transaction. The transaction inserts the immutable report and monitor run,
   creates or updates incidents, records one immutable observation per run and incident, resolves
   absent active incidents, increments the generation on recurrence, creates exactly one dashboard
   notification per opened generation, marks its unread notification read on resolution, and writes
   compact transactional realtime invalidation events for each changed report, incident, and
   notification.
+- A named Effect application service wraps that synchronous core without suspending inside the
+  SQLite callback. Validation and immutable-run conflicts use tagged typed failures; unknown
+  repository or invariant failures remain defects. The best-effort event-pump wake runs as an Effect
+  only after a successful commit and cannot turn committed state into a failed submission.
 - Retry behavior is explicit. An identical run ID and canonical submission checksum is a no-op; the
   same run ID with different content is a conflict. Older runs remain queryable as reports but do
   not mutate lifecycle state. Equal completion times use the lowercase UUIDv7 run ID as a stable
@@ -250,8 +258,77 @@
   deletion is intentionally not performed in the request transaction: the approved architecture
   assigns bounded batch deletion and checkpoint work to the later resource-scoped maintenance job.
 - Focused normalization, lifecycle, rollback, stale-order, schema-invariant, and query-plan coverage
-  passes 21/21 tests. The complete server/database suite passes 50/50, server TypeScript passes,
+  passes 25/25 tests. The complete server/database suite passes 54/54, server TypeScript passes,
   Drizzle reports both `check: ok` and schema `no_changes`, and Oxfmt/Oxlint pass on the slice.
+
+### 2026-08-04 — Durable realtime event pump implemented
+
+- The bounded async queue proven by the SSE memory qualification is now a shared production
+  primitive rather than a copied implementation. Both the qualification feed and the durable pump
+  enforce independent event-count and queued UTF-8 payload-byte ceilings, wake pending readers
+  directly, fail deterministic slow consumers, and release pending reads on abort or close.
+- A narrow Drizzle realtime store validates every immutable outbox row through the generated
+  Valibot select schema and reads only ordered, bounded pages. Every hot-path batch reads its
+  cursor bounds and page inside one SQLite read transaction, so concurrent prefix deletion cannot
+  move the page beyond a required row without an explicit resync. Its cursor window combines
+  retained `MIN(id)` / `MAX(id)` / row count with SQLite's durable `AUTOINCREMENT` high-water mark,
+  so a completely pruned journal still distinguishes “no events ever” from “history was removed.”
+- Each subscription validates a canonical numeric cursor, captures a stable replay boundary, joins
+  the live subscriber set before yielding replay pages, and filters any central-poll event at or
+  below that boundary. Events committed during replay therefore enter the bounded live queue once,
+  without a replay/live race gap. Cursors ahead of the tail fail explicitly; cursors below the
+  retained prefix receive one terminal `resync-required` control delivery. Topic-filtered
+  subscribers advance their retention cursor to the predecessor of each sparse replay/live match
+  while preserving every unacknowledged matching delivery, and a terminal live failure interrupts
+  replay immediately unless request cancellation or pump closure has already won. Topic names are
+  trimmed, non-empty, and length-bounded at the store boundary. A process-local cap covers both
+  subscriptions still opening and subscriptions already attached, so concurrent replay setup cannot
+  bypass capacity control.
+- One coalesced pump owns live database reads. Its synchronous core returns an `active`, `idle`, or
+  `immediate` poll plan; a scoped Effect fiber owns timing, cancellation, and the capacity-one
+  dropping wake queue. Local post-commit `wake()` calls request an immediate page, while commits
+  from another SQLite connection are recovered by a 250 ms active poll. The poll backs off to five
+  seconds with no subscribers, drains at most 16 rows per page, caps the full
+  serialized change delivery at 8 KiB, and disconnects a subscriber that exceeds 16 queued events
+  or 128 KiB of serialized deliveries. A malformed over-budget row fails only subscribers whose
+  topic filter selects it; irrelevant subscribers advance safely and continue. Subscriber turnover
+  raises the central cursor to the lowest cursor already observed by an active subscriber,
+  preventing an obsolete global cursor from forcing a safe newer subscriber to resync. Subscriber-
+  local cursor failures terminate only that subscriber. Central poll reads and per-subscription
+  open/replay reads use the same Effect `Schedule` for bounded `SQLITE_BUSY*` exponential backoff;
+  a wake cannot bypass an in-progress retry delay and one successful operation resets the schedule.
+  A subscription-local non-retryable failure or exhausted retry budget terminates that subscription
+  with a safe typed store error. The corresponding central-poll failure terminates all subscriptions
+  attached to that failed polling attempt, while the scoped runner remains available for later
+  recovery. An unexpected runner defect stays outside the typed error channel, records only a safe
+  structured failure marker, and poisons/closes the scoped service so future streams fail fast; its
+  raw `Cause` is not passed to logging until a redacting Effect logger bridge exists.
+- Bounded page polls and subscription opens use count-free cursor bounds. The linear retained-row
+  count is sampled on a separate 60-second cadence at most, whether the pump is active or idle.
+  Metrics expose that count together with its sample timestamp, current retained cursor bounds, the
+  oldest cursor still required by an attached subscriber, active subscribers, polls/failures,
+  wakeups, subscriber-capacity rejections, scheduled retryable poll and subscription-read retries,
+  subscription-read failures,
+  catch-up batch size, queue high-water marks, topic-filtered deliveries, slow-consumer drops,
+  delivery-preparation failures, and forced resyncs. Delivery-preparation failures count rejected
+  preparation attempts across replay and live delivery. `pollFailures` counts every failed poll
+  attempt; the retry counters count only failures that scheduled another attempt instead of
+  terminating affected subscribers.
+- The pump does not delete outbox rows. The later resource-scoped maintenance job remains
+  responsible for durable checkpointing and bounded deletion below this published in-process
+  cursor boundary. Its expiry scan may identify eligible rows, but deletion must consume only a
+  contiguous ID prefix; arbitrary expiry deletion could create interior cursor holes that
+  `MIN(id)` / `MAX(id)` cannot detect.
+- Focused store, pump, Effect-service, and qualification coverage includes a real two-connection
+  SQLite snapshot interleaving, atomic retention revalidation, sparse topic-filtered replay and live
+  retention progress, bounded central and replay-read busy retry and exhaustion, subscriber
+  turnover, terminal replay
+  failure and cancellation precedence, a fully pruned journal, cadence-bound count sampling,
+  cross-connection polling without a wake signal, exact queue overflow, full-delivery byte rejection
+  and topic isolation, Effect interruption/finalization, abort cleanup, and preservation of the
+  original SSE qualification behavior. The pump core remains transport-independent; this slice also
+  establishes its scoped Effect service and the global tRPC SuperJSON transformer. The authenticated
+  `events.stream` procedure, browser subscription, and frontend invalidation wiring remain later work.
 
 ## Executive Decision
 
@@ -267,8 +344,15 @@ build it as a **Bun-native modular monolith**:
 - The browser receives live updates over one multiplexed tRPC SSE subscription. It does not
   open a separate application WebSocket.
 - The server still uses Bun's native `WebSocket` client for the OpenClaw Gateway connection.
-- Valibot is the only runtime schema language. The same transport schemas drive tRPC,
-  generated JSON Schema, tests, and documentation.
+- Valibot owns transport, persistence, generated JSON Schema, tests, and documentation schemas.
+  Effect Schema is limited to server-internal typed/tagged errors and does not replace Valibot at
+  those boundaries.
+- Effect owns server orchestration where typed errors, cancellation, retries, concurrency, or scoped
+  resources materially improve correctness. Pure domain functions remain ordinary TypeScript.
+- In the browser, Valibot validates transport, form, URL, persisted-state, and browser API
+  boundaries. Effect is reserved for headless long-lived workflows such as streaming,
+  cancellation/reconnect races, and resource cleanup; TanStack Query continues to own ordinary
+  request caching, invalidation, and retry, and React components do not start ad hoc Effect runtimes.
 - SQLite remains the durable store through `bun:sqlite`, with Drizzle as the typed schema/query
   layer and full parameterized SQL/native-driver access where needed.
 - React 19 and the TanStack stack remain, but state ownership is made explicit instead of
@@ -315,21 +399,22 @@ is recreated manually after cutover through the new system.
 
 ## Decision Record
 
-| Area                     | Greenfield choice                            | Why                                                                                                  |
-| ------------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Runtime/server           | Bun 1.4 Canary channel + `Bun.serve`         | Keeps the proven Bun-native deployment model and removes framework duplication.                      |
-| Application API          | tRPC v11 Fetch adapter                       | Browser and automations are permanently TypeScript; end-to-end contracts provide real value.         |
-| Browser realtime         | tRPC SSE with `tracked()` event IDs          | Native Fetch transport, automatic reconnect, resumable events, and no Node WebSocket adapter.        |
-| Gateway transport        | Bun native outbound `WebSocket`              | OpenClaw Gateway is already a WebSocket protocol and remains an external integration boundary.       |
-| Validation               | Valibot + Standard Schema                    | Already used, smaller than Zod, and supported directly by tRPC and TanStack.                         |
-| Database                 | SQLite WAL via `bun:sqlite` + Drizzle        | Typed schema/common queries without giving up raw SQL, native PRAGMAs, backup, or migration control. |
-| Client server-state      | TanStack Query                               | Queries, mutations, invalidation, retry, and cached-error behavior.                                  |
-| Live entity state        | TanStack DB Query Collections, selectively   | Normalized incremental writes for collections that genuinely receive live entity deltas.             |
-| Cross-route client state | Small TanStack Store domains                 | Suitable for chat runtime and connection state without a generic mega-store.                         |
-| Forms/routes             | TanStack Form + Router                       | Typed form and URL state with Valibot support.                                                       |
-| Documentation            | Explicit contract registries + Bun generator | Deterministic docs without relying on tRPC private internals.                                        |
-| Processes                | Bun web + Bun worker                         | Isolates latency-sensitive requests from privileged and resource-heavy jobs.                         |
-| Deployment               | Immutable artifact + paired DB snapshot      | Predictable activation and safe rollback without schema compatibility code.                          |
+| Area                     | Greenfield choice                            | Why                                                                                                                   |
+| ------------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Runtime/server           | Bun 1.4 Canary channel + `Bun.serve`         | Keeps the proven Bun-native deployment model and removes framework duplication.                                       |
+| Application API          | tRPC v11 Fetch adapter + SuperJSON           | Browser and automations are permanently TypeScript; end-to-end contracts and selective rich types provide real value. |
+| Browser realtime         | tRPC SSE with `tracked()` event IDs          | Native Fetch transport, automatic reconnect, resumable events, and no Node WebSocket adapter.                         |
+| Gateway transport        | Bun native outbound `WebSocket`              | OpenClaw Gateway is already a WebSocket protocol and remains an external integration boundary.                        |
+| Validation               | Valibot + Standard Schema                    | Owns transport, persistence, generated JSON Schema, tests, and documentation.                                         |
+| Server effects           | Effect 4                                     | Typed errors, structured cancellation, bounded schedules, concurrency, and scoped resource lifetime.                  |
+| Database                 | SQLite WAL via `bun:sqlite` + Drizzle        | Typed schema/common queries without giving up raw SQL, native PRAGMAs, backup, or migration control.                  |
+| Client server-state      | TanStack Query                               | Queries, mutations, invalidation, retry, and cached-error behavior.                                                   |
+| Live entity state        | TanStack DB Query Collections, selectively   | Normalized incremental writes for collections that genuinely receive live entity deltas.                              |
+| Cross-route client state | Small TanStack Store domains                 | Suitable for chat runtime and connection state without a generic mega-store.                                          |
+| Forms/routes             | TanStack Form + Router                       | Typed form and URL state with Valibot support.                                                                        |
+| Documentation            | Explicit contract registries + Bun generator | Deterministic docs without relying on tRPC private internals.                                                         |
+| Processes                | Bun web + Bun worker                         | Isolates latency-sensitive requests from privileged and resource-heavy jobs.                                          |
+| Deployment               | Immutable artifact + paired DB snapshot      | Predictable activation and safe rollback without schema compatibility code.                                           |
 
 ## Target Architecture
 
@@ -535,7 +620,8 @@ Every application operation controlled by this repository becomes a tRPC procedu
 
 The browser uses `@trpc/tanstack-react-query`, a singleton `QueryClient`, and a singleton
 `createTRPCOptionsProxy`. Queries and mutations use `httpBatchLink`; subscriptions use
-`httpSubscriptionLink` selected through `splitLink`.
+`httpSubscriptionLink` selected through `splitLink`. The server and every batch, subscription,
+browser, and automation client configure the same SuperJSON transformer.
 
 Automation scripts import the same `AppRouter` client type. They authenticate with scoped,
 high-entropy bearer credentials whose validators are hashed at rest. There is no second REST
@@ -569,11 +655,12 @@ through an explicit registry entry which contains:
 - expected error codes; and
 - deprecation state, which should normally remain absent in this no-compatibility design.
 
-The same schema objects are passed to `.input()` and `.output()`. Transport schemas avoid
-non-JSON types and transforms that cannot be represented in JSON Schema; normalization occurs
-after validation in domain code. Dates cross the API as UTC epoch milliseconds or explicit
-ISO strings according to the contract, never as implicit JavaScript `Date` objects. No
-SuperJSON transformer is needed.
+The same schema objects are passed to `.input()` and `.output()`. tRPC may deliberately expose
+SuperJSON-supported values such as `Date`, `Map`, `Set`, or `BigInt` when the richer type improves a
+specific contract and its documentation representation is explicit. This is not a universal storage
+codec: database payloads, idempotency/hash inputs, migrations, and the durable realtime journal stay
+canonical plain JSON. Contracts continue to prefer epoch milliseconds or explicit ISO strings when
+the richer runtime type adds no value.
 
 ### Errors and context
 
@@ -590,6 +677,12 @@ Expected errors use a small stable code set such as `UNAUTHENTICATED`, `FORBIDDE
 structured details. Stack traces, command output, filesystem paths, and upstream secrets never
 enter client error shapes.
 
+Server orchestration represents expected failures as tagged Effect errors in the typed error
+channel. The tRPC boundary exhaustively maps those internal tags to the stable client code set;
+unknown defects and internal `cause` values may be logged only through a redaction boundary and are
+never serialized to clients. Until that logger bridge exists, the boundary records only safe,
+constant failure markers.
+
 ## Realtime Architecture
 
 ### One browser stream
@@ -598,6 +691,9 @@ Each authenticated browser tab opens one `events.stream` tRPC SSE subscription c
 topics it currently needs. Route changes update the subscription input rather than opening a
 connection per widget. Browser-to-server actions, including chat send/cancel/retry/steer, stay
 ordinary tRPC mutations. SSE is intentionally one-way.
+
+The authenticated transport derives or authorizes every requested topic before invoking the pump.
+A caller-supplied topic filter narrows delivery only; it is never an authorization mechanism.
 
 The stream uses same-origin credentials, Origin and Fetch Metadata checks, periodic comments
 or pings, an abort-aware iterator, bounded per-client buffering, and explicit slow-consumer
@@ -624,7 +720,9 @@ realtime_events
 queries in bounded pages, validates stored payloads, and emits `tracked(String(id), event)`.
 In-process mutations wake the pump immediately. Cross-process worker changes are discovered by
 a single adaptive database poll, fast only while browsers are connected and backed off while
-idle. This is simpler and safer on one host than introducing a broker.
+idle. Retryable `SQLITE_BUSY*` reads use a bounded exponential backoff; non-retryable or exhausted
+failures terminate affected subscriptions explicitly. This is simpler and safer on one host than
+introducing a broker.
 
 Initial load and reconnect are gap-free:
 
@@ -638,7 +736,8 @@ Initial load and reconnect are gap-free:
 
 Outbox retention is time- and count-bounded and cannot delete below the oldest cursor still
 needed by a connected client. Metrics expose oldest/newest IDs, retained rows, catch-up batch
-size, subscriber lag, reconnects, dropped slow clients, and forced resyncs.
+size, subscriber lag, reconnects, failed poll attempts, scheduled retryable poll retries, dropped
+slow clients, and forced resyncs.
 
 ### Chat event handling
 
@@ -1087,11 +1186,13 @@ docs/generated/
   openapi.raw-http.json
 ```
 
-`@valibot/to-json-schema` generates JSON Schema for transport-compatible Valibot schemas. The
-generator must fail with a useful location when a contract uses an unrepresentable transform
-or non-JSON type. OpenAPI 3.1 documents only true raw HTTP endpoints; it must not pretend the
-tRPC wire format is a conventional REST API. The tRPC `AppRouter` type remains the client
-contract.
+`@valibot/to-json-schema` generates JSON Schema for transport-compatible Valibot schemas. Plain-JSON
+storage and journal schemas fail generation with a useful location when they contain an
+unrepresentable transform or non-JSON type. A tRPC contract that deliberately uses a richer
+SuperJSON type must declare an explicit documentation/wire representation; generation fails when
+that representation is absent. OpenAPI 3.1 documents only true raw HTTP endpoints; it must not
+pretend the tRPC wire format is a conventional REST API. The tRPC `AppRouter` type remains the
+client contract.
 
 The new `/docs` frontend route renders the checked-in generated artifacts with navigation and
 search. Rendering uses the existing Markdown/sanitization boundary and never reads source files
@@ -1289,16 +1390,16 @@ against an arbitrary schema is forbidden.
 
 ### Add
 
-| Package                      |      Audited version | Purpose                                                     |
-| ---------------------------- | -------------------: | ----------------------------------------------------------- |
-| `@trpc/server`               |              11.18.0 | server router, Fetch adapter, errors, tracked subscriptions |
-| `@trpc/client`               |              11.18.0 | batch and subscription links for browser/automation         |
-| `@trpc/tanstack-react-query` |              11.18.0 | current TanStack Query integration                          |
-| `@valibot/to-json-schema`    |                1.7.1 | generated contract JSON Schema                              |
-| `drizzle-orm`                | 1.0.0-rc.4 candidate | typed Bun SQLite schema/query layer and Valibot integration |
-| `drizzle-kit`                | 1.0.0-rc.4 candidate | reviewed SQL migration generation from the schema           |
-
-No transformer package is added because contracts use plain JSON values.
+| Package                      |      Audited version | Purpose                                                            |
+| ---------------------------- | -------------------: | ------------------------------------------------------------------ |
+| `@trpc/server`               |              11.18.0 | server router, Fetch adapter, errors, tracked subscriptions        |
+| `@trpc/client`               |              11.18.0 | batch and subscription links for browser/automation                |
+| `@trpc/tanstack-react-query` |              11.18.0 | current TanStack Query integration                                 |
+| `@valibot/to-json-schema`    |                1.7.1 | generated contract JSON Schema                                     |
+| `drizzle-orm`                | 1.0.0-rc.4 candidate | typed Bun SQLite schema/query layer and Valibot integration        |
+| `drizzle-kit`                | 1.0.0-rc.4 candidate | reviewed SQL migration generation from the schema                  |
+| `effect`                     |       4.0.0-beta.103 | server typed errors, cancellation, schedules, and scoped resources |
+| `superjson`                  |                2.2.6 | symmetric tRPC transformer for deliberately richer API types       |
 
 ### Keep as architectural dependencies
 
@@ -1507,7 +1608,16 @@ not package memory alone:
 - [TanStack React Query client](https://trpc.io/docs/client/tanstack-react-query)
 - [Validators](https://trpc.io/docs/server/validators)
 - [Procedure metadata](https://trpc.io/docs/server/metadata)
+- [Data transformers](https://trpc.io/docs/server/data-transformers)
 - [Valibot JSON Schema](https://valibot.dev/guides/json-schema/)
+- [SuperJSON](https://github.com/flightcontrolhq/superjson)
+
+### Effect
+
+- [Effect-oriented coding-agent workflow](https://www.effect.website/blog/the-one-weird-git-trick-that-makes-coding-agents-more-effect-ive)
+- [Effect 4 migration and beta API map](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.103/MIGRATION.md)
+- [Scoped `acquireRelease` resources](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.103/ai-docs/src/01_effect/05_resources/10_acquire-release.ts)
+- [Schema-backed tagged errors and `catchTags`](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.103/ai-docs/src/01_effect/04_errors/10_catch-tags.ts)
 
 ### React and TanStack
 

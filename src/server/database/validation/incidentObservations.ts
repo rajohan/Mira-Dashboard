@@ -5,16 +5,24 @@ import {
 } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
+import {
+    monitoringKindSchema,
+    monitoringProblemTitleSchema,
+} from "../../../contracts/monitoring.ts";
 import { incidentObservations } from "../schema/incidentObservations.ts";
-import { jsonObjectTextAction, uuidV7Action } from "./scalars.ts";
+import {
+    jsonObjectTextSchema,
+    nonnegativeDateSchema,
+    uuidV7TextSchema,
+} from "./scalars.ts";
 
 const observationRefinements = {
-    detailsJson: (schema: v.StringSchema<undefined>) =>
-        v.pipe(schema, jsonObjectTextAction),
-    incidentId: (schema: v.StringSchema<undefined>) =>
-        v.pipe(schema, v.uuid(), uuidV7Action),
-    monitorRunId: (schema: v.StringSchema<undefined>) =>
-        v.pipe(schema, v.uuid(), uuidV7Action),
+    detailsJson: jsonObjectTextSchema,
+    incidentId: uuidV7TextSchema,
+    kind: () => monitoringKindSchema,
+    monitorRunId: uuidV7TextSchema,
+    observedAt: nonnegativeDateSchema,
+    title: () => monitoringProblemTitleSchema,
     generation: (
         schema: GetValibotTypeFromColumn<typeof incidentObservations.generation>
     ) => v.pipe(schema, v.minValue(1)),

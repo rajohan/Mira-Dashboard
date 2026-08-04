@@ -105,6 +105,9 @@ describe("paused native TLS SSE client", () => {
         expect(() => hasConnectedSseFrame(`${responseHeaders}not-hex\r\n`)).toThrow(
             "invalid chunk size"
         );
+        expect(() =>
+            hasConnectedSseFrame(`${responseHeaders}20000000000000\r\n`)
+        ).toThrow("unsafe chunk size");
         expect(() => hasConnectedSseFrame(`${responseHeaders}2\r\nab!!`)).toThrow(
             "invalid chunk terminator"
         );

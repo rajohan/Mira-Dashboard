@@ -16,22 +16,22 @@ const eventPayloadSchema = v.pipe(
     )
 );
 
-const eventDataSchema = v.object({
+const eventDataSchema = v.strictObject({
     kind: v.literal("qualification.changed"),
     payload: v.optional(eventPayloadSchema),
     value: v.number(),
 });
 
-const eventRecordSchema = v.object({
+const eventRecordSchema = v.strictObject({
     data: eventDataSchema,
     id: v.string(),
 });
 
-const eventStreamInputSchema = v.object({
+const eventStreamInputSchema = v.strictObject({
     lastEventId: v.optional(v.string()),
 });
 
-const runtimeIdentitySchema = v.object({
+const runtimeIdentitySchema = v.strictObject({
     hasGlobalEventSource: v.boolean(),
     releaseId: v.string(),
     revision: v.string(),

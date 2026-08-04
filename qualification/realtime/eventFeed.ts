@@ -1,3 +1,9 @@
+import * as v from "valibot";
+
+import { BoundedAsyncQueue } from "../../src/server/platform/realtime/boundedAsyncQueue.ts";
+import { utf8ByteLength } from "../../src/shared/encoding.ts";
+import { nonnegativeDecimalSafeIntegerStringSchema } from "../../src/shared/validation.ts";
+
 /** Data carried by the qualification event stream. */
 export interface QualificationEventData {
     readonly kind: "qualification.changed";
@@ -11,12 +17,16 @@ export interface QualificationEventRecord {
     readonly id: string;
 }
 
+const maximumQualificationPayloadBytes = 8 * 1024;
+const maximumQualificationSubscriberQueueEvents = 16;
+
 /** Fixed event and subscriber budgets used by the qualification feed. */
 export const qualificationEventLimits = Object.freeze({
-    maximumPayloadBytes: 8192,
+    maximumPayloadBytes: maximumQualificationPayloadBytes,
     maximumRetainedEvents: 128,
-    maximumSubscriberQueueEvents: 16,
-    maximumSubscriberQueuedPayloadBytes: 16 * 8192,
+    maximumSubscriberQueueEvents: maximumQualificationSubscriberQueueEvents,
+    maximumSubscriberQueuedPayloadBytes:
+        maximumQualificationSubscriberQueueEvents * maximumQualificationPayloadBytes,
 });
 
 /** Point-in-time operational measurements for a qualification event feed. */
@@ -34,22 +44,6 @@ interface EventSubscriptionOptions {
     signal: AbortSignal;
 }
 
-interface PendingRead<T> {
-    reject: (reason: Error) => void;
-    resolve: (result: IteratorResult<T>) => void;
-}
-
-interface QueuedValue<T> {
-    readonly payloadBytes: number;
-    readonly value: T;
-}
-
-interface QueuePushResult {
-    readonly accepted: boolean;
-    readonly queuedEventCount: number;
-    readonly queuedPayloadBytes: number;
-}
-
 interface StoredQualificationEvent {
     readonly payloadBytes: number;
     readonly record: QualificationEventRecord;
@@ -65,87 +59,7 @@ const payloadBudgetErrorMessage = `Qualification event payload exceeds ${qualifi
  * @returns Whether the encoded payload fits within the event budget.
  */
 export function isQualificationEventPayloadWithinLimit(payload: string): boolean {
-    return (
-        encodedPayloadByteLength(payload) <= qualificationEventLimits.maximumPayloadBytes
-    );
-}
-
-class BoundedAsyncQueue<T> {
-    readonly #pendingReads: PendingRead<T>[] = [];
-    readonly #values: QueuedValue<T>[] = [];
-    #closed = false;
-    #failure: Error | undefined;
-    #queuedPayloadBytes = 0;
-
-    close(): void {
-        this.#closed = true;
-        this.#queuedPayloadBytes = 0;
-        this.#values.length = 0;
-        for (const pendingRead of this.#pendingReads.splice(0)) {
-            pendingRead.resolve({ done: true, value: undefined });
-        }
-    }
-
-    fail(error: Error): void {
-        this.#closed = true;
-        this.#failure = error;
-        this.#queuedPayloadBytes = 0;
-        this.#values.length = 0;
-        for (const pendingRead of this.#pendingReads.splice(0)) {
-            pendingRead.reject(error);
-        }
-    }
-
-    next(): Promise<IteratorResult<T>> {
-        if (this.#failure) {
-            return Promise.reject(this.#failure);
-        }
-        const queuedValue = this.#values.shift();
-        if (queuedValue !== undefined) {
-            this.#queuedPayloadBytes -= queuedValue.payloadBytes;
-            return Promise.resolve({ done: false, value: queuedValue.value });
-        }
-        if (this.#closed) {
-            return Promise.resolve({ done: true, value: undefined });
-        }
-
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
-            this.#pendingReads.push({ reject, resolve });
-        });
-    }
-
-    push(value: T, payloadBytes: number): QueuePushResult {
-        if (this.#closed) {
-            return this.#pushResult(false);
-        }
-
-        const pendingRead = this.#pendingReads.shift();
-        if (pendingRead) {
-            pendingRead.resolve({ done: false, value });
-            return this.#pushResult(true);
-        }
-
-        if (
-            this.#values.length >=
-                qualificationEventLimits.maximumSubscriberQueueEvents ||
-            this.#queuedPayloadBytes + payloadBytes >
-                qualificationEventLimits.maximumSubscriberQueuedPayloadBytes
-        ) {
-            this.fail(new Error(queueBudgetErrorMessage));
-            return this.#pushResult(false);
-        }
-        this.#values.push({ payloadBytes, value });
-        this.#queuedPayloadBytes += payloadBytes;
-        return this.#pushResult(true);
-    }
-
-    #pushResult(accepted: boolean): QueuePushResult {
-        return {
-            accepted,
-            queuedEventCount: this.#values.length,
-            queuedPayloadBytes: this.#queuedPayloadBytes,
-        };
-    }
+    return utf8ByteLength(payload) <= qualificationEventLimits.maximumPayloadBytes;
 }
 
 /** In-memory qualification model for tracked replay and bounded live delivery. */
@@ -187,7 +101,7 @@ export class QualificationEventFeed {
      * @returns The appended event record.
      */
     publish(data: QualificationEventData): QualificationEventRecord {
-        const payloadBytes = encodedPayloadByteLength(data.payload ?? "");
+        const payloadBytes = utf8ByteLength(data.payload ?? "");
         if (payloadBytes > qualificationEventLimits.maximumPayloadBytes) {
             throw new RangeError(payloadBudgetErrorMessage);
         }
@@ -233,7 +147,12 @@ export class QualificationEventFeed {
         }
 
         const replayEvents = [...this.#events];
-        const queue = new BoundedAsyncQueue<QualificationEventRecord>();
+        const queue = new BoundedAsyncQueue<QualificationEventRecord>({
+            maximumEvents: qualificationEventLimits.maximumSubscriberQueueEvents,
+            maximumPayloadBytes:
+                qualificationEventLimits.maximumSubscriberQueuedPayloadBytes,
+            overflowErrorMessage: queueBudgetErrorMessage,
+        });
         const subscriber = (event: StoredQualificationEvent): void => {
             if (Number(event.record.id) <= replayBoundary) {
                 return;
@@ -288,22 +207,18 @@ export class QualificationEventFeed {
     }
 }
 
-function encodedPayloadByteLength(payload: string): number {
-    return Buffer.byteLength(payload, "utf8");
-}
+const resumeSequenceSchema = nonnegativeDecimalSafeIntegerStringSchema(
+    "Qualification event resume cursor is invalid"
+);
 
 function parseResumeSequence(resumeId: string | undefined): number {
     if (resumeId === undefined) {
         return 0;
     }
 
-    const sequence = Number(resumeId);
-    if (
-        !Number.isSafeInteger(sequence) ||
-        sequence < 0 ||
-        String(sequence) !== resumeId
-    ) {
+    const result = v.safeParse(resumeSequenceSchema, resumeId, { abortEarly: true });
+    if (!result.success) {
         throw new Error("Qualification event resume cursor is invalid");
     }
-    return sequence;
+    return result.output;
 }

@@ -38,6 +38,7 @@
 | `clsx` | `^2.1.1` | `2.1.1` | runtime |
 | `date-fns` | `^4.4.0` | `4.4.0` | runtime |
 | `drizzle-orm` | `1.0.0-rc.4` | `1.0.0-rc.4` | runtime |
+| `effect` | `4.0.0-beta.103` | `4.0.0-beta.103` | runtime |
 | `json5` | `^2.2.3` | `2.2.3` | runtime |
 | `lucide-react` | `^1.28.0` | `1.28.0` | runtime |
 | `otplib` | `13.4.1` | `13.4.1` | runtime |
@@ -52,6 +53,7 @@
 | `rehype-sanitize` | `^6.0.0` | `6.0.0` | runtime |
 | `remark-frontmatter` | `^5.0.0` | `5.0.0` | runtime |
 | `remark-gfm` | `^4.0.1` | `4.0.1` | runtime |
+| `superjson` | `2.2.6` | `2.2.6` | runtime |
 | `tailwind-merge` | `^3.6.0` | `3.6.0` | runtime |
 | `valibot` | `^1.4.2` | `1.4.2` | runtime |
 | `@babel/core` | `^8.0.1` | `8.0.1` | development |

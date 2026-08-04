@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { openFreshMigratedDatabase } from "./freshDatabaseFixture.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 
 const rejectedJsonDocuments = ["[]", '"string"', "42", "null", "not-json"];
+const validIncidentFingerprint = "d".repeat(64);
 
 describe("database object JSON constraints", () => {
     test("keeps raw SQLite writes aligned with the Valibot object contract", async () => {
@@ -32,7 +33,7 @@ describe("database object JSON constraints", () => {
                     severity,
                     state,
                     title
-                ) VALUES ('{}', 'valid-fingerprint', 1000, 'incident-valid', 'system', 1000, 'ops-check', 'warning', 'active', 'Valid incident')`
+                ) VALUES ('{}', '${validIncidentFingerprint}', 1000, 'incident-valid', 'system', 1000, 'ops-check', 'warning', 'active', 'Valid incident')`
             );
             database.sqlite.run(
                 `INSERT INTO monitor_runs (
@@ -87,11 +88,7 @@ describe("database object JSON constraints", () => {
                             state,
                             title
                         ) VALUES (?, ?, 1000, ?, 'system', 1000, 'ops-check', 'warning', 'active', 'Invalid incident')`,
-                        [
-                            document,
-                            `invalid-fingerprint-${index}`,
-                            `incident-invalid-${index}`,
-                        ]
+                        [document, validIncidentFingerprint, `incident-invalid-${index}`]
                     )
                 ).toThrow("incidents_details_json_check");
 

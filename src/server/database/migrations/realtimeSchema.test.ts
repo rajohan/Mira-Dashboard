@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { openFreshMigratedDatabase } from "./freshDatabaseFixture.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 
 interface QueryPlanRow {
     detail: string;

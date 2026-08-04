@@ -1,8 +1,13 @@
 import path from "node:path";
 
+import * as v from "valibot";
+
+import { nonnegativeSafeIntegerSchema } from "../../src/shared/validation.ts";
+
 const unitIdentifierPattern = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
 const unitNamePattern =
     /^mira-dashboard-sse-memory-[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
+const userIdSchema = nonnegativeSafeIntegerSchema();
 
 /**
  * Creates a unique systemd unit name without accepting user-controlled fragments.
@@ -55,7 +60,7 @@ export function expectedSseMemoryUnitCgroupPath(
     unitName: string
 ): string {
     assertSseMemoryUnitName(unitName);
-    if (!Number.isSafeInteger(userId) || userId < 0) {
+    if (!v.safeParse(userIdSchema, userId).success) {
         throw new TypeError("SSE memory qualification user ID is invalid");
     }
     return path.posix.join(

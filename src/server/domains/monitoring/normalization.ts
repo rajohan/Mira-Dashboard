@@ -1,13 +1,49 @@
+import { Schema } from "effect";
 import * as v from "valibot";
 
 import {
     completeMonitoringSnapshotInputSchema,
     type JsonObject,
 } from "../../../contracts/monitoring.ts";
+import { sha256Hex } from "../../shared/crypto.ts";
 
 const fingerprintVersion = "monitoring-incident-fingerprint:v1";
-const identifierPattern = /^[a-z0-9][a-z0-9._:-]*$/u;
-const segmentPattern = /^[a-z0-9][a-z0-9._-]*$/u;
+const identifierPolicy = Object.freeze({
+    pattern: /^[a-z0-9][a-z0-9._:-]*$/u,
+    separators: "'.', '_', ':', or '-'",
+});
+const segmentPolicy = Object.freeze({
+    pattern: /^[a-z0-9][a-z0-9._-]*$/u,
+    separators: "'.', '_', or '-'",
+});
+
+function normalizedIdentifierSchema(
+    label: string,
+    policy: { readonly pattern: RegExp; readonly separators: string }
+) {
+    return v.pipe(
+        v.string(),
+        v.trim(),
+        v.toLowerCase(),
+        v.regex(
+            policy.pattern,
+            `${label} must use lowercase alphanumeric segments with ${policy.separators} separators`
+        )
+    );
+}
+
+const monitorKeySchema = normalizedIdentifierSchema("monitorKey", identifierPolicy);
+const problemConditionSchema = normalizedIdentifierSchema(
+    "problem.condition",
+    segmentPolicy
+);
+const problemEntityKeySchema = normalizedIdentifierSchema(
+    "problem.entityKey",
+    identifierPolicy
+);
+const problemKindSchema = normalizedIdentifierSchema("problem.kind", segmentPolicy);
+const reportKindSchema = normalizedIdentifierSchema("report.kind", segmentPolicy);
+const trimmedTextSchema = v.pipe(v.string(), v.trim());
 
 export interface NormalizedMonitoringProblem {
     condition: string;
@@ -41,24 +77,19 @@ export interface NormalizedMonitoringSubmission {
 }
 
 /** Expected validation failure before the monitoring repository is entered. */
-export class MonitoringSnapshotValidationError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = "MonitoringSnapshotValidationError";
-    }
-}
-
-function sha256(value: string): string {
-    return new Bun.CryptoHasher("sha256").update(value).digest("hex");
-}
+export class MonitoringSnapshotValidationError extends Schema.TaggedErrorClass<MonitoringSnapshotValidationError>(
+    "mira-dashboard/server/domains/monitoring/MonitoringSnapshotValidationError"
+)("MonitoringSnapshotValidationError", {
+    message: Schema.String,
+}) {}
 
 function canonicalJson(value: unknown): string {
     if (value === null || typeof value !== "object") {
         const serialized = JSON.stringify(value);
         if (serialized === undefined) {
-            throw new MonitoringSnapshotValidationError(
-                "Monitoring snapshots must contain only JSON values"
-            );
+            throw new MonitoringSnapshotValidationError({
+                message: "Monitoring snapshots must contain only JSON values",
+            });
         }
         return serialized;
     }
@@ -73,14 +104,17 @@ function canonicalJson(value: unknown): string {
         .join(",")}}`;
 }
 
-function normalizeIdentifier(value: string, label: string, pattern: RegExp): string {
-    const normalized = value.trim().toLowerCase();
-    if (!pattern.test(normalized)) {
-        throw new MonitoringSnapshotValidationError(
-            `${label} must use lowercase alphanumeric segments with '.', '_', ':', or '-' separators`
-        );
+function parseNormalizedIdentifier(
+    schema: v.GenericSchema<string, string>,
+    value: string
+): string {
+    const validation = v.safeParse(schema, value);
+    if (!validation.success) {
+        throw new MonitoringSnapshotValidationError({
+            message: validation.issues[0]?.message ?? "Invalid monitoring identifier",
+        });
     }
-    return normalized;
+    return validation.output;
 }
 
 /**
@@ -94,13 +128,22 @@ export function deriveIncidentFingerprint(input: {
     entityKey: string;
     kind: string;
 }): string {
-    return sha256(
+    return sha256Hex(
         `${fingerprintVersion}\0${canonicalJson([
             input.kind,
             input.entityKey,
             input.condition,
         ])}`
     );
+}
+
+function compareIncidentFingerprints(
+    left: Pick<NormalizedMonitoringProblem, "fingerprint">,
+    right: Pick<NormalizedMonitoringProblem, "fingerprint">
+): number {
+    if (left.fingerprint < right.fingerprint) return -1;
+    if (left.fingerprint > right.fingerprint) return 1;
+    return 0;
 }
 
 /**
@@ -113,27 +156,21 @@ export function normalizeMonitoringSnapshot(
 ): NormalizedMonitoringSubmission {
     const validation = v.safeParse(completeMonitoringSnapshotInputSchema, input);
     if (!validation.success) {
-        throw new MonitoringSnapshotValidationError(
-            validation.issues[0]?.message ?? "Invalid complete monitor snapshot"
-        );
+        throw new MonitoringSnapshotValidationError({
+            message: validation.issues[0]?.message ?? "Invalid complete monitor snapshot",
+        });
     }
     const parsed = validation.output;
     const normalizedProblems = parsed.problems
         .map((problem): NormalizedMonitoringProblem => {
-            const kind = normalizeIdentifier(
-                problem.kind,
-                "problem.kind",
-                segmentPattern
+            const kind = parseNormalizedIdentifier(problemKindSchema, problem.kind);
+            const entityKey = parseNormalizedIdentifier(
+                problemEntityKeySchema,
+                problem.entityKey
             );
-            const entityKey = normalizeIdentifier(
-                problem.entityKey,
-                "problem.entityKey",
-                identifierPattern
-            );
-            const condition = normalizeIdentifier(
-                problem.condition,
-                "problem.condition",
-                segmentPattern
+            const condition = parseNormalizedIdentifier(
+                problemConditionSchema,
+                problem.condition
             );
             return {
                 condition,
@@ -142,35 +179,32 @@ export function normalizeMonitoringSnapshot(
                 fingerprint: deriveIncidentFingerprint({ condition, entityKey, kind }),
                 kind,
                 severity: problem.severity,
-                title: problem.title.trim(),
+                title: v.parse(trimmedTextSchema, problem.title),
             };
         })
-        .toSorted((left, right) => left.fingerprint.localeCompare(right.fingerprint));
+        .toSorted(compareIncidentFingerprints);
 
     const fingerprints = new Set(
         normalizedProblems.map((problem) => problem.fingerprint)
     );
     if (fingerprints.size !== normalizedProblems.length) {
-        throw new MonitoringSnapshotValidationError(
-            "A complete monitor snapshot cannot contain duplicate problem identities"
-        );
+        throw new MonitoringSnapshotValidationError({
+            message:
+                "A complete monitor snapshot cannot contain duplicate problem identities",
+        });
     }
 
     const snapshot: NormalizedMonitoringSnapshot = {
         completedAtMs: parsed.completedAtMs,
-        monitorKey: normalizeIdentifier(
-            parsed.monitorKey,
-            "monitorKey",
-            identifierPattern
-        ),
+        monitorKey: parseNormalizedIdentifier(monitorKeySchema, parsed.monitorKey),
         problems: normalizedProblems,
         report: {
             bodyMarkdown: parsed.report.bodyMarkdown,
-            kind: normalizeIdentifier(parsed.report.kind, "report.kind", segmentPattern),
+            kind: parseNormalizedIdentifier(reportKindSchema, parsed.report.kind),
             metadata: parsed.report.metadata,
-            source: parsed.report.source.trim(),
-            sourceJobId: parsed.report.sourceJobId.trim(),
-            title: parsed.report.title.trim(),
+            source: v.parse(trimmedTextSchema, parsed.report.source),
+            sourceJobId: v.parse(trimmedTextSchema, parsed.report.sourceJobId),
+            title: v.parse(trimmedTextSchema, parsed.report.title),
         },
         runId: parsed.runId,
         startedAtMs: parsed.startedAtMs,
@@ -178,6 +212,6 @@ export function normalizeMonitoringSnapshot(
 
     return {
         snapshot,
-        submissionSha256: sha256(canonicalJson(snapshot)),
+        submissionSha256: sha256Hex(canonicalJson(snapshot)),
     };
 }

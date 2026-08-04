@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { parseISO } from "date-fns";
 import { eq, sql } from "drizzle-orm";
 import * as v from "valibot";
 
@@ -18,7 +19,7 @@ interface QueryPlanRow {
 describe("Drizzle on Bun SQLite", () => {
     test("keeps typed queries, raw SQL, constraints, and native access", () => {
         const database = createQualificationDatabase();
-        const openedAt = new Date("2026-08-03T20:00:00.000Z");
+        const openedAt = parseISO("2026-08-03T20:00:00.000Z");
         const incidentKey = "system:filesystem:root-pressure";
 
         try {
@@ -115,7 +116,7 @@ describe("Drizzle on Bun SQLite", () => {
                         .insert(qualificationIncidents)
                         .values({
                             incidentKey: "system:memory:pressure",
-                            lastSeenAt: new Date("2026-08-03T20:05:00.000Z"),
+                            lastSeenAt: parseISO("2026-08-03T20:05:00.000Z"),
                             status: "open",
                         })
                         .run();

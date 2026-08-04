@@ -135,6 +135,8 @@ describe("SSE memory qualification resource policy", () => {
             { pidsMax: 64 },
             { pidsMax: "max" as const },
             { cpuQuotaMicros: "max" as const },
+            { cpuQuotaMicros: 50_000.5 },
+            { cpuPeriodMicros: Number.MAX_SAFE_INTEGER + 1 },
             { cpuQuotaMicros: 60_000 },
             { oomGroup: false },
         ]) {
@@ -161,6 +163,8 @@ describe("SSE memory qualification resource policy", () => {
             { memoryMaxBytes: 256 * 1024 * 1024 },
             { pidsMax: 31 },
             { cpuQuotaMicros: 25_000 },
+            { cpuPeriodMicros: 100_000.5 },
+            { cpuQuotaMicros: Number.MAX_SAFE_INTEGER + 1 },
         ]) {
             expect(() =>
                 assertCgroupAncestorResourcePolicy([ancestorSnapshot(overrides)])

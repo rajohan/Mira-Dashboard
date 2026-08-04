@@ -3,35 +3,23 @@ import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import * as v from "valibot";
 
-import { openFreshMigratedDatabase } from "../migrations/freshDatabaseFixture.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { incidents } from "../schema/incidents.ts";
 import { incidentInsertSchema, incidentSelectSchema } from "./incidents.ts";
+import { incidentId, validIncidentValues } from "./testSupport/rows.ts";
 
 describe("Drizzle Valibot database integration", () => {
     test("round-trips a migrated SQLite row through generated schemas", async () => {
         const database = await openFreshMigratedDatabase();
-        const id = "019fc968-1a9b-7760-bf1b-d5b863b0e7b4";
-        const observedAt = new Date("2026-08-03T22:00:00.000Z");
 
         try {
-            const insert = v.parse(incidentInsertSchema, {
-                detailsJson: '{"mount":"/"}',
-                fingerprint: "filesystem:root-pressure",
-                firstSeenAt: observedAt,
-                id,
-                kind: "system",
-                lastSeenAt: observedAt,
-                monitorKey: "ops-check",
-                severity: "warning",
-                state: "active",
-                title: "Root filesystem pressure",
-            });
+            const insert = v.parse(incidentInsertSchema, validIncidentValues);
             database.orm.insert(incidents).values(insert).run();
 
             const selected = database.orm
                 .select()
                 .from(incidents)
-                .where(eq(incidents.id, id))
+                .where(eq(incidents.id, incidentId))
                 .get();
 
             expect(v.parse(incidentSelectSchema, selected)).toEqual({

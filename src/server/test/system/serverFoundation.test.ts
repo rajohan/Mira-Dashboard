@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import superjson from "superjson";
 
-import { createServer } from "../../app/server.ts";
-import { bunRuntimePolicy } from "../../shared/bunRuntimePolicy.ts";
+import { createServer, serverRequestBodyMaximumBytes } from "../../../app/server.ts";
+import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
 import {
     createReadinessController,
     type ReadinessController,
-} from "../platform/readiness/readinessState.ts";
-import * as runtimeIdentityModule from "../platform/runtime/readRuntimeIdentity.ts";
-import type { AppRouter } from "../trpc/appRouter.ts";
+} from "../../platform/readiness/readinessState.ts";
+import * as runtimeIdentityModule from "../../platform/runtime/readRuntimeIdentity.ts";
+import type { AppRouter } from "../../trpc/appRouter.ts";
 
 const servers: Array<ReturnType<typeof createServer>> = [];
 
@@ -18,7 +19,11 @@ function startServer(): {
     server: ReturnType<typeof createServer>;
 } {
     const readiness = createReadinessController();
-    const server = createServer({ port: 0, readiness });
+    const server = createServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        readiness,
+    });
     servers.push(server);
     return { readiness, server };
 }
@@ -33,7 +38,12 @@ describe("system foundation", () => {
     test("serves typed runtime identity through tRPC", async () => {
         const { server } = startServer();
         const client = createTRPCClient<AppRouter>({
-            links: [httpBatchLink({ url: new URL("/trpc", server.url) })],
+            links: [
+                httpBatchLink({
+                    transformer: superjson,
+                    url: new URL("/trpc", server.url),
+                }),
+            ],
         });
 
         expect(await client.system.runtimeIdentity.query()).toEqual({
@@ -84,6 +94,20 @@ describe("system foundation", () => {
         const unavailable = await fetch(new URL("/api/health/ready", server.url));
         expect(unavailable.status).toBe(503);
         expect(await unavailable.json()).toEqual({ status: "not-ready" });
+    });
+
+    test("rejects request bodies above the bounded application transport budget", async () => {
+        const { server } = startServer();
+        const response = await fetch(
+            new URL("/trpc/system.runtimeIdentity", server.url),
+            {
+                body: "x".repeat(serverRequestBodyMaximumBytes + 1),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            }
+        );
+
+        expect(response.status).toBe(413);
     });
 
     test("accepts new canary revisions on Bun 1.4", () => {

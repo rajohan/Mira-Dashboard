@@ -1,5 +1,8 @@
 import path from "node:path";
 
+import * as v from "valibot";
+
+import { positiveSafeIntegerSchema } from "../../src/shared/validation.ts";
 import { sseMemoryQualificationPolicy } from "./resourcePolicy.ts";
 import { assertSseMemoryUnitName } from "./unitIdentity.ts";
 
@@ -10,6 +13,7 @@ const launcherEnvironmentNames = [
     "PATH",
     "XDG_RUNTIME_DIR",
 ] as const;
+const systemdLauncherDeadlineSchema = positiveSafeIntegerSchema();
 /** Fixed uncapped-parent process limits used around the capped child. */
 export const systemdLauncherProcessPolicy = Object.freeze({
     launcherOutputMaxBytes: 64 * 1024,
@@ -274,7 +278,7 @@ export function createSystemdLauncherDeadline(
     delayMs: number,
     scheduler: SystemdLauncherDeadlineScheduler = nativeDeadlineScheduler
 ): SystemdLauncherDeadline {
-    if (!Number.isSafeInteger(delayMs) || delayMs <= 0) {
+    if (!v.safeParse(systemdLauncherDeadlineSchema, delayMs).success) {
         throw new TypeError("Systemd launcher deadline must be a positive integer");
     }
 

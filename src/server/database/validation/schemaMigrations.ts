@@ -1,14 +1,26 @@
 import { createInsertSchema, createSelectSchema } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
+import { nonnegativeDateAction } from "../../../shared/dateTime.ts";
+import {
+    fullCommitShaAction,
+    lowercaseSha256Action,
+} from "../../../shared/validation.ts";
+import { migrationIdAction } from "../migrations/validation.ts";
 import { schemaMigrations } from "../schema/schemaMigrations.ts";
 
 const migrationRefinements = {
-    checksum: (schema: v.StringSchema<undefined>) =>
+    appliedAt: (schema: v.DateSchema<undefined>) =>
         v.pipe(
             schema,
-            v.regex(/^[0-9a-f]{64}$/, "Expected a lowercase SHA-256 checksum.")
+            nonnegativeDateAction("Expected a valid nonnegative migration Date.")
         ),
+    checksum: (schema: v.StringSchema<undefined>) =>
+        v.pipe(schema, lowercaseSha256Action()),
+    id: (schema: v.StringSchema<undefined>) =>
+        v.pipe(schema, migrationIdAction("Expected a canonical migration id.")),
+    releaseId: (schema: v.StringSchema<undefined>) =>
+        v.pipe(schema, fullCommitShaAction()),
 };
 
 const generatedSchemaMigrationSelectSchema = createSelectSchema(

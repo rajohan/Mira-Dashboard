@@ -1,3 +1,4 @@
+import { compareAsc } from "date-fns";
 import {
     createInsertSchema,
     createSelectSchema,
@@ -6,16 +7,44 @@ import {
 } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
+import {
+    monitoringKindSchema,
+    monitoringProblemTitleSchema,
+    monitoringReportTitleSchema,
+} from "../../../contracts/monitoring.ts";
 import { notifications } from "../schema/notifications.ts";
-import { uuidV7Action } from "./scalars.ts";
+import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
+
+function notificationIncidentPairIsValid(notification: {
+    readonly incidentGeneration?: number | null;
+    readonly incidentId?: string | null;
+}): boolean {
+    return (
+        (notification.incidentId == null) === (notification.incidentGeneration == null)
+    );
+}
+
+function notificationReadOrderIsValid(notification: {
+    readonly occurredAt: Date;
+    readonly readAt?: Date | null;
+}): boolean {
+    return (
+        notification.readAt == null ||
+        compareAsc(notification.readAt, notification.occurredAt) >= 0
+    );
+}
 
 const notificationRefinements = {
-    id: (schema: v.StringSchema<undefined>) => v.pipe(schema, v.uuid(), uuidV7Action),
-    incidentId: (schema: v.StringSchema<undefined>) =>
-        v.pipe(schema, v.uuid(), uuidV7Action),
+    id: uuidV7TextSchema,
+    incidentId: uuidV7TextSchema,
     incidentGeneration: (
         schema: GetValibotTypeFromColumn<typeof notifications.incidentGeneration>
     ) => v.pipe(schema, v.minValue(1)),
+    kind: () => monitoringKindSchema,
+    message: () => monitoringProblemTitleSchema,
+    occurredAt: nonnegativeDateSchema,
+    readAt: nonnegativeDateSchema,
+    title: () => monitoringReportTitleSchema,
 };
 
 const generatedNotificationSelectSchema = createSelectSchema(
@@ -24,8 +53,16 @@ const generatedNotificationSelectSchema = createSelectSchema(
 );
 
 /** Validates rows read from the notifications table. */
-export const notificationSelectSchema = v.strictObject(
-    generatedNotificationSelectSchema.entries
+export const notificationSelectSchema = v.pipe(
+    v.strictObject(generatedNotificationSelectSchema.entries),
+    v.check(
+        (notification) => notificationIncidentPairIsValid(notification),
+        "Expected notification incident id and generation to be present together."
+    ),
+    v.check(
+        (notification) => notificationReadOrderIsValid(notification),
+        "Expected notification readAt to be at or after occurredAt."
+    )
 );
 
 const generatedNotificationInsertSchema = v.omit(
@@ -34,8 +71,16 @@ const generatedNotificationInsertSchema = v.omit(
 );
 
 /** Validates values before a notification insert. */
-export const notificationInsertSchema = v.strictObject(
-    generatedNotificationInsertSchema.entries
+export const notificationInsertSchema = v.pipe(
+    v.strictObject(generatedNotificationInsertSchema.entries),
+    v.check(
+        (notification) => notificationIncidentPairIsValid(notification),
+        "Expected notification incident id and generation to be present together."
+    ),
+    v.check(
+        (notification) => notificationReadOrderIsValid(notification),
+        "Expected notification readAt to be at or after occurredAt."
+    )
 );
 
 const generatedNotificationUpdateSchema = createUpdateSchema(
