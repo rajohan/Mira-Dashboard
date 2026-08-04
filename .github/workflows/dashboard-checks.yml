@@ -13,8 +13,8 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    greenfield-foundation:
-        name: greenfield-foundation
+    server-foundation:
+        name: server-foundation
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
@@ -34,20 +34,20 @@ jobs:
             - name: Type-check qualification probes
               run: bun run typecheck:qualification
 
-            - name: Type-check greenfield source
-              run: bun run typecheck:greenfield
+            - name: Type-check server source
+              run: bun run typecheck:server
 
             - name: Test qualification probes
               run: bun run test:qualification
 
-            - name: Test greenfield source
-              run: bun run test:greenfield
+            - name: Test server source
+              run: bun run test:server
 
             - name: Test documentation generator
-              run: bun run test:greenfield:docs
+              run: bun run test:server:docs
 
-            - name: Test greenfield tooling
-              run: bun run test:greenfield:tooling
+            - name: Test server tooling
+              run: bun run test:server:tooling
 
             - name: Verify generated documentation
               run: bun run docs:check

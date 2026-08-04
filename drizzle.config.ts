@@ -3,7 +3,7 @@ import { defineConfig } from "drizzle-kit";
 export default defineConfig({
     breakpoints: true,
     dbCredentials: {
-        url: "./data/greenfield-drizzle-kit.db",
+        url: "./data/drizzle-kit.db",
     },
     dialect: "sqlite",
     out: "./migrations",

@@ -15,9 +15,14 @@ export const runtimeIdentitySchema = v.strictObject({
     ),
 });
 
-/** Live/readiness response shared by raw health routes. */
-export const healthStatusSchema = v.strictObject({
-    status: v.picklist(["live", "ready"]),
+/** Liveness response returned while the Bun process can answer requests. */
+export const livenessStatusSchema = v.strictObject({
+    status: v.literal("live"),
+});
+
+/** Readiness response returned before and after critical initialization. */
+export const readinessStatusSchema = v.strictObject({
+    status: v.picklist(["not-ready", "ready"]),
 });
 
 /** Runtime identity contract shared by tRPC wiring and generated documentation. */
@@ -45,8 +50,8 @@ export const systemRawHttpContracts = [
         path: "/api/health/live",
         response: {
             kind: "schema",
-            schema: healthStatusSchema,
-            schemaId: "health.status.response",
+            schema: livenessStatusSchema,
+            schemaId: "health.liveness.response",
         },
         statusCodes: [200],
         summary: "Confirms that the Bun web process can answer requests.",
@@ -65,18 +70,18 @@ export const systemRawHttpContracts = [
         path: "/api/health/ready",
         response: {
             kind: "schema",
-            schema: healthStatusSchema,
-            schemaId: "health.status.response",
+            schema: readinessStatusSchema,
+            schemaId: "health.readiness.response",
         },
-        statusCodes: [200],
-        summary: "Confirms that the greenfield foundation is ready to serve traffic.",
+        statusCodes: [200, 503],
+        summary: "Reports whether critical application initialization is complete.",
     },
     {
         access: { kind: "public" },
         method: "HEAD",
         path: "/api/health/ready",
         response: { kind: "none" },
-        statusCodes: [200],
-        summary: "Checks greenfield readiness without a response body.",
+        statusCodes: [200, 503],
+        summary: "Checks application readiness without a response body.",
     },
 ] as const satisfies readonly RawHttpContract[];

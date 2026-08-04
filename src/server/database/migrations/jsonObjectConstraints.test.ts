@@ -4,7 +4,7 @@ import { openFreshMigratedDatabase } from "./freshDatabaseFixture.ts";
 
 const rejectedJsonDocuments = ["[]", '"string"', "42", "null", "not-json"];
 
-describe("greenfield object JSON constraints", () => {
+describe("database object JSON constraints", () => {
     test("keeps raw SQLite writes aligned with the Valibot object contract", async () => {
         const database = await openFreshMigratedDatabase();
 

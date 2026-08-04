@@ -1,23 +1,29 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
+import type { ReadinessState } from "../server/platform/readiness/readinessState.ts";
 import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
-import { livenessResponse, readinessResponse } from "../server/rawHttp/health.ts";
+import {
+    type HealthProbeMethod,
+    livenessResponse,
+    readinessResponse,
+} from "../server/rawHttp/health.ts";
 import { appRouter } from "../server/trpc/appRouter.ts";
 import { createRequestContext } from "../server/trpc/context.ts";
 
 const trpcEndpoint = "/trpc";
 
-/** Greenfield Bun server startup options. */
-export interface GreenfieldServerOptions {
+/** Bun server startup dependencies and listen options. */
+export interface ServerOptions {
     port: number;
+    readiness: ReadinessState;
 }
 
 /**
- * Creates the greenfield Bun HTTP server without mutating the current production composition.
+ * Creates the Bun HTTP server after validating the runtime baseline.
  * @param options Server listen options.
  * @returns A started Bun server.
  */
-export function createGreenfieldServer(options: GreenfieldServerOptions) {
+export function createServer(options: ServerOptions) {
     readRuntimeIdentity();
 
     return Bun.serve({
@@ -33,13 +39,15 @@ export function createGreenfieldServer(options: GreenfieldServerOptions) {
                     router: appRouter,
                 });
             }
-            const isHealthProbeMethod =
-                request.method === "GET" || request.method === "HEAD";
-            if (isHealthProbeMethod && pathname === "/api/health/live") {
-                return livenessResponse();
+            const healthProbeMethod: HealthProbeMethod | undefined =
+                request.method === "GET" || request.method === "HEAD"
+                    ? request.method
+                    : undefined;
+            if (healthProbeMethod && pathname === "/api/health/live") {
+                return livenessResponse(healthProbeMethod);
             }
-            if (isHealthProbeMethod && pathname === "/api/health/ready") {
-                return readinessResponse();
+            if (healthProbeMethod && pathname === "/api/health/ready") {
+                return readinessResponse(healthProbeMethod, options.readiness);
             }
             return new Response("Not found", { status: 404 });
         },
