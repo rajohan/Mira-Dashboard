@@ -250,8 +250,57 @@
   deletion is intentionally not performed in the request transaction: the approved architecture
   assigns bounded batch deletion and checkpoint work to the later resource-scoped maintenance job.
 - Focused normalization, lifecycle, rollback, stale-order, schema-invariant, and query-plan coverage
-  passes 21/21 tests. The complete server/database suite passes 50/50, server TypeScript passes,
+  passes 25/25 tests. The complete server/database suite passes 54/54, server TypeScript passes,
   Drizzle reports both `check: ok` and schema `no_changes`, and Oxfmt/Oxlint pass on the slice.
+
+### 2026-08-04 — Durable realtime event pump implemented
+
+- The bounded async queue proven by the SSE memory qualification is now a shared production
+  primitive rather than a copied implementation. Both the qualification feed and the durable pump
+  enforce independent event-count and queued UTF-8 payload-byte ceilings, wake pending readers
+  directly, fail deterministic slow consumers, and release pending reads on abort or close.
+- A narrow Drizzle realtime store validates every immutable outbox row through the generated
+  Valibot select schema and reads only ordered, bounded pages. Every hot-path batch reads its
+  cursor bounds and page inside one SQLite read transaction, so concurrent prefix deletion cannot
+  move the page beyond a required row without an explicit resync. Its cursor window combines
+  retained `MIN(id)` / `MAX(id)` / row count with SQLite's durable `AUTOINCREMENT` high-water mark,
+  so a completely pruned journal still distinguishes “no events ever” from “history was removed.”
+- Each subscription validates a canonical numeric cursor, captures a stable replay boundary, joins
+  the live subscriber set before yielding replay pages, and filters any central-poll event at or
+  below that boundary. Events committed during replay therefore enter the bounded live queue once,
+  without a replay/live race gap. Cursors ahead of the tail fail explicitly; cursors below the
+  retained prefix receive one terminal `resync-required` control delivery. Topic-filtered
+  subscribers advance their retention cursor to the predecessor of each sparse replay/live match
+  while preserving every unacknowledged matching delivery, and a terminal live failure interrupts
+  replay immediately unless request cancellation or pump closure has already won.
+- One coalesced pump owns live database reads. Local post-commit `wake()` calls request an immediate
+  page, while commits from another SQLite connection are recovered by a 250 ms active poll. The
+  poll backs off to five seconds with no subscribers, drains at most 16 rows per page, caps the full
+  serialized change delivery at 8 KiB, and disconnects a subscriber that exceeds 16 queued events
+  or 128 KiB of serialized deliveries. A malformed over-budget row fails only subscribers whose
+  topic filter selects it; irrelevant subscribers advance safely and continue. Subscriber turnover
+  raises the central cursor to the lowest cursor already observed by an active subscriber,
+  preventing an obsolete global cursor from forcing a safe newer subscriber to resync.
+- Bounded page polls and subscription opens use count-free cursor bounds. The linear retained-row
+  count is sampled on a separate 60-second cadence at most, whether the pump is active or idle.
+  Metrics expose that count together with its sample timestamp, current retained cursor bounds, the
+  oldest cursor still required by an attached subscriber, active subscribers, polls/failures,
+  wakeups, catch-up batch size, queue high-water marks, slow-consumer drops, delivery-preparation
+  failures, and forced resyncs. Delivery-preparation failures count rejected preparation attempts
+  across replay and live delivery; `pollFailures` counts only polls that terminate through the outer
+  failure path.
+- The pump does not delete outbox rows. The later resource-scoped maintenance job remains
+  responsible for durable checkpointing and bounded deletion below this published in-process
+  cursor boundary. Its expiry scan may identify eligible rows, but deletion must consume only a
+  contiguous ID prefix; arbitrary expiry deletion could create interior cursor holes that
+  `MIN(id)` / `MAX(id)` cannot detect.
+- Focused store/pump/qualification coverage passes 23/23 tests, including a real two-connection
+  SQLite snapshot interleaving, atomic retention revalidation, sparse topic-filtered replay and live
+  retention progress, subscriber turnover, terminal replay failure and cancellation precedence, a
+  fully pruned journal, cadence-bound count sampling, cross-connection polling without a wake
+  signal, exact queue overflow, full-delivery byte rejection and topic isolation, abort cleanup,
+  and preservation of the original SSE qualification behavior. Browser tRPC/SSE, authentication,
+  and frontend invalidation wiring remain deliberately outside this transport-independent slice.
 
 ## Executive Decision
 

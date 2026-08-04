@@ -112,6 +112,20 @@ describe("monitoring snapshot normalization", () => {
         );
     });
 
+    test("reports the exact separator policy for each identifier kind", () => {
+        const invalidSegment = snapshot();
+        invalidSegment.problems[0]!.kind = "system:health";
+        expect(() => normalizeMonitoringSnapshot(invalidSegment)).toThrow(
+            "problem.kind must use lowercase alphanumeric segments with '.', '_', or '-' separators"
+        );
+
+        const invalidIdentifier = snapshot();
+        invalidIdentifier.problems[0]!.entityKey = "filesystem/root";
+        expect(() => normalizeMonitoringSnapshot(invalidIdentifier)).toThrow(
+            "problem.entityKey must use lowercase alphanumeric segments with '.', '_', ':', or '-' separators"
+        );
+    });
+
     test("canonicalizes problem order and nested JSON key order for idempotency", () => {
         const baseline = snapshot();
         const first = {

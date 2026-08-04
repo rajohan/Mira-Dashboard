@@ -6,8 +6,14 @@ import {
 } from "../../../contracts/monitoring.ts";
 
 const fingerprintVersion = "monitoring-incident-fingerprint:v1";
-const identifierPattern = /^[a-z0-9][a-z0-9._:-]*$/u;
-const segmentPattern = /^[a-z0-9][a-z0-9._-]*$/u;
+const identifierPolicy = Object.freeze({
+    pattern: /^[a-z0-9][a-z0-9._:-]*$/u,
+    separators: "'.', '_', ':', or '-'",
+});
+const segmentPolicy = Object.freeze({
+    pattern: /^[a-z0-9][a-z0-9._-]*$/u,
+    separators: "'.', '_', or '-'",
+});
 
 export interface NormalizedMonitoringProblem {
     condition: string;
@@ -73,11 +79,15 @@ function canonicalJson(value: unknown): string {
         .join(",")}}`;
 }
 
-function normalizeIdentifier(value: string, label: string, pattern: RegExp): string {
+function normalizeIdentifier(
+    value: string,
+    label: string,
+    policy: { readonly pattern: RegExp; readonly separators: string }
+): string {
     const normalized = value.trim().toLowerCase();
-    if (!pattern.test(normalized)) {
+    if (!policy.pattern.test(normalized)) {
         throw new MonitoringSnapshotValidationError(
-            `${label} must use lowercase alphanumeric segments with '.', '_', ':', or '-' separators`
+            `${label} must use lowercase alphanumeric segments with ${policy.separators} separators`
         );
     }
     return normalized;
@@ -120,20 +130,16 @@ export function normalizeMonitoringSnapshot(
     const parsed = validation.output;
     const normalizedProblems = parsed.problems
         .map((problem): NormalizedMonitoringProblem => {
-            const kind = normalizeIdentifier(
-                problem.kind,
-                "problem.kind",
-                segmentPattern
-            );
+            const kind = normalizeIdentifier(problem.kind, "problem.kind", segmentPolicy);
             const entityKey = normalizeIdentifier(
                 problem.entityKey,
                 "problem.entityKey",
-                identifierPattern
+                identifierPolicy
             );
             const condition = normalizeIdentifier(
                 problem.condition,
                 "problem.condition",
-                segmentPattern
+                segmentPolicy
             );
             return {
                 condition,
@@ -161,12 +167,12 @@ export function normalizeMonitoringSnapshot(
         monitorKey: normalizeIdentifier(
             parsed.monitorKey,
             "monitorKey",
-            identifierPattern
+            identifierPolicy
         ),
         problems: normalizedProblems,
         report: {
             bodyMarkdown: parsed.report.bodyMarkdown,
-            kind: normalizeIdentifier(parsed.report.kind, "report.kind", segmentPattern),
+            kind: normalizeIdentifier(parsed.report.kind, "report.kind", segmentPolicy),
             metadata: parsed.report.metadata,
             source: parsed.report.source.trim(),
             sourceJobId: parsed.report.sourceJobId.trim(),

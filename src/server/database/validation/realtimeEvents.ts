@@ -1,10 +1,16 @@
-import { createInsertSchema, createSelectSchema } from "drizzle-orm/valibot";
+import {
+    createInsertSchema,
+    createSelectSchema,
+    type GetValibotTypeFromColumn,
+} from "drizzle-orm/valibot";
 import * as v from "valibot";
 
 import { realtimeEvents } from "../schema/realtime.ts";
 import { validJsonTextAction } from "./scalars.ts";
 
 const realtimeEventRefinements = {
+    id: (schema: GetValibotTypeFromColumn<typeof realtimeEvents.id>) =>
+        v.pipe(schema, v.safeInteger(), v.minValue(1)),
     payloadJson: (schema: v.StringSchema<undefined>) =>
         v.pipe(schema, validJsonTextAction),
 };

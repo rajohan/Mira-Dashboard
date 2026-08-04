@@ -10,7 +10,10 @@ import {
 } from "./incidents.ts";
 import { monitorRunInsertSchema, monitorRunUpdateSchema } from "./monitorRuns.ts";
 import { notificationInsertSchema, notificationUpdateSchema } from "./notifications.ts";
-import { realtimeEventInsertSchema } from "./realtimeEvents.ts";
+import {
+    realtimeEventInsertSchema,
+    realtimeEventSelectSchema,
+} from "./realtimeEvents.ts";
 import { reportInsertSchema } from "./reports.ts";
 import { schemaMigrationInsertSchema } from "./schemaMigrations.ts";
 
@@ -204,6 +207,12 @@ describe("Drizzle-generated Valibot row schemas", () => {
             v.parse(realtimeEventInsertSchema, {
                 ...validRealtimeEventValues,
                 id: 1,
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(realtimeEventSelectSchema, {
+                ...validRealtimeEventValues,
+                id: 0,
             })
         ).toThrow();
         expect(() =>

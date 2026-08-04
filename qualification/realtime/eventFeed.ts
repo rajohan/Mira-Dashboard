@@ -1,3 +1,5 @@
+import { BoundedAsyncQueue } from "../../src/server/platform/realtime/boundedAsyncQueue.ts";
+
 /** Data carried by the qualification event stream. */
 export interface QualificationEventData {
     readonly kind: "qualification.changed";
@@ -34,22 +36,6 @@ interface EventSubscriptionOptions {
     signal: AbortSignal;
 }
 
-interface PendingRead<T> {
-    reject: (reason: Error) => void;
-    resolve: (result: IteratorResult<T>) => void;
-}
-
-interface QueuedValue<T> {
-    readonly payloadBytes: number;
-    readonly value: T;
-}
-
-interface QueuePushResult {
-    readonly accepted: boolean;
-    readonly queuedEventCount: number;
-    readonly queuedPayloadBytes: number;
-}
-
 interface StoredQualificationEvent {
     readonly payloadBytes: number;
     readonly record: QualificationEventRecord;
@@ -68,84 +54,6 @@ export function isQualificationEventPayloadWithinLimit(payload: string): boolean
     return (
         encodedPayloadByteLength(payload) <= qualificationEventLimits.maximumPayloadBytes
     );
-}
-
-class BoundedAsyncQueue<T> {
-    readonly #pendingReads: PendingRead<T>[] = [];
-    readonly #values: QueuedValue<T>[] = [];
-    #closed = false;
-    #failure: Error | undefined;
-    #queuedPayloadBytes = 0;
-
-    close(): void {
-        this.#closed = true;
-        this.#queuedPayloadBytes = 0;
-        this.#values.length = 0;
-        for (const pendingRead of this.#pendingReads.splice(0)) {
-            pendingRead.resolve({ done: true, value: undefined });
-        }
-    }
-
-    fail(error: Error): void {
-        this.#closed = true;
-        this.#failure = error;
-        this.#queuedPayloadBytes = 0;
-        this.#values.length = 0;
-        for (const pendingRead of this.#pendingReads.splice(0)) {
-            pendingRead.reject(error);
-        }
-    }
-
-    next(): Promise<IteratorResult<T>> {
-        if (this.#failure) {
-            return Promise.reject(this.#failure);
-        }
-        const queuedValue = this.#values.shift();
-        if (queuedValue !== undefined) {
-            this.#queuedPayloadBytes -= queuedValue.payloadBytes;
-            return Promise.resolve({ done: false, value: queuedValue.value });
-        }
-        if (this.#closed) {
-            return Promise.resolve({ done: true, value: undefined });
-        }
-
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
-            this.#pendingReads.push({ reject, resolve });
-        });
-    }
-
-    push(value: T, payloadBytes: number): QueuePushResult {
-        if (this.#closed) {
-            return this.#pushResult(false);
-        }
-
-        const pendingRead = this.#pendingReads.shift();
-        if (pendingRead) {
-            pendingRead.resolve({ done: false, value });
-            return this.#pushResult(true);
-        }
-
-        if (
-            this.#values.length >=
-                qualificationEventLimits.maximumSubscriberQueueEvents ||
-            this.#queuedPayloadBytes + payloadBytes >
-                qualificationEventLimits.maximumSubscriberQueuedPayloadBytes
-        ) {
-            this.fail(new Error(queueBudgetErrorMessage));
-            return this.#pushResult(false);
-        }
-        this.#values.push({ payloadBytes, value });
-        this.#queuedPayloadBytes += payloadBytes;
-        return this.#pushResult(true);
-    }
-
-    #pushResult(accepted: boolean): QueuePushResult {
-        return {
-            accepted,
-            queuedEventCount: this.#values.length,
-            queuedPayloadBytes: this.#queuedPayloadBytes,
-        };
-    }
 }
 
 /** In-memory qualification model for tracked replay and bounded live delivery. */
@@ -233,7 +141,12 @@ export class QualificationEventFeed {
         }
 
         const replayEvents = [...this.#events];
-        const queue = new BoundedAsyncQueue<QualificationEventRecord>();
+        const queue = new BoundedAsyncQueue<QualificationEventRecord>({
+            maximumEvents: qualificationEventLimits.maximumSubscriberQueueEvents,
+            maximumPayloadBytes:
+                qualificationEventLimits.maximumSubscriberQueuedPayloadBytes,
+            overflowErrorMessage: queueBudgetErrorMessage,
+        });
         const subscriber = (event: StoredQualificationEvent): void => {
             if (Number(event.record.id) <= replayBoundary) {
                 return;
