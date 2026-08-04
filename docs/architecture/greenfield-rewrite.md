@@ -46,7 +46,9 @@
 - The tRPC evidence covers validated queries and mutations through `Bun.serve`, tracked SSE
   delivery through the official `httpSubscriptionLink`, a server-forced reconnect, resume from
   the last event ID without duplicate delivery, bounded per-subscriber buffering, and subscriber
-  cleanup after client abort. `eventsource` is injected only into the Bun-side client test.
+  cleanup after client abort. `eventsource` is injected only into the Bun-side client test. The
+  explicit liveness/readiness boundary preserves both `GET` and bodyless `HEAD` probes, and the
+  generated raw-HTTP reference is sourced from that same method contract.
 - These focused gates currently pass on the exact candidate: qualification and greenfield
   TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 8/8
   qualification tests, 31/31 greenfield server/database tests, and 4/4 documentation tests.

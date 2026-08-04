@@ -33,10 +33,12 @@ export function createGreenfieldServer(options: GreenfieldServerOptions) {
                     router: appRouter,
                 });
             }
-            if (request.method === "GET" && pathname === "/api/health/live") {
+            const isHealthProbeMethod =
+                request.method === "GET" || request.method === "HEAD";
+            if (isHealthProbeMethod && pathname === "/api/health/live") {
                 return livenessResponse();
             }
-            if (request.method === "GET" && pathname === "/api/health/ready") {
+            if (isHealthProbeMethod && pathname === "/api/health/ready") {
                 return readinessResponse();
             }
             return new Response("Not found", { status: 404 });

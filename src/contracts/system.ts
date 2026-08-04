@@ -41,7 +41,7 @@ export const systemProcedureContracts = [runtimeIdentityContract] as const;
 export const systemRawHttpContracts = [
     {
         access: { kind: "public" },
-        method: "GET",
+        methods: ["GET", "HEAD"],
         path: "/api/health/live",
         response: healthStatusSchema,
         responseSchemaId: "health.status.response",
@@ -50,7 +50,7 @@ export const systemRawHttpContracts = [
     },
     {
         access: { kind: "public" },
-        method: "GET",
+        methods: ["GET", "HEAD"],
         path: "/api/health/ready",
         response: healthStatusSchema,
         responseSchemaId: "health.status.response",

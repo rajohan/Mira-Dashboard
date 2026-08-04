@@ -47,11 +47,13 @@ export function renderProcedures(contracts: readonly ProcedureContract[]): strin
 export function renderRawHttp(contracts: readonly RawHttpContract[]): string {
     const rows = contracts
         .toSorted((left, right) =>
-            `${left.path}:${left.method}`.localeCompare(`${right.path}:${right.method}`)
+            `${left.path}:${left.methods.join(",")}`.localeCompare(
+                `${right.path}:${right.methods.join(",")}`
+            )
         )
         .map(
             (contract) =>
-                `| ${contract.method} | \`${contract.path}\` | ${accessLabel(contract.access)} | ${contract.statusCodes.join(", ")} | [response](./schemas/${contract.responseSchemaId}.schema.json) | ${contract.summary} |`
+                `| ${contract.methods.join(" / ")} | \`${contract.path}\` | ${accessLabel(contract.access)} | ${contract.statusCodes.join(", ")} | [response](./schemas/${contract.responseSchemaId}.schema.json) | ${contract.summary} |`
         );
 
     return `${documentHeader("Raw HTTP Routes", "bun run docs:generate")}| Method | Path | Access | Status | Response | Summary |\n| --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;

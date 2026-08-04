@@ -25,7 +25,7 @@ export interface ProcedureContract {
 /** Metadata for one raw route whose protocol semantics are HTTP-specific. */
 export interface RawHttpContract {
     access: ContractAccess;
-    method: "GET" | "POST";
+    methods: readonly ("GET" | "HEAD" | "POST")[];
     path: string;
     response: ContractSchema;
     responseSchemaId: string;

@@ -43,6 +43,12 @@ describe("greenfield system foundation", () => {
 
         const liveness = await fetch(new URL("/api/health/live", server.url));
         const readiness = await fetch(new URL("/api/health/ready", server.url));
+        const headLiveness = await fetch(new URL("/api/health/live", server.url), {
+            method: "HEAD",
+        });
+        const headReadiness = await fetch(new URL("/api/health/ready", server.url), {
+            method: "HEAD",
+        });
         const missing = await fetch(new URL("/api/unknown", server.url));
         const misleadingTrpcPrefix = await fetch(new URL("/trpc-unrelated", server.url));
 
@@ -50,6 +56,10 @@ describe("greenfield system foundation", () => {
         expect(await liveness.json()).toEqual({ status: "live" });
         expect(readiness.status).toBe(200);
         expect(await readiness.json()).toEqual({ status: "ready" });
+        expect(headLiveness.status).toBe(200);
+        expect(await headLiveness.text()).toBe("");
+        expect(headReadiness.status).toBe(200);
+        expect(await headReadiness.text()).toBe("");
         expect(missing.status).toBe(404);
         expect(misleadingTrpcPrefix.status).toBe(404);
     });

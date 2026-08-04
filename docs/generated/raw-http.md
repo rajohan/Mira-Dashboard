@@ -4,5 +4,5 @@
 
 | Method | Path | Access | Status | Response | Summary |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/api/health/live` | Public | 200 | [response](./schemas/health.status.response.schema.json) | Confirms that the Bun web process can answer requests. |
-| GET | `/api/health/ready` | Public | 200 | [response](./schemas/health.status.response.schema.json) | Confirms that the greenfield foundation is ready to serve traffic. |
+| GET / HEAD | `/api/health/live` | Public | 200 | [response](./schemas/health.status.response.schema.json) | Confirms that the Bun web process can answer requests. |
+| GET / HEAD | `/api/health/ready` | Public | 200 | [response](./schemas/health.status.response.schema.json) | Confirms that the greenfield foundation is ready to serve traffic. |
