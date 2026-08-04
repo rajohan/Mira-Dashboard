@@ -211,9 +211,12 @@ describe("database migration graph", () => {
                 INSERT INTO incident_observations (
                     generation,
                     incident_id,
+                    kind,
                     monitor_run_id,
-                    observed_at
-                ) VALUES (1, 'missing-incident', 'missing-run', 1)
+                    observed_at,
+                    severity,
+                    title
+                ) VALUES (1, 'missing-incident', 'system', 'missing-run', 1, 'warning', 'Missing')
             `);
             database.sqlite.run("PRAGMA foreign_keys = ON");
 

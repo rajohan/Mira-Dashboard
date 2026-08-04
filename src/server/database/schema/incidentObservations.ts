@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+    check,
+    index,
+    integer,
+    sqliteTable,
+    text,
+    uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 import { incidents } from "./incidents.ts";
 import { monitorRuns } from "./monitorRuns.ts";
@@ -14,10 +21,15 @@ export const incidentObservations = sqliteTable(
         incidentId: text("incident_id")
             .notNull()
             .references(() => incidents.id, { onDelete: "cascade" }),
+        kind: text("kind").notNull(),
         monitorRunId: text("monitor_run_id")
             .notNull()
             .references(() => monitorRuns.id, { onDelete: "cascade" }),
         observedAt: integer("observed_at", { mode: "timestamp_ms" }).notNull(),
+        severity: text("severity", {
+            enum: ["critical", "error", "info", "warning"],
+        }).notNull(),
+        title: text("title").notNull(),
     },
     (table) => [
         check(
@@ -25,6 +37,14 @@ export const incidentObservations = sqliteTable(
             sql`CASE WHEN json_valid(${table.detailsJson}) THEN json_type(${table.detailsJson}) = 'object' ELSE 0 END`
         ),
         check("incident_observations_generation_check", sql`${table.generation} >= 1`),
+        check(
+            "incident_observations_severity_check",
+            sql`${table.severity} IN ('critical', 'error', 'info', 'warning')`
+        ),
+        uniqueIndex("incident_observations_run_incident_unique").on(
+            table.monitorRunId,
+            table.incidentId
+        ),
         index("incident_observations_incident_observed_id_idx").on(
             table.incidentId,
             table.observedAt,

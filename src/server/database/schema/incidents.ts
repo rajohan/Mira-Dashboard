@@ -44,6 +44,14 @@ export const incidents = sqliteTable(
             "incidents_resolution_check",
             sql`(${table.state} = 'active' AND ${table.resolvedAt} IS NULL) OR (${table.state} = 'resolved' AND ${table.resolvedAt} IS NOT NULL)`
         ),
+        check(
+            "incidents_seen_order_check",
+            sql`${table.lastSeenAt} >= ${table.firstSeenAt}`
+        ),
+        check(
+            "incidents_resolution_order_check",
+            sql`${table.resolvedAt} IS NULL OR ${table.resolvedAt} >= ${table.lastSeenAt}`
+        ),
         uniqueIndex("incidents_monitor_fingerprint_unique").on(
             table.monitorKey,
             table.fingerprint

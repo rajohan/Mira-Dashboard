@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "b3ddbfb9-2ddd-4ab4-84f5-7a2ad97e6cbf",
+  "id": "46483271-9e0d-4714-9a30-6cdb97d3e558",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -80,6 +80,16 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "kind",
+      "entityType": "columns",
+      "table": "incident_observations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "monitor_run_id",
       "entityType": "columns",
       "table": "incident_observations"
@@ -91,6 +101,26 @@
       "default": null,
       "generated": null,
       "name": "observed_at",
+      "entityType": "columns",
+      "table": "incident_observations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "severity",
+      "entityType": "columns",
+      "table": "incident_observations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "title",
       "entityType": "columns",
       "table": "incident_observations"
     },
@@ -275,6 +305,16 @@
       "table": "monitor_runs"
     },
     {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "submission_sha256",
+      "entityType": "columns",
+      "table": "monitor_runs"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -421,6 +461,16 @@
       "default": null,
       "generated": null,
       "name": "entity_type",
+      "entityType": "columns",
+      "table": "realtime_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
       "entityType": "columns",
       "table": "realtime_events"
     },
@@ -720,6 +770,24 @@
     {
       "columns": [
         {
+          "value": "monitor_run_id",
+          "isExpression": false
+        },
+        {
+          "value": "incident_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "incident_observations_run_incident_unique",
+      "entityType": "indexes",
+      "table": "incident_observations"
+    },
+    {
+      "columns": [
+        {
           "value": "incident_id",
           "isExpression": false
         },
@@ -800,14 +868,18 @@
           "isExpression": false
         },
         {
-          "value": "started_at",
+          "value": "completed_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
           "isExpression": false
         }
       ],
       "isUnique": false,
       "where": null,
       "origin": "manual",
-      "name": "monitor_runs_monitor_started_idx",
+      "name": "monitor_runs_monitor_completed_id_idx",
       "entityType": "indexes",
       "table": "monitor_runs"
     },
@@ -846,6 +918,24 @@
       "name": "notifications_unread_occurred_idx",
       "entityType": "indexes",
       "table": "notifications"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "realtime_events_expires_id_idx",
+      "entityType": "indexes",
+      "table": "realtime_events"
     },
     {
       "columns": [
@@ -926,6 +1016,12 @@
       "table": "incident_observations"
     },
     {
+      "value": "\"severity\" IN ('critical', 'error', 'info', 'warning')",
+      "name": "incident_observations_severity_check",
+      "entityType": "checks",
+      "table": "incident_observations"
+    },
+    {
       "value": "CASE WHEN json_valid(\"details_json\") THEN json_type(\"details_json\") = 'object' ELSE 0 END",
       "name": "incidents_details_json_check",
       "entityType": "checks",
@@ -962,6 +1058,18 @@
       "table": "incidents"
     },
     {
+      "value": "\"last_seen_at\" >= \"first_seen_at\"",
+      "name": "incidents_seen_order_check",
+      "entityType": "checks",
+      "table": "incidents"
+    },
+    {
+      "value": "\"resolved_at\" IS NULL OR \"resolved_at\" >= \"last_seen_at\"",
+      "name": "incidents_resolution_order_check",
+      "entityType": "checks",
+      "table": "incidents"
+    },
+    {
       "value": "\"complete_snapshot\" IN (0, 1)",
       "name": "monitor_runs_complete_snapshot_check",
       "entityType": "checks",
@@ -976,6 +1084,18 @@
     {
       "value": "(\"state\" = 'running' AND \"completed_at\" IS NULL) OR (\"state\" IN ('failed', 'succeeded') AND \"completed_at\" IS NOT NULL)",
       "name": "monitor_runs_completion_check",
+      "entityType": "checks",
+      "table": "monitor_runs"
+    },
+    {
+      "value": "\"completed_at\" IS NULL OR \"completed_at\" >= \"started_at\"",
+      "name": "monitor_runs_completion_order_check",
+      "entityType": "checks",
+      "table": "monitor_runs"
+    },
+    {
+      "value": "length(\"submission_sha256\") = 64 AND \"submission_sha256\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "monitor_runs_submission_sha256_check",
       "entityType": "checks",
       "table": "monitor_runs"
     },
@@ -1012,6 +1132,12 @@
     {
       "value": "\"operation\" IN ('created', 'deleted', 'snapshot-required', 'updated')",
       "name": "realtime_events_operation_check",
+      "entityType": "checks",
+      "table": "realtime_events"
+    },
+    {
+      "value": "\"expires_at\" > \"occurred_at\"",
+      "name": "realtime_events_expiry_order_check",
       "entityType": "checks",
       "table": "realtime_events"
     },

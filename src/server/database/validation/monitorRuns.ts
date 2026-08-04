@@ -12,6 +12,11 @@ const monitorRunRefinements = {
     id: (schema: v.StringSchema<undefined>) => v.pipe(schema, v.uuid(), uuidV7Action),
     reportId: (schema: v.StringSchema<undefined>) =>
         v.pipe(schema, v.uuid(), uuidV7Action),
+    submissionSha256: (schema: v.StringSchema<undefined>) =>
+        v.pipe(
+            schema,
+            v.regex(/^[0-9a-f]{64}$/, "Expected a lowercase SHA-256 checksum.")
+        ),
 };
 
 const generatedMonitorRunSelectSchema = createSelectSchema(

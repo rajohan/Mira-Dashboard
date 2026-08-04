@@ -98,9 +98,10 @@ describe("monitoring schema", () => {
                         complete_snapshot,
                         id,
                         monitor_key,
+                        submission_sha256,
                         started_at,
                         state
-                    ) VALUES (2, 'run-1', 'ops-check', 1000, 'running')`
+                    ) VALUES (2, 'run-1', 'ops-check', '${"a".repeat(64)}', 1000, 'running')`
                 )
             ).toThrow("monitor_runs_complete_snapshot_check");
             expect(() =>
@@ -109,11 +110,106 @@ describe("monitoring schema", () => {
                         complete_snapshot,
                         id,
                         monitor_key,
+                        submission_sha256,
                         started_at,
                         state
-                    ) VALUES (1, 'run-2', 'ops-check', 'not-a-timestamp', 'running')`
+                    ) VALUES (1, 'run-2', 'ops-check', '${"a".repeat(64)}', 'not-a-timestamp', 'running')`
                 )
             ).toThrow();
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("enforces temporal, submission, and observation invariants", async () => {
+        const database = await openFreshMigratedDatabase();
+
+        try {
+            database.sqlite.run(insertIncidentSql, [
+                "{}",
+                "filesystem:root:pressure",
+                "incident-1",
+                "ops-check",
+            ]);
+
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE incidents SET last_seen_at = 999 WHERE id = 'incident-1'"
+                )
+            ).toThrow("incidents_seen_order_check");
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE incidents SET resolved_at = 999, state = 'resolved' WHERE id = 'incident-1'"
+                )
+            ).toThrow("incidents_resolution_order_check");
+
+            expect(() =>
+                database.sqlite.run(`
+                    INSERT INTO monitor_runs (
+                        completed_at,
+                        complete_snapshot,
+                        id,
+                        monitor_key,
+                        submission_sha256,
+                        started_at,
+                        state
+                    ) VALUES (999, 1, 'run-out-of-order', 'ops-check', '${"a".repeat(64)}', 1000, 'succeeded')
+                `)
+            ).toThrow("monitor_runs_completion_order_check");
+            expect(() =>
+                database.sqlite.run(`
+                    INSERT INTO monitor_runs (
+                        complete_snapshot,
+                        id,
+                        monitor_key,
+                        submission_sha256,
+                        started_at,
+                        state
+                    ) VALUES (1, 'run-invalid-checksum', 'ops-check', '${"A".repeat(64)}', 1000, 'running')
+                `)
+            ).toThrow("monitor_runs_submission_sha256_check");
+
+            database.sqlite.run(`
+                INSERT INTO monitor_runs (
+                    complete_snapshot,
+                    id,
+                    monitor_key,
+                    submission_sha256,
+                    started_at,
+                    state
+                ) VALUES (1, 'run-valid', 'ops-check', '${"a".repeat(64)}', 1000, 'running')
+            `);
+            expect(() =>
+                database.sqlite.run(`
+                    INSERT INTO incident_observations (
+                        details_json,
+                        generation,
+                        incident_id,
+                        kind,
+                        monitor_run_id,
+                        observed_at,
+                        severity,
+                        title
+                    ) VALUES ('{}', 1, 'incident-1', 'system', 'run-valid', 1000, 'unknown', 'Invalid severity')
+                `)
+            ).toThrow("incident_observations_severity_check");
+
+            const insertObservation = `
+                INSERT INTO incident_observations (
+                    details_json,
+                    generation,
+                    incident_id,
+                    kind,
+                    monitor_run_id,
+                    observed_at,
+                    severity,
+                    title
+                ) VALUES ('{}', 1, 'incident-1', 'system', 'run-valid', 1000, 'warning', 'Disk pressure')
+            `;
+            database.sqlite.run(insertObservation);
+            expect(() => database.sqlite.run(insertObservation)).toThrow(
+                "UNIQUE constraint failed"
+            );
         } finally {
             database.sqlite.close(true);
         }
