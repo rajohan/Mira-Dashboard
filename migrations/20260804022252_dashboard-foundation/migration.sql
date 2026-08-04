@@ -3,12 +3,16 @@ CREATE TABLE `incident_observations` (
 	`generation` integer NOT NULL,
 	`id` integer PRIMARY KEY AUTOINCREMENT,
 	`incident_id` text NOT NULL,
+	`kind` text NOT NULL,
 	`monitor_run_id` text NOT NULL,
 	`observed_at` integer NOT NULL,
+	`severity` text NOT NULL,
+	`title` text NOT NULL,
 	CONSTRAINT `fk_incident_observations_incident_id_incidents_id_fk` FOREIGN KEY (`incident_id`) REFERENCES `incidents`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `fk_incident_observations_monitor_run_id_monitor_runs_id_fk` FOREIGN KEY (`monitor_run_id`) REFERENCES `monitor_runs`(`id`) ON DELETE CASCADE,
 	CONSTRAINT "incident_observations_details_json_check" CHECK(CASE WHEN json_valid("details_json") THEN json_type("details_json") = 'object' ELSE 0 END),
-	CONSTRAINT "incident_observations_generation_check" CHECK("generation" >= 1)
+	CONSTRAINT "incident_observations_generation_check" CHECK("generation" >= 1),
+	CONSTRAINT "incident_observations_severity_check" CHECK("severity" IN ('critical', 'error', 'info', 'warning'))
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `incidents` (
@@ -30,7 +34,9 @@ CREATE TABLE `incidents` (
 	CONSTRAINT "incidents_occurrence_count_check" CHECK("occurrence_count" >= 1),
 	CONSTRAINT "incidents_severity_check" CHECK("severity" IN ('critical', 'error', 'info', 'warning')),
 	CONSTRAINT "incidents_state_check" CHECK("state" IN ('active', 'resolved')),
-	CONSTRAINT "incidents_resolution_check" CHECK(("state" = 'active' AND "resolved_at" IS NULL) OR ("state" = 'resolved' AND "resolved_at" IS NOT NULL))
+	CONSTRAINT "incidents_resolution_check" CHECK(("state" = 'active' AND "resolved_at" IS NULL) OR ("state" = 'resolved' AND "resolved_at" IS NOT NULL)),
+	CONSTRAINT "incidents_seen_order_check" CHECK("last_seen_at" >= "first_seen_at"),
+	CONSTRAINT "incidents_resolution_order_check" CHECK("resolved_at" IS NULL OR "resolved_at" >= "last_seen_at")
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `monitor_runs` (
@@ -41,10 +47,13 @@ CREATE TABLE `monitor_runs` (
 	`report_id` text,
 	`started_at` integer NOT NULL,
 	`state` text NOT NULL,
+	`submission_sha256` text NOT NULL,
 	CONSTRAINT `fk_monitor_runs_report_id_reports_id_fk` FOREIGN KEY (`report_id`) REFERENCES `reports`(`id`) ON DELETE SET NULL,
 	CONSTRAINT "monitor_runs_complete_snapshot_check" CHECK("complete_snapshot" IN (0, 1)),
 	CONSTRAINT "monitor_runs_state_check" CHECK("state" IN ('failed', 'running', 'succeeded')),
-	CONSTRAINT "monitor_runs_completion_check" CHECK(("state" = 'running' AND "completed_at" IS NULL) OR ("state" IN ('failed', 'succeeded') AND "completed_at" IS NOT NULL))
+	CONSTRAINT "monitor_runs_completion_check" CHECK(("state" = 'running' AND "completed_at" IS NULL) OR ("state" IN ('failed', 'succeeded') AND "completed_at" IS NOT NULL)),
+	CONSTRAINT "monitor_runs_completion_order_check" CHECK("completed_at" IS NULL OR "completed_at" >= "started_at"),
+	CONSTRAINT "monitor_runs_submission_sha256_check" CHECK(length("submission_sha256") = 64 AND "submission_sha256" NOT GLOB '*[^0-9a-f]*')
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `notifications` (
@@ -69,13 +78,15 @@ CREATE TABLE `notifications` (
 CREATE TABLE `realtime_events` (
 	`entity_id` text NOT NULL,
 	`entity_type` text NOT NULL,
+	`expires_at` integer NOT NULL,
 	`id` integer PRIMARY KEY AUTOINCREMENT,
 	`occurred_at` integer NOT NULL,
 	`operation` text NOT NULL,
 	`payload_json` text NOT NULL,
 	`topic` text NOT NULL,
 	CONSTRAINT "realtime_events_payload_json_check" CHECK(json_valid("payload_json")),
-	CONSTRAINT "realtime_events_operation_check" CHECK("operation" IN ('created', 'deleted', 'snapshot-required', 'updated'))
+	CONSTRAINT "realtime_events_operation_check" CHECK("operation" IN ('created', 'deleted', 'snapshot-required', 'updated')),
+	CONSTRAINT "realtime_events_expiry_order_check" CHECK("expires_at" > "occurred_at")
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `reports` (
@@ -97,13 +108,15 @@ CREATE TABLE `schema_migrations` (
 	`release_id` text NOT NULL
 ) STRICT;
 --> statement-breakpoint
+CREATE UNIQUE INDEX `incident_observations_run_incident_unique` ON `incident_observations` (`monitor_run_id`,`incident_id`);--> statement-breakpoint
 CREATE INDEX `incident_observations_incident_observed_id_idx` ON `incident_observations` (`incident_id`,`observed_at`,`id`);--> statement-breakpoint
 CREATE INDEX `incident_observations_run_idx` ON `incident_observations` (`monitor_run_id`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `incidents_monitor_fingerprint_unique` ON `incidents` (`monitor_key`,`fingerprint`);--> statement-breakpoint
 CREATE INDEX `incidents_active_monitor_seen_idx` ON `incidents` (`monitor_key`,`last_seen_at`) WHERE "incidents"."state" = 'active';--> statement-breakpoint
-CREATE INDEX `monitor_runs_monitor_started_idx` ON `monitor_runs` (`monitor_key`,`started_at`);--> statement-breakpoint
+CREATE INDEX `monitor_runs_monitor_completed_id_idx` ON `monitor_runs` (`monitor_key`,`completed_at`,`id`) WHERE "monitor_runs"."complete_snapshot" = 1 AND "monitor_runs"."state" = 'succeeded';--> statement-breakpoint
 CREATE UNIQUE INDEX `notifications_incident_generation_channel_unique` ON `notifications` (`incident_id`,`incident_generation`,`channel`) WHERE "notifications"."incident_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `notifications_unread_occurred_idx` ON `notifications` (`occurred_at`) WHERE "notifications"."read_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `realtime_events_expires_id_idx` ON `realtime_events` (`expires_at`,`id`);--> statement-breakpoint
 CREATE INDEX `realtime_events_topic_id_idx` ON `realtime_events` (`topic`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_kind_occurred_id_idx` ON `reports` (`kind`,`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_source_job_occurred_id_idx` ON `reports` (`source`,`source_job_id`,`occurred_at`,`id`);

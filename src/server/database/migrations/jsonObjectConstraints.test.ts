@@ -39,18 +39,22 @@ describe("database object JSON constraints", () => {
                     complete_snapshot,
                     id,
                     monitor_key,
+                    submission_sha256,
                     started_at,
                     state
-                ) VALUES (1, 'run-valid', 'ops-check', 1000, 'running')`
+                ) VALUES (1, 'run-valid', 'ops-check', '${"a".repeat(64)}', 1000, 'running')`
             );
             database.sqlite.run(
                 `INSERT INTO incident_observations (
                     details_json,
                     generation,
                     incident_id,
+                    kind,
                     monitor_run_id,
-                    observed_at
-                ) VALUES ('{}', 1, 'incident-valid', 'run-valid', 1000)`
+                    observed_at,
+                    severity,
+                    title
+                ) VALUES ('{}', 1, 'incident-valid', 'system', 'run-valid', 1000, 'warning', 'Valid observation')`
             );
 
             for (const [index, document] of rejectedJsonDocuments.entries()) {
@@ -97,9 +101,12 @@ describe("database object JSON constraints", () => {
                             details_json,
                             generation,
                             incident_id,
+                            kind,
                             monitor_run_id,
-                            observed_at
-                        ) VALUES (?, 1, 'incident-valid', 'run-valid', 1000)`,
+                            observed_at,
+                            severity,
+                            title
+                        ) VALUES (?, 1, 'incident-valid', 'system', 'run-valid', 1000, 'warning', 'Invalid observation')`,
                         [document]
                     )
                 ).toThrow("incident_observations_details_json_check");

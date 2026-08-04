@@ -35,12 +35,16 @@ const validObservationValues = {
     detailsJson: '{"usagePercent":91}',
     generation: 1,
     incidentId,
+    kind: "system",
     monitorRunId,
     observedAt,
+    severity: "warning",
+    title: "Root filesystem pressure",
 } as const;
 const validRealtimeEventValues = {
     entityId: incidentId,
     entityType: "incident",
+    expiresAt: new Date("2026-08-10T22:00:00.000Z"),
     occurredAt: observedAt,
     operation: "created",
     payloadJson: JSON.stringify({ incidentId }),
@@ -78,6 +82,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 reportId,
                 startedAt: observedAt,
                 state: "running",
+                submissionSha256: "a".repeat(64),
             })
         ).toBeDefined();
 
