@@ -38,12 +38,15 @@ git clone https://github.com/rajohan/Mira-Dashboard.git \
 cd /home/ubuntu/projects/mira-dashboard/production/checkout
 ```
 
-Select the repository runtime channel:
+Select the repository runtime channel before bootstrapping a release:
 
 ```bash
 bun upgrade --canary
 bun --revision
 ```
+
+The repository targets Bun 1.4 while `.bun-version` remains on Canary. Each immutable Dashboard
+release records and reuses the exact Bun revision that built it.
 
 ## Configure Secrets
 

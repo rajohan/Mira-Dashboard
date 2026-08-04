@@ -1,0 +1,14 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "lib": ["ESNext"],
+        "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
+        "types": ["bun-types", "node"]
+    },
+    "include": [
+        "src/app/**/*.ts",
+        "src/contracts/**/*.ts",
+        "src/server/**/*.ts",
+        "src/shared/**/*.ts"
+    ]
+}
