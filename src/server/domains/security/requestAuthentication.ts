@@ -129,7 +129,7 @@ function readSingleCookie(request: Request, name: string): CookieValue {
     const occurrences = header.split(";").filter((part) => {
         const normalized = part.trim();
         const separator = normalized.indexOf("=");
-        return separator !== -1 && normalized.slice(0, separator) === name;
+        return separator !== -1 && normalized.slice(0, separator).trim() === name;
     }).length;
     if (occurrences > 1) return { kind: "invalid" };
     if (occurrences === 0) return { kind: "absent" };

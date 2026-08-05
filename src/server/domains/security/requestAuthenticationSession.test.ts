@@ -111,6 +111,11 @@ describe("session request authentication", () => {
                     cookie: `${dashboardSessionCookieName}=${fixture.session.token}; ${dashboardSessionCookieName}=${fixture.session.token}`,
                 },
             });
+            const whitespaceDuplicate = new Request("https://dashboard.example/trpc", {
+                headers: {
+                    cookie: `${dashboardSessionCookieName}=${fixture.session.token}; ${dashboardSessionCookieName} =other`,
+                },
+            });
             const unknownToken = `${"f".repeat(32)}.${"e".repeat(64)}`;
 
             expect(
@@ -119,6 +124,9 @@ describe("session request authentication", () => {
             expect(authenticator.authenticate(duplicate).authentication).toEqual({
                 kind: "invalid",
             });
+            expect(
+                authenticator.authenticate(whitespaceDuplicate).authentication
+            ).toEqual({ kind: "invalid" });
             expect(
                 authenticator.authenticate(sessionRequest(unknownToken)).authentication
             ).toEqual({ kind: "invalid" });

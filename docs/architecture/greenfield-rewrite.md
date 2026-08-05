@@ -70,10 +70,11 @@
   SQLite `STRICT` tables and passes integrity, foreign-key, lifecycle-constraint, deduplication,
   datatype, and partial-index query-plan tests. An explicit manifest pins both the SQL and
   snapshot SHA-256 values and rejects tampered or unreviewed migration folders before runtime
-  application. Review hardening now also enforces object-root JSON in SQLite for report metadata
-  and incident details. Because no rewrite database is live, every schema slice regenerates the
-  same unpublished fresh-database baseline rather than preserving incremental implementation
-  history. Every fresh-database fixture applies only checksum-verified statements through
+  application. Review hardening now also enforces object-root JSON plus the shared safe-number
+  and nesting-depth boundary in SQLite for report metadata and incident details. Because no
+  rewrite database is live, every schema slice regenerates the same unpublished fresh-database
+  baseline rather than preserving incremental implementation history. Every fresh-database
+  fixture applies only checksum-verified statements through
   Dashboard's native SQLite runner. That runner validates the canonical graph,
   holds an immediate transaction across validation and application, and records the reviewed SQL
   checksum in the owned `schema_migrations` ledger. Before any transaction it requires foreign
@@ -967,7 +968,8 @@ applies the SQL, and runs integrity checks. `drizzle-kit push` is forbidden in p
 Drizzle ORM/Kit `1.0.0-rc.4` does not model SQLite's table-level `STRICT` option in
 `sqliteTable`. Generated `CREATE TABLE` statements are therefore reviewed to add the `STRICT`
 keyword, restore explicit `NOT NULL` on rowid-backed text primary keys where Kit elides it, and apply
-`WITHOUT ROWID` plus the custom triggers to `audit_events`. CI applies the tracked SQL to an empty
+`WITHOUT ROWID` plus the custom audit and monitoring-JSON validation triggers. CI applies the
+tracked SQL to an empty
 database and introspects `sqlite_schema` plus `pragma_table_info`; every Dashboard-owned table must
 remain `STRICT`, every text primary-key component must be non-null, and the audit ledger must have
 no hidden rowid. These explicit, tested SQLite extensions are preferable to pretending Drizzle

@@ -244,6 +244,144 @@ CREATE INDEX `realtime_events_topic_id_idx` ON `realtime_events` (`topic`,`id`);
 CREATE INDEX `reports_kind_occurred_id_idx` ON `reports` (`kind`,`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_source_job_occurred_id_idx` ON `reports` (`source`,`source_job_id`,`occurred_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`);--> statement-breakpoint
+CREATE TRIGGER reports_validate_metadata_insert
+BEFORE INSERT ON reports
+WHEN CASE WHEN json_valid(NEW.metadata_json) THEN EXISTS (
+	WITH RECURSIVE
+	metadata_tree(id, parent, type, atom) AS (
+		SELECT id, parent, type, atom FROM json_tree(NEW.metadata_json)
+	),
+	metadata_depth(id, type, atom, depth) AS (
+		SELECT id, type, atom, 0 FROM metadata_tree WHERE parent IS NULL
+		UNION ALL
+		SELECT child.id, child.type, child.atom, parent.depth + 1
+		FROM metadata_tree AS child
+		JOIN metadata_depth AS parent ON child.parent = parent.id
+	)
+	SELECT 1
+	FROM metadata_depth
+	WHERE (type IN ('object', 'array') AND depth > 12)
+		OR (type IN ('integer', 'real') AND (atom > 9007199254740991 OR atom < -9007199254740991))
+) ELSE 0 END
+BEGIN
+	SELECT RAISE(ABORT, 'reports metadata must be bounded monitoring JSON');
+END;
+--> statement-breakpoint
+CREATE TRIGGER reports_validate_metadata_update
+BEFORE UPDATE OF metadata_json ON reports
+WHEN CASE WHEN json_valid(NEW.metadata_json) THEN EXISTS (
+	WITH RECURSIVE
+	metadata_tree(id, parent, type, atom) AS (
+		SELECT id, parent, type, atom FROM json_tree(NEW.metadata_json)
+	),
+	metadata_depth(id, type, atom, depth) AS (
+		SELECT id, type, atom, 0 FROM metadata_tree WHERE parent IS NULL
+		UNION ALL
+		SELECT child.id, child.type, child.atom, parent.depth + 1
+		FROM metadata_tree AS child
+		JOIN metadata_depth AS parent ON child.parent = parent.id
+	)
+	SELECT 1
+	FROM metadata_depth
+	WHERE (type IN ('object', 'array') AND depth > 12)
+		OR (type IN ('integer', 'real') AND (atom > 9007199254740991 OR atom < -9007199254740991))
+) ELSE 0 END
+BEGIN
+	SELECT RAISE(ABORT, 'reports metadata must be bounded monitoring JSON');
+END;
+--> statement-breakpoint
+CREATE TRIGGER incidents_validate_details_insert
+BEFORE INSERT ON incidents
+WHEN CASE WHEN json_valid(NEW.details_json) THEN EXISTS (
+	WITH RECURSIVE
+	metadata_tree(id, parent, type, atom) AS (
+		SELECT id, parent, type, atom FROM json_tree(NEW.details_json)
+	),
+	metadata_depth(id, type, atom, depth) AS (
+		SELECT id, type, atom, 0 FROM metadata_tree WHERE parent IS NULL
+		UNION ALL
+		SELECT child.id, child.type, child.atom, parent.depth + 1
+		FROM metadata_tree AS child
+		JOIN metadata_depth AS parent ON child.parent = parent.id
+	)
+	SELECT 1
+	FROM metadata_depth
+	WHERE (type IN ('object', 'array') AND depth > 12)
+		OR (type IN ('integer', 'real') AND (atom > 9007199254740991 OR atom < -9007199254740991))
+) ELSE 0 END
+BEGIN
+	SELECT RAISE(ABORT, 'incidents details must be bounded monitoring JSON');
+END;
+--> statement-breakpoint
+CREATE TRIGGER incidents_validate_details_update
+BEFORE UPDATE OF details_json ON incidents
+WHEN CASE WHEN json_valid(NEW.details_json) THEN EXISTS (
+	WITH RECURSIVE
+	metadata_tree(id, parent, type, atom) AS (
+		SELECT id, parent, type, atom FROM json_tree(NEW.details_json)
+	),
+	metadata_depth(id, type, atom, depth) AS (
+		SELECT id, type, atom, 0 FROM metadata_tree WHERE parent IS NULL
+		UNION ALL
+		SELECT child.id, child.type, child.atom, parent.depth + 1
+		FROM metadata_tree AS child
+		JOIN metadata_depth AS parent ON child.parent = parent.id
+	)
+	SELECT 1
+	FROM metadata_depth
+	WHERE (type IN ('object', 'array') AND depth > 12)
+		OR (type IN ('integer', 'real') AND (atom > 9007199254740991 OR atom < -9007199254740991))
+) ELSE 0 END
+BEGIN
+	SELECT RAISE(ABORT, 'incidents details must be bounded monitoring JSON');
+END;
+--> statement-breakpoint
+CREATE TRIGGER incident_observations_validate_details_insert
+BEFORE INSERT ON incident_observations
+WHEN CASE WHEN json_valid(NEW.details_json) THEN EXISTS (
+	WITH RECURSIVE
+	metadata_tree(id, parent, type, atom) AS (
+		SELECT id, parent, type, atom FROM json_tree(NEW.details_json)
+	),
+	metadata_depth(id, type, atom, depth) AS (
+		SELECT id, type, atom, 0 FROM metadata_tree WHERE parent IS NULL
+		UNION ALL
+		SELECT child.id, child.type, child.atom, parent.depth + 1
+		FROM metadata_tree AS child
+		JOIN metadata_depth AS parent ON child.parent = parent.id
+	)
+	SELECT 1
+	FROM metadata_depth
+	WHERE (type IN ('object', 'array') AND depth > 12)
+		OR (type IN ('integer', 'real') AND (atom > 9007199254740991 OR atom < -9007199254740991))
+) ELSE 0 END
+BEGIN
+	SELECT RAISE(ABORT, 'incident observations details must be bounded monitoring JSON');
+END;
+--> statement-breakpoint
+CREATE TRIGGER incident_observations_validate_details_update
+BEFORE UPDATE OF details_json ON incident_observations
+WHEN CASE WHEN json_valid(NEW.details_json) THEN EXISTS (
+	WITH RECURSIVE
+	metadata_tree(id, parent, type, atom) AS (
+		SELECT id, parent, type, atom FROM json_tree(NEW.details_json)
+	),
+	metadata_depth(id, type, atom, depth) AS (
+		SELECT id, type, atom, 0 FROM metadata_tree WHERE parent IS NULL
+		UNION ALL
+		SELECT child.id, child.type, child.atom, parent.depth + 1
+		FROM metadata_tree AS child
+		JOIN metadata_depth AS parent ON child.parent = parent.id
+	)
+	SELECT 1
+	FROM metadata_depth
+	WHERE (type IN ('object', 'array') AND depth > 12)
+		OR (type IN ('integer', 'real') AND (atom > 9007199254740991 OR atom < -9007199254740991))
+) ELSE 0 END
+BEGIN
+	SELECT RAISE(ABORT, 'incident observations details must be bounded monitoring JSON');
+END;
+--> statement-breakpoint
 CREATE TRIGGER audit_events_validate_metadata
 BEFORE INSERT ON audit_events
 WHEN EXISTS (

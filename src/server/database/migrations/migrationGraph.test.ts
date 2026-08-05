@@ -59,6 +59,12 @@ describe("database migration graph", () => {
             "audit_events_reject_replace",
             "audit_events_reject_update",
             "audit_events_reject_delete",
+            "reports_validate_metadata_insert",
+            "reports_validate_metadata_update",
+            "incidents_validate_details_insert",
+            "incidents_validate_details_update",
+            "incident_observations_validate_details_insert",
+            "incident_observations_validate_details_update",
         ]) {
             expect(foundationSql).toContain(`CREATE TRIGGER ${trigger}`);
         }
