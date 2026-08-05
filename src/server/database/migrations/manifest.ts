@@ -17,7 +17,7 @@ export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]
     Object.freeze({
         id: "20260805071222_security-core",
         migrationSha256:
-            "a195b1914088adfe04aa5dca883bd8b55d3c9060d282a3fc53f958a6eb2a867c",
+            "7ded0812b4930b72534dcf7e7554f1a04fe267704c540a049707761a5cbaf8ad",
         snapshotSha256:
             "bc7f18ca16720eea05bb9ff71909d55de096d22c9ae65d44f469aac9e032f53d",
     }),

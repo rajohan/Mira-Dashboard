@@ -115,6 +115,39 @@ describe("application Effect runtime", () => {
         expect(isRealtimeEventStreamError(observed)).toBe(true);
     });
 
+    test("completes without opening the source for a pre-aborted signal", async () => {
+        let sourcePulls = 0;
+        const layer = Layer.succeed(
+            RealtimeEventPumpService,
+            RealtimeEventPumpService.of({
+                metricsSnapshot: Effect.die("metrics are not used in this test"),
+                stream: () =>
+                    Stream.fromEffect(
+                        Effect.sync(() => {
+                            sourcePulls += 1;
+                            return delivery;
+                        })
+                    ),
+                wake: Effect.void,
+            })
+        );
+        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const controller = new AbortController();
+        controller.abort();
+
+        try {
+            const deliveries = await runtime.services.realtimeEvents.stream(
+                { afterId: "0", signal: controller.signal },
+                stableLease
+            );
+
+            expect(await Array.fromAsync(deliveries)).toEqual([]);
+            expect(sourcePulls).toBe(0);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
     test("releases a subscription scope when an async consumer stops early", async () => {
         let acquisitions = 0;
         let releases = 0;

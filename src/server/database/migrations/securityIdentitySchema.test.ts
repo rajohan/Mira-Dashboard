@@ -11,6 +11,12 @@ interface TableListRow {
     strict: number;
 }
 
+interface TableInfoRow {
+    name: string;
+    notNull: number;
+    primaryKeyPosition: number;
+}
+
 const userId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 const passwordHash =
     "$argon2id$v=19$m=65536,t=3,p=1$c2FsdA$aGFzaGVkLXZhbGlkYXRvci1ieXRlcw";
@@ -62,6 +68,34 @@ describe("security identity schema", () => {
                 "users",
             ]) {
                 expect(strictByTable.get(table)).toBe(1);
+            }
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("declares every rowid security identity primary key as NOT NULL", async () => {
+        const database = await openFreshMigratedDatabase();
+
+        try {
+            for (const table of [
+                "auth_sessions",
+                "automation_credentials",
+                "automation_principals",
+                "users",
+            ]) {
+                expect(
+                    database.sqlite
+                        .query<TableInfoRow, [string]>(`
+                            SELECT
+                                name,
+                                "notnull" AS "notNull",
+                                pk AS "primaryKeyPosition"
+                            FROM pragma_table_info(?)
+                            WHERE name = 'id'
+                        `)
+                        .get(table)
+                ).toEqual({ name: "id", notNull: 1, primaryKeyPosition: 1 });
             }
         } finally {
             database.sqlite.close(true);

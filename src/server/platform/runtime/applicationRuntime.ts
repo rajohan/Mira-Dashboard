@@ -81,8 +81,7 @@ export function createApplicationRuntime(
                                       );
                             return Stream.toAsyncIterableEffect(interruptible);
                         })
-                    ),
-                    { signal: streamOptions.signal }
+                    )
                 );
             },
         }),

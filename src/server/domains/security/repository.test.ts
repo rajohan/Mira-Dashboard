@@ -118,7 +118,7 @@ describe("authentication repository", () => {
 
             expect(() =>
                 fixture.repository.findAutomationByPrefix(fixture.automation.prefix)
-            ).toThrow();
+            ).toThrow("Application capability is invalid");
         } finally {
             fixture.database.sqlite.close(true);
         }
