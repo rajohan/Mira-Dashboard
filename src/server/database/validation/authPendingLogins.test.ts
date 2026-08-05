@@ -28,7 +28,7 @@ describe("pending login row schemas", () => {
     });
 
     test.each([
-        { allowsRecovery: false, allowsTotp: false },
+        { allowsRecovery: false, allowsTotp: false, allowsWebAuthn: false },
         { authenticationVersion: 0 },
         { id: "A".repeat(32) },
         { passwordVerifiedAt: addMilliseconds(securityCreatedAt, 1) },
@@ -88,6 +88,34 @@ describe("pending login row schemas", () => {
                 ...validAuthPendingLoginInsert,
                 expiresAt: addMilliseconds(passwordVerifiedAt, pendingLoginLifetimeMs),
                 passwordVerifiedAt,
+            })
+        ).toBeDefined();
+    });
+
+    test("accepts a WebAuthn-only pending-login handoff", () => {
+        expect(
+            v.parse(authPendingLoginInsertSchema, {
+                ...validAuthPendingLoginInsert,
+                allowsRecovery: false,
+                allowsTotp: false,
+                allowsWebAuthn: true,
+            })
+        ).toBeDefined();
+    });
+
+    test("accepts a recovery-only pending-login handoff", () => {
+        const recoveryOnly = {
+            ...validAuthPendingLoginInsert,
+            allowsRecovery: true,
+            allowsTotp: false,
+            allowsWebAuthn: false,
+        };
+        expect(v.parse(authPendingLoginInsertSchema, recoveryOnly)).toBeDefined();
+        expect(
+            v.parse(authPendingLoginSelectSchema, {
+                ...recoveryOnly,
+                attemptCount: 0,
+                validatorVersion: 1,
             })
         ).toBeDefined();
     });

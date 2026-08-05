@@ -3,6 +3,7 @@
  * Domain code imports its own tables directly rather than using this catalog as a barrel.
  */
 export { auditEvents } from "./auditEvents.ts";
+export { authChallenges } from "./authChallenges.ts";
 export { authPendingLogins } from "./authPendingLogins.ts";
 export { authRateLimitBuckets } from "./authRateLimitBuckets.ts";
 export { authSessions } from "./authSessions.ts";
@@ -18,4 +19,5 @@ export { reports } from "./reports.ts";
 export { schemaMigrations } from "./schemaMigrations.ts";
 export { userRecoveryCodes } from "./userRecoveryCodes.ts";
 export { userTotpFactors } from "./userTotpFactors.ts";
+export { userWebAuthnCredentials } from "./userWebAuthnCredentials.ts";
 export { users } from "./users.ts";

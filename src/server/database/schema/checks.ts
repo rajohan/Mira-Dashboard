@@ -26,6 +26,25 @@ export function lowercaseHexTextCheck(column: SQLWrapper, exactLength: 32 | 64) 
 }
 
 /**
+ * Builds a SQLite check matching canonical unpadded base64url text.
+ * The terminal-character rules reject encodings with non-zero unused bits, so
+ * every accepted value has exactly one textual representation.
+ * @param column SQLite text column to validate.
+ * @param minimumLength Minimum accepted ASCII character count.
+ * @param maximumLength Maximum accepted ASCII character count.
+ * @returns Drizzle SQL expression for the storage constraint.
+ */
+export function boundedCanonicalBase64UrlTextCheck(
+    column: SQLWrapper,
+    minimumLength: number,
+    maximumLength: number
+) {
+    const minimumLengthSql = sql.raw(String(minimumLength));
+    const maximumLengthSql = sql.raw(String(maximumLength));
+    return sql`length(${column}) BETWEEN ${minimumLengthSql} AND ${maximumLengthSql} AND ${nulFreeTextCheck(column)} AND ${column} NOT GLOB '*[^A-Za-z0-9_-]*' AND (length(${column}) % 4 = 0 OR (length(${column}) % 4 = 2 AND substr(${column}, -1, 1) GLOB '[AQgw]') OR (length(${column}) % 4 = 3 AND substr(${column}, -1, 1) GLOB '[AEIMQUYcgkosw048]'))`;
+}
+
+/**
  * Builds a SQLite check matching a bounded, nonblank, NUL-free text boundary.
  * @param column SQLite text column to validate.
  * @param maximumLength Maximum accepted Unicode code-point length.

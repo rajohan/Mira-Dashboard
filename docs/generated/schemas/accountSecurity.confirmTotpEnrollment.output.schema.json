@@ -119,7 +119,8 @@
               "enum": [
                 "password",
                 "recovery",
-                "totp"
+                "totp",
+                "webauthn"
               ],
               "type": "string"
             },

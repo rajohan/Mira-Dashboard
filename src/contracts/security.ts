@@ -7,7 +7,7 @@ import {
 } from "../shared/validation.ts";
 
 /** Second-factor methods implemented by this authentication slice. */
-export const multiFactorAuthenticationMethods = ["recovery", "totp"] as const;
+export const multiFactorAuthenticationMethods = ["recovery", "totp", "webauthn"] as const;
 
 export type MultiFactorAuthenticationMethod =
     (typeof multiFactorAuthenticationMethods)[number];

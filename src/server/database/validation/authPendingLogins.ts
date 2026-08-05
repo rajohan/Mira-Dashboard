@@ -20,6 +20,7 @@ import {
 function pendingLoginStateIsValid(login: {
     readonly allowsRecovery: boolean;
     readonly allowsTotp: boolean;
+    readonly allowsWebAuthn: boolean;
     readonly createdAt: Date;
     readonly expiresAt: Date;
     readonly passwordVerifiedAt: Date;
@@ -29,7 +30,7 @@ function pendingLoginStateIsValid(login: {
         login.passwordVerifiedAt
     );
     return (
-        (login.allowsRecovery || login.allowsTotp) &&
+        (login.allowsRecovery || login.allowsTotp || login.allowsWebAuthn) &&
         compareAsc(login.passwordVerifiedAt, login.createdAt) <= 0 &&
         compareAsc(login.expiresAt, login.createdAt) > 0 &&
         lifetimeMs > 0 &&

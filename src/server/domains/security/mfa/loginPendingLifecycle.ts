@@ -1,5 +1,6 @@
 import { addMilliseconds, compareAsc } from "date-fns";
 
+import { webAuthnCredentialMaximumPerUser } from "../../../../contracts/accountSecurity.ts";
 import type { PendingLoginSummary } from "../../../../contracts/auth.ts";
 import type { MultiFactorAuthenticationMethod } from "../../../../contracts/security.ts";
 import {
@@ -29,17 +30,28 @@ type PendingLoginOperations = Pick<
 
 type PendingLoginOperationsPort = Pick<
     MfaLoginLifecycleContext,
-    "audit" | "generatePendingLoginToken" | "now" | "repository" | "sessionIdleDurationMs"
+    | "audit"
+    | "generatePendingLoginToken"
+    | "now"
+    | "repository"
+    | "sessionIdleDurationMs"
+    | "webAuthn"
 >;
+
+const webAuthnCredentialReadMaximum = webAuthnCredentialMaximumPerUser + 1;
 
 class PendingLoginStateChangedError extends Error {}
 
 function pendingMethods(
-    pending: Pick<MfaPendingLoginRecord, "allowsRecovery" | "allowsTotp">
+    pending: Pick<
+        MfaPendingLoginRecord,
+        "allowsRecovery" | "allowsTotp" | "allowsWebAuthn"
+    >
 ): MultiFactorAuthenticationMethod[] {
     return [
         ...(pending.allowsRecovery ? (["recovery"] as const) : []),
         ...(pending.allowsTotp ? (["totp"] as const) : []),
+        ...(pending.allowsWebAuthn ? (["webauthn"] as const) : []),
     ];
 }
 
@@ -74,7 +86,8 @@ export function resolvePendingLogin(
         compareAsc(pending.expiresAt, checkedAt) <= 0 ||
         pending.attemptCount >= pendingLoginAttemptMaximum ||
         (method === "recovery" && !pending.allowsRecovery) ||
-        (method === "totp" && !pending.allowsTotp)
+        (method === "totp" && !pending.allowsTotp) ||
+        (method === "webauthn" && !pending.allowsWebAuthn)
     ) {
         return undefined;
     }
@@ -97,8 +110,14 @@ export function resolvePendingLogin(
 export function createPendingLoginOperations(
     context: PendingLoginOperationsPort
 ): PendingLoginOperations {
-    const { audit, generatePendingLoginToken, now, repository, sessionIdleDurationMs } =
-        context;
+    const {
+        audit,
+        generatePendingLoginToken,
+        now,
+        repository,
+        sessionIdleDurationMs,
+        webAuthn,
+    } = context;
 
     return Object.freeze({
         beginPendingLogin(input) {
@@ -119,7 +138,19 @@ export function createPendingLoginOperations(
                 }
                 const allowsTotp = unit.countConfirmedTotpFactors(user.id) > 0;
                 const allowsRecovery = unit.countUnusedRecoveryCodes(user.id) > 0;
-                if (!allowsTotp) return { status: "mfa-unavailable" } as const;
+                const webAuthnCredentials = unit.listWebAuthnCredentials(
+                    user.id,
+                    webAuthnCredentialReadMaximum
+                );
+                const allowsWebAuthn =
+                    webAuthn !== undefined &&
+                    webAuthnCredentials.length <= webAuthnCredentialMaximumPerUser &&
+                    webAuthnCredentials.some(
+                        (credential) => credential.rpId === webAuthn.relyingParty.rpId
+                    );
+                if (!allowsRecovery && !allowsTotp && !allowsWebAuthn) {
+                    return { status: "mfa-unavailable" } as const;
+                }
 
                 let replacedSessionId: string | null = null;
                 if (input.currentIdentity?.userId === user.id) {
@@ -149,6 +180,7 @@ export function createPendingLoginOperations(
                 const pending = unit.insertPendingLogin({
                     allowsRecovery,
                     allowsTotp,
+                    allowsWebAuthn,
                     authenticationVersion: user.authenticationVersion,
                     createdAt: input.verifiedAt,
                     expiresAt: addMilliseconds(input.verifiedAt, pendingLoginLifetimeMs),

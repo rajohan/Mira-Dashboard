@@ -7,6 +7,7 @@ import {
     validUserInsert,
     validUserRecoveryCodeInsert,
     validUserTotpFactorInsert,
+    validUserWebAuthnCredentialInsert,
 } from "../../../../database/validation/testSupport/securityRows.ts";
 import { userInsertSchema } from "../../../../database/validation/users.ts";
 import {
@@ -34,6 +35,7 @@ import {
 import type { AuthenticationWorkGate } from "../../authenticationWorkGate.ts";
 import { createMfaLifecycleRepository } from "../lifecycleRepository.ts";
 import { createMfaLoginLifecycleService } from "../loginLifecycle.ts";
+import type { MfaLoginWebAuthnDependencies } from "../loginLifecycleTypes.ts";
 import {
     dashboardRecoveryCodeHashInput,
     parseDashboardRecoveryCode,
@@ -43,6 +45,11 @@ import type {
     TotpSecretCipher,
     TotpSecretStorageContext,
 } from "../totpSecretCipher.ts";
+import type { WebAuthnAdapter } from "../webauthn/adapter.ts";
+import {
+    ceremonyFixtureCredentialId,
+    ceremonyFixturePublicKey,
+} from "../webauthn/testSupport/ceremonyFixture.ts";
 
 export const mfaLoginNow = new Date("2026-08-05T12:00:00.000Z");
 export const mfaLoginUserId = validUserInsert.id;
@@ -112,9 +119,11 @@ export function createMfaLoginBarrier(participants: number) {
 }
 
 export interface MfaLoginHarnessOptions {
+    readonly now?: () => Date;
     readonly passwordWorkGate?: AuthenticationWorkGate;
     readonly totpWorkBudget?: AuthenticationWorkBudget;
     readonly totpWorkGate?: AuthenticationWorkGate;
+    readonly webAuthn?: MfaLoginWebAuthnDependencies;
 }
 
 export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}) {
@@ -125,6 +134,9 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
     const passwordCryptoTransactionStates: boolean[] = [];
     const recoveryCryptoTransactionStates: boolean[] = [];
     const totpCryptoTransactionStates: boolean[] = [];
+    const webAuthnGenerationTransactionStates: boolean[] = [];
+    const webAuthnVerificationTransactionStates: boolean[] = [];
+    const webAuthn = options.webAuthn;
 
     try {
         database.orm
@@ -151,6 +163,17 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
                 ...validUserRecoveryCodeInsert,
                 createdAt: mfaLoginNow,
             });
+            if (webAuthn !== undefined) {
+                unit.insertWebAuthnCredential({
+                    ...validUserWebAuthnCredentialInsert,
+                    backedUp: true,
+                    createdAt: subMinutes(mfaLoginNow, 1),
+                    credentialId: ceremonyFixtureCredentialId,
+                    deviceType: "multiDevice",
+                    publicKey: Buffer.from(ceremonyFixturePublicKey),
+                    rpId: webAuthn.relyingParty.rpId,
+                });
+            }
         });
 
         const passwordWorkGate =
@@ -197,8 +220,43 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
             encrypt: () => Promise.reject(new Error("TOTP encryption is not used here")),
             hasKey: (keyId: string) => keyId === validUserTotpFactorInsert.secretKeyId,
         });
+        const webAuthnAdapter: WebAuthnAdapter | undefined =
+            webAuthn === undefined
+                ? undefined
+                : Object.freeze({
+                      generateAuthenticationOptions(
+                          input: Parameters<
+                              WebAuthnAdapter["generateAuthenticationOptions"]
+                          >[0]
+                      ) {
+                          webAuthnGenerationTransactionStates.push(
+                              database.sqlite.inTransaction
+                          );
+                          return webAuthn.adapter.generateAuthenticationOptions(input);
+                      },
+                      generateRegistrationOptions(
+                          input: Parameters<
+                              WebAuthnAdapter["generateRegistrationOptions"]
+                          >[0]
+                      ) {
+                          return webAuthn.adapter.generateRegistrationOptions(input);
+                      },
+                      verifyAuthentication(
+                          input: Parameters<WebAuthnAdapter["verifyAuthentication"]>[0]
+                      ) {
+                          webAuthnVerificationTransactionStates.push(
+                              database.sqlite.inTransaction
+                          );
+                          return webAuthn.adapter.verifyAuthentication(input);
+                      },
+                      verifyRegistration(
+                          input: Parameters<WebAuthnAdapter["verifyRegistration"]>[0]
+                      ) {
+                          return webAuthn.adapter.verifyRegistration(input);
+                      },
+                  });
         const service = createMfaLoginLifecycleService({
-            now: () => mfaLoginNow,
+            now: options.now ?? (() => mfaLoginNow),
             passwordWorkBudget,
             passwordWorkGate,
             repository,
@@ -212,11 +270,19 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
                         validatorHash === testDashboardPasswordHash
                 );
             },
+            ...(webAuthn === undefined
+                ? {}
+                : {
+                      webAuthn: {
+                          ...webAuthn,
+                          adapter: webAuthnAdapter ?? webAuthn.adapter,
+                      },
+                  }),
         });
         const authenticationService = createAuthenticationLifecycleService({
             gatewayWorkRuntime: createTestGatewayWorkRuntime(),
             mfaLoginLifecycle: service,
-            now: () => mfaLoginNow,
+            now: options.now ?? (() => mfaLoginNow),
             passwordWorkBudget,
             passwordWorkGate,
             repository: createAuthenticationLifecycleRepository(database.orm),
@@ -254,6 +320,8 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
                 beforeTotpDecrypt = callback;
             },
             totpCryptoTransactionStates,
+            webAuthnGenerationTransactionStates,
+            webAuthnVerificationTransactionStates,
         };
     } catch (error) {
         database.sqlite.close(true);

@@ -10,6 +10,7 @@ import {
     trpcMaximumBatchSize,
     trpcRequestBodyMaximumBytes,
 } from "../../../app/server.ts";
+import { createRegistrationFixture } from "../../domains/security/mfa/webauthn/testSupport/ceremonyFixture.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
 import {
@@ -126,6 +127,13 @@ describe("authentication HTTP transport policy", () => {
             "/trpc/auth.statusExtra?batch=1",
             "/trpc/accountSecurity.stepUpTotp?batch=1",
             "/trpc/accountSecurity%2EstepUpRecovery?batch=1",
+            "/trpc/auth.beginWebAuthnLogin?batch=1",
+            "/trpc/auth.loginWebAuthn?batch=1",
+            "/trpc/accountSecurity.beginWebAuthnStepUp?batch=1",
+            "/trpc/accountSecurity.stepUpWebAuthn?batch=1",
+            "/trpc/accountSecurity.beginWebAuthnEnrollment?batch=1",
+            "/trpc/accountSecurity.confirmWebAuthnEnrollment?batch=1",
+            "/trpc/accountSecurity.removeWebAuthnCredential?batch=1",
         ]) {
             const response = await fetch(new URL(path, server.url), {
                 body: "{}",
@@ -152,6 +160,45 @@ describe("authentication HTTP transport policy", () => {
         expect(await doubleEncodedProcedure.text()).toContain("NOT_FOUND");
         expect(authenticationCalls).toBe(authenticationCallsBeforeRejections + 1);
         expect(loginCalls).toBe(0);
+    });
+
+    test("keeps a real WebAuthn registration fixture inside the auth body ceiling", async () => {
+        let authenticationCalls = 0;
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime(),
+            authenticationLifecycle: createTestAuthenticationLifecycleService(),
+            authenticateCredential: () => {
+                authenticationCalls += 1;
+                return { authentication: { kind: "anonymous" } };
+            },
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+        const body = JSON.stringify({
+            json: {
+                label: "Qualified roaming security key",
+                response: createRegistrationFixture(),
+            },
+        });
+
+        expect(Buffer.byteLength(body)).toBeLessThan(
+            authenticationRequestBodyMaximumBytes
+        );
+        const response = await fetch(
+            new URL("/trpc/accountSecurity.confirmWebAuthnEnrollment", server.url),
+            {
+                body,
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            }
+        );
+
+        expect(response.status).not.toBe(413);
+        expect(response.headers.get("cache-control")).toContain("no-store");
+        expect(authenticationCalls).toBe(1);
     });
 
     test("rejects cross-site bootstrap before reaching the lifecycle service", async () => {

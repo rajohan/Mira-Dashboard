@@ -25,6 +25,7 @@ export const authPendingLogins = sqliteTable(
     {
         allowsRecovery: integer("allows_recovery", { mode: "boolean" }).notNull(),
         allowsTotp: integer("allows_totp", { mode: "boolean" }).notNull(),
+        allowsWebAuthn: integer("allows_webauthn", { mode: "boolean" }).notNull(),
         attemptCount: integer("attempt_count").notNull().default(0),
         authenticationVersion: integer("authentication_version").notNull(),
         createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -48,7 +49,7 @@ export const authPendingLogins = sqliteTable(
     (table) => [
         check(
             "auth_pending_logins_methods_check",
-            sql`${table.allowsRecovery} IN (0, 1) AND ${table.allowsTotp} IN (0, 1) AND (${table.allowsRecovery} + ${table.allowsTotp}) >= 1`
+            sql`${table.allowsRecovery} IN (0, 1) AND ${table.allowsTotp} IN (0, 1) AND ${table.allowsWebAuthn} IN (0, 1) AND (${table.allowsRecovery} + ${table.allowsTotp} + ${table.allowsWebAuthn}) >= 1`
         ),
         check(
             "auth_pending_logins_attempt_count_check",

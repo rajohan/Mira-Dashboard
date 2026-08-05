@@ -3,6 +3,10 @@ import * as v from "valibot";
 import type { MultiFactorAuthenticationMethod } from "../../../../contracts/security.ts";
 import type { AuthenticationRateLimitKind } from "../../../database/schema/authRateLimitBuckets.ts";
 import {
+    authChallengeInsertSchema,
+    authChallengeSelectSchema,
+} from "../../../database/validation/authChallenges.ts";
+import {
     authPendingLoginInsertSchema,
     authPendingLoginSelectSchema,
 } from "../../../database/validation/authPendingLogins.ts";
@@ -14,6 +18,10 @@ import {
     userTotpFactorInsertSchema,
     userTotpFactorSelectSchema,
 } from "../../../database/validation/userTotpFactors.ts";
+import {
+    userWebAuthnCredentialInsertSchema,
+    userWebAuthnCredentialSelectSchema,
+} from "../../../database/validation/userWebAuthnCredentials.ts";
 import type { SecurityAuditWriter } from "../securityAuditStore.ts";
 import type {
     AuthenticationRateLimitReader,
@@ -40,6 +48,14 @@ export type MfaTotpFactorRecord = v.InferOutput<typeof userTotpFactorSelectSchem
 export type MfaTotpFactorInsert = v.InferOutput<typeof userTotpFactorInsertSchema>;
 export type MfaRecoveryCodeRecord = v.InferOutput<typeof userRecoveryCodeSelectSchema>;
 export type MfaRecoveryCodeInsert = v.InferOutput<typeof userRecoveryCodeInsertSchema>;
+export type MfaWebAuthnChallengeRecord = v.InferOutput<typeof authChallengeSelectSchema>;
+export type MfaWebAuthnChallengeInsert = v.InferOutput<typeof authChallengeInsertSchema>;
+export type MfaWebAuthnCredentialRecord = v.InferOutput<
+    typeof userWebAuthnCredentialSelectSchema
+>;
+export type MfaWebAuthnCredentialInsert = v.InferOutput<
+    typeof userWebAuthnCredentialInsertSchema
+>;
 export type MfaSessionRecord = BrowserSessionRecord;
 export type MfaSessionInsert = BrowserSessionInsert;
 export type MfaUserRecord = SecurityUserRecord;
@@ -93,6 +109,36 @@ export interface ConsumeRecoveryCodeInput {
     readonly userId: string;
 }
 
+export interface ConsumeWebAuthnChallengeInput {
+    readonly authenticationVersion: number;
+    readonly challenge: string;
+    readonly checkedAt: Date;
+    readonly configFingerprint: string;
+    readonly createdAt: Date;
+    readonly expiresAt: Date;
+    readonly id: string;
+    readonly pendingLoginId: string | null;
+    readonly purpose: "login" | "registration" | "step-up";
+    readonly sessionId: string | null;
+}
+
+export interface AdvanceWebAuthnCredentialInput {
+    readonly backedUp: boolean;
+    readonly counter: number;
+    readonly credentialId: string;
+    readonly deviceType: "multiDevice" | "singleDevice";
+    readonly expectedBackedUp: boolean;
+    readonly expectedCounter: number;
+    readonly expectedCreatedAt: Date;
+    readonly expectedDeviceType: "multiDevice" | "singleDevice";
+    readonly expectedLastUsedAt: Date | null;
+    readonly expectedPublicKey: Buffer;
+    readonly expectedRpId: string;
+    readonly id: string;
+    readonly usedAt: Date;
+    readonly userId: string;
+}
+
 export type DeleteSessionForRotationInput = DeleteBrowserSessionForRotationInput;
 export type UpdateUserMfaStateInput = SecurityUserMfaStateUpdateInput;
 export type PruneMfaRateLimitBucketsInput = PruneAuthenticationRateLimitBucketsInput;
@@ -103,17 +149,34 @@ export interface MfaLifecycleReader extends AuthenticationRateLimitReader {
     countConfirmedTotpFactors(userId: string): number;
     countTotpFactors(userId: string): number;
     countUnusedRecoveryCodes(userId: string): number;
+    countWebAuthnCredentials(userId: string): number;
     findConfirmedTotpFactor(
         userId: string,
         factorId: string
     ): MfaTotpFactorRecord | undefined;
     findPendingLogin(id: string): MfaPendingLoginRecord | undefined;
+    findPendingLoginWebAuthnChallenge(
+        pendingLoginId: string
+    ): MfaWebAuthnChallengeRecord | undefined;
     findRecoveryCode(userId: string, selector: string): MfaRecoveryCodeRecord | undefined;
     findSession(userId: string, sessionId: string): MfaSessionRecord | undefined;
     findTotpFactor(userId: string, factorId: string): MfaTotpFactorRecord | undefined;
     findUserById(userId: string): MfaUserRecord | undefined;
+    findSessionWebAuthnChallenge(
+        sessionId: string,
+        purpose: "registration" | "step-up"
+    ): MfaWebAuthnChallengeRecord | undefined;
+    findWebAuthnCredential(
+        userId: string,
+        credentialId: string
+    ): MfaWebAuthnCredentialRecord | undefined;
+    findWebAuthnCredentialById(
+        userId: string,
+        id: string
+    ): MfaWebAuthnCredentialRecord | undefined;
     listConfirmedTotpFactors(userId: string, limit: number): MfaTotpFactorRecord[];
     listRecoveryCodes(userId: string, limit: number): MfaRecoveryCodeRecord[];
+    listWebAuthnCredentials(userId: string, limit: number): MfaWebAuthnCredentialRecord[];
 }
 
 /**
@@ -130,6 +193,9 @@ export interface MfaLifecycleUnitOfWork
     advanceTotpLastUsedStep(
         input: AdvanceTotpLastUsedStepInput
     ): MfaTotpFactorRecord | undefined;
+    advanceWebAuthnCredential(
+        input: AdvanceWebAuthnCredentialInput
+    ): MfaWebAuthnCredentialRecord | undefined;
     confirmTotpFactor(input: ConfirmTotpFactorInput): MfaTotpFactorRecord | undefined;
     consumePendingLogin(
         input: ConsumePendingLoginInput
@@ -137,6 +203,9 @@ export interface MfaLifecycleUnitOfWork
     consumeRecoveryCode(
         input: ConsumeRecoveryCodeInput
     ): MfaRecoveryCodeRecord | undefined;
+    consumeWebAuthnChallenge(
+        input: ConsumeWebAuthnChallengeInput
+    ): MfaWebAuthnChallengeRecord | undefined;
     deleteOtherSessions(userId: string, retainedSessionId: string): number;
     deletePendingLogin(
         userId: string,
@@ -152,13 +221,27 @@ export interface MfaLifecycleUnitOfWork
     ): MfaSessionRecord | undefined;
     deleteTotpFactor(userId: string, factorId: string): MfaTotpFactorRecord | undefined;
     deleteTotpFactorsForUser(userId: string): number;
+    deleteWebAuthnCredential(
+        userId: string,
+        id: string
+    ): MfaWebAuthnCredentialRecord | undefined;
+    deleteWebAuthnCredentialsForUser(userId: string): number;
     incrementPendingLoginAttempt(
         input: IncrementPendingLoginAttemptInput
     ): MfaPendingLoginRecord | undefined;
     insertPendingLogin(input: MfaPendingLoginInsert): MfaPendingLoginRecord;
     insertRecoveryCode(input: MfaRecoveryCodeInsert): MfaRecoveryCodeRecord;
     insertTotpFactor(input: MfaTotpFactorInsert): MfaTotpFactorRecord;
+    insertWebAuthnCredential(
+        input: MfaWebAuthnCredentialInsert
+    ): MfaWebAuthnCredentialRecord;
+    insertWebAuthnCredentialIfAvailable(
+        input: MfaWebAuthnCredentialInsert
+    ): MfaWebAuthnCredentialRecord | undefined;
     pruneSessions(input: PruneMfaSessionsInput): number;
+    replaceWebAuthnChallenge(
+        input: MfaWebAuthnChallengeInsert
+    ): MfaWebAuthnChallengeRecord;
     updateUserMfaState(input: UpdateUserMfaStateInput): MfaUserRecord | undefined;
 }
 

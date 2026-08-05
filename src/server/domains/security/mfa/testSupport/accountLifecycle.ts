@@ -12,7 +12,11 @@ import { generateOpaqueToken } from "../../../../shared/opaqueToken.ts";
 import { createTestAuthenticationWorkGate } from "../../../../test/support/authenticationWorkGate.ts";
 import { openFreshMigratedDatabase } from "../../../../test/support/freshDatabase.ts";
 import { testDashboardPasswordHash } from "../../../../test/support/securityPassword.ts";
-import type { AuthenticationWorkGate } from "../../authenticationWorkGate.ts";
+import type { AuthenticationWorkBudget } from "../../authenticationWorkBudget.ts";
+import type {
+    AuthenticationWorkGate,
+    AuthenticationWorkRuntimeService,
+} from "../../authenticationWorkGate.ts";
 import { createMfaAccountLifecycleService } from "../accountLifecycle.ts";
 import { createMfaLifecycleRepository } from "../lifecycleRepository.ts";
 import {
@@ -24,6 +28,8 @@ import type {
     TotpSecretCipher,
     TotpSecretStorageContext,
 } from "../totpSecretCipher.ts";
+import type { WebAuthnAdapter } from "../webauthn/adapter.ts";
+import type { WebAuthnRelyingPartyConfiguration } from "../webauthn/relyingPartyConfiguration.ts";
 
 export const accountLifecycleNow = new Date("2026-08-05T12:00:00.000Z");
 export const accountLifecycleUserId = validUserInsert.id;
@@ -86,8 +92,17 @@ function deterministicRecoveryCodes(
 }
 
 export interface AccountLifecycleHarnessOptions {
+    readonly now?: () => Date;
     readonly passwordWorkGate?: AuthenticationWorkGate;
     readonly totpWorkGate?: AuthenticationWorkGate;
+    readonly webAuthnAdapter?: WebAuthnAdapter;
+    readonly webAuthnRelyingParty?: WebAuthnRelyingPartyConfiguration;
+    readonly webAuthnVerificationTimeoutMs?: number;
+    readonly webAuthnWorkBudget?: AuthenticationWorkBudget;
+    readonly webAuthnWorkRuntime?: Pick<
+        AuthenticationWorkRuntimeService,
+        "runWebAuthnVerification"
+    >;
 }
 
 export async function createAccountLifecycleHarness(
@@ -181,7 +196,7 @@ export async function createAccountLifecycleHarness(
                 activeRecoveryHashes -= 1;
                 return testDashboardPasswordHash;
             },
-            now: () => accountLifecycleNow,
+            now: options.now ?? (() => accountLifecycleNow),
             passwordWorkBudget: Object.freeze({
                 consume(units = 1) {
                     consumedWorkUnits.push(units);
@@ -223,6 +238,24 @@ export async function createAccountLifecycleHarness(
                     ? { timeStep: (lastUsedTimeStep ?? 100) + 1 }
                     : undefined;
             },
+            ...(options.webAuthnAdapter === undefined
+                ? {}
+                : { webAuthnAdapter: options.webAuthnAdapter }),
+            ...(options.webAuthnRelyingParty === undefined
+                ? {}
+                : { webAuthnRelyingParty: options.webAuthnRelyingParty }),
+            ...(options.webAuthnVerificationTimeoutMs === undefined
+                ? {}
+                : {
+                      webAuthnVerificationTimeoutMs:
+                          options.webAuthnVerificationTimeoutMs,
+                  }),
+            ...(options.webAuthnWorkBudget === undefined
+                ? {}
+                : { webAuthnWorkBudget: options.webAuthnWorkBudget }),
+            ...(options.webAuthnWorkRuntime === undefined
+                ? {}
+                : { webAuthnWorkRuntime: options.webAuthnWorkRuntime }),
         });
 
         return {

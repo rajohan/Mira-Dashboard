@@ -67,8 +67,11 @@ five-second deadline, and request-abort propagation. Timed-out underlying
 verifier promises remain counted until they actually settle; a verifier that
 ignores cancellation therefore cannot accumulate unbounded orphan work.
 Overflow or an exhausted budget fails with `TOO_MANY_REQUESTS`; queued attempts
-recheck durable cooldown state before consuming resources. Pending MFA budgets
-are added with the MFA slice.
+recheck durable cooldown state before consuming resources. TOTP decrypt and HMAC
+work uses a separate two-operation/four-item gate plus a shared rolling budget of
+60 work units per minute across login and account-security flows. These gates are
+process-scoped Effect services, propagate request cancellation, and retain an
+active permit until non-cooperative underlying work actually settles.
 
 ## Two-Step Login And Step-Up
 
@@ -83,8 +86,11 @@ Supported second factors:
 - **Security key (YubiKey/WebAuthn/FIDO2):** origin-bound, phishing-resistant
   public-key authentication with user verification required. Register two named
   keys and store the backup separately. Dashboard stores credential public keys,
-  counters, transports, device/backup state, labels, and timestamps; it does not
-  store a YubiKey secret.
+  counters, transports, fixed device type, mutable backup state, labels, and
+  timestamps; it does not store a YubiKey secret. Credentials bound to an older
+  RP ID stay listed and removable but are marked unusable and cannot
+  authenticate until a separately approved migration or re-enrollment replaces
+  them.
 - **Authenticator app (RFC 6238 TOTP):** interoperable SHA-1, six-digit,
   30-second codes. Each seed is encrypted with versioned AES-256-GCM and
   context-bound associated data using
@@ -98,9 +104,13 @@ Supported second factors:
   atomically.
 
 The first enrolled factor enables MFA, revokes every other session, rotates the
-current session, and returns the recovery-code set. The final active factor
-cannot be removed. Disabling MFA requires both a recent second factor and the
-current password, removes all factors/codes, and revokes all sessions.
+current session, and returns the recovery-code set. Removing a factor always
+preserves at least one persisted possession factor, and removing a currently
+usable factor must also preserve another TOTP or current-RP WebAuthn factor.
+This permits old-RP cleanup without letting drifted credentials strand the next
+login. Disabling MFA requires both a recent second factor and the current
+password, removes all factors/codes and outstanding WebAuthn challenges, and
+revokes all sessions.
 
 Host-control actions require a second-factor verification within the
 configurable recent-auth window (`MIRA_DASHBOARD_RECENT_AUTH_MINUTES`, 10 minutes

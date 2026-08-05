@@ -18,7 +18,8 @@
             "methods": {
               "type": "array",
               "prefixItems": [],
-              "minItems": 0
+              "minItems": 0,
+              "items": false
             },
             "recoveryCodesRemaining": {
               "const": 0
@@ -26,14 +27,22 @@
             "totpFactors": {
               "type": "array",
               "prefixItems": [],
-              "minItems": 0
+              "minItems": 0,
+              "items": false
+            },
+            "webAuthnCredentials": {
+              "type": "array",
+              "prefixItems": [],
+              "minItems": 0,
+              "items": false
             }
           },
           "required": [
             "enabled",
             "methods",
             "recoveryCodesRemaining",
-            "totpFactors"
+            "totpFactors",
+            "webAuthnCredentials"
           ],
           "additionalProperties": false
         },
@@ -55,7 +64,8 @@
                   "const": "totp"
                 }
               ],
-              "minItems": 1
+              "minItems": 1,
+              "items": false
             },
             "recoveryCodesRemaining": {
               "const": 0
@@ -99,6 +109,12 @@
               },
               "minItems": 1,
               "maxItems": 4
+            },
+            "webAuthnCredentials": {
+              "type": "array",
+              "prefixItems": [],
+              "minItems": 0,
+              "items": false
             }
           },
           "required": [
@@ -106,7 +122,8 @@
             "enabledAtMs",
             "methods",
             "recoveryCodesRemaining",
-            "totpFactors"
+            "totpFactors",
+            "webAuthnCredentials"
           ],
           "additionalProperties": false
         },
@@ -131,7 +148,8 @@
                   "const": "totp"
                 }
               ],
-              "minItems": 2
+              "minItems": 2,
+              "items": false
             },
             "recoveryCodesRemaining": {
               "type": "integer",
@@ -177,6 +195,12 @@
               },
               "minItems": 1,
               "maxItems": 4
+            },
+            "webAuthnCredentials": {
+              "type": "array",
+              "prefixItems": [],
+              "minItems": 0,
+              "items": false
             }
           },
           "required": [
@@ -184,11 +208,553 @@
             "enabledAtMs",
             "methods",
             "recoveryCodesRemaining",
-            "totpFactors"
+            "totpFactors",
+            "webAuthnCredentials"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "enabledAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "methods": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "webauthn"
+                }
+              ],
+              "minItems": 1,
+              "items": false
+            },
+            "recoveryCodesRemaining": {
+              "const": 0
+            },
+            "totpFactors": {
+              "type": "array",
+              "prefixItems": [],
+              "minItems": 0,
+              "items": false
+            },
+            "webAuthnCredentials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "backedUp": {
+                    "type": "boolean"
+                  },
+                  "createdAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "deviceType": {
+                    "enum": [
+                      "multiDevice",
+                      "singleDevice"
+                    ],
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+                  },
+                  "lastUsedAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "transports": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "ble",
+                        "cable",
+                        "hybrid",
+                        "internal",
+                        "nfc",
+                        "smart-card",
+                        "usb"
+                      ],
+                      "type": "string"
+                    },
+                    "maxItems": 7,
+                    "uniqueItems": true
+                  },
+                  "usable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "backedUp",
+                  "createdAtMs",
+                  "deviceType",
+                  "id",
+                  "label",
+                  "transports",
+                  "usable"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 4
+            }
+          },
+          "required": [
+            "enabled",
+            "enabledAtMs",
+            "methods",
+            "recoveryCodesRemaining",
+            "totpFactors",
+            "webAuthnCredentials"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "enabledAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "methods": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "recovery"
+                },
+                {
+                  "const": "webauthn"
+                }
+              ],
+              "minItems": 2,
+              "items": false
+            },
+            "recoveryCodesRemaining": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "totpFactors": {
+              "type": "array",
+              "prefixItems": [],
+              "minItems": 0,
+              "items": false
+            },
+            "webAuthnCredentials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "backedUp": {
+                    "type": "boolean"
+                  },
+                  "createdAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "deviceType": {
+                    "enum": [
+                      "multiDevice",
+                      "singleDevice"
+                    ],
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+                  },
+                  "lastUsedAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "transports": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "ble",
+                        "cable",
+                        "hybrid",
+                        "internal",
+                        "nfc",
+                        "smart-card",
+                        "usb"
+                      ],
+                      "type": "string"
+                    },
+                    "maxItems": 7,
+                    "uniqueItems": true
+                  },
+                  "usable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "backedUp",
+                  "createdAtMs",
+                  "deviceType",
+                  "id",
+                  "label",
+                  "transports",
+                  "usable"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 4
+            }
+          },
+          "required": [
+            "enabled",
+            "enabledAtMs",
+            "methods",
+            "recoveryCodesRemaining",
+            "totpFactors",
+            "webAuthnCredentials"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "enabledAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "methods": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "totp"
+                },
+                {
+                  "const": "webauthn"
+                }
+              ],
+              "minItems": 2,
+              "items": false
+            },
+            "recoveryCodesRemaining": {
+              "const": 0
+            },
+            "totpFactors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "confirmedAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "createdAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+                  }
+                },
+                "required": [
+                  "confirmedAtMs",
+                  "createdAtMs",
+                  "id",
+                  "label"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 4
+            },
+            "webAuthnCredentials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "backedUp": {
+                    "type": "boolean"
+                  },
+                  "createdAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "deviceType": {
+                    "enum": [
+                      "multiDevice",
+                      "singleDevice"
+                    ],
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+                  },
+                  "lastUsedAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "transports": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "ble",
+                        "cable",
+                        "hybrid",
+                        "internal",
+                        "nfc",
+                        "smart-card",
+                        "usb"
+                      ],
+                      "type": "string"
+                    },
+                    "maxItems": 7,
+                    "uniqueItems": true
+                  },
+                  "usable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "backedUp",
+                  "createdAtMs",
+                  "deviceType",
+                  "id",
+                  "label",
+                  "transports",
+                  "usable"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 4
+            }
+          },
+          "required": [
+            "enabled",
+            "enabledAtMs",
+            "methods",
+            "recoveryCodesRemaining",
+            "totpFactors",
+            "webAuthnCredentials"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "enabledAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "methods": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "recovery"
+                },
+                {
+                  "const": "totp"
+                },
+                {
+                  "const": "webauthn"
+                }
+              ],
+              "minItems": 3,
+              "items": false
+            },
+            "recoveryCodesRemaining": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "totpFactors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "confirmedAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "createdAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+                  }
+                },
+                "required": [
+                  "confirmedAtMs",
+                  "createdAtMs",
+                  "id",
+                  "label"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 4
+            },
+            "webAuthnCredentials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "backedUp": {
+                    "type": "boolean"
+                  },
+                  "createdAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "deviceType": {
+                    "enum": [
+                      "multiDevice",
+                      "singleDevice"
+                    ],
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+                  },
+                  "lastUsedAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "transports": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "ble",
+                        "cable",
+                        "hybrid",
+                        "internal",
+                        "nfc",
+                        "smart-card",
+                        "usb"
+                      ],
+                      "type": "string"
+                    },
+                    "maxItems": 7,
+                    "uniqueItems": true
+                  },
+                  "usable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "backedUp",
+                  "createdAtMs",
+                  "deviceType",
+                  "id",
+                  "label",
+                  "transports",
+                  "usable"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 4
+            }
+          },
+          "required": [
+            "enabled",
+            "enabledAtMs",
+            "methods",
+            "recoveryCodesRemaining",
+            "totpFactors",
+            "webAuthnCredentials"
           ],
           "additionalProperties": false
         }
-      ]
+      ],
+      "$comment": "Live Valibot validation additionally limits the combined TOTP and WebAuthn possession-factor inventory to four."
     },
     "recentAuth": {
       "type": "object",
@@ -291,12 +857,48 @@
         "password"
       ],
       "additionalProperties": false
+    },
+    "webAuthn": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "available": {
+              "const": false
+            }
+          },
+          "required": [
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "rpId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253,
+              "pattern": "^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)$"
+            }
+          },
+          "required": [
+            "available",
+            "rpId"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "required": [
     "checkedAtMs",
     "mfa",
-    "recentAuth"
+    "recentAuth",
+    "webAuthn"
   ],
   "additionalProperties": false,
   "$schema": "https://json-schema.org/draft/2020-12/schema"

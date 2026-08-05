@@ -28,7 +28,7 @@ describe("authentication contracts", () => {
     };
     const pendingLogin: PendingLoginSummary = {
         expiresAtMs: 1_800_000_300_000,
-        methods: ["recovery", "totp"],
+        methods: ["recovery", "totp", "webauthn"],
         username: "operator",
     };
 
@@ -89,11 +89,23 @@ describe("authentication contracts", () => {
         ).toThrow();
     });
 
-    test("declares the service outage reachable from both pending MFA methods", () => {
-        for (const name of ["auth.loginRecovery", "auth.loginTotp"] as const) {
+    test("declares the service outage reachable from all pending MFA methods", () => {
+        for (const name of [
+            "auth.loginRecovery",
+            "auth.loginTotp",
+            "auth.loginWebAuthn",
+        ] as const) {
             expect(
                 authProcedureContracts.find((contract) => contract.name === name)?.errors
             ).toContain("SERVICE_UNAVAILABLE");
+        }
+    });
+
+    test("requires pending-login state for the WebAuthn ceremony", () => {
+        for (const name of ["auth.beginWebAuthnLogin", "auth.loginWebAuthn"] as const) {
+            expect(
+                authProcedureContracts.find((contract) => contract.name === name)?.access
+            ).toEqual({ kind: "pending-login" });
         }
     });
 

@@ -1,0 +1,203 @@
+{
+  "$id": "urn:mira-dashboard:accountSecurity.beginWebAuthnEnrollment.output",
+  "type": "object",
+  "properties": {
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "options": {
+      "type": "object",
+      "properties": {
+        "attestation": {
+          "const": "none"
+        },
+        "authenticatorSelection": {
+          "type": "object",
+          "properties": {
+            "authenticatorAttachment": {
+              "const": "cross-platform"
+            },
+            "requireResidentKey": {
+              "const": false
+            },
+            "residentKey": {
+              "const": "discouraged"
+            },
+            "userVerification": {
+              "const": "required"
+            }
+          },
+          "required": [
+            "authenticatorAttachment",
+            "requireResidentKey",
+            "residentKey",
+            "userVerification"
+          ],
+          "additionalProperties": false
+        },
+        "challenge": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 256,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "excludeCredentials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 1024,
+                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+              },
+              "transports": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "ble",
+                    "cable",
+                    "hybrid",
+                    "internal",
+                    "nfc",
+                    "smart-card",
+                    "usb"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 7,
+                "uniqueItems": true
+              },
+              "type": {
+                "const": "public-key"
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 4
+        },
+        "extensions": {
+          "type": "object",
+          "properties": {
+            "credProps": {
+              "const": true
+            }
+          },
+          "required": [
+            "credProps"
+          ],
+          "additionalProperties": false
+        },
+        "hints": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "security-key"
+            }
+          ],
+          "minItems": 1,
+          "items": false
+        },
+        "pubKeyCredParams": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "object",
+              "properties": {
+                "alg": {
+                  "const": -7
+                },
+                "type": {
+                  "const": "public-key"
+                }
+              },
+              "required": [
+                "alg",
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "minItems": 1,
+          "items": false
+        },
+        "rp": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253,
+              "pattern": "^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)$"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "timeout": {
+          "const": 60000
+        },
+        "user": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "id": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "displayName",
+            "id",
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "attestation",
+        "authenticatorSelection",
+        "challenge",
+        "excludeCredentials",
+        "extensions",
+        "pubKeyCredParams",
+        "rp",
+        "timeout",
+        "user"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "expiresAtMs",
+    "options"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

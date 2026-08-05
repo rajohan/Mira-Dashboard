@@ -1,7 +1,7 @@
 import { compareAsc } from "date-fns";
 
 import type { ConfirmTotpEnrollmentInput } from "../../../../contracts/accountSecurity.ts";
-import { totpFactorMaximumPerUser } from "../../../../contracts/accountSecurity.ts";
+import { possessionFactorMaximumPerUser } from "../../../../contracts/accountSecurity.ts";
 import type { GeneratedOpaqueToken } from "../../../shared/opaqueToken.ts";
 import {
     activeRateLimitForTargets,
@@ -76,11 +76,13 @@ function pendingFactorIsCurrent(
     );
 }
 
-function factorCountMatchesMfaState(
+function possessionFactorCountMatchesMfaState(
     account: AccountSnapshot,
-    confirmedCount: number
+    possessionFactorCount: number
 ): boolean {
-    return account.user.mfaEnabledAt === null ? confirmedCount === 0 : confirmedCount > 0;
+    return account.user.mfaEnabledAt === null
+        ? possessionFactorCount === 0
+        : possessionFactorCount > 0;
 }
 
 /**
@@ -132,10 +134,12 @@ export function createConfirmTotpEnrollmentOperation(
                 return { status: "state-changed" as const };
             }
             const confirmedCount = reader.countConfirmedTotpFactors(identity.userId);
-            if (confirmedCount >= totpFactorMaximumPerUser) {
+            const possessionFactorCount =
+                confirmedCount + reader.countWebAuthnCredentials(identity.userId);
+            if (possessionFactorCount >= possessionFactorMaximumPerUser) {
                 return { status: "factor-limit" as const };
             }
-            if (!factorCountMatchesMfaState(account, confirmedCount)) {
+            if (!possessionFactorCountMatchesMfaState(account, possessionFactorCount)) {
                 return { status: "state-changed" as const };
             }
             return { account, factor, status: "ready" as const };
@@ -251,10 +255,14 @@ export function createConfirmTotpEnrollmentOperation(
                     throw new MfaAccountStateChangedError();
                 }
                 const confirmedCount = unit.countConfirmedTotpFactors(identity.userId);
-                if (confirmedCount >= totpFactorMaximumPerUser) {
+                const possessionFactorCount =
+                    confirmedCount + unit.countWebAuthnCredentials(identity.userId);
+                if (possessionFactorCount >= possessionFactorMaximumPerUser) {
                     return { status: "factor-limit" as const };
                 }
-                if (!factorCountMatchesMfaState(current, confirmedCount)) {
+                if (
+                    !possessionFactorCountMatchesMfaState(current, possessionFactorCount)
+                ) {
                     throw new MfaAccountStateChangedError();
                 }
                 const confirmedFactor = unit.confirmTotpFactor({

@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
 import { securityRecordIdSchema } from "../../../../contracts/security.ts";
+import { recoveryCodeCount } from "../../../../shared/recoveryCodePolicy.ts";
 import { randomHex } from "../../../shared/crypto.ts";
 
 const recoveryCodeSelectorByteLength = 16;
@@ -9,9 +10,6 @@ const recoveryCodeMaximumRawLength = 128;
 const recoveryCodePattern = /^([0-9a-f]{32})-([0-9a-f]{32})$/u;
 const recoveryCodePartPattern = /^[0-9a-f]{32}$/u;
 const recoveryCodeGenerationAttemptMaximum = 40;
-
-/** Number of recovery codes installed as one atomic set. */
-export const dashboardRecoveryCodeCount = 10;
 
 /** Secret material parsed from one canonical recovery code. */
 export interface ParsedRecoveryCode {
@@ -91,7 +89,7 @@ export function generateDashboardRecoveryCodes(
     let attempts = 0;
 
     while (
-        generated.length < dashboardRecoveryCodeCount &&
+        generated.length < recoveryCodeCount &&
         attempts < recoveryCodeGenerationAttemptMaximum
     ) {
         attempts += 1;
@@ -116,7 +114,7 @@ export function generateDashboardRecoveryCodes(
         );
     }
 
-    if (generated.length !== dashboardRecoveryCodeCount) {
+    if (generated.length !== recoveryCodeCount) {
         throw new Error("Recovery code selectors could not be generated uniquely");
     }
     return Object.freeze(generated);

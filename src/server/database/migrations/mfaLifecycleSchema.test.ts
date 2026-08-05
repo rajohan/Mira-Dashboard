@@ -53,6 +53,7 @@ function insertPendingLogin(database: FreshDatabase): void {
         `INSERT INTO auth_pending_logins (
             allows_recovery,
             allows_totp,
+            allows_webauthn,
             authentication_version,
             created_at,
             expires_at,
@@ -61,7 +62,7 @@ function insertPendingLogin(database: FreshDatabase): void {
             replaced_session_id,
             user_id,
             validator_hash
-        ) VALUES (1, 1, 1, 2000, 301000, ?, 1000, ?, ?, ?)`,
+        ) VALUES (1, 1, 1, 1, 2000, 301000, ?, 1000, ?, ?, ?)`,
         [pendingLoginId, sessionId, userId, pendingValidatorHash]
     );
 }
@@ -162,11 +163,27 @@ describe("MFA lifecycle schema", () => {
                 [recoveryId, recoverySelector, userId, testDashboardPasswordHash]
             );
 
+            database.sqlite.run(
+                `INSERT INTO auth_pending_logins (
+                    allows_recovery,
+                    allows_totp,
+                    allows_webauthn,
+                    authentication_version,
+                    created_at,
+                    expires_at,
+                    id,
+                    password_verified_at,
+                    user_id,
+                    validator_hash
+                ) VALUES (1, 0, 0, 1, 2000, 301000, ?, 1000, ?, ?)`,
+                ["2".repeat(32), userId, "3".repeat(64)]
+            );
             expect(() =>
                 database.sqlite.run(
                     `INSERT INTO auth_pending_logins (
                         allows_recovery,
                         allows_totp,
+                        allows_webauthn,
                         authentication_version,
                         created_at,
                         expires_at,
@@ -174,8 +191,8 @@ describe("MFA lifecycle schema", () => {
                         password_verified_at,
                         user_id,
                         validator_hash
-                    ) VALUES (0, 0, 1, 2000, 301000, ?, 1000, ?, ?)`,
-                    ["2".repeat(32), userId, "3".repeat(64)]
+                    ) VALUES (0, 0, 0, 1, 2000, 301000, ?, 1000, ?, ?)`,
+                    ["9".repeat(32), userId, "a".repeat(64)]
                 )
             ).toThrow("auth_pending_logins_methods_check");
             expect(() =>
@@ -183,6 +200,7 @@ describe("MFA lifecycle schema", () => {
                     `INSERT INTO auth_pending_logins (
                         allows_recovery,
                         allows_totp,
+                        allows_webauthn,
                         attempt_count,
                         authentication_version,
                         created_at,
@@ -191,7 +209,7 @@ describe("MFA lifecycle schema", () => {
                         password_verified_at,
                         user_id,
                         validator_hash
-                    ) VALUES (0, 1, 9, 1, 2000, 301000, ?, 1000, ?, ?)`,
+                    ) VALUES (0, 1, 0, 9, 1, 2000, 301000, ?, 1000, ?, ?)`,
                     ["4".repeat(32), userId, "5".repeat(64)]
                 )
             ).toThrow("auth_pending_logins_attempt_count_check");
@@ -200,6 +218,7 @@ describe("MFA lifecycle schema", () => {
                     `INSERT INTO auth_pending_logins (
                         allows_recovery,
                         allows_totp,
+                        allows_webauthn,
                         authentication_version,
                         created_at,
                         expires_at,
@@ -207,7 +226,7 @@ describe("MFA lifecycle schema", () => {
                         password_verified_at,
                         user_id,
                         validator_hash
-                    ) VALUES (0, 1, 1, 2000, 301001, ?, 1000, ?, ?)`,
+                    ) VALUES (0, 1, 0, 1, 2000, 301001, ?, 1000, ?, ?)`,
                     ["6".repeat(32), userId, "7".repeat(64)]
                 )
             ).toThrow("auth_pending_logins_time_check");

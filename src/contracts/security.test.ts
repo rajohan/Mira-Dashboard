@@ -13,8 +13,17 @@ const sessionSelector = "a".repeat(32);
 
 describe("request authentication contract", () => {
     test("advertises only authentication methods implemented by this slice", () => {
-        expect(authenticationMethods).toEqual(["password", "recovery", "totp"]);
-        expect(multiFactorAuthenticationMethods).toEqual(["recovery", "totp"]);
+        expect(authenticationMethods).toEqual([
+            "password",
+            "recovery",
+            "totp",
+            "webauthn",
+        ]);
+        expect(multiFactorAuthenticationMethods).toEqual([
+            "recovery",
+            "totp",
+            "webauthn",
+        ]);
     });
 
     test("normalizes and freezes an authenticated principal", () => {
