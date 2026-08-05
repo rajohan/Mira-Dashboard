@@ -14,6 +14,12 @@ export const authenticationRateLimitKinds = [
 
 export type AuthenticationRateLimitKind = (typeof authenticationRateLimitKinds)[number];
 
+const authenticationRateLimitKindsSql = sql.raw(
+    `(${authenticationRateLimitKinds
+        .map((kind) => `'${kind.replaceAll("'", "''")}'`)
+        .join(", ")})`
+);
+
 /** Durable progressive-cooldown state keyed by a domain-separated subject digest. */
 export const authRateLimitBuckets = sqliteTable(
     "auth_rate_limit_buckets",
@@ -42,7 +48,7 @@ export const authRateLimitBuckets = sqliteTable(
         ),
         check(
             "auth_rate_limit_buckets_kind_check",
-            sql`${table.kind} IN ('account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-password-global', 'login-password-source')`
+            sql`${table.kind} IN ${authenticationRateLimitKindsSql}`
         ),
         check(
             "auth_rate_limit_buckets_timestamps_check",

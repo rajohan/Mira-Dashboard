@@ -30,7 +30,7 @@ small route allowlist documented below. It cannot authenticate WebSockets or
 other Dashboard route families. Account-security routes are never public merely
 because they contain authentication functionality.
 
-The browser session is stored in the `mira_dashboard_session` HTTP-only cookie.
+The browser session is stored in the `__Host-mira_dashboard_session` HTTP-only cookie.
 The cookie is always `Secure`, `SameSite=Strict`, host-only, and scoped to `/`;
 local browser development therefore uses HTTPS. Sessions use a 30-day absolute
 lifetime and a configurable 30-minute idle lifetime

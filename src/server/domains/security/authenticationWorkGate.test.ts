@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { captureFailure } from "../../test/support/promise.ts";
 import { createAuthenticationWorkGate } from "./authenticationWorkGate.ts";
 
 describe("authentication work gate", () => {
@@ -40,7 +41,7 @@ describe("authentication work gate", () => {
         await Promise.resolve();
 
         controller.abort(new Error("request cancelled"));
-        expect(aborted).rejects.toThrow("request cancelled");
+        expect(await captureFailure(() => aborted)).toBe(controller.signal.reason);
 
         const replacement = gate.run(() => Promise.resolve("replacement"));
         releaseFirst.resolve();

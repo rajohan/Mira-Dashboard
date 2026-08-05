@@ -122,6 +122,20 @@ function parseRateLimitBucket(row: unknown): AuthRateLimitBucket {
     return v.parse(authRateLimitBucketSelectSchema, row);
 }
 
+function countUsersFromDatabase(
+    database: SecurityTransaction | SQLiteBunDatabase
+): number {
+    const row = database
+        .select({ count: sql<number>`count(*)` })
+        .from(users)
+        .get();
+    const count = requiredRow(row, "user count").count;
+    if (!Number.isSafeInteger(count) || count < 0) {
+        throw new Error("Authentication repository returned an invalid user count");
+    }
+    return count;
+}
+
 function listSessionsFromDatabase(
     database: SecurityTransaction | SQLiteBunDatabase,
     input: AuthenticationSessionListInput
@@ -158,15 +172,7 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
     }
 
     countUsers(): number {
-        const row = this.#transaction
-            .select({ count: sql<number>`count(*)` })
-            .from(users)
-            .get();
-        const count = requiredRow(row, "user count").count;
-        if (!Number.isSafeInteger(count) || count < 0) {
-            throw new Error("Authentication repository returned an invalid user count");
-        }
-        return count;
+        return countUsersFromDatabase(this.#transaction);
     }
 
     deleteOtherSessions(userId: string, retainedSessionId: string): number {
@@ -439,17 +445,7 @@ export function createAuthenticationLifecycleRepository(
 
     return Object.freeze({
         countUsers() {
-            const row = database
-                .select({ count: sql<number>`count(*)` })
-                .from(users)
-                .get();
-            const count = requiredRow(row, "user count").count;
-            if (!Number.isSafeInteger(count) || count < 0) {
-                throw new Error(
-                    "Authentication repository returned an invalid user count"
-                );
-            }
-            return count;
+            return countUsersFromDatabase(database);
         },
         findRateLimitBucket(bucketKey: string) {
             const row = database

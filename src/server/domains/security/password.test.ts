@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 
 import { isDashboardPasswordHash } from "../../shared/passwordHash.ts";
+import { captureFailure } from "../../test/support/promise.ts";
 import { testDashboardPasswordHash } from "../../test/support/securityPassword.ts";
 import {
     dashboardPasswordHashPolicy,
@@ -53,13 +54,17 @@ describe("Dashboard password policy", () => {
         }
     });
 
-    test("fails closed when Bun returns an unexpected hash representation", () => {
+    test("fails closed when Bun returns an unexpected hash representation", async () => {
         const hash = spyOn(Bun.password, "hash").mockImplementation(() =>
             Promise.resolve("not-a-dashboard-password-hash")
         );
         try {
-            expect(hashDashboardPassword("correct-horse-battery-staple")).rejects.toThrow(
-                "unsupported Dashboard password hash"
+            const failure = await captureFailure(() =>
+                hashDashboardPassword("correct-horse-battery-staple")
+            );
+            expect(failure).toBeInstanceOf(Error);
+            expect((failure as Error).message).toBe(
+                "Bun returned an unsupported Dashboard password hash"
             );
         } finally {
             hash.mockRestore();

@@ -36,7 +36,7 @@ import type {
 } from "./repository.ts";
 
 /** Browser session cookie read only by the server. */
-export const dashboardSessionCookieName = "mira_dashboard_session";
+export const dashboardSessionCookieName = "__Host-mira_dashboard_session";
 
 const defaultAuthenticationLeaseDurationMs = secondsToMilliseconds(30);
 const minimumAuthenticationLeaseDurationMs = secondsToMilliseconds(1);

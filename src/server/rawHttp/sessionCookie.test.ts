@@ -14,7 +14,7 @@ describe("Dashboard session cookie", () => {
         appendDashboardSessionCookie(headers, token);
 
         expect(headers.get("set-cookie")).toBe(
-            `mira_dashboard_session=${token}; Max-Age=2592000; Path=/; Secure; HttpOnly; SameSite=Strict`
+            `__Host-mira_dashboard_session=${token}; Max-Age=2592000; Path=/; Secure; HttpOnly; SameSite=Strict`
         );
     });
 
@@ -24,7 +24,7 @@ describe("Dashboard session cookie", () => {
         appendClearedDashboardSessionCookie(headers);
 
         expect(headers.get("set-cookie")).toBe(
-            "mira_dashboard_session=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Strict"
+            "__Host-mira_dashboard_session=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Strict"
         );
     });
 

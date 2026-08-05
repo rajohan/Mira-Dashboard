@@ -5,6 +5,7 @@ import { addSeconds } from "date-fns";
 import { browserSessionMaximumPerUser } from "../../../contracts/auth.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { captureFailure } from "../../test/support/promise.ts";
 import {
     createAuthenticationLifecycleService,
     type VerifyGatewayCredential,
@@ -630,7 +631,7 @@ describe("authentication lifecycle", () => {
             await started.promise;
             controller.abort(new Error("request cancelled"));
 
-            expect(pending).rejects.toThrow("request cancelled");
+            expect(await captureFailure(() => pending)).toBe(controller.signal.reason);
             for (const table of [
                 "audit_events",
                 "auth_rate_limit_buckets",
@@ -674,7 +675,7 @@ describe("authentication lifecycle", () => {
             controller.abort(new Error("request cancelled"));
             hashResult.resolve(fakePasswordHash("current-password-1"));
 
-            expect(pending).rejects.toThrow("request cancelled");
+            expect(await captureFailure(() => pending)).toBe(controller.signal.reason);
             expect(
                 harness.database.sqlite
                     .query<{ count: number }, []>("SELECT count(*) AS count FROM users")
@@ -717,7 +718,7 @@ describe("authentication lifecycle", () => {
             controller.abort(new Error("request cancelled"));
             verificationResult.resolve(true);
 
-            expect(pending).rejects.toThrow("request cancelled");
+            expect(await captureFailure(() => pending)).toBe(controller.signal.reason);
             expect(
                 harness.database.sqlite
                     .query<{ count: number }, []>(
@@ -782,7 +783,7 @@ describe("authentication lifecycle", () => {
             controller.abort(new Error("request cancelled"));
             replacementHash.resolve(fakePasswordHash("replacement-password-2"));
 
-            expect(pending).rejects.toThrow("request cancelled");
+            expect(await captureFailure(() => pending)).toBe(controller.signal.reason);
             expect(harness.service.status(identity).authenticated).toBeTrue();
             expect(
                 harness.database.sqlite

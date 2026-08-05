@@ -26,6 +26,8 @@ export const securityLabelSchema = boundedNonBlankTextSchema(
 export const securityUserAgentSchema = v.pipe(
     v.string("Session user agent is invalid"),
     v.minLength(1, "Session user agent is invalid"),
+    // Valibot counts UTF-16 code units; the domain predicate counts code points.
+    // Two units per point keeps the full astral-character allowance reachable.
     v.maxLength(
         browserSessionUserAgentMaximumLength * 2,
         "Session user agent is invalid"

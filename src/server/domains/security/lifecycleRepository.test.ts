@@ -1,11 +1,58 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { addMilliseconds } from "date-fns";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { createAuthenticationLifecycleRepository } from "./lifecycleRepository.ts";
 
 describe("authentication lifecycle repository", () => {
+    test("acquires the SQLite write lock before an immediate callback runs", async () => {
+        const directory = await mkdtemp(path.join(tmpdir(), "mira-auth-repository-"));
+        const databasePath = path.join(directory, "dashboard.sqlite");
+        const primary = new Database(databasePath, { create: true, strict: true });
+        const competing = new Database(databasePath, { strict: true });
+        competing.run("PRAGMA busy_timeout = 0");
+        const repository = createAuthenticationLifecycleRepository(
+            drizzle({ client: primary })
+        );
+
+        try {
+            let deferredCompetingWriterAcquired = false;
+            repository.withReadTransaction(() => {
+                competing.run("BEGIN IMMEDIATE");
+                deferredCompetingWriterAcquired = true;
+                competing.run("ROLLBACK");
+            });
+            expect(deferredCompetingWriterAcquired).toBeTrue();
+
+            let immediateCompetingWriterFailure: unknown;
+            repository.withImmediateTransaction(() => {
+                try {
+                    competing.run("BEGIN IMMEDIATE");
+                    competing.run("ROLLBACK");
+                } catch (error) {
+                    immediateCompetingWriterFailure = error;
+                }
+            });
+
+            expect(immediateCompetingWriterFailure).toBeInstanceOf(Error);
+            expect(String(immediateCompetingWriterFailure)).toContain(
+                "database is locked"
+            );
+            competing.run("BEGIN IMMEDIATE");
+            competing.run("ROLLBACK");
+        } finally {
+            competing.close(true);
+            primary.close(true);
+            await rm(directory, { force: true, recursive: true });
+        }
+    });
+
     test("prunes stale and excess source rate-limit buckets transactionally", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createAuthenticationLifecycleRepository(database.orm);

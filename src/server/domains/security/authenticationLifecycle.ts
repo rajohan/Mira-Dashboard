@@ -241,9 +241,13 @@ function blockDurationMs(
     failureCount: number,
     blockDurations: AuthenticationRateLimitTarget["blockDurations"]
 ): number {
-    return (
-        blockDurations.find(({ failures }) => failureCount >= failures)?.milliseconds ?? 0
-    );
+    let longestDuration = 0;
+    for (const { failures, milliseconds } of blockDurations) {
+        if (failureCount >= failures) {
+            longestDuration = Math.max(longestDuration, milliseconds);
+        }
+    }
+    return longestDuration;
 }
 
 function retryAfterSeconds(blockedUntil: Date, now: Date): number {

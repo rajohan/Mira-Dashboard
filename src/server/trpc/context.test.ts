@@ -71,6 +71,19 @@ describe("tRPC request context", () => {
         }
     });
 
+    test("omits user-agent metadata when the request header is absent", async () => {
+        const context = await createRequestContext({
+            applicationRuntime: createTestApplicationRuntime(),
+            authenticationClientSourceId: "client-source-without-user-agent",
+            authenticationLifecycle: createTestAuthenticationLifecycleService(),
+            authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
+            request: new Request("http://localhost/trpc/auth.status"),
+            responseHeaders: new Headers(),
+        });
+
+        expect(context.userAgent).toBeUndefined();
+    });
+
     test("rejects malformed authentication service output", async () => {
         let failure: unknown;
         try {

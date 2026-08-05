@@ -106,7 +106,7 @@ describe("authentication HTTP transport", () => {
         expect(responseText).toContain('"username":"operator"');
         expect(responseText).not.toContain(generated.token);
         expect(response.headers.get("set-cookie")).toContain(
-            `mira_dashboard_session=${generated.token}`
+            `__Host-mira_dashboard_session=${generated.token}`
         );
         expect(response.headers.get("cache-control")).toContain("no-store");
     });
@@ -151,7 +151,10 @@ describe("authentication HTTP transport", () => {
         const allowedReads = await fetch(
             new URL("/trpc/auth.status,auth.sessions?batch=1", server.url)
         );
-        expect(allowedReads.status).not.toBe(400);
+        expect(allowedReads.status).toBe(207);
+        const allowedReadsBody = await allowedReads.text();
+        expect(allowedReadsBody).toContain('"isBootstrapRequired":true');
+        expect(allowedReadsBody).toContain('"UNAUTHORIZED"');
         const authenticationCallsBeforeOversizedBatch = authenticationCalls;
         const oversizedBatch = await fetch(
             new URL(
@@ -357,7 +360,7 @@ describe("authentication HTTP transport", () => {
             headers: {
                 authorization: `Bearer ${"a".repeat(32)}.${"b".repeat(64)}`,
                 "content-type": "application/json",
-                cookie: "mira_dashboard_session=malformed",
+                cookie: "__Host-mira_dashboard_session=malformed",
             },
             method: "POST",
         });
@@ -425,7 +428,7 @@ describe("authentication HTTP transport", () => {
                 }),
                 headers: {
                     "content-type": "application/json",
-                    cookie: `mira_dashboard_session=${generateOpaqueToken("session").token}`,
+                    cookie: `__Host-mira_dashboard_session=${generateOpaqueToken("session").token}`,
                 },
                 method: "POST",
             }

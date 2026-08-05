@@ -60,7 +60,7 @@ describe("authentication procedures", () => {
         expect(result).toEqual({ session: authSession, user: authUser });
         expect(JSON.stringify(result)).not.toContain(generated.token);
         expect(responseHeaders.get("set-cookie")).toContain(
-            `mira_dashboard_session=${generated.token}`
+            `__Host-mira_dashboard_session=${generated.token}`
         );
         expect(responseHeaders.get("set-cookie")).toContain(
             "Secure; HttpOnly; SameSite=Strict"

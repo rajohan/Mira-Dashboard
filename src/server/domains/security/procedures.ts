@@ -181,11 +181,10 @@ export const authRouter = router({
         .input(emptyInputSchema)
         .output(okResultSchema)
         .mutation(({ ctx }) => {
-            ctx.authenticationLifecycle.logout(currentSessionIdentity(ctx), {
-                clientSourceId: ctx.authenticationClientSourceId,
-                requestId: ctx.requestId,
-                ...(ctx.userAgent !== undefined && { userAgent: ctx.userAgent }),
-            });
+            ctx.authenticationLifecycle.logout(
+                currentSessionIdentity(ctx),
+                requestMetadata(ctx, undefined)
+            );
             appendClearedDashboardSessionCookie(ctx.responseHeaders);
             return { isOk: true } as const;
         }),
@@ -196,11 +195,7 @@ export const authRouter = router({
             const result = ctx.authenticationLifecycle.revokeSession(
                 ctx.sessionIdentity,
                 input.sessionId,
-                {
-                    clientSourceId: ctx.authenticationClientSourceId,
-                    requestId: ctx.requestId,
-                    ...(ctx.userAgent !== undefined && { userAgent: ctx.userAgent }),
-                }
+                requestMetadata(ctx, undefined)
             );
             if (result === undefined) {
                 appendClearedDashboardSessionCookie(ctx.responseHeaders);
