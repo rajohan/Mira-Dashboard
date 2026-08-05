@@ -8,6 +8,8 @@ import {
     uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { lowercaseHexTextCheck } from "./checks.ts";
+
 /** Current lifecycle state for one stable monitor problem fingerprint. */
 export const incidents = sqliteTable(
     "incidents",
@@ -35,7 +37,7 @@ export const incidents = sqliteTable(
         ),
         check(
             "incidents_fingerprint_check",
-            sql`length(${table.fingerprint}) = 64 AND ${table.fingerprint} NOT GLOB '*[^0-9a-f]*'`
+            lowercaseHexTextCheck(table.fingerprint, 64)
         ),
         check("incidents_generation_check", sql`${table.generation} >= 1`),
         check("incidents_occurrence_count_check", sql`${table.occurrenceCount} >= 1`),

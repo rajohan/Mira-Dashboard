@@ -31,6 +31,7 @@ describe("user row schemas", () => {
         { username: "Raymond" },
         { username: "ab" },
         { passwordHash: "not-an-argon2id-hash" },
+        { passwordHash: `${validUserInsert.passwordHash}\0suffix` },
         { updatedAt: subMilliseconds(securityCreatedAt, 1) },
         { unexpected: true },
     ])("rejects invalid user row %#", (replacement) => {

@@ -65,9 +65,15 @@ describe("database migration graph", () => {
             "audit_events_reject_replace",
             "audit_events_reject_update",
             "audit_events_reject_delete",
+            "incidents_reject_nul_fingerprint_insert",
+            "incidents_reject_nul_fingerprint_update",
+            "monitor_runs_reject_nul_submission_sha256_insert",
+            "monitor_runs_reject_nul_submission_sha256_update",
         ]) {
             expect(securityCoreSql).toContain(`CREATE TRIGGER ${trigger}`);
         }
+        expect(securityCoreSql).toContain("WHERE instr(fingerprint, char(0)) > 0;");
+        expect(securityCoreSql).toContain("WHERE instr(submission_sha256, char(0)) > 0;");
 
         const database = await openFreshMigratedDatabase();
 
@@ -142,9 +148,8 @@ describe("database migration graph", () => {
         try {
             database.run("PRAGMA foreign_keys = ON");
             for (const statement of foundationMigration.statements) {
-                if (statement.trim().length > 0) {
-                    database.run(statement);
-                }
+                const executableStatement = statement.trim();
+                if (executableStatement.length > 0) database.run(executableStatement);
             }
             database.run(
                 `INSERT INTO schema_migrations (

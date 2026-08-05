@@ -4,6 +4,26 @@ import { sql, type SQLWrapper } from "drizzle-orm";
 const sqliteWhitespace = sql`char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)`;
 
 /**
+ * Builds a SQLite check that rejects embedded NUL characters.
+ * @param column SQLite text column to validate.
+ * @returns Drizzle SQL expression for the storage constraint.
+ */
+export function nulFreeTextCheck(column: SQLWrapper) {
+    return sql`instr(${column}, char(0)) = 0`;
+}
+
+/**
+ * Builds a SQLite check matching a fixed-length lowercase hexadecimal boundary.
+ * @param column SQLite text column to validate.
+ * @param exactLength Required hexadecimal character count.
+ * @returns Drizzle SQL expression for the storage constraint.
+ */
+export function lowercaseHexTextCheck(column: SQLWrapper, exactLength: 32 | 64) {
+    const exactLengthSql = sql.raw(String(exactLength));
+    return sql`length(${column}) = ${exactLengthSql} AND ${nulFreeTextCheck(column)} AND ${column} NOT GLOB '*[^0-9a-f]*'`;
+}
+
+/**
  * Builds a SQLite check matching a bounded, nonblank, NUL-free text boundary.
  * @param column SQLite text column to validate.
  * @param maximumLength Maximum accepted Unicode code-point length.
@@ -11,7 +31,7 @@ const sqliteWhitespace = sql`char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 
  */
 export function boundedNonBlankTextCheck(column: SQLWrapper, maximumLength: number) {
     const maximumLengthSql = sql.raw(String(maximumLength));
-    return sql`length(${column}) BETWEEN 1 AND ${maximumLengthSql} AND instr(${column}, char(0)) = 0 AND length(trim(${column}, ${sqliteWhitespace})) > 0`;
+    return sql`length(${column}) BETWEEN 1 AND ${maximumLengthSql} AND ${nulFreeTextCheck(column)} AND length(trim(${column}, ${sqliteWhitespace})) > 0`;
 }
 
 /**
@@ -30,5 +50,5 @@ export function timestampMillisecondsCheck(column: SQLWrapper) {
  * @returns Drizzle SQL expression for the storage constraint.
  */
 export function uuidV7TextCheck(column: SQLWrapper) {
-    return sql`length(${column}) = 36 AND instr(${column}, char(0)) = 0 AND length(replace(${column}, '-', '')) = 32 AND replace(${column}, '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(${column}, 9, 1) = '-' AND substr(${column}, 14, 1) = '-' AND substr(${column}, 15, 1) = '7' AND substr(${column}, 19, 1) = '-' AND substr(${column}, 20, 1) GLOB '[89ab]' AND substr(${column}, 24, 1) = '-'`;
+    return sql`length(${column}) = 36 AND ${nulFreeTextCheck(column)} AND length(replace(${column}, '-', '')) = 32 AND replace(${column}, '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(${column}, 9, 1) = '-' AND substr(${column}, 14, 1) = '-' AND substr(${column}, 15, 1) = '7' AND substr(${column}, 19, 1) = '-' AND substr(${column}, 20, 1) GLOB '[89ab]' AND substr(${column}, 24, 1) = '-'`;
 }

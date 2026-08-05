@@ -198,6 +198,139 @@ describe("security identity schema", () => {
         }
     });
 
+    test("rejects embedded NUL across persisted security scalars", async () => {
+        const database = await openFreshMigratedDatabase();
+
+        try {
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT INTO users (
+                        created_at,
+                        id,
+                        password_hash,
+                        updated_at,
+                        username
+                    ) VALUES (1000, ?, ?, 1000, 'nul-password')`,
+                    ["019fc968-1a9b-7775-8f1b-d5b863b0e7b4", `${passwordHash}\0suffix`]
+                )
+            ).toThrow("users_password_hash_check");
+
+            insertUser(database);
+            expect(() =>
+                database.sqlite.run("UPDATE users SET password_hash = ? WHERE id = ?", [
+                    `${passwordHash}\0suffix`,
+                    userId,
+                ])
+            ).toThrow("users_password_hash_check");
+
+            const insertSession = `
+                INSERT INTO auth_sessions (
+                    authenticated_at,
+                    authentication_version,
+                    auth_method,
+                    created_at,
+                    expires_at,
+                    id,
+                    last_seen_at,
+                    user_id,
+                    validator_hash
+                ) VALUES (1000, 1, 'password', 1000, 5000, ?, 1000, ?, ?)
+            `;
+            expect(() =>
+                database.sqlite.run(insertSession, [
+                    `${"a".repeat(32)}\0suffix`,
+                    userId,
+                    "b".repeat(64),
+                ])
+            ).toThrow("auth_sessions_id_check");
+            expect(() =>
+                database.sqlite.run(insertSession, [
+                    "c".repeat(32),
+                    userId,
+                    `${"d".repeat(64)}\0suffix`,
+                ])
+            ).toThrow("auth_sessions_validator_hash_check");
+            database.sqlite.run(insertSession, ["a".repeat(32), userId, "b".repeat(64)]);
+            expect(() =>
+                database.sqlite.run("UPDATE auth_sessions SET id = ? WHERE id = ?", [
+                    `${"a".repeat(32)}\0suffix`,
+                    "a".repeat(32),
+                ])
+            ).toThrow("auth_sessions_id_check");
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE auth_sessions SET validator_hash = ? WHERE id = ?",
+                    [`${"b".repeat(64)}\0suffix`, "a".repeat(32)]
+                )
+            ).toThrow("auth_sessions_validator_hash_check");
+
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT INTO automation_principals (
+                        created_at,
+                        id,
+                        label,
+                        updated_at
+                    ) VALUES (1000, ?, 'NUL principal', 1000)`,
+                    ["openclaw-task-tracking\0suffix"]
+                )
+            ).toThrow("automation_principals_id_check");
+
+            insertAutomationPrincipal(database);
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE automation_principals SET id = ? WHERE id = 'openclaw-task-tracking'",
+                    ["openclaw-task-tracking\0suffix"]
+                )
+            ).toThrow("automation_principals_id_check");
+
+            const insertCredential = `
+                INSERT INTO automation_credentials (
+                    created_at,
+                    id,
+                    label,
+                    prefix,
+                    principal_id,
+                    validator_hash
+                ) VALUES (1000, ?, 'NUL credential', ?, 'openclaw-task-tracking', ?)
+            `;
+            expect(() =>
+                database.sqlite.run(insertCredential, [
+                    "019fc968-1a9b-7776-8f1b-d5b863b0e7b4",
+                    `${"e".repeat(32)}\0suffix`,
+                    "f".repeat(64),
+                ])
+            ).toThrow("automation_credentials_prefix_check");
+            expect(() =>
+                database.sqlite.run(insertCredential, [
+                    "019fc968-1a9b-7777-8f1b-d5b863b0e7b4",
+                    "1".repeat(32),
+                    `${"2".repeat(64)}\0suffix`,
+                ])
+            ).toThrow("automation_credentials_validator_hash_check");
+            const credentialId = "019fc968-1a9b-7778-8f1b-d5b863b0e7b4";
+            database.sqlite.run(insertCredential, [
+                credentialId,
+                "3".repeat(32),
+                "4".repeat(64),
+            ]);
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE automation_credentials SET prefix = ? WHERE id = ?",
+                    [`${"3".repeat(32)}\0suffix`, credentialId]
+                )
+            ).toThrow("automation_credentials_prefix_check");
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE automation_credentials SET validator_hash = ? WHERE id = ?",
+                    [`${"4".repeat(64)}\0suffix`, credentialId]
+                )
+            ).toThrow("automation_credentials_validator_hash_check");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("closes automation capabilities and constrains credential lifecycle", async () => {
         const database = await openFreshMigratedDatabase();
 

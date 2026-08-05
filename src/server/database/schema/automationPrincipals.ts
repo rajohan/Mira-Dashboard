@@ -1,7 +1,11 @@
 import { sql } from "drizzle-orm";
 import { check, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-import { boundedNonBlankTextCheck, timestampMillisecondsCheck } from "./checks.ts";
+import {
+    boundedNonBlankTextCheck,
+    nulFreeTextCheck,
+    timestampMillisecondsCheck,
+} from "./checks.ts";
 
 /** Named non-browser callers whose privileges are granted independently of credentials. */
 export const automationPrincipals = sqliteTable(
@@ -21,7 +25,7 @@ export const automationPrincipals = sqliteTable(
         ),
         check(
             "automation_principals_id_check",
-            sql`length(${table.id}) BETWEEN 1 AND 64 AND ${table.id} = lower(${table.id}) AND substr(${table.id}, 1, 1) GLOB '[a-z0-9]' AND ${table.id} NOT GLOB '*[^a-z0-9._-]*'`
+            sql`length(${table.id}) BETWEEN 1 AND 64 AND ${nulFreeTextCheck(table.id)} AND ${table.id} = lower(${table.id}) AND substr(${table.id}, 1, 1) GLOB '[a-z0-9]' AND ${table.id} NOT GLOB '*[^a-z0-9._-]*'`
         ),
         check(
             "automation_principals_label_check",

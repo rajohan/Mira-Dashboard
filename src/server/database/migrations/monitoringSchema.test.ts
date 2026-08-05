@@ -200,6 +200,61 @@ describe("monitoring schema", () => {
         }
     });
 
+    test("rejects NUL-tainted monitoring checksums on insert and update", async () => {
+        const database = await openFreshMigratedDatabase();
+
+        try {
+            expect(() =>
+                database.sqlite.run(insertIncidentSql, [
+                    "{}",
+                    `${filesystemFingerprint}\0suffix`,
+                    "incident-nul",
+                    "ops-check",
+                ])
+            ).toThrow("incidents fingerprint must not contain NUL");
+
+            database.sqlite.run(insertIncidentSql, [
+                "{}",
+                filesystemFingerprint,
+                "incident-valid",
+                "ops-check",
+            ]);
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE incidents SET fingerprint = ? WHERE id = 'incident-valid'",
+                    [`${memoryFingerprint}\0suffix`]
+                )
+            ).toThrow("incidents fingerprint must not contain NUL");
+
+            const insertMonitorRun = `
+                INSERT INTO monitor_runs (
+                    complete_snapshot,
+                    id,
+                    monitor_key,
+                    submission_sha256,
+                    started_at,
+                    state
+                ) VALUES (1, ?, 'ops-check', ?, 1000, 'running')
+            `;
+            expect(() =>
+                database.sqlite.run(insertMonitorRun, [
+                    "run-nul",
+                    `${filesystemFingerprint}\0suffix`,
+                ])
+            ).toThrow("monitor_runs submission_sha256 must not contain NUL");
+
+            database.sqlite.run(insertMonitorRun, ["run-valid", filesystemFingerprint]);
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE monitor_runs SET submission_sha256 = ? WHERE id = 'run-valid'",
+                    [`${memoryFingerprint}\0suffix`]
+                )
+            ).toThrow("monitor_runs submission_sha256 must not contain NUL");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("enforces observation severity", async () => {
         const database = await openFreshMigratedDatabase();
 

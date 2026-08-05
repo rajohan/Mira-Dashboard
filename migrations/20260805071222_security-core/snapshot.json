@@ -1924,7 +1924,7 @@
       "table": "auth_sessions"
     },
     {
-      "value": "length(\"id\") = 32 AND \"id\" NOT GLOB '*[^0-9a-f]*'",
+      "value": "length(\"id\") = 32 AND instr(\"id\", char(0)) = 0 AND \"id\" NOT GLOB '*[^0-9a-f]*'",
       "name": "auth_sessions_id_check",
       "entityType": "checks",
       "table": "auth_sessions"
@@ -1936,7 +1936,7 @@
       "table": "auth_sessions"
     },
     {
-      "value": "length(\"validator_hash\") = 64 AND \"validator_hash\" NOT GLOB '*[^0-9a-f]*'",
+      "value": "length(\"validator_hash\") = 64 AND instr(\"validator_hash\", char(0)) = 0 AND \"validator_hash\" NOT GLOB '*[^0-9a-f]*'",
       "name": "auth_sessions_validator_hash_check",
       "entityType": "checks",
       "table": "auth_sessions"
@@ -1960,13 +1960,13 @@
       "table": "automation_credentials"
     },
     {
-      "value": "length(\"prefix\") = 32 AND \"prefix\" NOT GLOB '*[^0-9a-f]*'",
+      "value": "length(\"prefix\") = 32 AND instr(\"prefix\", char(0)) = 0 AND \"prefix\" NOT GLOB '*[^0-9a-f]*'",
       "name": "automation_credentials_prefix_check",
       "entityType": "checks",
       "table": "automation_credentials"
     },
     {
-      "value": "length(\"validator_hash\") = 64 AND \"validator_hash\" NOT GLOB '*[^0-9a-f]*'",
+      "value": "length(\"validator_hash\") = 64 AND instr(\"validator_hash\", char(0)) = 0 AND \"validator_hash\" NOT GLOB '*[^0-9a-f]*'",
       "name": "automation_credentials_validator_hash_check",
       "entityType": "checks",
       "table": "automation_credentials"
@@ -2002,7 +2002,7 @@
       "table": "automation_principals"
     },
     {
-      "value": "length(\"id\") BETWEEN 1 AND 64 AND \"id\" = lower(\"id\") AND substr(\"id\", 1, 1) GLOB '[a-z0-9]' AND \"id\" NOT GLOB '*[^a-z0-9._-]*'",
+      "value": "length(\"id\") BETWEEN 1 AND 64 AND instr(\"id\", char(0)) = 0 AND \"id\" = lower(\"id\") AND substr(\"id\", 1, 1) GLOB '[a-z0-9]' AND \"id\" NOT GLOB '*[^a-z0-9._-]*'",
       "name": "automation_principals_id_check",
       "entityType": "checks",
       "table": "automation_principals"
@@ -2044,7 +2044,7 @@
       "table": "incidents"
     },
     {
-      "value": "length(\"fingerprint\") = 64 AND \"fingerprint\" NOT GLOB '*[^0-9a-f]*'",
+      "value": "length(\"fingerprint\") = 64 AND instr(\"fingerprint\", char(0)) = 0 AND \"fingerprint\" NOT GLOB '*[^0-9a-f]*'",
       "name": "incidents_fingerprint_check",
       "entityType": "checks",
       "table": "incidents"
@@ -2116,7 +2116,7 @@
       "table": "monitor_runs"
     },
     {
-      "value": "length(\"submission_sha256\") = 64 AND \"submission_sha256\" NOT GLOB '*[^0-9a-f]*'",
+      "value": "length(\"submission_sha256\") = 64 AND instr(\"submission_sha256\", char(0)) = 0 AND \"submission_sha256\" NOT GLOB '*[^0-9a-f]*'",
       "name": "monitor_runs_submission_sha256_check",
       "entityType": "checks",
       "table": "monitor_runs"
@@ -2200,7 +2200,7 @@
       "table": "users"
     },
     {
-      "value": "length(\"password_hash\") BETWEEN 32 AND 512 AND substr(\"password_hash\", 1, 10) = '$argon2id$'",
+      "value": "length(\"password_hash\") BETWEEN 32 AND 512 AND instr(\"password_hash\", char(0)) = 0 AND substr(\"password_hash\", 1, 10) = '$argon2id$'",
       "name": "users_password_hash_check",
       "entityType": "checks",
       "table": "users"

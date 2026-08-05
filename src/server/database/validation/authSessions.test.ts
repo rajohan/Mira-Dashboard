@@ -38,7 +38,9 @@ describe("auth session row schemas", () => {
 
     test.each([
         { id: "A".repeat(32) },
+        { id: `${"a".repeat(32)}\0suffix` },
         { validatorHash: "b".repeat(63) },
+        { validatorHash: `${"b".repeat(64)}\0suffix` },
         { authenticationVersion: 0 },
         { authenticationVersion: Number.MAX_SAFE_INTEGER + 1 },
         { authenticatedAt: addMilliseconds(securityCreatedAt, 1) },

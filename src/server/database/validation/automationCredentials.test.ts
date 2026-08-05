@@ -30,7 +30,9 @@ describe("automation credential row schemas", () => {
 
     test.each([
         { prefix: "C".repeat(32) },
+        { prefix: `${"c".repeat(32)}\0suffix` },
         { validatorHash: "d".repeat(63) },
+        { validatorHash: `${"d".repeat(64)}\0suffix` },
         { label: "\0" },
         { label: "\u3000" },
         { expiresAt: securityCreatedAt },

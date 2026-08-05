@@ -8,7 +8,11 @@ import {
     uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-import { boundedNonBlankTextCheck, timestampMillisecondsCheck } from "./checks.ts";
+import {
+    boundedNonBlankTextCheck,
+    lowercaseHexTextCheck,
+    timestampMillisecondsCheck,
+} from "./checks.ts";
 import { users } from "./users.ts";
 
 /** Revocable browser sessions backed by selector/validator tokens. */
@@ -69,17 +73,14 @@ export const authSessions = sqliteTable(
             "auth_sessions_elevation_check",
             sql`(${table.elevatedAt} IS NULL AND ${table.elevatedMethod} IS NULL) OR (${table.elevatedAt} IS NOT NULL AND ${table.elevatedMethod} IS NOT NULL AND ${timestampMillisecondsCheck(table.elevatedAt)} AND ${table.elevatedAt} >= ${table.authenticatedAt} AND ${table.elevatedAt} < ${table.expiresAt})`
         ),
-        check(
-            "auth_sessions_id_check",
-            sql`length(${table.id}) = 32 AND ${table.id} NOT GLOB '*[^0-9a-f]*'`
-        ),
+        check("auth_sessions_id_check", lowercaseHexTextCheck(table.id, 32)),
         check(
             "auth_sessions_user_agent_check",
             sql`${table.userAgent} IS NULL OR (${boundedNonBlankTextCheck(table.userAgent, 512)})`
         ),
         check(
             "auth_sessions_validator_hash_check",
-            sql`length(${table.validatorHash}) = 64 AND ${table.validatorHash} NOT GLOB '*[^0-9a-f]*'`
+            lowercaseHexTextCheck(table.validatorHash, 64)
         ),
         check(
             "auth_sessions_validator_version_check",

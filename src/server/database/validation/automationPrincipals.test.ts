@@ -47,6 +47,7 @@ describe("automation principal row schemas", () => {
     test.each([
         { id: "Uppercase" },
         { id: "-leading" },
+        { id: "openclaw-task-tracking\0suffix" },
         { label: "   " },
         { label: "\t\n" },
         { updatedAt: subMilliseconds(securityCreatedAt, 1) },

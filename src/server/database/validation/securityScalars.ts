@@ -3,6 +3,7 @@ import * as v from "valibot";
 import {
     boundedNonBlankTextSchema,
     lowercaseSha256Action,
+    noNulStringAction,
 } from "../../../shared/validation.ts";
 
 /** Bun Argon2id hash accepted by the security persistence boundary. */
@@ -10,6 +11,7 @@ export const argon2idPasswordHashSchema = v.pipe(
     v.string("Password hash is invalid"),
     v.minLength(32, "Password hash is invalid"),
     v.maxLength(512, "Password hash is invalid"),
+    noNulStringAction("Password hash is invalid"),
     v.startsWith("$argon2id$", "Password hash is invalid")
 );
 

@@ -11,6 +11,7 @@ import {
 import { automationPrincipals } from "./automationPrincipals.ts";
 import {
     boundedNonBlankTextCheck,
+    lowercaseHexTextCheck,
     timestampMillisecondsCheck,
     uuidV7TextCheck,
 } from "./checks.ts";
@@ -40,11 +41,11 @@ export const automationCredentials = sqliteTable(
         ),
         check(
             "automation_credentials_prefix_check",
-            sql`length(${table.prefix}) = 32 AND ${table.prefix} NOT GLOB '*[^0-9a-f]*'`
+            lowercaseHexTextCheck(table.prefix, 32)
         ),
         check(
             "automation_credentials_validator_hash_check",
-            sql`length(${table.validatorHash}) = 64 AND ${table.validatorHash} NOT GLOB '*[^0-9a-f]*'`
+            lowercaseHexTextCheck(table.validatorHash, 64)
         ),
         check(
             "automation_credentials_validator_version_check",

@@ -10,7 +10,7 @@ CREATE TABLE `users` (
 	CONSTRAINT "users_created_at_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"),
 	CONSTRAINT "users_disabled_at_check" CHECK("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")),
 	CONSTRAINT "users_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
-	CONSTRAINT "users_password_hash_check" CHECK(length("password_hash") BETWEEN 32 AND 512 AND substr("password_hash", 1, 10) = '$argon2id$'),
+	CONSTRAINT "users_password_hash_check" CHECK(length("password_hash") BETWEEN 32 AND 512 AND instr("password_hash", char(0)) = 0 AND substr("password_hash", 1, 10) = '$argon2id$'),
 	CONSTRAINT "users_username_check" CHECK(length("username") BETWEEN 3 AND 32 AND instr("username", char(0)) = 0 AND "username" = lower("username") AND substr("username", 1, 1) GLOB '[a-z0-9]' AND "username" NOT GLOB '*[^a-z0-9._-]*')
 ) STRICT;
 --> statement-breakpoint
@@ -38,9 +38,9 @@ CREATE TABLE `auth_sessions` (
 	CONSTRAINT "auth_sessions_last_seen_check" CHECK("last_seen_at" BETWEEN 0 AND 8640000000000000 AND "last_seen_at" >= "created_at" AND "last_seen_at" < "expires_at"),
 	CONSTRAINT "auth_sessions_mfa_time_check" CHECK("mfa_verified_at" IS NULL OR ("mfa_verified_at" BETWEEN 0 AND 8640000000000000 AND "mfa_verified_at" >= "authenticated_at" AND "mfa_verified_at" < "expires_at")),
 	CONSTRAINT "auth_sessions_elevation_check" CHECK(("elevated_at" IS NULL AND "elevated_method" IS NULL) OR ("elevated_at" IS NOT NULL AND "elevated_method" IS NOT NULL AND "elevated_at" BETWEEN 0 AND 8640000000000000 AND "elevated_at" >= "authenticated_at" AND "elevated_at" < "expires_at")),
-	CONSTRAINT "auth_sessions_id_check" CHECK(length("id") = 32 AND "id" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_sessions_id_check" CHECK(length("id") = 32 AND instr("id", char(0)) = 0 AND "id" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "auth_sessions_user_agent_check" CHECK("user_agent" IS NULL OR (length("user_agent") BETWEEN 1 AND 512 AND instr("user_agent", char(0)) = 0 AND length(trim("user_agent", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)),
-	CONSTRAINT "auth_sessions_validator_hash_check" CHECK(length("validator_hash") = 64 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_sessions_validator_hash_check" CHECK(length("validator_hash") = 64 AND instr("validator_hash", char(0)) = 0 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "auth_sessions_validator_version_check" CHECK("validator_version" = 1)
 ) STRICT;
 --> statement-breakpoint
@@ -52,7 +52,7 @@ CREATE TABLE `automation_principals` (
 	`label` text NOT NULL,
 	`updated_at` integer NOT NULL,
 	CONSTRAINT "automation_principals_authorization_version_check" CHECK("authorization_version" BETWEEN 1 AND 9007199254740991),
-	CONSTRAINT "automation_principals_id_check" CHECK(length("id") BETWEEN 1 AND 64 AND "id" = lower("id") AND substr("id", 1, 1) GLOB '[a-z0-9]' AND "id" NOT GLOB '*[^a-z0-9._-]*'),
+	CONSTRAINT "automation_principals_id_check" CHECK(length("id") BETWEEN 1 AND 64 AND instr("id", char(0)) = 0 AND "id" = lower("id") AND substr("id", 1, 1) GLOB '[a-z0-9]' AND "id" NOT GLOB '*[^a-z0-9._-]*'),
 	CONSTRAINT "automation_principals_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0),
 	CONSTRAINT "automation_principals_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at" AND ("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")))
 ) STRICT;
@@ -71,8 +71,8 @@ CREATE TABLE `automation_credentials` (
 	CONSTRAINT `fk_automation_credentials_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
 	CONSTRAINT "automation_credentials_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
 	CONSTRAINT "automation_credentials_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0),
-	CONSTRAINT "automation_credentials_prefix_check" CHECK(length("prefix") = 32 AND "prefix" NOT GLOB '*[^0-9a-f]*'),
-	CONSTRAINT "automation_credentials_validator_hash_check" CHECK(length("validator_hash") = 64 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "automation_credentials_prefix_check" CHECK(length("prefix") = 32 AND instr("prefix", char(0)) = 0 AND "prefix" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "automation_credentials_validator_hash_check" CHECK(length("validator_hash") = 64 AND instr("validator_hash", char(0)) = 0 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "automation_credentials_validator_version_check" CHECK("validator_version" = 1),
 	CONSTRAINT "automation_credentials_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND ("expires_at" IS NULL OR ("expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at")) AND ("revoked_at" IS NULL OR ("revoked_at" BETWEEN 0 AND 8640000000000000 AND "revoked_at" >= "created_at")) AND ("last_used_at" IS NULL OR ("last_used_at" BETWEEN 0 AND 8640000000000000 AND "last_used_at" >= "created_at" AND ("expires_at" IS NULL OR "last_used_at" < "expires_at") AND ("revoked_at" IS NULL OR "last_used_at" <= "revoked_at"))))
 ) STRICT;
@@ -120,6 +120,42 @@ CREATE UNIQUE INDEX `automation_credentials_validator_unique` ON `automation_cre
 CREATE INDEX `audit_events_occurred_id_idx` ON `audit_events` (`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `audit_events_request_occurred_idx` ON `audit_events` (`request_id`,`occurred_at`,`id`) WHERE "audit_events"."request_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `audit_events_target_occurred_idx` ON `audit_events` (`target_type`,`target_id`,`occurred_at`,`id`);--> statement-breakpoint
+CREATE TRIGGER incidents_reject_nul_fingerprint_insert
+BEFORE INSERT ON incidents
+WHEN instr(NEW.fingerprint, char(0)) > 0
+BEGIN
+	SELECT RAISE(ABORT, 'incidents fingerprint must not contain NUL');
+END;
+--> statement-breakpoint
+CREATE TRIGGER incidents_reject_nul_fingerprint_update
+BEFORE UPDATE OF fingerprint ON incidents
+WHEN instr(NEW.fingerprint, char(0)) > 0
+BEGIN
+	SELECT RAISE(ABORT, 'incidents fingerprint must not contain NUL');
+END;
+--> statement-breakpoint
+CREATE TRIGGER monitor_runs_reject_nul_submission_sha256_insert
+BEFORE INSERT ON monitor_runs
+WHEN instr(NEW.submission_sha256, char(0)) > 0
+BEGIN
+	SELECT RAISE(ABORT, 'monitor_runs submission_sha256 must not contain NUL');
+END;
+--> statement-breakpoint
+CREATE TRIGGER monitor_runs_reject_nul_submission_sha256_update
+BEFORE UPDATE OF submission_sha256 ON monitor_runs
+WHEN instr(NEW.submission_sha256, char(0)) > 0
+BEGIN
+	SELECT RAISE(ABORT, 'monitor_runs submission_sha256 must not contain NUL');
+END;
+--> statement-breakpoint
+UPDATE incidents
+SET fingerprint = fingerprint
+WHERE instr(fingerprint, char(0)) > 0;
+--> statement-breakpoint
+UPDATE monitor_runs
+SET submission_sha256 = submission_sha256
+WHERE instr(submission_sha256, char(0)) > 0;
+--> statement-breakpoint
 CREATE TRIGGER audit_events_validate_metadata
 BEFORE INSERT ON audit_events
 WHEN EXISTS (
