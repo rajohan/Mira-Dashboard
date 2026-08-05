@@ -1,4 +1,4 @@
-import { eq, type SQL } from "drizzle-orm";
+import { and, eq, type SQL } from "drizzle-orm";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
@@ -7,7 +7,7 @@ import {
     applicationCapabilitySchema,
     automationPrincipalIdSchema,
     securityRecordIdSchema,
-    sessionSelectorSchema,
+    opaqueSelectorSchema,
     type ApplicationCapability,
 } from "../../../contracts/security.ts";
 import { nonnegativeDateAction } from "../../../shared/dateTime.ts";
@@ -33,7 +33,7 @@ const validatorVersionSchema = v.pipe(
 const sessionAuthenticationRecordSchema = v.strictObject({
     authenticationVersion: positiveSafeIntegerSchema(),
     expiresAt: persistedDateSchema,
-    id: sessionSelectorSchema,
+    id: opaqueSelectorSchema,
     lastSeenAt: persistedDateSchema,
     userAuthenticationVersion: positiveSafeIntegerSchema(),
     userDisabledAt: persistedOptionalDateSchema,
@@ -46,7 +46,7 @@ const automationAuthenticationRowSchema = v.strictObject({
     capability: v.nullable(applicationCapabilitySchema),
     credentialExpiresAt: persistedOptionalDateSchema,
     credentialId: securityRecordIdSchema,
-    credentialPrefix: sessionSelectorSchema,
+    credentialPrefix: opaqueSelectorSchema,
     credentialRevokedAt: persistedOptionalDateSchema,
     principalAuthorizationVersion: positiveSafeIntegerSchema(),
     principalDisabledAt: persistedOptionalDateSchema,
@@ -69,7 +69,7 @@ const automationAuthenticationRecordSchema = v.strictObject({
     capabilities: capabilitySetSchema,
     credentialExpiresAt: persistedOptionalDateSchema,
     credentialId: securityRecordIdSchema,
-    credentialPrefix: sessionSelectorSchema,
+    credentialPrefix: opaqueSelectorSchema,
     credentialRevokedAt: persistedOptionalDateSchema,
     principalAuthorizationVersion: positiveSafeIntegerSchema(),
     principalDisabledAt: persistedOptionalDateSchema,
@@ -145,7 +145,12 @@ function readAutomationRecord(
             automationPrincipalCapabilities,
             eq(automationPrincipalCapabilities.principalId, automationPrincipals.id)
         )
-        .where(where)
+        .where(
+            and(
+                where,
+                eq(automationCredentials.validatorVersion, opaqueTokenValidatorVersion)
+            )
+        )
         .limit(applicationCapabilities.length + 1)
         .all()
         .map((row) => v.parse(automationAuthenticationRowSchema, row));
@@ -209,7 +214,12 @@ export function createAuthenticationRepository(
                 })
                 .from(authSessions)
                 .innerJoin(users, eq(users.id, authSessions.userId))
-                .where(eq(authSessions.id, sessionId))
+                .where(
+                    and(
+                        eq(authSessions.id, sessionId),
+                        eq(authSessions.validatorVersion, opaqueTokenValidatorVersion)
+                    )
+                )
                 .get();
             return row === undefined
                 ? undefined

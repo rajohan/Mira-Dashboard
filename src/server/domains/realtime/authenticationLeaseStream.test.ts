@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { addMinutes, getTime } from "date-fns";
 
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
-import { captureFailure } from "../../test/support/promise.ts";
+import { captureFailure, rejectOnAbort } from "../../test/support/promise.ts";
 import type {
     AuthenticationLease,
     AuthenticationResolution,
@@ -19,6 +19,13 @@ const reportsPrincipal: AuthenticatedPrincipal = {
     capabilities: ["reports:read"],
     id: "test-automation",
     kind: "automation",
+};
+const reportsSessionPrincipal: AuthenticatedPrincipal = {
+    authorizationVersion: 1,
+    authenticatorId: "a".repeat(32),
+    capabilities: ["reports:read"],
+    id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+    kind: "session",
 };
 
 function futureExpiry(): number {
@@ -82,40 +89,56 @@ describe("realtime authentication lease", () => {
         expect(renewed.expiresAtMs).toBe(nextLease.expiresAtMs);
     });
 
-    test("fails closed for invalid, changed, or rolled-back identities", async () => {
-        const nextLease = stableLease();
-        const cases: readonly unknown[] = [
-            { authentication: { kind: "invalid" } },
-            authenticatedResolution(
+    test.each([
+        {
+            initialPrincipal: { ...reportsPrincipal },
+            name: "invalid authentication",
+            result: { authentication: { kind: "invalid" } },
+        },
+        {
+            initialPrincipal: { ...reportsPrincipal },
+            name: "changed authenticator id",
+            result: authenticatedResolution(
                 { ...reportsPrincipal, authenticatorId: otherCredentialId },
-                nextLease
+                stableLease()
             ),
-            authenticatedResolution(
+        },
+        {
+            initialPrincipal: { ...reportsPrincipal },
+            name: "changed principal id",
+            result: authenticatedResolution(
+                { ...reportsPrincipal, id: "other-automation" },
+                stableLease()
+            ),
+        },
+        {
+            initialPrincipal: { ...reportsPrincipal },
+            name: "changed principal kind",
+            result: authenticatedResolution(reportsSessionPrincipal, stableLease()),
+        },
+        {
+            initialPrincipal: { ...reportsPrincipal, authorizationVersion: 2 },
+            name: "rolled-back authorization version",
+            result: authenticatedResolution(
                 { ...reportsPrincipal, authorizationVersion: 1 },
-                nextLease
+                stableLease()
             ),
-        ];
+        },
+    ] as const)("fails closed for $name", async ({ initialPrincipal, result }) => {
+        const renewable = createRealtimeAuthenticationLease({
+            lease: {
+                expiresAtMs: futureExpiry(),
+                revalidate: () => Promise.resolve(result),
+            },
+            principal: initialPrincipal,
+            topics: ["monitoring.reports"],
+        });
+        const failure = await captureFailure(() =>
+            renewable.renew(new AbortController().signal)
+        );
 
-        for (const [index, result] of cases.entries()) {
-            const principal =
-                index === 2
-                    ? { ...reportsPrincipal, authorizationVersion: 2 }
-                    : reportsPrincipal;
-            const renewable = createRealtimeAuthenticationLease({
-                lease: {
-                    expiresAtMs: futureExpiry(),
-                    revalidate: () => Promise.resolve(result),
-                },
-                principal,
-                topics: ["monitoring.reports"],
-            });
-            const failure = await captureFailure(() =>
-                renewable.renew(new AbortController().signal)
-            );
-
-            expect(failure).toBeInstanceOf(TRPCError);
-            expect((failure as TRPCError).code).toBe("UNAUTHORIZED");
-        }
+        expect(failure).toBeInstanceOf(TRPCError);
+        expect((failure as TRPCError).code).toBe("UNAUTHORIZED");
     });
 
     test("reauthorizes capabilities on every renewal", async () => {
@@ -153,21 +176,7 @@ describe("realtime authentication lease", () => {
                 expiresAtMs: futureExpiry(),
                 revalidate: (signal) => {
                     observedSignal = signal;
-                    return new Promise((_resolve, reject) => {
-                        const rejectWithAbortReason = (): void => {
-                            const reason: unknown = signal.reason;
-                            reject(
-                                reason instanceof Error
-                                    ? reason
-                                    : new Error("Authentication revalidation aborted", {
-                                          cause: reason,
-                                      })
-                            );
-                        };
-                        signal.addEventListener("abort", rejectWithAbortReason, {
-                            once: true,
-                        });
-                    });
+                    return rejectOnAbort(signal, "Authentication revalidation aborted");
                 },
             },
             principal: reportsPrincipal,

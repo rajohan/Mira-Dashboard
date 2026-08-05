@@ -9,6 +9,7 @@ import {
     RealtimeEventStoreStreamError,
     type RealtimeEventStreamOptions,
 } from "../../platform/realtime/eventPumpService.ts";
+import type { RenewableStreamLease } from "../../platform/realtime/renewableStreamLease.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
     createTestAutomationAuthentication,
@@ -65,10 +66,12 @@ describe("events.stream procedure", () => {
     test("authorizes before opening one tracked runtime stream", async () => {
         const controller = new AbortController();
         let observedOptions: RealtimeEventStreamOptions | undefined;
+        let observedLease: RenewableStreamLease | undefined;
         let signalWasAbortedWhenOpened: boolean | undefined;
         const runtime = createTestApplicationRuntime({
-            stream(options) {
+            stream(options, lease) {
                 observedOptions = options;
+                observedLease = lease;
                 signalWasAbortedWhenOpened = options.signal?.aborted;
                 return Promise.resolve(oneValueAsyncIterable(delivery));
             },
@@ -77,6 +80,9 @@ describe("events.stream procedure", () => {
             authenticatedReportsReader,
             runtime
         );
+        if (context.authenticationLease === undefined) {
+            throw new Error("Expected an authenticated test context lease");
+        }
         const caller = appRouter.createCaller(context, { signal: controller.signal });
 
         const results = await Array.fromAsync(
@@ -92,6 +98,9 @@ describe("events.stream procedure", () => {
         expect(observedSignal).toBe(controller.signal);
         expect(signalWasAbortedWhenOpened).toBe(false);
         expect(observedSignal?.aborted).toBe(false);
+        expect(observedLease).toBeDefined();
+        expect(observedLease?.expiresAtMs).toBe(context.authenticationLease.expiresAtMs);
+        expect(typeof observedLease?.renew).toBe("function");
         expect(results).toHaveLength(1);
         expect(isTrackedEnvelope(results[0])).toBe(true);
         if (isTrackedEnvelope(results[0])) {

@@ -4,6 +4,7 @@ import { addSeconds, getTime, secondsToMilliseconds } from "date-fns";
 import { Deferred, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
+import { rejectOnAbort } from "../../test/support/promise.ts";
 import {
     type RenewableStreamLease,
     RenewableStreamLeaseInvalidError,
@@ -216,21 +217,7 @@ describe("renewable Effect stream lease", () => {
             expiresAtMs: oneSecondMs,
             renew: (signal) => {
                 renewalSignal = signal;
-                return new Promise((_resolve, reject) => {
-                    const rejectWithAbortReason = (): void => {
-                        const reason: unknown = signal.reason;
-                        reject(
-                            reason instanceof Error
-                                ? reason
-                                : new Error("Realtime lease renewal aborted", {
-                                      cause: reason,
-                                  })
-                        );
-                    };
-                    signal.addEventListener("abort", rejectWithAbortReason, {
-                        once: true,
-                    });
-                });
+                return rejectOnAbort(signal, "Realtime lease renewal aborted");
             },
         };
         const program = Effect.gen(function* () {

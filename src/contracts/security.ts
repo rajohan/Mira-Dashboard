@@ -35,11 +35,11 @@ export const automationPrincipalIdSchema = v.pipe(
     v.regex(/^[a-z0-9][a-z0-9._-]*$/u, "Automation principal id is invalid")
 );
 
-/** Non-secret 128-bit selector used to identify a browser session. */
-export const sessionSelectorSchema = v.pipe(
-    v.string("Session selector is invalid"),
-    v.length(32, "Session selector is invalid"),
-    v.regex(/^[0-9a-f]{32}$/u, "Session selector is invalid")
+/** Non-secret 128-bit selector used to identify an opaque token. */
+export const opaqueSelectorSchema = v.pipe(
+    v.string("Opaque selector is invalid"),
+    v.length(32, "Opaque selector is invalid"),
+    v.regex(/^[0-9a-f]{32}$/u, "Opaque selector is invalid")
 );
 
 /** Canonical UUIDv7 identity for users and managed security records. */
@@ -87,7 +87,7 @@ const automationAuthenticatedPrincipalSchema = v.strictObject({
 
 const sessionAuthenticatedPrincipalSchema = v.strictObject({
     ...authenticatedPrincipalBaseEntries,
-    authenticatorId: sessionSelectorSchema,
+    authenticatorId: opaqueSelectorSchema,
     id: securityRecordIdSchema,
     kind: v.literal("session"),
 });

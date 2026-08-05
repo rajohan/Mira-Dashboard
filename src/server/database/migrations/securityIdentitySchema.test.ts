@@ -122,7 +122,19 @@ describe("security identity schema", () => {
                     ) VALUES (1000, ?, ?, 1000, 'raymond')`,
                     ["019fc968-1a9b-7773-bf1b-d5b863b0e7b4", passwordHash]
                 )
-            ).toThrow();
+            ).toThrow("UNIQUE constraint failed: users.username");
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT INTO users (
+                        created_at,
+                        id,
+                        password_hash,
+                        updated_at,
+                        username
+                    ) VALUES (1000, ?, ?, 1000, ?)`,
+                    ["019fc968-1a9b-7775-bf1b-d5b863b0e7b4", passwordHash, "ray\0admin"]
+                )
+            ).toThrow("users_username_check");
             expect(() =>
                 database.sqlite.run(`
                     INSERT INTO auth_sessions (
@@ -180,7 +192,7 @@ describe("security identity schema", () => {
                         validator_hash
                     ) VALUES (1000, 1, 'password', 1000, 5000, '${"e".repeat(32)}', 1000, '${userId}', '${"b".repeat(64)}')
                 `)
-            ).toThrow();
+            ).toThrow("UNIQUE constraint failed: auth_sessions.validator_hash");
         } finally {
             database.sqlite.close(true);
         }

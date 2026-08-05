@@ -71,9 +71,10 @@
   datatype, and partial-index query-plan tests. An explicit manifest pins both the SQL and
   snapshot SHA-256 values and rejects tampered or unreviewed migration folders before runtime
   application. Review hardening now also enforces object-root JSON in SQLite for report metadata
-  and incident details, regenerates the unpublished initial migration rather than adding
-  compatibility history, and makes every fresh-database fixture apply only checksum-verified
-  statements through Dashboard's native SQLite runner. That runner validates the canonical graph,
+  and incident details. Before the foundation node was locked, that work regenerated the then-
+  unpublished initial migration rather than adding compatibility history; later slices append
+  immutable nodes. Every fresh-database fixture applies only checksum-verified statements through
+  Dashboard's native SQLite runner. That runner validates the canonical graph,
   holds an immediate transaction across validation and application, and records the reviewed SQL
   checksum in the owned `schema_migrations` ledger. Before any transaction it requires foreign
   keys and check constraints to be enforced; before success it rejects stored foreign-key,
@@ -81,8 +82,8 @@
   non-object JSON, SQL/snapshot tampering, manifest shape/order, strict tables, enforcement and
   integrity failures, transactional rollback, unknown-schema rejection, mandatory realtime-event
   entity identity, Valibot round-trips, and query plans; the migration/database subset passes
-  29/29 tests. Because this baseline is unpublished and targets an empty database, the identity
-  constraint regenerates the single initial migration instead of adding compatibility history.
+  29/29 tests. The reviewed foundation bytes are now locked; subsequent schema changes use new
+  checksummed manifest nodes rather than rewriting that history.
 - Migration graph validation runs through the read-only `drizzle-kit check` CLI in the foundation
   job. A non-writing `drizzle-kit generate --explain` pass must also report `no_changes`, so a
   TypeScript schema edit cannot drift from the reviewed migration snapshot. A controlled
@@ -124,9 +125,10 @@
   subscriber cleanup, deterministic server teardown, and temporary TLS-file cleanup are covered.
 - Runtime-facing code and tooling no longer use temporary `greenfield` names. The rewrite server
   factory is `createServer`, scripts use `checkDatabaseSchema.ts` and `generateDocs.ts`, CI uses the
-  `server-foundation` job, and the sole unpublished initial migration is named
-  `20260804022252_dashboard-foundation`. The blueprint keeps its name because it documents the
-  rewrite project itself.
+  `server-foundation` job, and the locked initial migration remains
+  `20260804022252_dashboard-foundation`. Security identity and audit objects follow in the
+  append-only `20260805071222_security-core` node. The blueprint keeps its name because it
+  documents the rewrite project itself.
 - The readiness controller is deliberately dependency-injected and initially unavailable. A later
   composition slice must promote it only after configuration, checksum-verified database startup,
   and other declared critical dependencies complete; this PR does not pretend those dependencies
@@ -247,11 +249,12 @@
   tie-breaker. A completed timestamp more than five minutes ahead of the server clock is rejected
   before repository entry, preventing an accidental epoch-microseconds value from poisoning that
   monitor's ordering watermark.
-- The unpublished fresh-database migration was regenerated in place. Monitor runs now persist the
-  immutable submission checksum and enforce completion ordering; incidents enforce seen/resolution
-  ordering; observations preserve kind, severity, and title with one row per run/incident; and
-  realtime events carry an enforced expiry with an indexed `(expires_at, id)` retention scan. The
-  migration SQL, Drizzle snapshot, and explicit manifest checksums remain aligned.
+- Before the foundation node was locked, its then-unpublished fresh-database migration was
+  regenerated in place. Monitor runs persist the immutable submission checksum and enforce
+  completion ordering; incidents enforce seen/resolution ordering; observations preserve kind,
+  severity, and title with one row per run/incident; and realtime events carry an enforced expiry
+  with an indexed `(expires_at, id)` retention scan. The migration SQL, Drizzle snapshot, and
+  explicit manifest checksums remain aligned.
 - Realtime events use a compact `{id}` payload below the qualified 8 KiB event ceiling, share one
   seven-day expiry horizon per transaction, and wake the event pump only after commit. A wakeup
   failure cannot invalidate durable state because adaptive polling is the recovery path. Expired-row
@@ -1053,11 +1056,11 @@ them.
 
 Drizzle Kit v1 stores the migration graph as timestamped directories containing
 `migration.sql` and `snapshot.json`. The new database begins by applying the ordered graph from
-`migrations/`; the first node is the reviewed `*_dashboard-foundation` migration generated from
-the Drizzle schema and completed with tested SQLite `STRICT` table options plus the deliberate
-`audit_events WITHOUT ROWID` hardening. Future nodes are
-generated by Drizzle Kit, reviewed as SQL, immutable, checksummed, transactional where SQLite
-permits, and registered in an explicit manifest.
+`migrations/`; the first node is the locked, reviewed `*_dashboard-foundation` migration. The
+forward `*_security-core` node adds the security identity and audit objects, including tested
+SQLite `STRICT` table options and deliberate `audit_events WITHOUT ROWID` hardening. Later nodes
+are generated by Drizzle Kit, reviewed as SQL, immutable, checksummed, transactional where SQLite
+permits, and registered in the explicit manifest.
 
 The snapshot files form Drizzle Kit's conflict-analysis DAG. Dashboard's runtime loader applies
 the explicit manifest order after verifying valid 14-digit timestamp prefixes, unique full folder

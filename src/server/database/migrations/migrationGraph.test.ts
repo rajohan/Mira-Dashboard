@@ -33,6 +33,11 @@ const expectedTables: string[] = [
     "schema_migrations",
     "users",
 ];
+const lockedFoundationIdentity = {
+    id: "20260804022252_dashboard-foundation",
+    migrationSha256: "692e9c325ffd790e554a67c007dd421e00076e71919c6c18fed28059116923fd",
+    snapshotSha256: "d1d97eccf4ba5fb63b0058c41599d629dbe65c97656f0a5e060ab671acb5d8b1",
+} as const;
 
 describe("database migration graph", () => {
     test("is immutable, ordered, and applicable to an empty database", async () => {
@@ -40,13 +45,29 @@ describe("database migration graph", () => {
             directory: migrationsDirectory,
         });
         const foundationMigration = migrations[0];
-        if (!foundationMigration) {
-            throw new Error("Expected the database migration graph to contain one node");
+        const securityCoreMigration = migrations[1];
+        if (!foundationMigration || !securityCoreMigration) {
+            throw new Error(
+                "Expected the database migration graph to contain foundation and security-core nodes"
+            );
         }
 
-        expect(migrations).toHaveLength(1);
-        expect(foundationMigration.id).toEndWith("_dashboard-foundation");
-        expect(foundationMigration.migrationSha256).toMatch(/^[a-f\d]{64}$/u);
+        expect(migrations).toHaveLength(2);
+        expect(foundationMigration).toMatchObject(lockedFoundationIdentity);
+        expect(securityCoreMigration.id).toEndWith("_security-core");
+        expect(securityCoreMigration.migrationSha256).toMatch(/^[a-f\d]{64}$/u);
+        const foundationSql = foundationMigration.statements.join("\n");
+        const securityCoreSql = securityCoreMigration.statements.join("\n");
+        expect(foundationSql).not.toContain("audit_events");
+        expect(securityCoreSql).toContain(") STRICT, WITHOUT ROWID;");
+        for (const trigger of [
+            "audit_events_validate_metadata",
+            "audit_events_reject_replace",
+            "audit_events_reject_update",
+            "audit_events_reject_delete",
+        ]) {
+            expect(securityCoreSql).toContain(`CREATE TRIGGER ${trigger}`);
+        }
 
         const database = await openFreshMigratedDatabase();
 
@@ -56,6 +77,7 @@ describe("database migration graph", () => {
                     SELECT name, strict, wr
                     FROM pragma_table_list
                     WHERE schema = 'main'
+                      AND type = 'table'
                       AND name NOT GLOB 'sqlite_*'
                     ORDER BY name
                 `)
@@ -72,13 +94,21 @@ describe("database migration graph", () => {
                     .query<{ checksum: string; id: string; release_id: string }, []>(`
                         SELECT checksum, id, release_id
                         FROM schema_migrations
+                        ORDER BY id
                     `)
-                    .get()
-            ).toEqual({
-                checksum: foundationMigration.migrationSha256,
-                id: foundationMigration.id,
-                release_id: "0".repeat(40),
-            });
+                    .all()
+            ).toEqual([
+                {
+                    checksum: foundationMigration.migrationSha256,
+                    id: foundationMigration.id,
+                    release_id: "0".repeat(40),
+                },
+                {
+                    checksum: securityCoreMigration.migrationSha256,
+                    id: securityCoreMigration.id,
+                    release_id: "0".repeat(40),
+                },
+            ]);
             expect(
                 applyVerifiedMigrations(database.sqlite, migrations, {
                     releaseId: "1".repeat(40),
@@ -90,6 +120,99 @@ describe("database migration graph", () => {
             expect(database.sqlite.query("PRAGMA foreign_key_check").all()).toEqual([]);
         } finally {
             database.sqlite.close(true);
+        }
+    });
+
+    test("upgrades an already-applied locked foundation in place", async () => {
+        const migrations = await loadVerifiedMigrations({
+            directory: migrationsDirectory,
+        });
+        const foundationMigration = migrations[0];
+        const securityCoreMigration = migrations[1];
+        if (!foundationMigration || !securityCoreMigration) {
+            throw new Error(
+                "Expected the database migration graph to contain foundation and security-core nodes"
+            );
+        }
+
+        const foundationReleaseId = "1".repeat(40);
+        const securityCoreReleaseId = "2".repeat(40);
+        const database = new Database(":memory:", { strict: true });
+
+        try {
+            database.run("PRAGMA foreign_keys = ON");
+            for (const statement of foundationMigration.statements) {
+                if (statement.trim().length > 0) {
+                    database.run(statement);
+                }
+            }
+            database.run(
+                `INSERT INTO schema_migrations (
+                    applied_at,
+                    checksum,
+                    id,
+                    release_id
+                ) VALUES (?, ?, ?, ?)`,
+                [
+                    0,
+                    lockedFoundationIdentity.migrationSha256,
+                    lockedFoundationIdentity.id,
+                    foundationReleaseId,
+                ]
+            );
+            database.run(`
+                INSERT INTO reports (
+                    body_markdown,
+                    id,
+                    kind,
+                    occurred_at,
+                    source,
+                    title
+                ) VALUES ('Foundation body', 'foundation-report', 'test', 0, 'test', 'Foundation report')
+            `);
+
+            expect(
+                applyVerifiedMigrations(database, migrations, {
+                    appliedAt: new Date(1),
+                    releaseId: securityCoreReleaseId,
+                })
+            ).toBe(1);
+            expect(
+                database
+                    .query<{ title: string }, []>(
+                        "SELECT title FROM reports WHERE id = 'foundation-report'"
+                    )
+                    .get()
+            ).toEqual({ title: "Foundation report" });
+            expect(
+                database
+                    .query<{ strict: number; wr: number }, []>(
+                        "SELECT strict, wr FROM pragma_table_list WHERE type = 'table' AND name = 'audit_events'"
+                    )
+                    .get()
+            ).toEqual({ strict: 1, wr: 1 });
+            expect(
+                database
+                    .query<{ checksum: string; id: string; release_id: string }, []>(`
+                        SELECT checksum, id, release_id
+                        FROM schema_migrations
+                        ORDER BY id
+                    `)
+                    .all()
+            ).toEqual([
+                {
+                    checksum: lockedFoundationIdentity.migrationSha256,
+                    id: lockedFoundationIdentity.id,
+                    release_id: foundationReleaseId,
+                },
+                {
+                    checksum: securityCoreMigration.migrationSha256,
+                    id: securityCoreMigration.id,
+                    release_id: securityCoreReleaseId,
+                },
+            ]);
+        } finally {
+            database.close(true);
         }
     });
 
@@ -340,7 +463,9 @@ describe("database migration graph", () => {
         });
         const migration = migrations[0];
         if (!migration) {
-            throw new Error("Expected the database migration graph to contain one node");
+            throw new Error(
+                "Expected the database migration graph to contain a foundation node"
+            );
         }
 
         const database = new Database(":memory:", { strict: true });
@@ -348,15 +473,17 @@ describe("database migration graph", () => {
             expect(() =>
                 applyVerifiedMigrations(
                     database,
-                    [
-                        {
-                            ...migration,
-                            statements: [
-                                ...migration.statements,
-                                "CREATE TABLE unreviewed_table (id INTEGER)",
-                            ],
-                        },
-                    ],
+                    migrations.map((candidate) =>
+                        candidate === migration
+                            ? {
+                                  ...candidate,
+                                  statements: [
+                                      ...candidate.statements,
+                                      "CREATE TABLE unreviewed_table (id INTEGER)",
+                                  ],
+                              }
+                            : candidate
+                    ),
                     { releaseId: "1".repeat(40) }
                 )
             ).toThrow("Verified migration graph does not match the reviewed manifest");

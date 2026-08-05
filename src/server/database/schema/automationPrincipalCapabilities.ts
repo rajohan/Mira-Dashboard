@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+import { applicationCapabilities } from "../../../contracts/security.ts";
 import { automationPrincipals } from "./automationPrincipals.ts";
 import { timestampMillisecondsCheck } from "./checks.ts";
 
@@ -8,7 +9,7 @@ import { timestampMillisecondsCheck } from "./checks.ts";
 export const automationPrincipalCapabilities = sqliteTable(
     "automation_principal_capabilities",
     {
-        capability: text("capability").notNull(),
+        capability: text("capability", { enum: applicationCapabilities }).notNull(),
         grantedAt: integer("granted_at", { mode: "timestamp_ms" }).notNull(),
         principalId: text("principal_id")
             .notNull()

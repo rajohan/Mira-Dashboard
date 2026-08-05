@@ -79,6 +79,8 @@ const generatedAuditEventInsertSchema = createInsertSchema(auditEvents, {
     ...auditEventSelectRefinements,
     metadataJson: () => auditMetadataInsertJsonSchema,
 });
+// Drizzle marks nullable columns optional on insert; audit actor invariants require
+// callers to choose an explicit authenticator id or null instead of omitting it.
 const requiredAuditAuthenticatorIdSchema = v.nullable(boundedNonBlankTextSchema(128));
 
 /** Validates one redacted audit event before append-only insertion. */

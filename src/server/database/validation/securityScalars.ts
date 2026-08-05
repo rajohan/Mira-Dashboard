@@ -38,5 +38,5 @@ export {
     automationPrincipalIdSchema,
     securityRecordIdSchema,
     securityUsernameSchema,
-    sessionSelectorSchema,
+    opaqueSelectorSchema,
 } from "../../../contracts/security.ts";

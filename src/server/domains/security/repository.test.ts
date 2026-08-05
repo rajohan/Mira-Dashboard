@@ -74,6 +74,36 @@ describe("authentication repository", () => {
         }
     });
 
+    test("treats unsupported opaque-token validator versions as misses", async () => {
+        const fixture = await openAuthenticationTestDatabase();
+
+        try {
+            fixture.database.sqlite.run("PRAGMA ignore_check_constraints = ON");
+            fixture.database.sqlite.run(
+                "UPDATE auth_sessions SET validator_version = 2 WHERE id = ?",
+                [fixture.session.prefix]
+            );
+            fixture.database.sqlite.run(
+                "UPDATE automation_credentials SET validator_version = 2 WHERE id = ?",
+                [authenticationTestCredentialId]
+            );
+
+            expect(fixture.repository.findSessionById(fixture.session.prefix)).toBe(
+                undefined
+            );
+            expect(
+                fixture.repository.findAutomationByPrefix(fixture.automation.prefix)
+            ).toBe(undefined);
+            expect(
+                fixture.repository.findAutomationByCredentialId(
+                    authenticationTestCredentialId
+                )
+            ).toBe(undefined);
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
     test("fails closed when persisted capability data violates Valibot", async () => {
         const fixture = await openAuthenticationTestDatabase();
 

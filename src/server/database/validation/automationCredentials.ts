@@ -12,7 +12,7 @@ import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 import {
     automationPrincipalIdSchema,
     securityLabelSchema,
-    sessionSelectorSchema,
+    opaqueSelectorSchema,
     sha256TextSchema,
 } from "./securityScalars.ts";
 
@@ -42,7 +42,7 @@ const credentialRefinements = {
     id: uuidV7TextSchema,
     label: () => securityLabelSchema,
     lastUsedAt: nonnegativeDateSchema,
-    prefix: () => sessionSelectorSchema,
+    prefix: () => opaqueSelectorSchema,
     principalId: () => automationPrincipalIdSchema,
     revokedAt: nonnegativeDateSchema,
     validatorHash: sha256TextSchema,
@@ -69,20 +69,13 @@ const generatedCredentialInsertSchema = createInsertSchema(
     automationCredentials,
     credentialRefinements
 );
+const credentialInsertEntries = v.omit(generatedCredentialInsertSchema, [
+    "validatorVersion",
+]).entries;
 
 /** Validates a new credential while keeping validatorVersion database-owned. */
 export const automationCredentialInsertSchema = v.pipe(
-    v.strictObject({
-        createdAt: generatedCredentialInsertSchema.entries.createdAt,
-        expiresAt: generatedCredentialInsertSchema.entries.expiresAt,
-        id: generatedCredentialInsertSchema.entries.id,
-        label: generatedCredentialInsertSchema.entries.label,
-        lastUsedAt: generatedCredentialInsertSchema.entries.lastUsedAt,
-        prefix: generatedCredentialInsertSchema.entries.prefix,
-        principalId: generatedCredentialInsertSchema.entries.principalId,
-        revokedAt: generatedCredentialInsertSchema.entries.revokedAt,
-        validatorHash: generatedCredentialInsertSchema.entries.validatorHash,
-    }),
+    v.strictObject(credentialInsertEntries),
     v.check(
         (credential) => credentialTimesAreOrdered(credential),
         "Automation credential timestamps are inconsistent"

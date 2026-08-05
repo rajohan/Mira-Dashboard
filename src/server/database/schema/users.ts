@@ -35,7 +35,7 @@ export const users = sqliteTable(
         ),
         check(
             "users_username_check",
-            sql`length(${table.username}) BETWEEN 3 AND 32 AND ${table.username} = lower(${table.username}) AND substr(${table.username}, 1, 1) GLOB '[a-z0-9]' AND ${table.username} NOT GLOB '*[^a-z0-9._-]*'`
+            sql`length(${table.username}) BETWEEN 3 AND 32 AND instr(${table.username}, char(0)) = 0 AND ${table.username} = lower(${table.username}) AND substr(${table.username}, 1, 1) GLOB '[a-z0-9]' AND ${table.username} NOT GLOB '*[^a-z0-9._-]*'`
         ),
         uniqueIndex("users_username_unique").on(table.username),
     ]

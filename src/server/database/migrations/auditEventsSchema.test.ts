@@ -285,13 +285,13 @@ describe("audit events schema", () => {
         try {
             expect(() =>
                 insertAuditEvent(database, {
-                    metadataJson: '{"number":1e400,"number":0}',
+                    metadataJson: '{"number":0,"number":1}',
                 })
             ).toThrow("audit_events metadata must be a bounded JSON object");
             expect(() =>
                 insertAuditEvent(database, {
                     id: "019fc968-1a9b-7779-af1b-d5b863b0e7b4",
-                    metadataJson: '{"number":0,"number":1e400}',
+                    metadataJson: '{"nested":{"key":0,"key":1}}',
                 })
             ).toThrow("audit_events metadata must be a bounded JSON object");
         } finally {

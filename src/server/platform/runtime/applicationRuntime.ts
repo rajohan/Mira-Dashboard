@@ -12,7 +12,7 @@ import {
 export interface RealtimeEventRuntimeService {
     stream(
         options: RealtimeEventStreamOptions,
-        lease?: RenewableStreamLease
+        lease: RenewableStreamLease
     ): Promise<AsyncIterable<RealtimeEventDelivery>>;
 }
 
@@ -62,7 +62,7 @@ export function createApplicationRuntime(
         realtimeEvents: Object.freeze({
             stream(
                 streamOptions: RealtimeEventStreamOptions,
-                lease?: RenewableStreamLease
+                lease: RenewableStreamLease
             ) {
                 // Effect 4 captures this ManagedRuntime's cached Context here.
                 // The returned AsyncIterator owns and closes only its subscription scope.
@@ -70,10 +70,7 @@ export function createApplicationRuntime(
                     RealtimeEventPumpService.pipe(
                         Effect.flatMap((service) => {
                             const source = service.stream(streamOptions);
-                            const leased =
-                                lease === undefined
-                                    ? source
-                                    : withRenewableStreamLease(source, lease);
+                            const leased = withRenewableStreamLease(source, lease);
                             const interruptible =
                                 streamOptions.signal === undefined
                                     ? leased

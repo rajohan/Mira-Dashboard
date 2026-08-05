@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { addMilliseconds, secondsToMilliseconds } from "date-fns";
+import { maxTime } from "date-fns/constants";
 import { Effect, Layer, Stream } from "effect";
 
-import { withTestTimeout } from "../../test/support/promise.ts";
+import { rejectOnAbort, withTestTimeout } from "../../test/support/promise.ts";
 import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
 import {
     isRealtimeEventStreamError,
@@ -24,6 +25,11 @@ const delivery: RealtimeEventDelivery = {
     },
     id: "1",
     kind: "change",
+};
+
+const stableLease: RenewableStreamLease = {
+    expiresAtMs: maxTime,
+    renew: () => Promise.resolve(stableLease),
 };
 
 describe("application Effect runtime", () => {
@@ -62,10 +68,13 @@ describe("application Effect runtime", () => {
         expect(Object.isFrozen(runtime.services.realtimeEvents)).toBe(true);
 
         const values = await Array.fromAsync(
-            await runtime.services.realtimeEvents.stream({
-                afterId: "0",
-                signal: controller.signal,
-            })
+            await runtime.services.realtimeEvents.stream(
+                {
+                    afterId: "0",
+                    signal: controller.signal,
+                },
+                stableLease
+            )
         );
         expect(values).toEqual([delivery]);
         expect(observedSignal).toBe(controller.signal);
@@ -91,9 +100,10 @@ describe("application Effect runtime", () => {
         let observed: unknown;
 
         try {
-            const deliveries = await runtime.services.realtimeEvents.stream({
-                afterId: "0",
-            });
+            const deliveries = await runtime.services.realtimeEvents.stream(
+                { afterId: "0" },
+                stableLease
+            );
             await Array.fromAsync(deliveries);
         } catch (error) {
             observed = error;
@@ -127,9 +137,10 @@ describe("application Effect runtime", () => {
             })
         );
         const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
-        const deliveries = await runtime.services.realtimeEvents.stream({
-            afterId: "0",
-        });
+        const deliveries = await runtime.services.realtimeEvents.stream(
+            { afterId: "0" },
+            stableLease
+        );
 
         try {
             for await (const value of deliveries) {
@@ -179,25 +190,10 @@ describe("application Effect runtime", () => {
                 expiresAtMs: addMilliseconds(new Date(), leaseDurationMs).getTime(),
                 renew(signal) {
                     renewalStarted.resolve(signal);
-                    return new Promise<RenewableStreamLease>((_resolve, reject) => {
-                        const rejectWithAbortReason = (): void => {
-                            const reason: unknown = signal.reason;
-                            reject(
-                                reason instanceof Error
-                                    ? reason
-                                    : new Error("Realtime lease renewal aborted", {
-                                          cause: reason,
-                                      })
-                            );
-                        };
-                        if (signal.aborted) {
-                            rejectWithAbortReason();
-                            return;
-                        }
-                        signal.addEventListener("abort", rejectWithAbortReason, {
-                            once: true,
-                        });
-                    });
+                    return rejectOnAbort<RenewableStreamLease>(
+                        signal,
+                        "Realtime lease renewal aborted"
+                    );
                 },
             };
             const deliveries = await runtime.services.realtimeEvents.stream(

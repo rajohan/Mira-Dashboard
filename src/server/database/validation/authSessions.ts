@@ -13,7 +13,7 @@ import { authSessions } from "../schema/authSessions.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 import {
     securityUserAgentSchema,
-    sessionSelectorSchema,
+    opaqueSelectorSchema,
     sha256TextSchema,
 } from "./securityScalars.ts";
 
@@ -52,7 +52,7 @@ const sessionRefinements = {
     elevatedAt: nonnegativeDateSchema,
     elevatedMethod: () => v.nullable(authenticationMethodSchema),
     expiresAt: nonnegativeDateSchema,
-    id: () => sessionSelectorSchema,
+    id: () => opaqueSelectorSchema,
     lastSeenAt: nonnegativeDateSchema,
     mfaVerifiedAt: nonnegativeDateSchema,
     userAgent: () => v.nullable(securityUserAgentSchema),
@@ -75,24 +75,13 @@ export const authSessionSelectSchema = v.pipe(
 );
 
 const generatedSessionInsertSchema = createInsertSchema(authSessions, sessionRefinements);
+const sessionInsertEntries = v.omit(generatedSessionInsertSchema, [
+    "validatorVersion",
+]).entries;
 
 /** Validates a complete durable browser session before insertion. */
 export const authSessionInsertSchema = v.pipe(
-    v.strictObject({
-        authenticatedAt: generatedSessionInsertSchema.entries.authenticatedAt,
-        authenticationVersion: generatedSessionInsertSchema.entries.authenticationVersion,
-        authMethod: generatedSessionInsertSchema.entries.authMethod,
-        createdAt: generatedSessionInsertSchema.entries.createdAt,
-        elevatedAt: generatedSessionInsertSchema.entries.elevatedAt,
-        elevatedMethod: generatedSessionInsertSchema.entries.elevatedMethod,
-        expiresAt: generatedSessionInsertSchema.entries.expiresAt,
-        id: generatedSessionInsertSchema.entries.id,
-        lastSeenAt: generatedSessionInsertSchema.entries.lastSeenAt,
-        mfaVerifiedAt: generatedSessionInsertSchema.entries.mfaVerifiedAt,
-        userAgent: generatedSessionInsertSchema.entries.userAgent,
-        userId: generatedSessionInsertSchema.entries.userId,
-        validatorHash: generatedSessionInsertSchema.entries.validatorHash,
-    }),
+    v.strictObject(sessionInsertEntries),
     v.check(
         (session) => sessionTimesAreOrdered(session),
         "Session timestamps are inconsistent"
