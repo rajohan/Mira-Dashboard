@@ -7,8 +7,8 @@ import superjson from "superjson";
 import * as v from "valibot";
 import { map as mapSchema } from "valibot";
 
-import { createRequestContext } from "../../trpc/context.ts";
 import { publicProcedure, router } from "../../trpc/trpc.ts";
+import { createTestRequestContext } from "../support/requestContext.ts";
 
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
 
@@ -35,7 +35,7 @@ describe("SuperJSON transport contract", () => {
         const server = Bun.serve({
             fetch(request) {
                 return fetchRequestHandler({
-                    createContext: createRequestContext,
+                    createContext: () => createTestRequestContext(),
                     endpoint: "/trpc",
                     req: request,
                     router: transportRouter,

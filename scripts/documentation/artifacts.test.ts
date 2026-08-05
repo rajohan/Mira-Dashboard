@@ -26,7 +26,12 @@ describe("generated contract documentation", () => {
 
         expect([...first]).toEqual([...second]);
         expect(first.get("README.md")).toContain("[tRPC procedures](procedures.md)");
-        expect(first.get("procedures.md")).toContain("`system.runtimeIdentity`");
+        const procedureDocumentation = first.get("procedures.md");
+        expect(procedureDocumentation).toContain("`events.stream`");
+        expect(procedureDocumentation).toContain(
+            "Authenticated; per-topic: notifications:read, reports:read"
+        );
+        expect(procedureDocumentation).toContain("`system.runtimeIdentity`");
         const rawHttpDocumentation = first.get("raw-http.md");
         expect(rawHttpDocumentation).toContain(
             "| GET | `/api/health/live` | Public | 200 | [response]"
@@ -41,7 +46,7 @@ describe("generated contract documentation", () => {
             "| HEAD | `/api/health/ready` | Public | 200, 503 | No body |"
         );
         expect(first.get("realtime-events.md")).toContain(
-            "No realtime topics are implemented"
+            "No standalone realtime topic references are published"
         );
     });
 
@@ -63,6 +68,14 @@ describe("generated contract documentation", () => {
         ) as unknown;
         expect(inputSchema).toMatchObject({
             additionalProperties: false,
+            type: "object",
+        });
+        const realtimeInputSchema = JSON.parse(
+            artifacts.get("schemas/events.stream.input.schema.json") ?? "null"
+        ) as unknown;
+        expect(realtimeInputSchema).toMatchObject({
+            additionalProperties: false,
+            required: ["topics"],
             type: "object",
         });
         expect(artifacts.get("packages-and-runtime.md")).toContain(

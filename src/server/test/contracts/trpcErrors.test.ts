@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { TRPCError } from "@trpc/server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
-import { createRequestContext } from "../../trpc/context.ts";
 import { publicProcedure, router } from "../../trpc/trpc.ts";
+import { createTestRequestContext } from "../support/requestContext.ts";
 
 async function queryWireBody(procedure: "expected" | "unexpected"): Promise<{
     response: Response;
@@ -20,7 +20,7 @@ async function queryWireBody(procedure: "expected" | "unexpected"): Promise<{
         }),
     });
     const response = await fetchRequestHandler({
-        createContext: createRequestContext,
+        createContext: () => createTestRequestContext(),
         endpoint: "/trpc",
         req: new Request(`http://localhost/trpc/${procedure}`),
         router: errorRouter,

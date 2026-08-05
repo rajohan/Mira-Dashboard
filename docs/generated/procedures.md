@@ -4,4 +4,5 @@
 
 | Procedure | Kind | Domain | Access | Input | Output | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
+| `events.stream` | subscription | events | Authenticated; per-topic: notifications:read, reports:read | [input](./schemas/events.stream.input.schema.json) | [output](./schemas/events.stream.output.schema.json) | Streams authorized durable changes with tracked resume cursors. |
 | `system.runtimeIdentity` | query | system | Public | [input](./schemas/system.runtimeIdentity.input.schema.json) | [output](./schemas/system.runtimeIdentity.output.schema.json) | Returns the Bun runtime identity of the serving process. |

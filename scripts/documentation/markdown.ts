@@ -6,9 +6,13 @@ import type {
 } from "../../src/contracts/registry.ts";
 
 function accessLabel(access: ContractAccess): string {
-    return access.kind === "public"
-        ? "Public"
-        : `Authenticated: ${access.capabilities.join(", ")}`;
+    if (access.kind === "public") {
+        return "Public";
+    }
+    if (access.capabilityPolicy === "per-topic") {
+        return `Authenticated; per-topic: ${access.capabilities.join(", ")}`;
+    }
+    return `Authenticated: ${access.capabilities.join(", ")}`;
 }
 
 function documentHeader(title: string, source: string): string {
@@ -76,7 +80,7 @@ export function renderRealtimeEvents(
         );
     const body =
         rows.length === 0
-            ? "No realtime topics are implemented in the current foundation slice.\n"
+            ? "No standalone realtime topic references are published until their snapshot procedures are implemented.\n"
             : `| Topic | Payload | Snapshot | Retention | Summary |\n| --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 
     return `${documentHeader("Realtime Events", "bun run docs:generate")}${body}`;

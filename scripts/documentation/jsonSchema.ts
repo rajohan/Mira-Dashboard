@@ -1,6 +1,7 @@
 import { toJsonSchema } from "@valibot/to-json-schema";
 
 import type { ContractSchema } from "../../src/contracts/registry.ts";
+import { hasUniqueArrayItems } from "../../src/shared/validation.ts";
 
 /** JSON Schema conversion direction for transport schemas. */
 export type SchemaTypeMode = "input" | "output";
@@ -21,6 +22,18 @@ export function convertContractSchema(
         $id: `urn:mira-dashboard:${schemaId}`,
         ...toJsonSchema(schema, {
             errorMode: "throw",
+            overrideAction({ jsonSchema, valibotAction }) {
+                // This exact named refinement is equivalent to draft-2020-12's
+                // uniqueItems keyword. Every other unsupported check still fails.
+                if (
+                    valibotAction.type === "check" &&
+                    "requirement" in valibotAction &&
+                    valibotAction.requirement === hasUniqueArrayItems
+                ) {
+                    return { ...jsonSchema, uniqueItems: true };
+                }
+                return null;
+            },
             target: "draft-2020-12",
             typeMode,
         }),

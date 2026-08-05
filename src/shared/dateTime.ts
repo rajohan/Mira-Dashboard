@@ -1,4 +1,5 @@
 import { getTime, isValid } from "date-fns";
+import { maxTime } from "date-fns/constants";
 import * as v from "valibot";
 
 import { nonnegativeSafeIntegerSchema } from "./validation.ts";
@@ -11,10 +12,7 @@ import { nonnegativeSafeIntegerSchema } from "./validation.ts";
 export function timestampMillisecondsSchema(
     message = "Expected valid Date milliseconds."
 ) {
-    return v.pipe(
-        nonnegativeSafeIntegerSchema(message),
-        v.check((value: number) => isValid(value), message)
-    );
+    return v.pipe(nonnegativeSafeIntegerSchema(message), v.maxValue(maxTime, message));
 }
 
 /**

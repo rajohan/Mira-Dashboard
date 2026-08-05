@@ -327,8 +327,37 @@
   cross-connection polling without a wake signal, exact queue overflow, full-delivery byte rejection
   and topic isolation, Effect interruption/finalization, abort cleanup, and preservation of the
   original SSE qualification behavior. The pump core remains transport-independent; this slice also
-  establishes its scoped Effect service and the global tRPC SuperJSON transformer. The authenticated
-  `events.stream` procedure, browser subscription, and frontend invalidation wiring remain later work.
+  establishes its scoped Effect service and the global tRPC SuperJSON transformer. At the close of
+  that slice, the authenticated `events.stream` procedure, browser subscription, and frontend
+  invalidation wiring remained later work.
+
+### 2026-08-05 — Authenticated realtime transport implemented
+
+- The web-server composition boundary now requires one eagerly initialized Effect `ManagedRuntime`
+  for the full lifetime of its Bun process. Every request reuses that runtime; each stream iterator
+  owns only its subscription-local scope. Shutdown stops the HTTP server before disposing the
+  process runtime, and both operations are idempotent. The later worker process owns a separate
+  runtime if its workflows need Effect services; neither process creates a runtime per request or
+  module.
+- `events.stream` is an authenticated tRPC tracked-SSE subscription over the durable event pump.
+  Input accepts a canonical resume cursor and a bounded, unique set of registered topics. Topic
+  authorization runs before pump access, and each registered topic declares its required
+  capability, allowed entity types and operations, and Valibot payload schema.
+- The security composition root injects authentication into request-context creation. This slice
+  validates and freezes anonymous, invalid, session, and automation results at that boundary;
+  persistent session and automation-credential resolution remain owned by the later security slice.
+- Valibot validates authentication results, subscription input, durable payloads, and client output.
+  Effect Schema remains limited to tagged internal stream failures, which are exhaustively mapped to
+  safe tRPC errors. SuperJSON remains only the tRPC transformer; the durable journal stays canonical
+  plain JSON.
+- Focused unit, procedure, and real Bun/EventSource system coverage proves tracked delivery,
+  capability denial before pump access, safe typed-error mapping, unknown-defect redaction,
+  process-runtime reuse, abort propagation, and subscription cleanup.
+- No transport or utility dependency was added. Browser realtime continues to use tRPC SSE rather
+  than Socket.IO; OpenClaw Gateway continues to use Bun's native outbound WebSocket. Authentication
+  retains revocable opaque credential validators rather than JWTs, configuration uses Bun plus
+  composition-root Valibot parsing rather than `dotenv`, and HTTP calls use tRPC/native `fetch`
+  rather than Axios.
 
 ## Executive Decision
 
@@ -349,6 +378,9 @@ build it as a **Bun-native modular monolith**:
   those boundaries.
 - Effect owns server orchestration where typed errors, cancellation, retries, concurrency, or scoped
   resources materially improve correctness. Pure domain functions remain ordinary TypeScript.
+- Each long-lived Bun process that needs Effect services owns one eagerly initialized managed
+  runtime at its composition root. Requests and modules reuse it; they never construct ad hoc
+  runtimes. The web process and separate worker are processes, not multiple HTTP servers.
 - In the browser, Valibot validates transport, form, URL, persisted-state, and browser API
   boundaries. Effect is reserved for headless long-lived workflows such as streaming,
   cancellation/reconnect races, and resource cleanup; TanStack Query continues to own ordinary
@@ -1423,6 +1455,8 @@ domain code.
 
 - `@dnd-kit/react`, which has no current code import; keep only the used DnD packages;
 - handwritten REST client types and the browser `/ws` protocol/client;
+- JWT session/access tokens, Axios, or `dotenv`; opaque revocable validators, native `fetch`, and
+  composition-root configuration parsing already own those concerns;
 - duplicate global auth/server caches superseded by Query and focused stores;
 - a second ORM, active-record/data-mapper layer, or production schema auto-push;
 - Zod alongside Valibot;
