@@ -336,9 +336,10 @@
 - The web-server composition boundary now requires one eagerly initialized Effect `ManagedRuntime`
   for the full lifetime of its Bun process. Every request reuses that runtime; each stream iterator
   owns only its subscription-local scope. Shutdown stops the HTTP server before disposing the
-  process runtime, and both operations are idempotent. The later worker process owns a separate
-  runtime if its workflows need Effect services; neither process creates a runtime per request or
-  module.
+  process runtime, bounds graceful draining before forcing long-lived SSE closed, and permits an
+  explicit forced call to escalate a pending graceful stop. Lifecycle cleanup remains idempotent.
+  The later worker process owns a separate runtime if its workflows need Effect services; neither
+  process creates a runtime per request or module.
 - `events.stream` is an authenticated tRPC tracked-SSE subscription over the durable event pump.
   Input accepts a canonical resume cursor and a bounded, unique set of registered topics. Topic
   authorization runs before pump access, and each registered topic declares its required

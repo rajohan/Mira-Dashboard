@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { monitoringRealtimeTopics } from "../../src/contracts/monitoringRealtime.ts";
+import { realtimeSubscriptionMaximumTopics } from "../../src/contracts/realtime.ts";
 import { buildDocumentationArtifacts } from "./artifacts.ts";
 
 const packageManifest = {
@@ -75,6 +77,18 @@ describe("generated contract documentation", () => {
         ) as unknown;
         expect(realtimeInputSchema).toMatchObject({
             additionalProperties: false,
+            properties: {
+                topics: {
+                    items: {
+                        enum: Object.values(monitoringRealtimeTopics),
+                        type: "string",
+                    },
+                    maxItems: realtimeSubscriptionMaximumTopics,
+                    minItems: 1,
+                    type: "array",
+                    uniqueItems: true,
+                },
+            },
             required: ["topics"],
             type: "object",
         });

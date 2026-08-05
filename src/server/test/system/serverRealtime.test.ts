@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { createTRPCClient, httpSubscriptionLink } from "@trpc/client";
+import { secondsToMilliseconds } from "date-fns";
 import { EventSource, type EventSourceFetchInit } from "eventsource";
 import superjson from "superjson";
 
@@ -9,10 +10,13 @@ import type { RealtimeStreamOutput } from "../../../contracts/events.ts";
 import { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
+import type { ApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
+import { withTestTimeout } from "../support/promise.ts";
 import { createTestApplicationRuntime } from "../support/requestContext.ts";
 
 const sessionCookie = "mira_session=valid-test-session";
+const testWaitTimeoutMs = secondsToMilliseconds(2);
 const servers: ApplicationServer[] = [];
 
 const reportDelivery: RealtimeEventDelivery = {
@@ -58,12 +62,33 @@ function createEventsClient(server: ApplicationServer, authenticated: boolean) {
     });
 }
 
+async function startRealtimeServer(
+    applicationRuntime: ApplicationRuntime
+): Promise<ApplicationServer> {
+    const server = await createServer({
+        applicationRuntime,
+        authenticateRequest: (request) =>
+            request.headers.get("cookie") === sessionCookie
+                ? {
+                      kind: "authenticated" as const,
+                      principal: {
+                          capabilities: ["reports:read"] as const,
+                          id: "test-session",
+                          kind: "session" as const,
+                      },
+                  }
+                : { kind: "anonymous" as const },
+        hostname: "127.0.0.1",
+        port: 0,
+        readiness: createReadinessController(),
+    });
+    servers.push(server);
+    return server;
+}
+
 describe("application server realtime transport", () => {
     test("streams authorized tracked events and cleans up on unsubscribe", async () => {
-        let finishCleanup: (() => void) | undefined;
-        const cleanedUp = new Promise<void>((resolve) => {
-            finishCleanup = resolve;
-        });
+        const cleanedUp = Promise.withResolvers<void>();
         let streamCalls = 0;
         let streamSignal: AbortSignal | undefined;
         const runtime = createTestApplicationRuntime({
@@ -88,43 +113,28 @@ describe("application server realtime transport", () => {
                                 );
                             });
                         } finally {
-                            finishCleanup?.();
+                            cleanedUp.resolve();
                         }
                     })()
                 );
             },
         });
-        const server = await createServer({
-            applicationRuntime: runtime,
-            authenticateRequest: (request) =>
-                request.headers.get("cookie") === sessionCookie
-                    ? {
-                          kind: "authenticated" as const,
-                          principal: {
-                              capabilities: ["reports:read"] as const,
-                              id: "test-session",
-                              kind: "session" as const,
-                          },
-                      }
-                    : { kind: "anonymous" as const },
-            hostname: "127.0.0.1",
-            port: 0,
-            readiness: createReadinessController(),
-        });
-        servers.push(server);
+        const server = await startRealtimeServer(runtime);
 
         const authenticatedClient = createEventsClient(server, true);
-        let authenticatedSubscription:
-            | ReturnType<typeof authenticatedClient.events.stream.subscribe>
-            | undefined;
-        const firstEvent = new Promise<RealtimeStreamOutput>((resolve, reject) => {
-            authenticatedSubscription = authenticatedClient.events.stream.subscribe(
-                { topics: [monitoringRealtimeTopics.reports] },
-                { onData: resolve, onError: reject }
-            );
-        });
+        const firstEvent = Promise.withResolvers<RealtimeStreamOutput>();
+        const authenticatedSubscription = authenticatedClient.events.stream.subscribe(
+            { topics: [monitoringRealtimeTopics.reports] },
+            { onData: firstEvent.resolve, onError: firstEvent.reject }
+        );
 
-        expect(await firstEvent).toEqual({
+        expect(
+            await withTestTimeout(
+                firstEvent.promise,
+                testWaitTimeoutMs,
+                "Authorized realtime stream did not emit its first event"
+            )
+        ).toEqual({
             data: {
                 event: {
                     entityId: "report-1",
@@ -141,27 +151,45 @@ describe("application server realtime transport", () => {
         expect(streamCalls).toBe(1);
         expect(streamSignal?.aborted).toBe(false);
 
-        authenticatedSubscription?.unsubscribe();
-        await cleanedUp;
+        authenticatedSubscription.unsubscribe();
+        await withTestTimeout(
+            cleanedUp.promise,
+            testWaitTimeoutMs,
+            "Realtime stream did not clean up after unsubscribe"
+        );
         expect(streamSignal?.aborted).toBe(true);
+    });
+
+    test("rejects anonymous subscribers before runtime access", async () => {
+        let streamCalls = 0;
+        const runtime = createTestApplicationRuntime({
+            stream: () => {
+                streamCalls += 1;
+                return Promise.reject(
+                    new Error("Anonymous caller reached the realtime runtime")
+                );
+            },
+        });
+        const server = await startRealtimeServer(runtime);
 
         const anonymousClient = createEventsClient(server, false);
-        let anonymousSubscription:
-            | ReturnType<typeof anonymousClient.events.stream.subscribe>
-            | undefined;
-        const anonymousFailure = new Promise<Error>((resolve, reject) => {
-            anonymousSubscription = anonymousClient.events.stream.subscribe(
-                { topics: [monitoringRealtimeTopics.reports] },
-                {
-                    onData: () => reject(new Error("Anonymous stream emitted data")),
-                    onError: resolve,
-                }
-            );
-        });
+        const anonymousFailure = Promise.withResolvers<Error>();
+        const anonymousSubscription = anonymousClient.events.stream.subscribe(
+            { topics: [monitoringRealtimeTopics.reports] },
+            {
+                onData: () =>
+                    anonymousFailure.reject(new Error("Anonymous stream emitted data")),
+                onError: anonymousFailure.resolve,
+            }
+        );
 
-        const authenticationError = await anonymousFailure;
+        const authenticationError = await withTestTimeout(
+            anonymousFailure.promise,
+            testWaitTimeoutMs,
+            "Anonymous realtime stream did not return an authentication error"
+        );
         expect(authenticationError.message).toBe("Authentication required");
-        anonymousSubscription?.unsubscribe();
-        expect(streamCalls).toBe(1);
+        anonymousSubscription.unsubscribe();
+        expect(streamCalls).toBe(0);
     });
 });

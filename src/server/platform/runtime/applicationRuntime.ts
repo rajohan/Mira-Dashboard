@@ -44,6 +44,8 @@ export function createApplicationRuntime(
     const services: ApplicationRuntimeServices = Object.freeze({
         realtimeEvents: Object.freeze({
             stream(streamOptions: RealtimeEventStreamOptions) {
+                // Effect 4 captures this ManagedRuntime's cached Context here.
+                // The returned AsyncIterator owns and closes only its subscription scope.
                 return runtime.runPromise(
                     RealtimeEventPumpService.pipe(
                         Effect.flatMap((service) =>
