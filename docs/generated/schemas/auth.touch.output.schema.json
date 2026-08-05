@@ -1,0 +1,16 @@
+{
+  "$id": "urn:mira-dashboard:auth.touch.output",
+  "type": "object",
+  "properties": {
+    "lastSeenAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    }
+  },
+  "required": [
+    "lastSeenAtMs"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

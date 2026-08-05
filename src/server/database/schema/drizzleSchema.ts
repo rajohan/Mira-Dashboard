@@ -3,6 +3,7 @@
  * Domain code imports its own tables directly rather than using this catalog as a barrel.
  */
 export { auditEvents } from "./auditEvents.ts";
+export { authRateLimitBuckets } from "./authRateLimitBuckets.ts";
 export { authSessions } from "./authSessions.ts";
 export { automationCredentials } from "./automationCredentials.ts";
 export { automationPrincipalCapabilities } from "./automationPrincipalCapabilities.ts";

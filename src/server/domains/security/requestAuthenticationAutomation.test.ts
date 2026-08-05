@@ -95,7 +95,7 @@ describe("automation request authentication", () => {
         }
     });
 
-    test("gives every Authorization header strict precedence over a valid cookie", async () => {
+    test("rejects mixed automation and browser credentials", async () => {
         const fixture = await openAuthenticationTestDatabase();
 
         try {
@@ -103,15 +103,52 @@ describe("automation request authentication", () => {
                 now: () => authenticationTestNow,
                 repository: fixture.repository,
             });
-            const request = new Request("https://dashboard.example/trpc", {
+            const malformedBearer = new Request("https://dashboard.example/trpc", {
                 headers: {
                     authorization: "Basic malformed",
                     cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
                 },
             });
+            const validBearer = new Request("https://dashboard.example/trpc", {
+                headers: {
+                    authorization: `Bearer ${fixture.automation.token}`,
+                    cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
+                },
+            });
+            const malformedDashboardCookie = new Request(
+                "https://dashboard.example/trpc",
+                {
+                    headers: {
+                        authorization: `Bearer ${fixture.automation.token}`,
+                        cookie: dashboardSessionCookieName,
+                    },
+                }
+            );
+            const unrelatedCookie = new Request("https://dashboard.example/trpc", {
+                headers: {
+                    authorization: `Bearer ${fixture.automation.token}`,
+                    cookie: "theme=dark",
+                },
+            });
 
-            expect(authenticator.authenticate(request).authentication).toEqual({
+            expect(authenticator.authenticate(malformedBearer).authentication).toEqual({
                 kind: "invalid",
+            });
+            expect(authenticator.authenticate(validBearer).authentication).toEqual({
+                kind: "invalid",
+            });
+            expect(
+                authenticator.authenticate(malformedDashboardCookie).authentication
+            ).toEqual({ kind: "invalid" });
+            expect(authenticator.authenticate(unrelatedCookie).authentication).toEqual({
+                kind: "authenticated",
+                principal: {
+                    authorizationVersion: 1,
+                    capabilities: ["reports:read"],
+                    authenticatorId: authenticationTestCredentialId,
+                    id: authenticationTestPrincipalId,
+                    kind: "automation",
+                },
             });
         } finally {
             fixture.database.sqlite.close(true);

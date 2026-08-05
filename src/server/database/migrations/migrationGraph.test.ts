@@ -25,6 +25,7 @@ interface TextPrimaryKeyRow {
 
 const expectedTables: string[] = [
     "audit_events",
+    "auth_rate_limit_buckets",
     "auth_sessions",
     "automation_credentials",
     "automation_principal_capabilities",

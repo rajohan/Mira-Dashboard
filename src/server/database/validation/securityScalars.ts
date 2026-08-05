@@ -1,18 +1,19 @@
 import * as v from "valibot";
 
 import {
+    browserSessionUserAgentMaximumLength,
+    isValidBrowserSessionUserAgent,
+} from "../../../contracts/auth.ts";
+import {
     boundedNonBlankTextSchema,
     lowercaseSha256Action,
-    noNulStringAction,
 } from "../../../shared/validation.ts";
+import { isDashboardPasswordHash } from "../../shared/passwordHash.ts";
 
 /** Bun Argon2id hash accepted by the security persistence boundary. */
 export const argon2idPasswordHashSchema = v.pipe(
     v.string("Password hash is invalid"),
-    v.minLength(32, "Password hash is invalid"),
-    v.maxLength(512, "Password hash is invalid"),
-    noNulStringAction("Password hash is invalid"),
-    v.startsWith("$argon2id$", "Password hash is invalid")
+    v.check(isDashboardPasswordHash, "Password hash is invalid")
 );
 
 /** Bounded human-readable label without NUL characters. */
@@ -22,9 +23,16 @@ export const securityLabelSchema = boundedNonBlankTextSchema(
 );
 
 /** Bounded user-agent metadata without NUL characters. */
-export const securityUserAgentSchema = boundedNonBlankTextSchema(
-    512,
-    "Session user agent is invalid"
+export const securityUserAgentSchema = v.pipe(
+    v.string("Session user agent is invalid"),
+    v.minLength(1, "Session user agent is invalid"),
+    // Valibot counts UTF-16 code units; the domain predicate counts code points.
+    // Two units per point keeps the full astral-character allowance reachable.
+    v.maxLength(
+        browserSessionUserAgentMaximumLength * 2,
+        "Session user agent is invalid"
+    ),
+    v.check(isValidBrowserSessionUserAgent, "Session user agent is invalid")
 );
 
 /**

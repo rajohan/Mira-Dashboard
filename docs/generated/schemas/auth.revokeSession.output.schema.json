@@ -1,0 +1,14 @@
+{
+  "$id": "urn:mira-dashboard:auth.revokeSession.output",
+  "type": "object",
+  "properties": {
+    "revoked": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "revoked"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -29,6 +29,16 @@ describe("generated contract documentation", () => {
         expect([...first]).toEqual([...second]);
         expect(first.get("README.md")).toContain("[tRPC procedures](procedures.md)");
         const procedureDocumentation = first.get("procedures.md");
+        expect(procedureDocumentation).toContain("`auth.bootstrap`");
+        expect(procedureDocumentation).toContain("`auth.changePassword`");
+        expect(procedureDocumentation).toContain("Authenticated browser session");
+        expect(procedureDocumentation).toContain(
+            "`CONFLICT`, `SERVICE_UNAVAILABLE`, `TOO_MANY_REQUESTS`, `UNAUTHORIZED`"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `auth.status` | query | auth | Public |"
+        );
+        expect(procedureDocumentation).toContain("| None | Returns bootstrap state");
         expect(procedureDocumentation).toContain("`events.stream`");
         expect(procedureDocumentation).toContain(
             "Authenticated; per-topic: notifications:read, reports:read"

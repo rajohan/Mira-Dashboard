@@ -53,5 +53,24 @@ export const authenticatedProcedure = publicProcedure.use(({ ctx, next }) => {
     });
 });
 
+/** Procedure builder restricted to an authenticated browser session. */
+export const sessionProcedure = authenticatedProcedure.use(({ ctx, next }) => {
+    if (ctx.principal.kind !== "session") {
+        throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "A browser session is required",
+        });
+    }
+    return next({
+        ctx: {
+            ...ctx,
+            sessionIdentity: {
+                sessionId: ctx.principal.authenticatorId,
+                userId: ctx.principal.id,
+            },
+        },
+    });
+});
+
 /** Application tRPC router factory. */
 export const router = trpc.router;

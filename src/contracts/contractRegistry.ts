@@ -1,3 +1,4 @@
+import { authProcedureContracts } from "./auth.ts";
 import { eventsStreamContract } from "./events.ts";
 import type {
     ProcedureContract,
@@ -8,6 +9,7 @@ import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
 
 /** Implemented tRPC procedure metadata used by runtime wiring and docs. */
 export const procedureContracts: readonly ProcedureContract[] = [
+    ...authProcedureContracts,
     eventsStreamContract,
     ...systemProcedureContracts,
 ];

@@ -1,5 +1,10 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
+import {
+    createAuthenticationLifecycleService,
+    type VerifyGatewayCredential,
+} from "../server/domains/security/authenticationLifecycle.ts";
+import { createAuthenticationLifecycleRepository } from "../server/domains/security/lifecycleRepository.ts";
 import { createAuthenticationRepository } from "../server/domains/security/repository.ts";
 import { createRequestAuthenticator } from "../server/domains/security/requestAuthentication.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
@@ -7,13 +12,16 @@ import { createServer, type ApplicationServer, type ServerOptions } from "./serv
 /** Production composition inputs above the generic Bun/tRPC server primitive. */
 export interface DashboardServerOptions extends Omit<
     ServerOptions,
-    "authenticateRequest" | "browserOrigin"
+    "authenticateRequest" | "authenticationLifecycle" | "browserOrigin" | "hostname"
 > {
     readonly authenticationLeaseDurationMs?: number;
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
     readonly database: SQLiteBunDatabase;
+    readonly gatewayVerificationTimeoutMs?: number;
     readonly sessionIdleDurationMs?: number;
+    readonly trustedProxyAddresses?: readonly string[];
+    readonly verifyGatewayCredential: VerifyGatewayCredential;
 }
 
 /**
@@ -31,13 +39,21 @@ export function createDashboardServer(
         repository,
         sessionIdleDurationMs: options.sessionIdleDurationMs,
     });
+    const authenticationLifecycle = createAuthenticationLifecycleService({
+        gatewayVerificationTimeoutMs: options.gatewayVerificationTimeoutMs,
+        repository: createAuthenticationLifecycleRepository(options.database),
+        sessionIdleDurationMs: options.sessionIdleDurationMs,
+        verifyGatewayCredential: options.verifyGatewayCredential,
+    });
     return createServer({
         applicationRuntime: options.applicationRuntime,
+        authenticationLifecycle,
         authenticateRequest: (request) => authenticator.authenticate(request),
         browserOrigin: options.browserOrigin,
         gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
-        hostname: options.hostname,
+        hostname: "127.0.0.1",
         port: options.port,
         readiness: options.readiness,
+        trustedProxyAddresses: options.trustedProxyAddresses,
     });
 }

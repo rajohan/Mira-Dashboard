@@ -10,6 +10,7 @@ export type ContractAccess =
           capabilities: readonly string[];
           capabilityPolicy: "all" | "per-topic";
           kind: "authenticated";
+          principalKinds?: readonly ("automation" | "session")[];
       };
 
 /** Metadata for one controlled tRPC procedure. */

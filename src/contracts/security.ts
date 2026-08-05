@@ -14,6 +14,8 @@ export const authenticationMethods = [
     "webauthn",
 ] as const;
 
+export type AuthenticationMethod = (typeof authenticationMethods)[number];
+
 export const authenticationMethodSchema = v.picklist(
     authenticationMethods,
     "Authentication method is invalid"
