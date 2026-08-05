@@ -3,6 +3,7 @@ import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
 import {
+    realtimeSubscriptionMaximumTopics,
     realtimeTopicMaximumCharacters,
     realtimeTopicSchema,
 } from "../../../contracts/realtime.ts";
@@ -30,7 +31,7 @@ export interface RealtimeEventBatch {
 export const realtimeEventStoreLimits = Object.freeze({
     maximumPageEvents: 256,
     maximumTopicCharacters: realtimeTopicMaximumCharacters,
-    maximumTopicsPerPage: 64,
+    maximumTopicsPerPage: realtimeSubscriptionMaximumTopics,
 });
 
 const realtimePageCursorSchema = nonnegativeSafeIntegerSchema(

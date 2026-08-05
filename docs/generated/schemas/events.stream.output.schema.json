@@ -1,0 +1,203 @@
+{
+  "$id": "urn:mira-dashboard:events.stream.output",
+  "type": "object",
+  "properties": {
+    "data": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "pattern": "\\S"
+                    },
+                    "entityType": {
+                      "const": "incident"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "enum": [
+                        "created",
+                        "updated"
+                      ],
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 200,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "monitoring.incidents"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "pattern": "\\S"
+                    },
+                    "entityType": {
+                      "const": "notification"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "enum": [
+                        "created",
+                        "updated"
+                      ],
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 200,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "monitoring.notifications"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "pattern": "\\S"
+                    },
+                    "entityType": {
+                      "const": "report"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "const": "created"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 200,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "monitoring.reports"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "kind": {
+              "const": "change"
+            }
+          },
+          "required": [
+            "event",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "resync-required"
+            },
+            "reason": {
+              "const": "cursor-outside-retention"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "maxLength": 16,
+      "pattern": "^(?:0|[1-9]|[1-9]\\d{1}|[1-9]\\d{2}|[1-9]\\d{3}|[1-9]\\d{4}|[1-9]\\d{5}|[1-9]\\d{6}|[1-9]\\d{7}|[1-9]\\d{8}|[1-9]\\d{9}|[1-9]\\d{10}|[1-9]\\d{11}|[1-9]\\d{12}|[1-9]\\d{13}|[1-9]\\d{14}|[1-8]\\d{15}|900[0-6]\\d{12}|90070\\d{11}|90071[0-8]\\d{10}|900719[0-8]\\d{9}|9007199[0-1]\\d{8}|90071992[0-4]\\d{7}|900719925[0-3]\\d{6}|9007199254[0-6]\\d{5}|90071992547[0-3]\\d{4}|9007199254740[0-8]\\d{2}|90071992547409[0-8]\\d{1}|9007199254740990|9007199254740991)$"
+    }
+  },
+  "required": [
+    "data",
+    "id"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

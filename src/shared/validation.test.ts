@@ -38,7 +38,16 @@ describe("shared scalar validation", () => {
         expect(v.parse(schema, String(Number.MAX_SAFE_INTEGER))).toBe(
             Number.MAX_SAFE_INTEGER
         );
-        for (const value of ["", "00", "01", "-1", "1.0", "1e1", "9".repeat(17)]) {
+        for (const value of [
+            "",
+            "00",
+            "01",
+            "-1",
+            "1.0",
+            "1e1",
+            String(Number.MAX_SAFE_INTEGER + 1),
+            "9".repeat(17),
+        ]) {
             expect(v.safeParse(schema, value).success).toBeFalse();
         }
     });

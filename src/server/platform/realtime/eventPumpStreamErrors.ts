@@ -37,6 +37,16 @@ export class RealtimeEventSubscriptionStreamError extends Schema.TaggedErrorClas
     message: Schema.String,
 }) {}
 
+const realtimeEventStreamErrorSchema = Schema.Union([
+    RealtimeEventCursorStreamError,
+    RealtimeEventSlowConsumerStreamError,
+    RealtimeEventStoreStreamError,
+    RealtimeEventSubscriptionStreamError,
+]);
+
+/** Runtime guard for typed failures crossing the Effect/async-iterator boundary. */
+export const isRealtimeEventStreamError = Schema.is(realtimeEventStreamErrorSchema);
+
 export type RealtimeEventStreamError =
     | RealtimeEventCursorStreamError
     | RealtimeEventSlowConsumerStreamError

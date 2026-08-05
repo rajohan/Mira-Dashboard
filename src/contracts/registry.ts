@@ -6,7 +6,11 @@ export type ContractSchema = v.GenericSchema;
 /** Authentication requirement shown in generated contract documentation. */
 export type ContractAccess =
     | { kind: "public" }
-    | { capabilities: readonly string[]; kind: "authenticated" };
+    | {
+          capabilities: readonly string[];
+          capabilityPolicy: "all" | "per-topic";
+          kind: "authenticated";
+      };
 
 /** Metadata for one controlled tRPC procedure. */
 export interface ProcedureContract {

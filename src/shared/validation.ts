@@ -5,6 +5,67 @@ const FULL_COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const LOWERCASE_UUID_V7_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
+function decimalRangePattern(maximum: number): RegExp {
+    const maximumDigits = String(maximum);
+    const alternatives = ["0"];
+
+    for (let length = 1; length < maximumDigits.length; length += 1) {
+        alternatives.push(length === 1 ? "[1-9]" : `[1-9]\\d{${length - 1}}`);
+    }
+    for (let index = 0; index < maximumDigits.length; index += 1) {
+        const maximumDigit = Number(maximumDigits[index]);
+        const minimumDigit = index === 0 ? 1 : 0;
+        if (maximumDigit <= minimumDigit) continue;
+
+        const upperDigit = maximumDigit - 1;
+        const digitRange =
+            upperDigit === minimumDigit
+                ? String(minimumDigit)
+                : `[${minimumDigit}-${upperDigit}]`;
+        const suffixLength = maximumDigits.length - index - 1;
+        alternatives.push(
+            `${maximumDigits.slice(0, index)}${digitRange}${
+                suffixLength === 0 ? "" : `\\d{${suffixLength}}`
+            }`
+        );
+    }
+    alternatives.push(maximumDigits);
+    return new RegExp(`^(?:${alternatives.join("|")})$`);
+}
+
+const CANONICAL_NONNEGATIVE_SAFE_INTEGER_PATTERN = decimalRangePattern(
+    Number.MAX_SAFE_INTEGER
+);
+
+/**
+ * Builds a bounded string schema that rejects blank values.
+ * @param maximumLength Maximum accepted UTF-16 code-unit length.
+ * @param message Validation failure message.
+ * @returns Valibot schema for a bounded non-blank string.
+ */
+export function boundedNonBlankStringSchema(
+    maximumLength: number,
+    message = "Expected a bounded non-blank string."
+) {
+    return v.pipe(
+        v.string(message),
+        v.maxLength(maximumLength, message),
+        v.regex(/\S/, message)
+    );
+}
+
+/**
+ * Tests the named scalar-array uniqueness rule shared by Valibot and JSON Schema generation.
+ * Restricting this helper to JSON scalars keeps Set equality equivalent to `uniqueItems`.
+ * @param values Scalar array values to compare by JSON-compatible equality.
+ * @returns Whether every array value is unique.
+ */
+export function hasUniqueArrayItems<TItem extends boolean | null | number | string>(
+    values: TItem[]
+): boolean {
+    return new Set(values).size === values.length;
+}
+
 /**
  * Builds a schema for a nonnegative JavaScript safe integer.
  * @param message Validation failure message.
@@ -34,12 +95,24 @@ export function nonnegativeDecimalSafeIntegerStringSchema(
     message = "Expected a canonical nonnegative safe-integer string."
 ) {
     return v.pipe(
+        canonicalNonnegativeSafeIntegerStringSchema(message),
+        v.transform(Number),
+        v.safeInteger(message)
+    );
+}
+
+/**
+ * Builds a schema that preserves a canonical nonnegative safe-integer string.
+ * @param message Validation failure message.
+ * @returns Valibot schema for a canonical decimal cursor string.
+ */
+export function canonicalNonnegativeSafeIntegerStringSchema(
+    message = "Expected a canonical nonnegative safe-integer string."
+) {
+    return v.pipe(
         v.string(message),
         v.maxLength(16, message),
-        v.regex(/^(?:0|[1-9]\d*)$/u, message),
-        v.transform(Number),
-        v.safeInteger(message),
-        v.minValue(0, message)
+        v.regex(CANONICAL_NONNEGATIVE_SAFE_INTEGER_PATTERN, message)
     );
 }
 
