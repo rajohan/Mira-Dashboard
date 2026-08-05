@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { subMilliseconds } from "date-fns";
+import { addMilliseconds, subMilliseconds } from "date-fns";
 import * as v from "valibot";
 
 import { securityCreatedAt, validUserInsert } from "./testSupport/securityRows.ts";
@@ -14,6 +14,7 @@ describe("user row schemas", () => {
                 ...validUserInsert,
                 authenticationVersion: 1,
                 disabledAt: null,
+                mfaEnabledAt: null,
             })
         ).toBeDefined();
         for (const authenticationVersion of [0, Number.MAX_SAFE_INTEGER + 1]) {
@@ -22,6 +23,7 @@ describe("user row schemas", () => {
                     ...validUserInsert,
                     authenticationVersion,
                     disabledAt: null,
+                    mfaEnabledAt: null,
                 })
             ).toThrow();
         }
@@ -38,6 +40,10 @@ describe("user row schemas", () => {
         { passwordHash: `${validUserInsert.passwordHash}=` },
         { passwordHash: `${validUserInsert.passwordHash}\0suffix` },
         { updatedAt: subMilliseconds(securityCreatedAt, 1) },
+        { mfaEnabledAt: subMilliseconds(securityCreatedAt, 1) },
+        {
+            mfaEnabledAt: addMilliseconds(validUserInsert.updatedAt, 1),
+        },
         { unexpected: true },
     ])("rejects invalid user row %#", (replacement) => {
         expect(() =>
@@ -52,5 +58,14 @@ describe("user row schemas", () => {
                 authenticationVersion: 2,
             })
         ).toThrow();
+    });
+
+    test("accepts MFA activation inside the user timestamp window", () => {
+        expect(
+            v.parse(userInsertSchema, {
+                ...validUserInsert,
+                mfaEnabledAt: validUserInsert.updatedAt,
+            })
+        ).toBeDefined();
     });
 });

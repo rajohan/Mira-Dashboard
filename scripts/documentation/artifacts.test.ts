@@ -32,13 +32,29 @@ describe("generated contract documentation", () => {
         expect(procedureDocumentation).toContain("`auth.bootstrap`");
         expect(procedureDocumentation).toContain("`auth.changePassword`");
         expect(procedureDocumentation).toContain("Authenticated browser session");
+        expect(procedureDocumentation).toContain("Pending MFA login");
+        expect(procedureDocumentation).toContain(
+            "Browser session when MFA is disabled; recent MFA when enabled"
+        );
+        expect(procedureDocumentation).toContain(
+            "Recent password when MFA is disabled; recent MFA when enabled"
+        );
+        expect(procedureDocumentation).toContain(
+            "MFA enrollment required; recent MFA when enabled"
+        );
         expect(procedureDocumentation).toContain(
             "`CONFLICT`, `SERVICE_UNAVAILABLE`, `TOO_MANY_REQUESTS`, `UNAUTHORIZED`"
         );
         expect(procedureDocumentation).toContain(
+            "`mfa_enrollment_required`, `step_up_required`"
+        );
+        expect(procedureDocumentation).toContain("Client action reasons");
+        expect(procedureDocumentation).toContain(
             "| `auth.status` | query | auth | Public |"
         );
-        expect(procedureDocumentation).toContain("| None | Returns bootstrap state");
+        expect(procedureDocumentation).toContain(
+            "| None | None | Returns bootstrap, pending MFA"
+        );
         expect(procedureDocumentation).toContain("`events.stream`");
         expect(procedureDocumentation).toContain(
             "Authenticated; per-topic: notifications:read, reports:read"

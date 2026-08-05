@@ -1,0 +1,16 @@
+{
+  "$id": "urn:mira-dashboard:accountSecurity.stepUpRecovery.input",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^\\s*[0-9A-Fa-f]{32}-[0-9A-Fa-f]{32}\\s*$"
+    }
+  },
+  "required": [
+    "code"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

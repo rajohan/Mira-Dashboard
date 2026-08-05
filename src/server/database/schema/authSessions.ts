@@ -23,17 +23,16 @@ export const authSessions = sqliteTable(
         authenticatedAt: integer("authenticated_at", { mode: "timestamp_ms" }).notNull(),
         authenticationVersion: integer("authentication_version").notNull(),
         authMethod: text("auth_method", {
-            enum: ["password", "recovery", "totp", "webauthn"],
+            enum: ["password", "recovery", "totp"],
         }).notNull(),
         createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-        elevatedAt: integer("elevated_at", { mode: "timestamp_ms" }),
-        elevatedMethod: text("elevated_method", {
-            enum: ["password", "recovery", "totp", "webauthn"],
-        }),
         expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
         id: text("id").notNull().primaryKey(),
         lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
         mfaVerifiedAt: integer("mfa_verified_at", { mode: "timestamp_ms" }),
+        passwordVerifiedAt: integer("password_verified_at", {
+            mode: "timestamp_ms",
+        }).notNull(),
         userAgent: text("user_agent"),
         userId: text("user_id")
             .notNull()
@@ -48,11 +47,7 @@ export const authSessions = sqliteTable(
         ),
         check(
             "auth_sessions_auth_method_check",
-            sql`${table.authMethod} IN ('password', 'recovery', 'totp', 'webauthn')`
-        ),
-        check(
-            "auth_sessions_elevated_method_check",
-            sql`${table.elevatedMethod} IS NULL OR ${table.elevatedMethod} IN ('password', 'recovery', 'totp', 'webauthn')`
+            sql`${table.authMethod} IN ('password', 'recovery', 'totp')`
         ),
         check(
             "auth_sessions_expiry_check",
@@ -68,11 +63,15 @@ export const authSessions = sqliteTable(
         ),
         check(
             "auth_sessions_mfa_time_check",
-            sql`${table.mfaVerifiedAt} IS NULL OR (${timestampMillisecondsCheck(table.mfaVerifiedAt)} AND ${table.mfaVerifiedAt} >= ${table.authenticatedAt} AND ${table.mfaVerifiedAt} < ${table.expiresAt})`
+            sql`${table.mfaVerifiedAt} IS NULL OR (${timestampMillisecondsCheck(table.mfaVerifiedAt)} AND ${table.mfaVerifiedAt} >= ${table.authenticatedAt} AND ${table.mfaVerifiedAt} <= ${table.createdAt})`
         ),
         check(
-            "auth_sessions_elevation_check",
-            sql`(${table.elevatedAt} IS NULL AND ${table.elevatedMethod} IS NULL) OR (${table.elevatedAt} IS NOT NULL AND ${table.elevatedMethod} IS NOT NULL AND ${timestampMillisecondsCheck(table.elevatedAt)} AND ${table.elevatedAt} >= ${table.authenticatedAt} AND ${table.elevatedAt} < ${table.expiresAt})`
+            "auth_sessions_password_time_check",
+            sql`${timestampMillisecondsCheck(table.passwordVerifiedAt)} AND ${table.passwordVerifiedAt} >= ${table.authenticatedAt} AND ${table.passwordVerifiedAt} <= ${table.createdAt}`
+        ),
+        check(
+            "auth_sessions_mfa_method_check",
+            sql`${table.authMethod} = 'password' OR ${table.mfaVerifiedAt} IS NOT NULL`
         ),
         check("auth_sessions_id_check", lowercaseHexTextCheck(table.id, 32)),
         check(

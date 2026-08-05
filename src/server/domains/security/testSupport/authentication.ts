@@ -14,12 +14,21 @@ import { userInsertSchema } from "../../../database/validation/users.ts";
 import { generateOpaqueToken } from "../../../shared/opaqueToken.ts";
 import { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
 import { testDashboardPasswordHash } from "../../../test/support/securityPassword.ts";
-import { createAuthenticationRepository } from "../repository.ts";
+import type { TotpSecretCipher } from "../mfa/totpSecretCipher.ts";
+import { createRequestAuthenticationRepository } from "../requestAuthenticationRepository.ts";
 
 export const authenticationTestNow = parseISO("2026-08-05T01:00:00.000Z");
 export const authenticationTestUserId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 export const authenticationTestCredentialId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4";
 export const authenticationTestPrincipalId = "openclaw-task-tracking";
+
+/** Fail-closed cipher used by composition tests that do not exercise TOTP. */
+export const testTotpSecretCipher: TotpSecretCipher = Object.freeze({
+    activeKeyId: "test-primary",
+    decrypt: () => Promise.reject(new Error("Test TOTP secret is unavailable")),
+    encrypt: () => Promise.reject(new Error("Test TOTP encryption is unavailable")),
+    hasKey: () => false,
+});
 
 /**
  * Opens a fresh database containing one session and one automation credential.
@@ -54,12 +63,11 @@ export async function openAuthenticationTestDatabase(now = authenticationTestNow
                     authenticationVersion: 1,
                     authMethod: "password",
                     createdAt: now,
-                    elevatedAt: null,
-                    elevatedMethod: null,
                     expiresAt,
                     id: session.prefix,
                     lastSeenAt: now,
                     mfaVerifiedAt: null,
+                    passwordVerifiedAt: now,
                     userAgent: null,
                     userId: authenticationTestUserId,
                     validatorHash: session.validatorHash,
@@ -109,7 +117,7 @@ export async function openAuthenticationTestDatabase(now = authenticationTestNow
             automation,
             database,
             expiresAt,
-            repository: createAuthenticationRepository(database.orm),
+            repository: createRequestAuthenticationRepository(database.orm),
             session,
         };
     } catch (error) {

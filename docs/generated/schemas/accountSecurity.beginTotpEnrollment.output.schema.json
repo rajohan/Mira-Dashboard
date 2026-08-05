@@ -1,0 +1,53 @@
+{
+  "$id": "urn:mira-dashboard:accountSecurity.beginTotpEnrollment.output",
+  "type": "object",
+  "properties": {
+    "enrollment": {
+      "type": "object",
+      "properties": {
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "factorId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]+$"
+        },
+        "otpauthUri": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^otpauth:\\/\\/totp\\/\\S+$"
+        },
+        "secret": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 32,
+          "pattern": "^[A-Z2-7]{32}$"
+        }
+      },
+      "required": [
+        "expiresAtMs",
+        "factorId",
+        "label",
+        "otpauthUri",
+        "secret"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "enrollment"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

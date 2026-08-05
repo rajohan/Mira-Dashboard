@@ -18,6 +18,7 @@ import type { AppRouter } from "../../trpc/appRouter.ts";
 import {
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
+    createTestServerSecurityServices,
 } from "../support/requestContext.ts";
 
 const servers: ApplicationServer[] = [];
@@ -28,9 +29,10 @@ async function startServer(): Promise<{
 }> {
     const readiness = createReadinessController();
     const server = await createServer({
+        ...createTestServerSecurityServices(),
         applicationRuntime: createTestApplicationRuntime(),
         authenticationLifecycle: createTestAuthenticationLifecycleService(),
-        authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
+        authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
         hostname: "127.0.0.1",
         port: 0,
         readiness,
@@ -124,9 +126,10 @@ describe("system foundation", () => {
     test("rejects untrusted browser requests before authentication", async () => {
         let authenticationCalls = 0;
         const server = await createServer({
+            ...createTestServerSecurityServices(),
             applicationRuntime: createTestApplicationRuntime(),
             authenticationLifecycle: createTestAuthenticationLifecycleService(),
-            authenticateRequest: () => {
+            authenticateCredential: () => {
                 authenticationCalls += 1;
                 return { authentication: { kind: "anonymous" } };
             },
@@ -168,6 +171,7 @@ describe("system foundation", () => {
         let disposals = 0;
         let initializations = 0;
         const server = await createServer({
+            ...createTestServerSecurityServices(),
             applicationRuntime: createTestApplicationRuntime({
                 dispose: () => {
                     disposals += 1;
@@ -179,7 +183,7 @@ describe("system foundation", () => {
                 },
             }),
             authenticationLifecycle: createTestAuthenticationLifecycleService(),
-            authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
+            authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
             hostname: "127.0.0.1",
             port: 0,
             readiness: createReadinessController(),
@@ -211,6 +215,7 @@ describe("system foundation", () => {
             let startupFailure: unknown;
             try {
                 await createServer({
+                    ...createTestServerSecurityServices(),
                     applicationRuntime: createTestApplicationRuntime({
                         dispose: () => {
                             disposals += 1;
@@ -218,7 +223,7 @@ describe("system foundation", () => {
                         },
                     }),
                     authenticationLifecycle: createTestAuthenticationLifecycleService(),
-                    authenticateRequest: () => ({
+                    authenticateCredential: () => ({
                         authentication: { kind: "anonymous" },
                     }),
                     port: 0,
@@ -277,6 +282,7 @@ describe("system foundation", () => {
             let startupFailure: unknown;
             try {
                 await createServer({
+                    ...createTestServerSecurityServices(),
                     applicationRuntime: createTestApplicationRuntime({
                         dispose: () => {
                             disposals += 1;
@@ -288,7 +294,7 @@ describe("system foundation", () => {
                         },
                     }),
                     authenticationLifecycle: createTestAuthenticationLifecycleService(),
-                    authenticateRequest: () => ({
+                    authenticateCredential: () => ({
                         authentication: { kind: "anonymous" },
                     }),
                     port: 0,

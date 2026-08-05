@@ -8,6 +8,7 @@ import { captureFailure } from "../support/promise.ts";
 import {
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
+    createTestServerSecurityServices,
 } from "../support/requestContext.ts";
 
 function createPendingBunServer(): {
@@ -47,6 +48,7 @@ describe("application server shutdown", () => {
 
         try {
             const server = await createServer({
+                ...createTestServerSecurityServices(),
                 applicationRuntime: createTestApplicationRuntime({
                     dispose: () => {
                         disposals += 1;
@@ -54,7 +56,7 @@ describe("application server shutdown", () => {
                     },
                 }),
                 authenticationLifecycle: createTestAuthenticationLifecycleService(),
-                authenticateRequest: () => ({
+                authenticateCredential: () => ({
                     authentication: { kind: "anonymous" },
                 }),
                 gracefulShutdownTimeoutMs: scenario.timeoutMs,
@@ -86,6 +88,7 @@ describe("application server shutdown", () => {
         try {
             const failure = await captureFailure(() =>
                 createServer({
+                    ...createTestServerSecurityServices(),
                     applicationRuntime: createTestApplicationRuntime({
                         dispose: () => {
                             disposals += 1;
@@ -93,7 +96,7 @@ describe("application server shutdown", () => {
                         },
                     }),
                     authenticationLifecycle: createTestAuthenticationLifecycleService(),
-                    authenticateRequest: () => ({
+                    authenticateCredential: () => ({
                         authentication: { kind: "anonymous" },
                     }),
                     port: 3100,
@@ -120,6 +123,7 @@ describe("application server shutdown", () => {
             try {
                 const failure = await captureFailure(() =>
                     createServer({
+                        ...createTestServerSecurityServices(),
                         applicationRuntime: createTestApplicationRuntime({
                             dispose: () => {
                                 disposals += 1;
@@ -132,7 +136,7 @@ describe("application server shutdown", () => {
                         }),
                         authenticationLifecycle:
                             createTestAuthenticationLifecycleService(),
-                        authenticateRequest: () => ({
+                        authenticateCredential: () => ({
                             authentication: { kind: "anonymous" },
                         }),
                         gracefulShutdownTimeoutMs: timeoutMs,

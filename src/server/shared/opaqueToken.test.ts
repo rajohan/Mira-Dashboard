@@ -49,10 +49,15 @@ describe("opaque token", () => {
         const generated = generateOpaqueToken("session");
         const session = parseOpaqueToken(generated.token, "session");
         const automation = parseOpaqueToken(generated.token, "automation");
+        const pendingLogin = parseOpaqueToken(generated.token, "pending-login");
 
         expect(session).toBeDefined();
         expect(automation).toBeDefined();
+        expect(pendingLogin).toBeDefined();
         expect(session?.prefix).toBe(automation?.prefix);
+        expect(session?.prefix).toBe(pendingLogin?.prefix);
         expect(session?.validatorHash).not.toBe(automation?.validatorHash);
+        expect(session?.validatorHash).not.toBe(pendingLogin?.validatorHash);
+        expect(automation?.validatorHash).not.toBe(pendingLogin?.validatorHash);
     });
 });

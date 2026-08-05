@@ -1,6 +1,6 @@
 import { browserSessionAbsoluteDurationMs } from "../domains/security/authenticationPolicy.ts";
-import { dashboardSessionCookieName } from "../domains/security/requestAuthentication.ts";
 import { parseOpaqueToken } from "../shared/opaqueToken.ts";
+import { dashboardSessionCookieName } from "./authenticationCredentials.ts";
 
 const browserSessionMaximumAgeSeconds = browserSessionAbsoluteDurationMs / 1000;
 const browserSessionCookieAttributes = "Path=/; Secure; HttpOnly; SameSite=Strict";

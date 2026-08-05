@@ -7,10 +7,21 @@ import type {
 import type { AuthenticationLifecycleService } from "../../domains/security/authenticationLifecycle.ts";
 import type { AuthenticationResolution } from "../../domains/security/authenticationResolution.ts";
 import type {
+    AuthenticationWorkRuntimeService,
+    GatewayAuthenticationWorkOptions,
+} from "../../domains/security/authenticationWorkGate.ts";
+import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
+import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
+import type {
     ApplicationRuntime,
     RealtimeEventRuntimeService,
 } from "../../platform/runtime/applicationRuntime.ts";
-import { createRequestContext, type RequestContext } from "../../trpc/context.ts";
+import { readAuthenticationHttpCredentials } from "../../rawHttp/authenticationCredentials.ts";
+import {
+    type AuthenticateCredential,
+    createRequestContext,
+    type RequestContext,
+} from "../../trpc/context.ts";
 
 const anonymousAuthentication: RequestAuthentication = { kind: "anonymous" };
 
@@ -80,10 +91,37 @@ export function createTestAuthenticationResolution(
 }
 
 interface TestApplicationRuntimeOverrides {
+    readonly authentication?: AuthenticationWorkRuntimeService;
     readonly dispose?: ApplicationRuntime["dispose"];
     readonly initialize?: ApplicationRuntime["initialize"];
     readonly stream?: RealtimeEventRuntimeService["stream"];
 }
+
+const inertAuthenticationWorkGate: AuthenticationWorkRuntimeService["passwordWorkGate"] =
+    Object.freeze({
+        async run<T>(work: () => Promise<T>, signal?: AbortSignal) {
+            signal?.throwIfAborted();
+            return { accepted: true as const, value: await work() };
+        },
+    });
+
+const inertAuthenticationRuntime: AuthenticationWorkRuntimeService = Object.freeze({
+    passwordWorkGate: inertAuthenticationWorkGate,
+    totpWorkGate: inertAuthenticationWorkGate,
+    runGatewayVerification<T>(
+        work: (signal: AbortSignal) => Promise<T>,
+        options: GatewayAuthenticationWorkOptions<T>
+    ) {
+        options.signal?.throwIfAborted();
+        const decision = options.onBeforeStart?.() ?? { proceed: true as const };
+        if (!decision.proceed) return Promise.resolve(decision.value);
+        const signal = options.signal ?? new AbortController().signal;
+        return work(signal).then((value) => {
+            options.onResultBeforeRelease?.(value);
+            return value;
+        });
+    },
+});
 
 /**
  * Creates an inert mutable-auth service that individual tests can override.
@@ -113,6 +151,94 @@ export function createTestAuthenticationLifecycleService(
 }
 
 /**
+ * Creates an inert account-security lifecycle that individual tests can override.
+ * @param overrides Account-security methods exercised by the current test.
+ * @returns A complete lifecycle service with fail-closed defaults.
+ */
+export function createTestMfaAccountLifecycleService(
+    overrides: Partial<MfaAccountLifecycleService> = {}
+): MfaAccountLifecycleService {
+    return Object.freeze({
+        beginTotpEnrollment:
+            overrides.beginTotpEnrollment ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        confirmTotpEnrollment:
+            overrides.confirmTotpEnrollment ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        disableMfa:
+            overrides.disableMfa ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        reauthenticatePassword:
+            overrides.reauthenticatePassword ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        removeTotpFactor:
+            overrides.removeTotpFactor ?? (() => ({ status: "session-changed" })),
+        rotateRecoveryCodes:
+            overrides.rotateRecoveryCodes ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        stepUpRecovery:
+            overrides.stepUpRecovery ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        stepUpTotp:
+            overrides.stepUpTotp ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        summary: overrides.summary ?? (() => ({ status: "session-changed" })),
+    });
+}
+
+/**
+ * Creates an inert login-MFA lifecycle that fails closed unless explicitly overridden.
+ * @param overrides Login-MFA methods exercised by the current test.
+ * @returns A complete lifecycle service with unavailable or absent defaults.
+ */
+export function createTestMfaLoginLifecycleService(
+    overrides: Partial<MfaLoginLifecycleService> = {}
+): MfaLoginLifecycleService {
+    return Object.freeze({
+        beginPendingLogin:
+            overrides.beginPendingLogin ??
+            (() => ({ status: "mfa-unavailable" as const })),
+        completeRecoveryLogin:
+            overrides.completeRecoveryLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
+        completeTotpLogin:
+            overrides.completeTotpLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
+        pendingLoginSummary: overrides.pendingLoginSummary ?? ((): undefined => {}),
+        revokePendingLogin: overrides.revokePendingLogin ?? (() => false),
+    });
+}
+
+export interface TestServerSecurityServices {
+    readonly authenticateCredential: AuthenticateCredential;
+    readonly authenticationLifecycle: AuthenticationLifecycleService;
+    readonly mfaAccountLifecycle: MfaAccountLifecycleService;
+    readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+}
+
+/**
+ * Creates required fail-closed security dependencies for generic server tests.
+ * @param overrides Security services exercised by the current test.
+ * @returns A complete security dependency bundle.
+ */
+export function createTestServerSecurityServices(
+    overrides: Partial<TestServerSecurityServices> = {}
+): TestServerSecurityServices {
+    return {
+        authenticateCredential:
+            overrides.authenticateCredential ??
+            (() => ({ authentication: { kind: "anonymous" as const } })),
+        authenticationLifecycle:
+            overrides.authenticationLifecycle ??
+            createTestAuthenticationLifecycleService(),
+        mfaAccountLifecycle:
+            overrides.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
+        mfaLoginLifecycle:
+            overrides.mfaLoginLifecycle ?? createTestMfaLoginLifecycleService(),
+    };
+}
+
+/**
  * Creates a lifecycle-safe runtime stub for transport and composition tests.
  * @param overrides Runtime methods exercised by the current test.
  * @returns A complete inert runtime with the requested overrides.
@@ -124,6 +250,7 @@ export function createTestApplicationRuntime(
         dispose: overrides.dispose ?? (() => Promise.resolve()),
         initialize: overrides.initialize ?? (() => Promise.resolve()),
         services: Object.freeze({
+            authentication: overrides.authentication ?? inertAuthenticationRuntime,
             realtimeEvents: Object.freeze({
                 stream:
                     overrides.stream ??
@@ -148,18 +275,28 @@ export function createTestRequestContext(
     options: {
         readonly authenticationClientSourceId?: string;
         readonly authenticationLifecycle?: AuthenticationLifecycleService;
+        readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
+        readonly mfaLoginLifecycle?: MfaLoginLifecycleService;
         readonly request?: Request;
         readonly responseHeaders?: Headers;
     } = {}
 ): Promise<RequestContext> {
+    const request = options.request ?? new Request("http://localhost/trpc/test");
+    const credentials = readAuthenticationHttpCredentials(request);
     return createRequestContext({
         applicationRuntime,
+        authenticationCredential: credentials.authentication,
         authenticationClientSourceId:
             options.authenticationClientSourceId ?? "test-client-source",
         authenticationLifecycle:
             options.authenticationLifecycle ?? createTestAuthenticationLifecycleService(),
-        authenticateRequest: () => createTestAuthenticationResolution(authentication),
-        request: options.request ?? new Request("http://localhost/trpc/test"),
+        authenticateCredential: () => createTestAuthenticationResolution(authentication),
+        mfaAccountLifecycle:
+            options.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
+        mfaLoginLifecycle:
+            options.mfaLoginLifecycle ?? createTestMfaLoginLifecycleService(),
+        pendingLoginCredential: credentials.pendingLogin,
+        request,
         responseHeaders: options.responseHeaders ?? new Headers(),
     });
 }

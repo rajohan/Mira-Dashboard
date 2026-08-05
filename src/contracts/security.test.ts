@@ -2,12 +2,21 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
-import { requestAuthenticationSchema } from "./security.ts";
+import {
+    authenticationMethods,
+    multiFactorAuthenticationMethods,
+    requestAuthenticationSchema,
+} from "./security.ts";
 
 const userId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 const sessionSelector = "a".repeat(32);
 
 describe("request authentication contract", () => {
+    test("advertises only authentication methods implemented by this slice", () => {
+        expect(authenticationMethods).toEqual(["password", "recovery", "totp"]);
+        expect(multiFactorAuthenticationMethods).toEqual(["recovery", "totp"]);
+    });
+
     test("normalizes and freezes an authenticated principal", () => {
         const authentication = v.parse(requestAuthenticationSchema, {
             kind: "authenticated",

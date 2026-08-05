@@ -1,0 +1,16 @@
+{
+  "$id": "urn:mira-dashboard:accountSecurity.disableMfa.input",
+  "type": "object",
+  "properties": {
+    "password": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 256
+    }
+  },
+  "required": [
+    "password"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

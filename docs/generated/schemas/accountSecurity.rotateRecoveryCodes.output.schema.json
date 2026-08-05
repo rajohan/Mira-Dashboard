@@ -1,0 +1,23 @@
+{
+  "$id": "urn:mira-dashboard:accountSecurity.rotateRecoveryCodes.output",
+  "type": "object",
+  "properties": {
+    "recoveryCodes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 65,
+        "maxLength": 65,
+        "pattern": "^[0-9a-f]{32}-[0-9a-f]{32}$"
+      },
+      "minItems": 10,
+      "maxItems": 10,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "recoveryCodes"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

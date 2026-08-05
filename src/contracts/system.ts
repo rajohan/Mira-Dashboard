@@ -2,6 +2,11 @@ import * as v from "valibot";
 
 import type { ProcedureContract, RawHttpContract } from "./registry.ts";
 
+/** Stable raw HTTP liveness endpoint shared by contracts and runtime dispatch. */
+export const healthLivenessPath = "/api/health/live";
+/** Stable raw HTTP readiness endpoint shared by contracts and runtime dispatch. */
+export const healthReadinessPath = "/api/health/ready";
+
 /** Empty object accepted by procedures without user input. */
 export const emptyInputSchema = v.optional(v.strictObject({}), {});
 
@@ -37,6 +42,11 @@ export const runtimeIdentityContract = {
     output: runtimeIdentitySchema,
     outputSchemaId: "system.runtimeIdentity.output",
     summary: "Returns the Bun runtime identity of the serving process.",
+    transport: {
+        batching: "adapter-default",
+        handler: "default",
+        requestBody: "default",
+    },
 } as const satisfies ProcedureContract;
 
 /** Implemented system tRPC contracts. */
@@ -47,7 +57,7 @@ export const systemRawHttpContracts = [
     {
         access: { kind: "public" },
         method: "GET",
-        path: "/api/health/live",
+        path: healthLivenessPath,
         response: {
             kind: "schema",
             schema: livenessStatusSchema,
@@ -59,7 +69,7 @@ export const systemRawHttpContracts = [
     {
         access: { kind: "public" },
         method: "HEAD",
-        path: "/api/health/live",
+        path: healthLivenessPath,
         response: { kind: "none" },
         statusCodes: [200],
         summary: "Checks Bun web-process liveness without a response body.",
@@ -67,7 +77,7 @@ export const systemRawHttpContracts = [
     {
         access: { kind: "public" },
         method: "GET",
-        path: "/api/health/ready",
+        path: healthReadinessPath,
         response: {
             kind: "schema",
             schema: readinessStatusSchema,
@@ -79,7 +89,7 @@ export const systemRawHttpContracts = [
     {
         access: { kind: "public" },
         method: "HEAD",
-        path: "/api/health/ready",
+        path: healthReadinessPath,
         response: { kind: "none" },
         statusCodes: [200, 503],
         summary: "Checks application readiness without a response body.",

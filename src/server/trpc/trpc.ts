@@ -2,16 +2,50 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { secondsToMilliseconds } from "date-fns";
 import superjson from "superjson";
 
+import {
+    contractAuthenticationErrorReasons,
+    type ContractAuthenticationErrorReason,
+} from "../../contracts/registry.ts";
 import type { RequestContext } from "./context.ts";
 
 const internalErrorMessage = "Internal server error";
+const contractAuthenticationErrorReasonSet: ReadonlySet<string> = new Set(
+    contractAuthenticationErrorReasons
+);
+
+class AuthenticationPolicyErrorCause extends Error {
+    public readonly reason: ContractAuthenticationErrorReason;
+
+    public constructor(reason: ContractAuthenticationErrorReason) {
+        super("Authentication policy requirement was not met");
+        this.name = "AuthenticationPolicyErrorCause";
+        this.reason = reason;
+    }
+}
+
+function authenticationPolicyReason(
+    error: TRPCError
+): ContractAuthenticationErrorReason | undefined {
+    if (
+        error.code !== "FORBIDDEN" ||
+        !(error.cause instanceof AuthenticationPolicyErrorCause) ||
+        !contractAuthenticationErrorReasonSet.has(error.cause.reason)
+    ) {
+        return undefined;
+    }
+    return error.cause.reason;
+}
 
 const trpc = initTRPC.context<RequestContext>().create({
     errorFormatter({ error, shape }) {
         const { path: _path, stack: _stack, ...safeData } = shape.data;
+        const reason = authenticationPolicyReason(error);
         return {
             ...shape,
-            data: safeData,
+            data: {
+                ...safeData,
+                ...(reason !== undefined && { reason }),
+            },
             message:
                 error.code === "INTERNAL_SERVER_ERROR"
                     ? internalErrorMessage
@@ -32,6 +66,39 @@ const trpc = initTRPC.context<RequestContext>().create({
 
 /** Base procedure builder for explicitly public contracts. */
 export const publicProcedure = trpc.procedure;
+
+/**
+ * Builds one client-actionable authentication-policy rejection.
+ * @param reason Allowlisted client action required before retry.
+ * @param message Safe human-readable policy failure.
+ * @returns Stable FORBIDDEN error with a private typed cause.
+ */
+export function authenticationPolicyError(
+    reason: ContractAuthenticationErrorReason,
+    message: string
+): TRPCError {
+    return new TRPCError({
+        cause: new AuthenticationPolicyErrorCause(reason),
+        code: "FORBIDDEN",
+        message,
+    });
+}
+
+/** Procedure builder requiring one valid password-first pending-login cookie. */
+export const pendingLoginProcedure = publicProcedure.use(({ ctx, next }) => {
+    if (ctx.pendingLoginCredential.kind !== "present") {
+        throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Pending multi-factor authentication is required",
+        });
+    }
+    return next({
+        ctx: {
+            ...ctx,
+            pendingLoginToken: ctx.pendingLoginCredential.token,
+        },
+    });
+});
 
 /** Procedure builder requiring a validated session or automation principal. */
 export const authenticatedProcedure = publicProcedure.use(({ ctx, next }) => {

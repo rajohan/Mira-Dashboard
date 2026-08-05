@@ -9,21 +9,26 @@ import { createDashboardServer } from "../../../app/dashboardServer.ts";
 import { type ApplicationServer, createServer } from "../../../app/server.ts";
 import type { RealtimeStreamOutput } from "../../../contracts/events.ts";
 import { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
-import { dashboardSessionCookieName } from "../../domains/security/requestAuthentication.ts";
-import { openAuthenticationTestDatabase } from "../../domains/security/testSupport/authentication.ts";
+import {
+    openAuthenticationTestDatabase,
+    testTotpSecretCipher,
+} from "../../domains/security/testSupport/authentication.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
 import type { ApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
+import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredentials.ts";
+import { generateOpaqueToken } from "../../shared/opaqueToken.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
 import { withTestTimeout } from "../support/promise.ts";
 import {
     createTestApplicationRuntime,
-    createTestAuthenticationLifecycleService,
     createTestAuthenticationResolution,
+    createTestServerSecurityServices,
     createTestSessionAuthentication,
 } from "../support/requestContext.ts";
 
-const sessionCookie = "mira_session=valid-test-session";
+const testSessionCredential = generateOpaqueToken("session");
+const sessionCookie = `${dashboardSessionCookieName}=${testSessionCredential.token}`;
 const testWaitTimeoutMs = secondsToMilliseconds(2);
 const servers: ApplicationServer[] = [];
 
@@ -87,13 +92,16 @@ async function startRealtimeServer(
 ): Promise<ApplicationServer> {
     const server = await createServer({
         applicationRuntime,
-        authenticationLifecycle: createTestAuthenticationLifecycleService(),
-        authenticateRequest: (request) =>
-            request.headers.get("cookie") === sessionCookie
-                ? createTestAuthenticationResolution(
-                      createTestSessionAuthentication(["reports:read"])
-                  )
-                : createTestAuthenticationResolution({ kind: "anonymous" }),
+        ...createTestServerSecurityServices({
+            authenticateCredential: (credential) =>
+                credential.kind === "session" &&
+                credential.token.prefix === testSessionCredential.prefix &&
+                credential.token.validatorHash === testSessionCredential.validatorHash
+                    ? createTestAuthenticationResolution(
+                          createTestSessionAuthentication(["reports:read"])
+                      )
+                    : createTestAuthenticationResolution({ kind: "anonymous" }),
+        }),
         hostname: "127.0.0.1",
         port: 0,
         readiness: createReadinessController(),
@@ -238,6 +246,7 @@ describe("application server realtime transport", () => {
                 database: fixture.database.orm,
                 port: 0,
                 readiness: createReadinessController(),
+                totpSecretCipher: testTotpSecretCipher,
                 verifyGatewayCredential: () => Promise.resolve(false),
             });
             servers.push(server);

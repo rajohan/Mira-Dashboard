@@ -39,7 +39,7 @@
         "test:backend": "bun test --cwd backend --config ../bunfig.toml --preload ./test/setup.ts test",
         "test:backend:changed": "bun test --cwd backend --config ../bunfig.toml --preload ./test/setup.ts --changed test",
         "test:backend:coverage": "bun scripts/runCoverage.ts backend 85 src/",
-        "test:server": "bun test src/server src/shared src/contracts",
+        "test:server": "bun test src/app src/server src/shared src/contracts",
         "test:server:docs": "bun test scripts/documentation",
         "test:server:tooling": "bun test scripts/checkDatabaseSchema.test.ts",
         "test:qualification": "bun test qualification",

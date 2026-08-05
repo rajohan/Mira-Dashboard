@@ -5,9 +5,12 @@ import { lowercaseHexTextCheck, timestampMillisecondsCheck } from "./checks.ts";
 
 /** Authentication operations with independent persisted failure budgets. */
 export const authenticationRateLimitKinds = [
+    "account-mfa",
     "account-password",
     "bootstrap-gateway-global",
     "bootstrap-gateway-source",
+    "login-mfa-global",
+    "login-mfa-source",
     "login-password-global",
     "login-password-source",
 ] as const;

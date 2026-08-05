@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { TRPCError } from "@trpc/server";
 
+import { dashboardPendingLoginCookieName } from "../../rawHttp/authenticationCredentials.ts";
 import { generateOpaqueToken } from "../../shared/opaqueToken.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
@@ -15,6 +16,7 @@ import {
 } from "../../test/support/requestContext.ts";
 import { appRouter } from "../../trpc/appRouter.ts";
 import type { AuthenticationLifecycleService } from "./authenticationLifecycle.ts";
+import type { MfaLoginLifecycleService } from "./mfa/loginLifecycle.ts";
 
 const authSession = Object.freeze({
     authenticatedAtMs: 1_800_000_000_000,
@@ -29,6 +31,24 @@ const authUser = Object.freeze({
     id: testSecurityUserId,
     username: "operator",
 });
+
+function createTestMfaLoginLifecycleService(
+    overrides: Partial<MfaLoginLifecycleService> = {}
+): MfaLoginLifecycleService {
+    return Object.freeze({
+        beginPendingLogin:
+            overrides.beginPendingLogin ?? (() => ({ status: "identity-changed" })),
+        completeRecoveryLogin:
+            overrides.completeRecoveryLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
+        completeTotpLogin:
+            overrides.completeTotpLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
+        pendingLoginSummary:
+            overrides.pendingLoginSummary ?? ((): undefined => undefined),
+        revokePendingLogin: overrides.revokePendingLogin ?? (() => false),
+    });
+}
 
 describe("authentication procedures", () => {
     test("sets a hardened cookie while keeping the one-time token out of bootstrap output", async () => {
@@ -128,6 +148,94 @@ describe("authentication procedures", () => {
         expect(responseHeaders.get("set-cookie")).toBeNull();
     });
 
+    test("does not issue MFA completion cookies before successful output validation", async () => {
+        const pendingLogin = generateOpaqueToken("pending-login");
+        const generatedSession = generateOpaqueToken("session");
+        const invalidCompletion = {
+            session: { ...authSession, id: "invalid-session-selector" },
+            status: "authenticated" as const,
+            token: generatedSession.token,
+            user: authUser,
+        };
+        const request = new Request("http://localhost/trpc/test", {
+            headers: {
+                cookie: `${dashboardPendingLoginCookieName}=${pendingLogin.token}`,
+            },
+        });
+
+        for (const method of ["recovery", "totp"] as const) {
+            const responseHeaders = new Headers();
+            const context = await createTestRequestContext(
+                undefined,
+                createTestApplicationRuntime(),
+                {
+                    mfaLoginLifecycle: createTestMfaLoginLifecycleService(
+                        method === "recovery"
+                            ? {
+                                  completeRecoveryLogin: (() =>
+                                      Promise.resolve(
+                                          invalidCompletion
+                                      )) as unknown as MfaLoginLifecycleService["completeRecoveryLogin"],
+                              }
+                            : {
+                                  completeTotpLogin: (() =>
+                                      Promise.resolve(
+                                          invalidCompletion
+                                      )) as unknown as MfaLoginLifecycleService["completeTotpLogin"],
+                              }
+                    ),
+                    request,
+                    responseHeaders,
+                }
+            );
+
+            const failure = await captureFailure(() =>
+                method === "recovery"
+                    ? appRouter.createCaller(context).auth.loginRecovery({
+                          code: `${"a".repeat(32)}-${"b".repeat(32)}`,
+                      })
+                    : appRouter.createCaller(context).auth.loginTotp({ code: "123456" })
+            );
+
+            expect(failure).toBeInstanceOf(Error);
+            expect(responseHeaders.get("set-cookie")).toBeNull();
+        }
+    });
+
+    test("maps pending MFA service outages without issuing cookies", async () => {
+        const pendingLogin = generateOpaqueToken("pending-login");
+        const request = new Request("http://localhost/trpc/test", {
+            headers: {
+                cookie: `${dashboardPendingLoginCookieName}=${pendingLogin.token}`,
+            },
+        });
+
+        for (const method of ["recovery", "totp"] as const) {
+            const responseHeaders = new Headers();
+            const context = await createTestRequestContext(
+                undefined,
+                createTestApplicationRuntime(),
+                {
+                    mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+                    request,
+                    responseHeaders,
+                }
+            );
+
+            const failure = await captureFailure(() =>
+                method === "recovery"
+                    ? appRouter.createCaller(context).auth.loginRecovery({
+                          code: `${"a".repeat(32)}-${"b".repeat(32)}`,
+                      })
+                    : appRouter.createCaller(context).auth.loginTotp({ code: "123456" })
+            );
+
+            expect(failure).toBeInstanceOf(TRPCError);
+            expect((failure as TRPCError).code).toBe("SERVICE_UNAVAILABLE");
+            expect(responseHeaders.get("set-cookie")).toBeNull();
+        }
+    });
+
     test("enforces browser-session-only procedures", async () => {
         const authenticationCases = [
             { authentication: undefined, code: "UNAUTHORIZED" },
@@ -170,6 +278,30 @@ describe("authentication procedures", () => {
         }
     });
 
+    test("preserves the session cookie when revocation requires recent proof", async () => {
+        const responseHeaders = new Headers();
+        const context = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    revokeSession: () => ({ status: "step-up-required" }),
+                }),
+                responseHeaders,
+            }
+        );
+
+        const failure = await captureFailure(() =>
+            appRouter.createCaller(context).auth.revokeSession({
+                sessionId: testSessionSelector,
+            })
+        );
+
+        expect(failure).toBeInstanceOf(TRPCError);
+        expect((failure as TRPCError).code).toBe("FORBIDDEN");
+        expect(responseHeaders.get("set-cookie")).toBeNull();
+    });
+
     test("clears stale authentication after a password-change race", async () => {
         const responseHeaders = new Headers();
         const context = await createTestRequestContext(
@@ -193,6 +325,31 @@ describe("authentication procedures", () => {
         expect(failure).toBeInstanceOf(TRPCError);
         expect((failure as TRPCError).code).toBe("UNAUTHORIZED");
         expect(responseHeaders.get("set-cookie")).toContain("Max-Age=0");
+    });
+
+    test("preserves the session cookie when password change requires step-up", async () => {
+        const responseHeaders = new Headers();
+        const context = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    changePassword: () => Promise.resolve({ status: "step-up-required" }),
+                }),
+                responseHeaders,
+            }
+        );
+
+        const failure = await captureFailure(() =>
+            appRouter.createCaller(context).auth.changePassword({
+                currentPassword: "current-password-1",
+                newPassword: "replacement-password-2",
+            })
+        );
+
+        expect(failure).toBeInstanceOf(TRPCError);
+        expect((failure as TRPCError).code).toBe("FORBIDDEN");
+        expect(responseHeaders.get("set-cookie")).toBeNull();
     });
 
     test("clears stale authentication after session-list and revoke races", async () => {
