@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import { testDashboardPasswordHash } from "../../test/support/securityPassword.ts";
 
 interface QueryPlanRow {
     detail: string;
@@ -18,8 +19,7 @@ interface TableInfoRow {
 }
 
 const userId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
-const passwordHash =
-    "$argon2id$v=19$m=65536,t=3,p=1$c2FsdA$aGFzaGVkLXZhbGlkYXRvci1ieXRlcw";
+const passwordHash = testDashboardPasswordHash;
 
 function insertUser(database: Awaited<ReturnType<typeof openFreshMigratedDatabase>>) {
     database.sqlite.run(
@@ -61,6 +61,7 @@ describe("security identity schema", () => {
 
             for (const table of [
                 "audit_events",
+                "auth_rate_limit_buckets",
                 "auth_sessions",
                 "automation_credentials",
                 "automation_principal_capabilities",
@@ -360,6 +361,36 @@ describe("security identity schema", () => {
                     [`${"4".repeat(64)}\0suffix`, credentialId]
                 )
             ).toThrow("automation_credentials_validator_hash_check");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("rejects unreviewed Argon2 parameters on insert and update", async () => {
+        const database = await openFreshMigratedDatabase();
+        const unreviewedHash = passwordHash.replace("t=3", "t=9");
+
+        try {
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT INTO users (
+                        created_at,
+                        id,
+                        password_hash,
+                        updated_at,
+                        username
+                    ) VALUES (1000, ?, ?, 1000, 'unsafe-hash')`,
+                    ["019fc968-1a9b-7775-8f1b-d5b863b0e7b4", unreviewedHash]
+                )
+            ).toThrow("users_password_hash_check");
+
+            insertUser(database);
+            expect(() =>
+                database.sqlite.run("UPDATE users SET password_hash = ? WHERE id = ?", [
+                    unreviewedHash,
+                    userId,
+                ])
+            ).toThrow("users_password_hash_check");
         } finally {
             database.sqlite.close(true);
         }

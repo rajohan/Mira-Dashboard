@@ -8,6 +8,7 @@ import {
     uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { browserSessionUserAgentMaximumLength } from "../../../contracts/auth.ts";
 import {
     boundedNonBlankTextCheck,
     lowercaseHexTextCheck,
@@ -76,7 +77,7 @@ export const authSessions = sqliteTable(
         check("auth_sessions_id_check", lowercaseHexTextCheck(table.id, 32)),
         check(
             "auth_sessions_user_agent_check",
-            sql`${table.userAgent} IS NULL OR (${boundedNonBlankTextCheck(table.userAgent, 512)})`
+            sql`${table.userAgent} IS NULL OR (${boundedNonBlankTextCheck(table.userAgent, browserSessionUserAgentMaximumLength)})`
         ),
         check(
             "auth_sessions_validator_hash_check",

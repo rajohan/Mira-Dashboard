@@ -3,7 +3,6 @@ import {
     addMilliseconds,
     compareAsc,
     getTime,
-    hoursToMilliseconds,
     isValid,
     min,
     minutesToMilliseconds,
@@ -24,6 +23,11 @@ import {
 } from "../../../shared/validation.ts";
 import { areSha256DigestsEqual, sha256Hex } from "../../shared/crypto.ts";
 import { parseOpaqueToken, type ParsedOpaqueToken } from "../../shared/opaqueToken.ts";
+import {
+    browserSessionIdleDurationDefaultMs,
+    browserSessionIdleDurationMaximumMs,
+    browserSessionIdleDurationMinimumMs,
+} from "./authenticationPolicy.ts";
 import type { AuthenticationResolution } from "./authenticationResolution.ts";
 import type {
     AuthenticationRepository,
@@ -37,9 +41,6 @@ export const dashboardSessionCookieName = "mira_dashboard_session";
 const defaultAuthenticationLeaseDurationMs = secondsToMilliseconds(30);
 const minimumAuthenticationLeaseDurationMs = secondsToMilliseconds(1);
 const maximumAuthenticationLeaseDurationMs = minutesToMilliseconds(5);
-const defaultSessionIdleDurationMs = minutesToMilliseconds(30);
-const minimumSessionIdleDurationMs = minutesToMilliseconds(5);
-const maximumSessionIdleDurationMs = hoursToMilliseconds(24);
 const dummyValidatorHash = sha256Hex("mira-dashboard:authentication-dummy:v1");
 
 const authenticationLeaseDurationSchema = v.pipe(
@@ -55,8 +56,8 @@ const authenticationLeaseDurationSchema = v.pipe(
 );
 const sessionIdleDurationSchema = v.pipe(
     positiveSafeIntegerSchema("Session idle duration is invalid"),
-    v.minValue(minimumSessionIdleDurationMs, "Session idle duration is invalid"),
-    v.maxValue(maximumSessionIdleDurationMs, "Session idle duration is invalid")
+    v.minValue(browserSessionIdleDurationMinimumMs, "Session idle duration is invalid"),
+    v.maxValue(browserSessionIdleDurationMaximumMs, "Session idle duration is invalid")
 );
 const nowSchema = v.pipe(
     v.date("Authentication clock is invalid"),
@@ -126,13 +127,16 @@ function readSingleCookie(request: Request, name: string): CookieValue {
     const header = request.headers.get("cookie");
     if (header === null) return { kind: "absent" };
 
-    const occurrences = header.split(";").filter((part) => {
+    const matchingParts = header.split(";").filter((part) => {
         const normalized = part.trim();
         const separator = normalized.indexOf("=");
-        return separator !== -1 && normalized.slice(0, separator).trim() === name;
-    }).length;
-    if (occurrences > 1) return { kind: "invalid" };
-    if (occurrences === 0) return { kind: "absent" };
+        const cookieName =
+            separator === -1 ? normalized : normalized.slice(0, separator).trim();
+        return cookieName === name;
+    });
+    if (matchingParts.length > 1) return { kind: "invalid" };
+    if (matchingParts.length === 0) return { kind: "absent" };
+    if (!matchingParts[0]?.includes("=")) return { kind: "invalid" };
 
     try {
         const value = new CookieMap(header).get(name);
@@ -143,7 +147,20 @@ function readSingleCookie(request: Request, name: string): CookieValue {
 }
 
 /**
- * Creates strict bearer-first request authentication with bounded revalidation leases.
+ * Detects an ambiguous request carrying both automation and browser credentials.
+ * Any occurrence of the Dashboard cookie counts, including malformed or duplicate values.
+ * @param request Candidate HTTP request.
+ * @returns Whether both credential classes are present.
+ */
+export function hasAmbiguousAuthenticationCredentials(request: Request): boolean {
+    return (
+        request.headers.get("authorization") !== null &&
+        readSingleCookie(request, dashboardSessionCookieName).kind !== "absent"
+    );
+}
+
+/**
+ * Creates strict single-credential request authentication with bounded revalidation leases.
  * Authentication and revalidation are read-only: SSE and polling never touch idle activity.
  * @param options Repository, validated durations, and replaceable clock.
  * @returns Request authenticator suitable for the tRPC context composition boundary.
@@ -157,7 +174,7 @@ export function createRequestAuthenticator(
     );
     const sessionIdleDurationMs = parseSchemaWithRangeError(
         sessionIdleDurationSchema,
-        options.sessionIdleDurationMs ?? defaultSessionIdleDurationMs
+        options.sessionIdleDurationMs ?? browserSessionIdleDurationDefaultMs
     );
     const now = () => v.parse(nowSchema, options.now?.() ?? new Date());
 
@@ -274,6 +291,9 @@ export function createRequestAuthenticator(
 
     return Object.freeze({
         authenticate(request: Request) {
+            if (hasAmbiguousAuthenticationCredentials(request)) {
+                return unauthenticatedResolution("invalid");
+            }
             const authorization = request.headers.get("authorization");
             if (authorization !== null) {
                 return authenticateAutomation(authorization);

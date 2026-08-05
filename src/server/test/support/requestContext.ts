@@ -4,6 +4,7 @@ import type {
     ApplicationCapability,
     RequestAuthentication,
 } from "../../../contracts/security.ts";
+import type { AuthenticationLifecycleService } from "../../domains/security/authenticationLifecycle.ts";
 import type { AuthenticationResolution } from "../../domains/security/authenticationResolution.ts";
 import type {
     ApplicationRuntime,
@@ -85,6 +86,33 @@ interface TestApplicationRuntimeOverrides {
 }
 
 /**
+ * Creates an inert mutable-auth service that individual tests can override.
+ * @param overrides Lifecycle methods exercised by the current test.
+ * @returns A complete inert lifecycle service with requested overrides.
+ */
+export function createTestAuthenticationLifecycleService(
+    overrides: Partial<AuthenticationLifecycleService> = {}
+): AuthenticationLifecycleService {
+    return Object.freeze({
+        bootstrap:
+            overrides.bootstrap ?? (() => Promise.resolve({ status: "closed" as const })),
+        changePassword:
+            overrides.changePassword ??
+            (() => Promise.resolve({ status: "session-changed" as const })),
+        listSessions: overrides.listSessions ?? (() => []),
+        login:
+            overrides.login ??
+            (() => Promise.resolve({ status: "bootstrap-required" as const })),
+        logout: overrides.logout ?? (() => false),
+        revokeSession: overrides.revokeSession ?? (() => ({ revoked: false })),
+        status:
+            overrides.status ??
+            (() => ({ authenticated: false, isBootstrapRequired: false })),
+        touchSession: overrides.touchSession ?? ((): undefined => {}),
+    });
+}
+
+/**
  * Creates a lifecycle-safe runtime stub for transport and composition tests.
  * @param overrides Runtime methods exercised by the current test.
  * @returns A complete inert runtime with the requested overrides.
@@ -116,11 +144,22 @@ export function createTestApplicationRuntime(
  */
 export function createTestRequestContext(
     authentication: RequestAuthentication = anonymousAuthentication,
-    applicationRuntime = createTestApplicationRuntime()
+    applicationRuntime = createTestApplicationRuntime(),
+    options: {
+        readonly authenticationClientSourceId?: string;
+        readonly authenticationLifecycle?: AuthenticationLifecycleService;
+        readonly request?: Request;
+        readonly responseHeaders?: Headers;
+    } = {}
 ): Promise<RequestContext> {
     return createRequestContext({
         applicationRuntime,
+        authenticationClientSourceId:
+            options.authenticationClientSourceId ?? "test-client-source",
+        authenticationLifecycle:
+            options.authenticationLifecycle ?? createTestAuthenticationLifecycleService(),
         authenticateRequest: () => createTestAuthenticationResolution(authentication),
-        request: new Request("http://localhost/trpc/test"),
+        request: options.request ?? new Request("http://localhost/trpc/test"),
+        responseHeaders: options.responseHeaders ?? new Headers(),
     });
 }

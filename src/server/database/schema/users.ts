@@ -35,7 +35,7 @@ export const users = sqliteTable(
         check("users_id_check", uuidV7TextCheck(table.id)),
         check(
             "users_password_hash_check",
-            sql`length(${table.passwordHash}) BETWEEN 32 AND 512 AND ${nulFreeTextCheck(table.passwordHash)} AND substr(${table.passwordHash}, 1, 10) = '$argon2id$'`
+            sql`length(${table.passwordHash}) = 118 AND ${nulFreeTextCheck(table.passwordHash)} AND substr(${table.passwordHash}, 1, 31) = '$argon2id$v=19$m=65536,t=3,p=1$' AND substr(${table.passwordHash}, 75, 1) = '$' AND substr(${table.passwordHash}, 32, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr(${table.passwordHash}, 76, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr(${table.passwordHash}, 74, 1) GLOB '[AEIMQUYcgkosw048]' AND substr(${table.passwordHash}, 118, 1) GLOB '[AEIMQUYcgkosw048]'`
         ),
         check(
             "users_username_check",

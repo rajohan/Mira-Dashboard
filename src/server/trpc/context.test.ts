@@ -1,16 +1,25 @@
 import { describe, expect, test } from "bun:test";
 
-import { createTestApplicationRuntime } from "../test/support/requestContext.ts";
+import {
+    createTestApplicationRuntime,
+    createTestAuthenticationLifecycleService,
+} from "../test/support/requestContext.ts";
 import { createRequestContext } from "./context.ts";
 
 describe("tRPC request context", () => {
     test("validates and freezes the authentication boundary", async () => {
-        const request = new Request("http://localhost/trpc/events.stream");
+        const request = new Request("http://localhost/trpc/events.stream", {
+            headers: { "user-agent": "Context Test Browser" },
+        });
         let observedRequest: Request | undefined;
         const applicationRuntime = createTestApplicationRuntime();
+        const authenticationLifecycle = createTestAuthenticationLifecycleService();
+        const responseHeaders = new Headers();
 
         const context = await createRequestContext({
             applicationRuntime,
+            authenticationClientSourceId: "client-source-1",
+            authenticationLifecycle,
             authenticateRequest(candidate) {
                 observedRequest = candidate;
                 return {
@@ -31,6 +40,7 @@ describe("tRPC request context", () => {
                 };
             },
             request,
+            responseHeaders,
         });
 
         expect(observedRequest).toBe(request);
@@ -48,6 +58,10 @@ describe("tRPC request context", () => {
         expect(Object.isFrozen(context.authentication)).toBe(true);
         expect(Object.isFrozen(context.authenticationLease)).toBe(true);
         expect(context.services).toBe(applicationRuntime.services);
+        expect(context.authenticationLifecycle).toBe(authenticationLifecycle);
+        expect(context.authenticationClientSourceId).toBe("client-source-1");
+        expect(context.responseHeaders).toBe(responseHeaders);
+        expect(context.userAgent).toBe("Context Test Browser");
         expect("dispose" in context.services).toBe(false);
         if (context.authentication.kind === "authenticated") {
             expect(Object.isFrozen(context.authentication.principal)).toBe(true);
@@ -62,6 +76,8 @@ describe("tRPC request context", () => {
         try {
             await createRequestContext({
                 applicationRuntime: createTestApplicationRuntime(),
+                authenticationClientSourceId: "client-source-2",
+                authenticationLifecycle: createTestAuthenticationLifecycleService(),
                 authenticateRequest: () => ({
                     authentication: {
                         kind: "authenticated",
@@ -75,6 +91,7 @@ describe("tRPC request context", () => {
                     },
                 }),
                 request: new Request("http://localhost/trpc/events.stream"),
+                responseHeaders: new Headers(),
             });
         } catch (error) {
             failure = error;

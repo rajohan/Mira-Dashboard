@@ -21,6 +21,20 @@ CREATE TABLE `audit_events` (
 	CONSTRAINT "audit_events_target_check" CHECK(length("target_type") BETWEEN 1 AND 64 AND instr("target_type", char(0)) = 0 AND substr("target_type", 1, 1) GLOB '[a-z0-9]' AND "target_type" = lower("target_type") AND "target_type" NOT GLOB '*[^a-z0-9._-]*' AND length("target_id") BETWEEN 1 AND 256 AND instr("target_id", char(0)) = 0 AND length(trim("target_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)
 ) STRICT, WITHOUT ROWID;
 --> statement-breakpoint
+CREATE TABLE `auth_rate_limit_buckets` (
+	`blocked_until` integer,
+	`bucket_key` text PRIMARY KEY NOT NULL,
+	`failure_count` integer NOT NULL,
+	`first_failed_at` integer NOT NULL,
+	`kind` text NOT NULL,
+	`updated_at` integer NOT NULL,
+	CONSTRAINT "auth_rate_limit_buckets_blocked_until_check" CHECK("blocked_until" IS NULL OR ("blocked_until" BETWEEN 0 AND 8640000000000000 AND "blocked_until" > "updated_at")),
+	CONSTRAINT "auth_rate_limit_buckets_bucket_key_check" CHECK(length("bucket_key") = 64 AND instr("bucket_key", char(0)) = 0 AND "bucket_key" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_rate_limit_buckets_failure_count_check" CHECK("failure_count" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "auth_rate_limit_buckets_kind_check" CHECK("kind" IN ('account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-password-global', 'login-password-source')),
+	CONSTRAINT "auth_rate_limit_buckets_timestamps_check" CHECK("first_failed_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "first_failed_at")
+) STRICT;
+--> statement-breakpoint
 CREATE TABLE `auth_sessions` (
 	`authenticated_at` integer NOT NULL,
 	`authentication_version` integer NOT NULL,
@@ -218,13 +232,14 @@ CREATE TABLE `users` (
 	CONSTRAINT "users_created_at_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"),
 	CONSTRAINT "users_disabled_at_check" CHECK("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")),
 	CONSTRAINT "users_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
-	CONSTRAINT "users_password_hash_check" CHECK(length("password_hash") BETWEEN 32 AND 512 AND instr("password_hash", char(0)) = 0 AND substr("password_hash", 1, 10) = '$argon2id$'),
+	CONSTRAINT "users_password_hash_check" CHECK(length("password_hash") = 118 AND instr("password_hash", char(0)) = 0 AND substr("password_hash", 1, 31) = '$argon2id$v=19$m=65536,t=3,p=1$' AND substr("password_hash", 75, 1) = '$' AND substr("password_hash", 32, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 76, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 74, 1) GLOB '[AEIMQUYcgkosw048]' AND substr("password_hash", 118, 1) GLOB '[AEIMQUYcgkosw048]'),
 	CONSTRAINT "users_username_check" CHECK(length("username") BETWEEN 3 AND 32 AND instr("username", char(0)) = 0 AND "username" = lower("username") AND substr("username", 1, 1) GLOB '[a-z0-9]' AND "username" NOT GLOB '*[^a-z0-9._-]*')
 ) STRICT;
 --> statement-breakpoint
 CREATE INDEX `audit_events_occurred_id_idx` ON `audit_events` (`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `audit_events_request_occurred_idx` ON `audit_events` (`request_id`,`occurred_at`,`id`) WHERE "audit_events"."request_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `audit_events_target_occurred_idx` ON `audit_events` (`target_type`,`target_id`,`occurred_at`,`id`);--> statement-breakpoint
+CREATE INDEX `auth_rate_limit_buckets_kind_updated_at_idx` ON `auth_rate_limit_buckets` (`kind`,`updated_at`,`bucket_key`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_expires_at_idx` ON `auth_sessions` (`expires_at`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_user_last_seen_idx` ON `auth_sessions` (`user_id`,`last_seen_at`,`created_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `auth_sessions_validator_hash_unique` ON `auth_sessions` (`validator_hash`);--> statement-breakpoint
