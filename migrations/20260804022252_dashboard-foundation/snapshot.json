@@ -1,11 +1,31 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "46483271-9e0d-4714-9a30-6cdb97d3e558",
+  "id": "4e143da6-6fd0-4ede-b93c-b20598fa961b",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
+    {
+      "name": "audit_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "auth_sessions",
+      "entityType": "tables"
+    },
+    {
+      "name": "automation_credentials",
+      "entityType": "tables"
+    },
+    {
+      "name": "automation_principal_capabilities",
+      "entityType": "tables"
+    },
+    {
+      "name": "automation_principals",
+      "entityType": "tables"
+    },
     {
       "name": "incident_observations",
       "entityType": "tables"
@@ -33,6 +53,450 @@
     {
       "name": "schema_migrations",
       "entityType": "tables"
+    },
+    {
+      "name": "users",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "action",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "actor_id",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "actor_kind",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "authenticator_id",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'{}'",
+      "generated": null,
+      "name": "metadata_json",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "occurred_at",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "target_id",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "target_type",
+      "entityType": "columns",
+      "table": "audit_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "authenticated_at",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "authentication_version",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "auth_method",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "elevated_at",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "elevated_method",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_seen_at",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mfa_verified_at",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_agent",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "validator_hash",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "validator_version",
+      "entityType": "columns",
+      "table": "auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "label",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_used_at",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "prefix",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revoked_at",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "validator_hash",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "validator_version",
+      "entityType": "columns",
+      "table": "automation_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "capability",
+      "entityType": "columns",
+      "table": "automation_principal_capabilities"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "granted_at",
+      "entityType": "columns",
+      "table": "automation_principal_capabilities"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "automation_principal_capabilities"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "authorization_version",
+      "entityType": "columns",
+      "table": "automation_principals"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "automation_principals"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "disabled_at",
+      "entityType": "columns",
+      "table": "automation_principals"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "automation_principals"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "label",
+      "entityType": "columns",
+      "table": "automation_principals"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "automation_principals"
     },
     {
       "type": "text",
@@ -645,6 +1109,121 @@
       "table": "schema_migrations"
     },
     {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "authentication_version",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "disabled_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "password_hash",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "username",
+      "entityType": "columns",
+      "table": "users"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_auth_sessions_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "auth_sessions"
+    },
+    {
+      "columns": [
+        "principal_id"
+      ],
+      "tableTo": "automation_principals",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_automation_credentials_principal_id_automation_principals_id_fk",
+      "entityType": "fks",
+      "table": "automation_credentials"
+    },
+    {
+      "columns": [
+        "principal_id"
+      ],
+      "tableTo": "automation_principals",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_automation_principal_capabilities_principal_id_automation_principals_id_fk",
+      "entityType": "fks",
+      "table": "automation_principal_capabilities"
+    },
+    {
       "columns": [
         "incident_id"
       ],
@@ -703,6 +1282,52 @@
       "name": "fk_notifications_incident_id_incidents_id_fk",
       "entityType": "fks",
       "table": "notifications"
+    },
+    {
+      "columns": [
+        "principal_id",
+        "capability"
+      ],
+      "nameExplicit": true,
+      "name": "automation_principal_capabilities_pk",
+      "entityType": "pks",
+      "table": "automation_principal_capabilities"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "audit_events_pk",
+      "table": "audit_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "auth_sessions_pk",
+      "table": "auth_sessions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "automation_credentials_pk",
+      "table": "automation_credentials",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "automation_principals_pk",
+      "table": "automation_principals",
+      "entityType": "pks"
     },
     {
       "columns": [
@@ -766,6 +1391,185 @@
       "name": "schema_migrations_pk",
       "table": "schema_migrations",
       "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "users_pk",
+      "table": "users",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "audit_events_occurred_id_idx",
+      "entityType": "indexes",
+      "table": "audit_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "request_id",
+          "isExpression": false
+        },
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"audit_events\".\"request_id\" IS NOT NULL",
+      "origin": "manual",
+      "name": "audit_events_request_occurred_idx",
+      "entityType": "indexes",
+      "table": "audit_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "target_type",
+          "isExpression": false
+        },
+        {
+          "value": "target_id",
+          "isExpression": false
+        },
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "audit_events_target_occurred_idx",
+      "entityType": "indexes",
+      "table": "audit_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "auth_sessions_expires_at_idx",
+      "entityType": "indexes",
+      "table": "auth_sessions"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "last_seen_at",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "auth_sessions_user_last_seen_idx",
+      "entityType": "indexes",
+      "table": "auth_sessions"
+    },
+    {
+      "columns": [
+        {
+          "value": "validator_hash",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "auth_sessions_validator_hash_unique",
+      "entityType": "indexes",
+      "table": "auth_sessions"
+    },
+    {
+      "columns": [
+        {
+          "value": "principal_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "automation_credentials_principal_created_idx",
+      "entityType": "indexes",
+      "table": "automation_credentials"
+    },
+    {
+      "columns": [
+        {
+          "value": "prefix",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "automation_credentials_prefix_unique",
+      "entityType": "indexes",
+      "table": "automation_credentials"
+    },
+    {
+      "columns": [
+        {
+          "value": "validator_version",
+          "isExpression": false
+        },
+        {
+          "value": "validator_hash",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "automation_credentials_validator_unique",
+      "entityType": "indexes",
+      "table": "automation_credentials"
     },
     {
       "columns": [
@@ -1004,6 +1808,218 @@
       "table": "reports"
     },
     {
+      "columns": [
+        {
+          "value": "username",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "users_username_unique",
+      "entityType": "indexes",
+      "table": "users"
+    },
+    {
+      "value": "length(\"action\") BETWEEN 1 AND 128 AND instr(\"action\", char(0)) = 0 AND substr(\"action\", 1, 1) GLOB '[a-z0-9]' AND \"action\" = lower(\"action\") AND \"action\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "audit_events_action_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "\"actor_kind\" IN ('anonymous', 'automation', 'system', 'user') AND length(\"actor_id\") BETWEEN 1 AND 128 AND instr(\"actor_id\", char(0)) = 0 AND length(trim(\"actor_id\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND ((\"actor_kind\" IN ('automation', 'user') AND \"authenticator_id\" IS NOT NULL) OR (\"actor_kind\" IN ('anonymous', 'system') AND \"authenticator_id\" IS NULL))",
+      "name": "audit_events_actor_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "\"authenticator_id\" IS NULL OR (length(\"authenticator_id\") BETWEEN 1 AND 128 AND instr(\"authenticator_id\", char(0)) = 0 AND length(trim(\"authenticator_id\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)",
+      "name": "audit_events_authenticator_id_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "audit_events_id_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "length(CAST(\"metadata_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"metadata_json\") THEN json_type(\"metadata_json\") = 'object' ELSE 0 END",
+      "name": "audit_events_metadata_json_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "\"occurred_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "audit_events_occurred_at_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "\"outcome\" IN ('accepted', 'attempted', 'cancelled', 'denied', 'failed', 'succeeded')",
+      "name": "audit_events_outcome_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "\"request_id\" IS NULL OR (length(\"request_id\") BETWEEN 1 AND 128 AND instr(\"request_id\", char(0)) = 0 AND length(trim(\"request_id\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)",
+      "name": "audit_events_request_id_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "length(\"target_type\") BETWEEN 1 AND 64 AND instr(\"target_type\", char(0)) = 0 AND substr(\"target_type\", 1, 1) GLOB '[a-z0-9]' AND \"target_type\" = lower(\"target_type\") AND \"target_type\" NOT GLOB '*[^a-z0-9._-]*' AND length(\"target_id\") BETWEEN 1 AND 256 AND instr(\"target_id\", char(0)) = 0 AND length(trim(\"target_id\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0",
+      "name": "audit_events_target_check",
+      "entityType": "checks",
+      "table": "audit_events"
+    },
+    {
+      "value": "\"authentication_version\" BETWEEN 1 AND 9007199254740991",
+      "name": "auth_sessions_authentication_version_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"auth_method\" IN ('password', 'recovery', 'totp', 'webauthn')",
+      "name": "auth_sessions_auth_method_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"elevated_method\" IS NULL OR \"elevated_method\" IN ('password', 'recovery', 'totp', 'webauthn')",
+      "name": "auth_sessions_elevated_method_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"created_at\"",
+      "name": "auth_sessions_expiry_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"authenticated_at\" BETWEEN 0 AND 8640000000000000 AND \"authenticated_at\" <= \"created_at\"",
+      "name": "auth_sessions_authentication_time_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"last_seen_at\" BETWEEN 0 AND 8640000000000000 AND \"last_seen_at\" >= \"created_at\" AND \"last_seen_at\" < \"expires_at\"",
+      "name": "auth_sessions_last_seen_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"mfa_verified_at\" IS NULL OR (\"mfa_verified_at\" BETWEEN 0 AND 8640000000000000 AND \"mfa_verified_at\" >= \"authenticated_at\" AND \"mfa_verified_at\" < \"expires_at\")",
+      "name": "auth_sessions_mfa_time_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "(\"elevated_at\" IS NULL AND \"elevated_method\" IS NULL) OR (\"elevated_at\" IS NOT NULL AND \"elevated_method\" IS NOT NULL AND \"elevated_at\" BETWEEN 0 AND 8640000000000000 AND \"elevated_at\" >= \"authenticated_at\" AND \"elevated_at\" < \"expires_at\")",
+      "name": "auth_sessions_elevation_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "length(\"id\") = 32 AND \"id\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "auth_sessions_id_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"user_agent\" IS NULL OR (length(\"user_agent\") BETWEEN 1 AND 512 AND instr(\"user_agent\", char(0)) = 0 AND length(trim(\"user_agent\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)",
+      "name": "auth_sessions_user_agent_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "length(\"validator_hash\") = 64 AND \"validator_hash\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "auth_sessions_validator_hash_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "\"validator_version\" = 1",
+      "name": "auth_sessions_validator_version_check",
+      "entityType": "checks",
+      "table": "auth_sessions"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "automation_credentials_id_check",
+      "entityType": "checks",
+      "table": "automation_credentials"
+    },
+    {
+      "value": "length(\"label\") BETWEEN 1 AND 128 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0",
+      "name": "automation_credentials_label_check",
+      "entityType": "checks",
+      "table": "automation_credentials"
+    },
+    {
+      "value": "length(\"prefix\") = 32 AND \"prefix\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "automation_credentials_prefix_check",
+      "entityType": "checks",
+      "table": "automation_credentials"
+    },
+    {
+      "value": "length(\"validator_hash\") = 64 AND \"validator_hash\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "automation_credentials_validator_hash_check",
+      "entityType": "checks",
+      "table": "automation_credentials"
+    },
+    {
+      "value": "\"validator_version\" = 1",
+      "name": "automation_credentials_validator_version_check",
+      "entityType": "checks",
+      "table": "automation_credentials"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND (\"expires_at\" IS NULL OR (\"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"created_at\")) AND (\"revoked_at\" IS NULL OR (\"revoked_at\" BETWEEN 0 AND 8640000000000000 AND \"revoked_at\" >= \"created_at\")) AND (\"last_used_at\" IS NULL OR (\"last_used_at\" BETWEEN 0 AND 8640000000000000 AND \"last_used_at\" >= \"created_at\" AND (\"expires_at\" IS NULL OR \"last_used_at\" < \"expires_at\") AND (\"revoked_at\" IS NULL OR \"last_used_at\" <= \"revoked_at\")))",
+      "name": "automation_credentials_time_check",
+      "entityType": "checks",
+      "table": "automation_credentials"
+    },
+    {
+      "value": "\"capability\" IN ('notifications:read', 'reports:read')",
+      "name": "automation_principal_capabilities_capability_check",
+      "entityType": "checks",
+      "table": "automation_principal_capabilities"
+    },
+    {
+      "value": "\"granted_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "automation_principal_capabilities_granted_at_check",
+      "entityType": "checks",
+      "table": "automation_principal_capabilities"
+    },
+    {
+      "value": "\"authorization_version\" BETWEEN 1 AND 9007199254740991",
+      "name": "automation_principals_authorization_version_check",
+      "entityType": "checks",
+      "table": "automation_principals"
+    },
+    {
+      "value": "length(\"id\") BETWEEN 1 AND 64 AND \"id\" = lower(\"id\") AND substr(\"id\", 1, 1) GLOB '[a-z0-9]' AND \"id\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "automation_principals_id_check",
+      "entityType": "checks",
+      "table": "automation_principals"
+    },
+    {
+      "value": "length(\"label\") BETWEEN 1 AND 128 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0",
+      "name": "automation_principals_label_check",
+      "entityType": "checks",
+      "table": "automation_principals"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"created_at\" AND (\"disabled_at\" IS NULL OR (\"disabled_at\" BETWEEN 0 AND 8640000000000000 AND \"disabled_at\" >= \"created_at\" AND \"disabled_at\" <= \"updated_at\"))",
+      "name": "automation_principals_time_check",
+      "entityType": "checks",
+      "table": "automation_principals"
+    },
+    {
       "value": "CASE WHEN json_valid(\"details_json\") THEN json_type(\"details_json\") = 'object' ELSE 0 END",
       "name": "incident_observations_details_json_check",
       "entityType": "checks",
@@ -1158,6 +2174,42 @@
       "name": "reports_metadata_json_check",
       "entityType": "checks",
       "table": "reports"
+    },
+    {
+      "value": "\"authentication_version\" BETWEEN 1 AND 9007199254740991",
+      "name": "users_authentication_version_check",
+      "entityType": "checks",
+      "table": "users"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"created_at\"",
+      "name": "users_created_at_check",
+      "entityType": "checks",
+      "table": "users"
+    },
+    {
+      "value": "\"disabled_at\" IS NULL OR (\"disabled_at\" BETWEEN 0 AND 8640000000000000 AND \"disabled_at\" >= \"created_at\" AND \"disabled_at\" <= \"updated_at\")",
+      "name": "users_disabled_at_check",
+      "entityType": "checks",
+      "table": "users"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "users_id_check",
+      "entityType": "checks",
+      "table": "users"
+    },
+    {
+      "value": "length(\"password_hash\") BETWEEN 32 AND 512 AND substr(\"password_hash\", 1, 10) = '$argon2id$'",
+      "name": "users_password_hash_check",
+      "entityType": "checks",
+      "table": "users"
+    },
+    {
+      "value": "length(\"username\") BETWEEN 3 AND 32 AND \"username\" = lower(\"username\") AND substr(\"username\", 1, 1) GLOB '[a-z0-9]' AND \"username\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "users_username_check",
+      "entityType": "checks",
+      "table": "users"
     }
   ],
   "renames": []

@@ -1,4 +1,18 @@
 /**
+ * Captures one expected Promise rejection for direct identity assertions in tests.
+ * @param work Asynchronous operation expected to reject.
+ * @returns The captured rejection reason.
+ */
+export async function captureFailure(work: () => PromiseLike<unknown>): Promise<unknown> {
+    try {
+        await work();
+    } catch (error) {
+        return error;
+    }
+    throw new Error("Expected asynchronous operation to fail");
+}
+
+/**
  * Bounds an asynchronous test operation and clears its timer after settlement.
  * @param operation Promise under test.
  * @param timeoutMs Maximum wait in milliseconds.

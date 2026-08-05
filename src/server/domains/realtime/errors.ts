@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 
 import type { RealtimeEventStreamError } from "../../platform/realtime/eventPumpService.ts";
+import type { RenewableStreamLeaseError } from "../../platform/realtime/renewableStreamLease.ts";
 
 function subscriptionError(
     error: Extract<
@@ -49,6 +50,25 @@ export function realtimeEventStreamErrorToTRPCError(
         }
         case "RealtimeEventSubscriptionStreamError": {
             return subscriptionError(error);
+        }
+    }
+}
+
+/**
+ * Maps bounded lease infrastructure failures without exposing internals.
+ * @param error Renewable lease failure crossing the stream boundary.
+ * @returns A redacted service-unavailable transport error.
+ */
+export function renewableStreamLeaseErrorToTRPCError(
+    error: RenewableStreamLeaseError
+): TRPCError {
+    switch (error._tag) {
+        case "RenewableStreamLeaseInvalidError":
+        case "RenewableStreamLeaseTimeoutError": {
+            return new TRPCError({
+                code: "SERVICE_UNAVAILABLE",
+                message: "Realtime authentication is temporarily unavailable",
+            });
         }
     }
 }

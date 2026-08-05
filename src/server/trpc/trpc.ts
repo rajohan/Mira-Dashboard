@@ -41,9 +41,13 @@ export const authenticatedProcedure = publicProcedure.use(({ ctx, next }) => {
             message: "Authentication required",
         });
     }
+    if (ctx.authenticationLease === undefined) {
+        throw new Error("Authenticated request context is missing its lease");
+    }
     return next({
         ctx: {
             ...ctx,
+            authenticationLease: ctx.authenticationLease,
             principal: ctx.authentication.principal,
         },
     });

@@ -5,13 +5,14 @@ import { TRPCError } from "@trpc/server";
 import { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
+import { createTestAutomationAuthentication } from "../../test/support/requestContext.ts";
 import { authorizeRealtimeTopics, realtimeDeliveryToStreamOutput } from "./transport.ts";
 
-const reportsPrincipal: AuthenticatedPrincipal = {
-    capabilities: ["reports:read"],
-    id: "reports-reader",
-    kind: "automation",
-};
+const reportsAuthentication = createTestAutomationAuthentication(["reports:read"]);
+if (reportsAuthentication.kind !== "authenticated") {
+    throw new Error("Test automation identity is not authenticated");
+}
+const reportsPrincipal: AuthenticatedPrincipal = reportsAuthentication.principal;
 
 const reportDelivery: RealtimeEventDelivery = {
     event: {

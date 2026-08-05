@@ -213,7 +213,7 @@ export function applyVerifiedMigrations(
         const pending = migrations.slice(applied.length);
         const baseAppliedAt = parseSchemaWithRangeError(
             migrationAppliedAtSchema,
-            getTime(options.appliedAt ?? Date.now())
+            getTime(options.appliedAt ?? new Date())
         );
 
         for (const [pendingIndex, migration] of pending.entries()) {

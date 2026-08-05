@@ -12,12 +12,18 @@ interface IntegrityRow {
     integrity_check: string;
 }
 
-interface SchemaObjectRow {
+interface TableListRow {
     name: string;
-    sql: string;
+    strict: number;
+    wr: number;
 }
 
 const expectedTables: string[] = [
+    "audit_events",
+    "auth_sessions",
+    "automation_credentials",
+    "automation_principal_capabilities",
+    "automation_principals",
     "incident_observations",
     "incidents",
     "monitor_runs",
@@ -25,6 +31,7 @@ const expectedTables: string[] = [
     "realtime_events",
     "reports",
     "schema_migrations",
+    "users",
 ];
 
 describe("database migration graph", () => {
@@ -45,10 +52,10 @@ describe("database migration graph", () => {
 
         try {
             const tableDefinitions = database.sqlite
-                .query<SchemaObjectRow, []>(`
-                    SELECT name, sql
-                    FROM sqlite_schema
-                    WHERE type = 'table'
+                .query<TableListRow, []>(`
+                    SELECT name, strict, wr
+                    FROM pragma_table_list
+                    WHERE schema = 'main'
                       AND name NOT GLOB 'sqlite_*'
                     ORDER BY name
                 `)
@@ -56,9 +63,10 @@ describe("database migration graph", () => {
             const tables = tableDefinitions.map((row) => row.name);
 
             expect(tables).toEqual(expectedTables);
-            expect(
-                tableDefinitions.every((row) => row.sql.trimEnd().endsWith("STRICT"))
-            ).toBeTrue();
+            expect(tableDefinitions.every((row) => row.strict === 1)).toBeTrue();
+            expect(tableDefinitions.find((row) => row.name === "audit_events")?.wr).toBe(
+                1
+            );
             expect(
                 database.sqlite
                     .query<{ checksum: string; id: string; release_id: string }, []>(`
