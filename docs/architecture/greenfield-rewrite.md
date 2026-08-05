@@ -71,9 +71,9 @@
   datatype, and partial-index query-plan tests. An explicit manifest pins both the SQL and
   snapshot SHA-256 values and rejects tampered or unreviewed migration folders before runtime
   application. Review hardening now also enforces object-root JSON in SQLite for report metadata
-  and incident details. Before the foundation node was locked, that work regenerated the then-
-  unpublished initial migration rather than adding compatibility history; later slices append
-  immutable nodes. Every fresh-database fixture applies only checksum-verified statements through
+  and incident details. Because no rewrite database is live, every schema slice regenerates the
+  same unpublished fresh-database baseline rather than preserving incremental implementation
+  history. Every fresh-database fixture applies only checksum-verified statements through
   Dashboard's native SQLite runner. That runner validates the canonical graph,
   holds an immediate transaction across validation and application, and records the reviewed SQL
   checksum in the owned `schema_migrations` ledger. Before any transaction it requires foreign
@@ -81,9 +81,8 @@
   CHECK-constraint, or general SQLite integrity failures. Focused tests cover malformed and
   non-object JSON, SQL/snapshot tampering, manifest shape/order, strict tables, enforcement and
   integrity failures, transactional rollback, unknown-schema rejection, mandatory realtime-event
-  entity identity, Valibot round-trips, and query plans; the migration/database subset passes
-  29/29 tests. The reviewed foundation bytes are now locked; subsequent schema changes use new
-  checksummed manifest nodes rather than rewriting that history.
+  entity identity, Valibot round-trips, and query plans. The baseline becomes immutable only at
+  cutover; genuine post-cutover schema changes then use new checksummed manifest nodes.
 - Migration graph validation runs through the read-only `drizzle-kit check` CLI in the foundation
   job. A non-writing `drizzle-kit generate --explain` pass must also report `no_changes`, so a
   TypeScript schema edit cannot drift from the reviewed migration snapshot. A controlled
@@ -125,10 +124,10 @@
   subscriber cleanup, deterministic server teardown, and temporary TLS-file cleanup are covered.
 - Runtime-facing code and tooling no longer use temporary `greenfield` names. The rewrite server
   factory is `createServer`, scripts use `checkDatabaseSchema.ts` and `generateDocs.ts`, CI uses the
-  `server-foundation` job, and the locked initial migration remains
-  `20260804022252_dashboard-foundation`. Security identity and audit objects follow in the
-  append-only `20260805071222_security-core` node. The blueprint keeps its name because it
-  documents the rewrite project itself.
+  `server-foundation` job, and the single unpublished migration remains
+  `20260804022252_dashboard-foundation`. Security identity and audit objects are regenerated into
+  that baseline rather than recorded as a compatibility upgrade. The blueprint keeps its name
+  because it documents the rewrite project itself.
 - The readiness controller is deliberately dependency-injected and initially unavailable. A later
   composition slice must promote it only after configuration, checksum-verified database startup,
   and other declared critical dependencies complete; this PR does not pretend those dependencies
@@ -249,8 +248,8 @@
   tie-breaker. A completed timestamp more than five minutes ahead of the server clock is rejected
   before repository entry, preventing an accidental epoch-microseconds value from poisoning that
   monitor's ordering watermark.
-- Before the foundation node was locked, its then-unpublished fresh-database migration was
-  regenerated in place. Monitor runs persist the immutable submission checksum and enforce
+- The unpublished fresh-database baseline was regenerated in place for this schema slice. Monitor
+  runs persist the immutable submission checksum and enforce
   completion ordering; incidents enforce seen/resolution ordering; observations preserve kind,
   severity, and title with one row per run/incident; and realtime events carry an enforced expiry
   with an indexed `(expires_at, id)` retention scan. The migration SQL, Drizzle snapshot, and
@@ -362,6 +361,25 @@
   retains revocable opaque credential validators rather than JWTs, configuration uses Bun plus
   composition-root Valibot parsing rather than `dotenv`, and HTTP calls use tRPC/native `fetch`
   rather than Axios.
+
+### 2026-08-05 — Security core and fresh database baseline implemented
+
+- Persistent users, browser sessions, automation principals, scoped capabilities, opaque
+  credential validators, and an append-only `STRICT, WITHOUT ROWID` audit ledger now have one
+  Drizzle schema, storage constraints, Valibot read/write boundaries, and repository-backed
+  request authentication. Browser-origin enforcement rejects unsafe cross-site requests before
+  tRPC dispatch.
+- Long-lived subscriptions receive a required renewable authorization lease. Renewal fails closed
+  when the authenticator, principal identity, authorization version, capability set, or persisted
+  validator version changes, and the stream scope is finalized on cancellation or renewal failure.
+- Every fixed or bounded security text field rejects embedded NUL at both Valibot and SQLite
+  boundaries. Audit metadata has bounded depth and safe-integer rules, and append-only triggers
+  reject replacement, update, and deletion.
+- The unpublished foundation and security migrations were consolidated into one generated
+  fresh-database baseline. Compatibility preflights and hypothetical rewrite-database upgrade tests
+  were removed. Until cutover, schema work regenerates this one baseline and updates its reviewed
+  checksums; after cutover, the baseline is immutable and later production changes append real
+  forward migrations.
 
 ## Executive Decision
 
@@ -903,9 +921,10 @@ reason showing that no current frontend or automation behavior depends on it.
   across network or child-process work.
 - Use UUIDv7 text IDs for externally referenced domain records and integer sequence IDs for
   high-volume local journals/outboxes.
-- Keep `.notNull()` on text primary keys for Drizzle's type model. SQLite `STRICT` tables make
-  primary-key nullability effective in the applied schema, and a fresh-database test inserts a
-  null key to prove enforcement.
+- Keep `.notNull()` on text primary keys for Drizzle's type model. Drizzle Kit currently emits
+  `TEXT PRIMARY KEY` without the explicit `NOT NULL`, so the reviewed baseline restores that
+  declaration for every rowid-backed text key; `WITHOUT ROWID` supplies the same storage invariant
+  for the audit ledger. Fresh-database introspection verifies the complete applied set.
 - Create the append-only `audit_events` table `WITHOUT ROWID` so no hidden SQLite identity can
   bypass its replacement guard; its explicit UUIDv7 primary key remains the only row identity.
 - Store timestamps as UTC epoch milliseconds in `INTEGER` columns. Serialize them explicitly
@@ -947,10 +966,12 @@ applies the SQL, and runs integrity checks. `drizzle-kit push` is forbidden in p
 
 Drizzle ORM/Kit `1.0.0-rc.4` does not model SQLite's table-level `STRICT` option in
 `sqliteTable`. Generated `CREATE TABLE` statements are therefore reviewed to add the `STRICT`
-keyword without changing columns, keys, checks, or indexes. CI applies the tracked SQL to an
-empty database and introspects `sqlite_schema`; every Dashboard-owned table must remain
-`STRICT`. This explicit, tested SQLite extension is preferable to pretending Drizzle generated
-an invariant it currently cannot represent.
+keyword, restore explicit `NOT NULL` on rowid-backed text primary keys where Kit elides it, and apply
+`WITHOUT ROWID` plus the custom triggers to `audit_events`. CI applies the tracked SQL to an empty
+database and introspects `sqlite_schema` plus `pragma_table_info`; every Dashboard-owned table must
+remain `STRICT`, every text primary-key component must be non-null, and the audit ledger must have
+no hidden rowid. These explicit, tested SQLite extensions are preferable to pretending Drizzle
+generated invariants it currently cannot represent.
 
 Pull requests run the lockfile-pinned `drizzle-kit check` CLI in the read-only foundation job.
 It validates the snapshot DAG without giving contributor-controlled code a pull-request write
@@ -1055,15 +1076,16 @@ them.
 ### Migrations, backup, and retention
 
 Drizzle Kit v1 stores the migration graph as timestamped directories containing
-`migration.sql` and `snapshot.json`. The new database begins by applying the ordered graph from
-`migrations/`; the first node is the locked, reviewed `*_dashboard-foundation` migration. The
-forward `*_security-core` node adds the security identity and audit objects, including tested
-SQLite `STRICT` table options and deliberate `audit_events WITHOUT ROWID` hardening. It also
-forward-hardens the locked foundation's incident fingerprint and monitor-run checksum with
-`INSERT`/`UPDATE` NUL-rejection triggers. A no-op preflight through those triggers makes an upgrade
-fail atomically if raw legacy data already violates the canonical checksum contract. Later nodes
-are generated by Drizzle Kit, reviewed as SQL, immutable, checksummed, transactional where SQLite
-permits, and registered in the explicit manifest.
+`migration.sql` and `snapshot.json`. During the unpublished rewrite, `migrations/` contains exactly
+one evolving `*_dashboard-foundation` baseline generated from the complete current Drizzle schema.
+The generated SQL includes the security identity objects, SQLite `STRICT` table options, canonical
+NUL-free constraints, and deliberate `audit_events WITHOUT ROWID` hardening. The custom audit
+metadata and append-only triggers are reviewed additions because Drizzle does not model them.
+There is no compatibility preflight or upgrade path for an intermediate rewrite database: every
+test and the final cutover start empty and apply this one baseline. Each schema slice regenerates
+the baseline, reviews the complete SQL/snapshot diff, and updates the explicit manifest checksums.
+At cutover those bytes become immutable; later production schema changes are generated as new,
+forward-only, checksummed nodes.
 
 The snapshot files form Drizzle Kit's conflict-analysis DAG. Dashboard's runtime loader applies
 the explicit manifest order after verifying valid 14-digit timestamp prefixes, unique full folder
@@ -1072,8 +1094,8 @@ directories. After the raw bytes are verified, the runner trims only each statem
 whitespace before execution so Bun SQLite cannot mask a trigger abort behind a trailing `;\n`;
 the checksummed source stays unchanged. `drizzle-kit check` must be green before release; stock
 Drizzle name-based pending detection is not accepted as the integrity boundary.
-Startup acquires a migration lock, creates and verifies a WAL-safe snapshot before a schema
-change, and rejects unknown or checksum-mismatched history.
+Startup acquires a migration lock, creates and verifies a WAL-safe snapshot before a post-cutover
+schema change, and rejects unknown or checksum-mismatched history.
 
 Web and worker may start concurrently, but only one migrates. The other waits with a bounded
 deadline and validates the final schema. Neither process contains table/column existence
@@ -1495,7 +1517,7 @@ database path. Cutover is deliberately simple:
 
 1. Stop old web and worker writers.
 2. Create and verify a final immutable old-database snapshot.
-3. Initialize a new database solely from the tracked greenfield migration graph.
+3. Initialize a new database solely from the tracked greenfield baseline.
 4. Bootstrap the sole operator again and re-enroll MFA/passkeys rather than copying live session
    or challenge state.
 5. Run parity smoke checks, then activate the new release/database pair.
@@ -1619,7 +1641,7 @@ The rewrite is ready only when all of the following are true:
   after a resolved incident reappears;
 - database constraints, query plans, migrations, backup, restore, retention, WAL, and paired
   rollback are verified;
-- the Drizzle schema, generated migration history, and an introspected freshly migrated database
+- the Drizzle schema, generated fresh baseline, and an introspected freshly initialized database
   agree in CI;
 - authentication, step-up, automation scopes, dangerous adapters, file boundaries, secret
   redaction, and audit behavior pass security review;

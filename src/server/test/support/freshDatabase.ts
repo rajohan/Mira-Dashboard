@@ -9,7 +9,7 @@ import { loadVerifiedMigrations } from "../../database/migrations/loadVerifiedMi
 
 const testReleaseId = "0".repeat(40);
 
-/** Root of the immutable Drizzle migration graph used by fresh-database tests. */
+/** Root of the reviewed Drizzle baseline used by fresh-database tests. */
 export const migrationsDirectory = path.resolve(
     import.meta.dir,
     "../../../../migrations"

@@ -211,7 +211,7 @@ describe("monitoring schema", () => {
                     "incident-nul",
                     "ops-check",
                 ])
-            ).toThrow("incidents fingerprint must not contain NUL");
+            ).toThrow("incidents_fingerprint_check");
 
             database.sqlite.run(insertIncidentSql, [
                 "{}",
@@ -224,7 +224,7 @@ describe("monitoring schema", () => {
                     "UPDATE incidents SET fingerprint = ? WHERE id = 'incident-valid'",
                     [`${memoryFingerprint}\0suffix`]
                 )
-            ).toThrow("incidents fingerprint must not contain NUL");
+            ).toThrow("incidents_fingerprint_check");
 
             const insertMonitorRun = `
                 INSERT INTO monitor_runs (
@@ -241,7 +241,7 @@ describe("monitoring schema", () => {
                     "run-nul",
                     `${filesystemFingerprint}\0suffix`,
                 ])
-            ).toThrow("monitor_runs submission_sha256 must not contain NUL");
+            ).toThrow("monitor_runs_submission_sha256_check");
 
             database.sqlite.run(insertMonitorRun, ["run-valid", filesystemFingerprint]);
             expect(() =>
@@ -249,7 +249,7 @@ describe("monitoring schema", () => {
                     "UPDATE monitor_runs SET submission_sha256 = ? WHERE id = 'run-valid'",
                     [`${memoryFingerprint}\0suffix`]
                 )
-            ).toThrow("monitor_runs submission_sha256 must not contain NUL");
+            ).toThrow("monitor_runs_submission_sha256_check");
         } finally {
             database.sqlite.close(true);
         }
