@@ -22,11 +22,7 @@ import {
 } from "../../../shared/validation.ts";
 import type { RawAuthenticationCredential } from "../../rawHttp/authenticationCredentials.ts";
 import { areSha256DigestsEqual, sha256Hex } from "../../shared/crypto.ts";
-import {
-    browserSessionIdleDurationDefaultMs,
-    browserSessionIdleDurationMaximumMs,
-    browserSessionIdleDurationMinimumMs,
-} from "./authenticationPolicy.ts";
+import { parseBrowserSessionIdleDurationMs } from "./authenticationPolicy.ts";
 import type { AuthenticationResolution } from "./authenticationResolution.ts";
 import type {
     AutomationAuthenticationRecord,
@@ -49,11 +45,6 @@ const authenticationLeaseDurationSchema = v.pipe(
         maximumAuthenticationLeaseDurationMs,
         "Authentication lease duration is invalid"
     )
-);
-const sessionIdleDurationSchema = v.pipe(
-    positiveSafeIntegerSchema("Session idle duration is invalid"),
-    v.minValue(browserSessionIdleDurationMinimumMs, "Session idle duration is invalid"),
-    v.maxValue(browserSessionIdleDurationMaximumMs, "Session idle duration is invalid")
 );
 const nowSchema = v.pipe(
     v.date("Authentication clock is invalid"),
@@ -117,9 +108,8 @@ export function createRequestAuthenticator(
         authenticationLeaseDurationSchema,
         options.authenticationLeaseDurationMs ?? defaultAuthenticationLeaseDurationMs
     );
-    const sessionIdleDurationMs = parseSchemaWithRangeError(
-        sessionIdleDurationSchema,
-        options.sessionIdleDurationMs ?? browserSessionIdleDurationDefaultMs
+    const sessionIdleDurationMs = parseBrowserSessionIdleDurationMs(
+        options.sessionIdleDurationMs
     );
     const now = () => v.parse(nowSchema, options.now?.() ?? new Date());
 

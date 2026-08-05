@@ -14,8 +14,6 @@ import type {
     SecurityUserRecord,
 } from "./securityPersistenceTypes.ts";
 
-export type { BrowserSessionWriter } from "./securityPersistenceTypes.ts";
-
 export interface AuthenticatedBrowserIdentity {
     readonly sessionId: string;
     readonly userId: string;
@@ -68,7 +66,7 @@ export function sessionActor(identity: AuthenticatedBrowserIdentity): SecurityAu
     };
 }
 
-export function normalizeBrowserUserAgent(userAgent: string | undefined): string | null {
+function normalizeBrowserUserAgent(userAgent: string | undefined): string | null {
     const normalized = userAgent
         ?.replaceAll(/\p{Cc}/gu, " ")
         .trim()
