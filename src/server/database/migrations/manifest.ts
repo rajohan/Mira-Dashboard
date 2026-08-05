@@ -1,17 +1,20 @@
-/** Immutable file identity for one ordered Drizzle migration node. */
+/** Reviewed file identity for one ordered Drizzle migration node. */
 export interface MigrationManifestEntry {
     id: string;
     migrationSha256: string;
     snapshotSha256: string;
 }
 
-/** Reviewed migration files accepted by the application runtime. */
+/**
+ * Reviewed migration files accepted by the application runtime.
+ * The unpublished rewrite keeps one evolving fresh-database baseline until cutover.
+ */
 export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]>([
     Object.freeze({
         id: "20260804022252_dashboard-foundation",
         migrationSha256:
-            "692e9c325ffd790e554a67c007dd421e00076e71919c6c18fed28059116923fd",
+            "85a5b7f489accaafc8bbad9504269b03bfc811c4d9b9c6dd73c926648b61d3a7",
         snapshotSha256:
-            "d1d97eccf4ba5fb63b0058c41599d629dbe65c97656f0a5e060ab671acb5d8b1",
+            "bb7a62a5e42402a10b52111ac864ee93c779e966b8cb5c236b34ea7ac825b3f9",
     }),
 ]);

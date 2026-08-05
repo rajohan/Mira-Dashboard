@@ -3,68 +3,16 @@ import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
 import { utf8ByteLength } from "../shared/encoding.ts";
+import { jsonObjectSchema, type JsonObject } from "../shared/json.ts";
 import {
     boundedNonBlankStringSchema,
     lowercaseUuidV7Schema,
 } from "../shared/validation.ts";
 
-export type JsonObject = { readonly [key: string]: JsonValue };
-export type JsonValue =
-    | JsonObject
-    | readonly JsonValue[]
-    | boolean
-    | null
-    | number
-    | string;
+export type { JsonObject, JsonValue } from "../shared/json.ts";
 
-const maximumJsonDepth = 12;
 export const monitoringJsonObjectMaximumBytes = 64 * 1024;
 const maximumReportBodyCharacters = 1_000_000;
-
-function isJsonValue(
-    value: unknown,
-    depth: number,
-    ancestors: Set<object>
-): value is JsonValue {
-    if (value === null || typeof value === "string" || typeof value === "boolean") {
-        return true;
-    }
-    if (typeof value === "number") {
-        return Number.isFinite(value);
-    }
-    if (typeof value !== "object" || depth > maximumJsonDepth || ancestors.has(value)) {
-        return false;
-    }
-
-    const prototype = Object.getPrototypeOf(value) as unknown;
-    if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-        return false;
-    }
-
-    ancestors.add(value);
-    let isValid = true;
-    if (Array.isArray(value)) {
-        for (let index = 0; index < value.length; index += 1) {
-            if (!(index in value) || !isJsonValue(value[index], depth + 1, ancestors)) {
-                isValid = false;
-                break;
-            }
-        }
-    } else {
-        isValid = Object.values(value).every((child) =>
-            isJsonValue(child, depth + 1, ancestors)
-        );
-    }
-    ancestors.delete(value);
-    return isValid;
-}
-
-function isJsonObject(value: unknown): value is JsonObject {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        return false;
-    }
-    return isJsonValue(value, 0, new Set());
-}
 
 function encodedJsonBytes(value: JsonObject): number {
     return utf8ByteLength(JSON.stringify(value));
@@ -72,7 +20,7 @@ function encodedJsonBytes(value: JsonObject): number {
 
 /** JSON object accepted by monitoring report metadata and incident details. */
 export const monitoringJsonObjectSchema = v.pipe(
-    v.custom<JsonObject>(isJsonObject, "Expected a JSON object."),
+    jsonObjectSchema,
     v.check(
         (value) => encodedJsonBytes(value) <= monitoringJsonObjectMaximumBytes,
         `Expected JSON no larger than ${monitoringJsonObjectMaximumBytes} encoded bytes.`

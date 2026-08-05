@@ -1,9 +1,8 @@
-import * as v from "valibot";
-
+import type { RequestAuthentication } from "../../contracts/security.ts";
 import {
-    requestAuthenticationSchema,
-    type RequestAuthentication,
-} from "../../contracts/security.ts";
+    type AuthenticationLease,
+    parseAuthenticationResolution,
+} from "../domains/security/authenticationResolution.ts";
 import type {
     ApplicationRuntime,
     ApplicationRuntimeServices,
@@ -22,6 +21,7 @@ export interface RequestContextOptions {
 /** Dependencies supplied to every application tRPC procedure. */
 export interface RequestContext {
     readonly authentication: RequestAuthentication;
+    readonly authenticationLease?: AuthenticationLease;
     readonly requestId: string;
     readonly services: ApplicationRuntimeServices;
 }
@@ -34,12 +34,12 @@ export interface RequestContext {
 export async function createRequestContext(
     options: RequestContextOptions
 ): Promise<RequestContext> {
-    const authentication = v.parse(
-        requestAuthenticationSchema,
+    const resolution = parseAuthenticationResolution(
         await options.authenticateRequest(options.request)
     );
     return Object.freeze({
-        authentication,
+        authentication: resolution.authentication,
+        ...(resolution.lease && { authenticationLease: resolution.lease }),
         requestId: crypto.randomUUID(),
         services: options.applicationRuntime.services,
     });

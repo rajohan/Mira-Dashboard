@@ -61,6 +61,7 @@ test("rejects monitor-run rows whose completion fields disagree", () => {
 test("reuses the monitoring key and timestamp policies at the run boundary", () => {
     for (const overrides of [
         { monitorKey: "m".repeat(201) },
+        { submissionSha256: `${"a".repeat(64)}\0suffix` },
         { startedAt: toDate(-1) },
     ]) {
         expect(() =>

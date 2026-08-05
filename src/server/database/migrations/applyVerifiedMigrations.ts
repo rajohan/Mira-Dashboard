@@ -60,6 +60,15 @@ const schemaObjectRowsSchema = v.array(schemaObjectRowSchema, schemaHistoryMisma
 type AppliedMigrationRow = v.InferOutput<typeof appliedMigrationRowSchema>;
 type SchemaObjectRow = v.InferOutput<typeof schemaObjectRowSchema>;
 
+function runMigrationStatements(database: Database, statements: readonly string[]): void {
+    for (const statement of statements) {
+        // Keep raw bytes for checksum verification, but do not pass trailing whitespace to Bun's
+        // SQLite boundary: a trigger ABORT can otherwise be masked when SQL ends in `;\n`.
+        const executableStatement = statement.trim();
+        if (executableStatement.length > 0) database.run(executableStatement);
+    }
+}
+
 function applicationSchemaObjects(database: Database): SchemaObjectRow[] {
     const rows: unknown = database
         .query(`
@@ -85,11 +94,7 @@ function expectedSchemaObjects(
 
     try {
         for (const migration of migrations) {
-            for (const statement of migration.statements) {
-                if (statement.trim().length > 0) {
-                    expectedDatabase.run(statement);
-                }
-            }
+            runMigrationStatements(expectedDatabase, migration.statements);
         }
         return applicationSchemaObjects(expectedDatabase);
     } finally {
@@ -213,15 +218,11 @@ export function applyVerifiedMigrations(
         const pending = migrations.slice(applied.length);
         const baseAppliedAt = parseSchemaWithRangeError(
             migrationAppliedAtSchema,
-            getTime(options.appliedAt ?? Date.now())
+            getTime(options.appliedAt ?? new Date())
         );
 
         for (const [pendingIndex, migration] of pending.entries()) {
-            for (const statement of migration.statements) {
-                if (statement.trim().length > 0) {
-                    database.run(statement);
-                }
-            }
+            runMigrationStatements(database, migration.statements);
 
             const appliedAt = parseSchemaWithRangeError(
                 migrationAppliedAtSchema,

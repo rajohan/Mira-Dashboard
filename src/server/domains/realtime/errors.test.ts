@@ -9,7 +9,14 @@ import {
     RealtimeEventSubscriptionStreamError,
     type RealtimeEventStreamError,
 } from "../../platform/realtime/eventPumpService.ts";
-import { realtimeEventStreamErrorToTRPCError } from "./errors.ts";
+import {
+    RenewableStreamLeaseInvalidError,
+    RenewableStreamLeaseTimeoutError,
+} from "../../platform/realtime/renewableStreamLease.ts";
+import {
+    realtimeEventStreamErrorToTRPCError,
+    renewableStreamLeaseErrorToTRPCError,
+} from "./errors.ts";
 
 describe("realtime stream transport errors", () => {
     test.each<{
@@ -68,6 +75,27 @@ describe("realtime stream transport errors", () => {
 
         expect(error.code).toBe(scenario.expectedCode);
         expect(error.message).toBe(scenario.expectedMessage);
+        expect(error.message).not.toContain("internal");
+    });
+
+    test.each([
+        {
+            leaseError: new RenewableStreamLeaseInvalidError({
+                message: "internal invalid lease detail",
+            }),
+            name: "invalid lease",
+        },
+        {
+            leaseError: new RenewableStreamLeaseTimeoutError({
+                message: "internal renewal timeout detail",
+            }),
+            name: "renewal timeout",
+        },
+    ])("maps $name without exposing internal details", ({ leaseError }) => {
+        const error = renewableStreamLeaseErrorToTRPCError(leaseError);
+
+        expect(error.code).toBe("SERVICE_UNAVAILABLE");
+        expect(error.message).toBe("Realtime authentication is temporarily unavailable");
         expect(error.message).not.toContain("internal");
     });
 });

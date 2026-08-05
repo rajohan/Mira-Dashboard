@@ -55,6 +55,42 @@ export function boundedNonBlankStringSchema(
 }
 
 /**
+ * Refines a string boundary to reject embedded NUL characters.
+ * @param message Validation failure message.
+ * @returns Valibot action for a NUL-free string.
+ */
+export function noNulStringAction(message = "Expected a string without NUL characters.") {
+    return v.check((value: string) => !value.includes("\0"), message);
+}
+
+function unicodeCodePointLength(value: string): number {
+    let length = 0;
+    for (const _codePoint of value) length += 1;
+    return length;
+}
+
+/**
+ * Builds a persistence-safe text schema using Unicode code-point length.
+ * @param maximumLength Maximum accepted Unicode code-point length.
+ * @param message Validation failure message.
+ * @returns Valibot schema for bounded, nonblank, NUL-free text.
+ */
+export function boundedNonBlankTextSchema(
+    maximumLength: number,
+    message = "Expected bounded non-blank text."
+) {
+    return v.pipe(
+        v.string(message),
+        v.check((value) => {
+            const length = unicodeCodePointLength(value);
+            return length > 0 && length <= maximumLength;
+        }, message),
+        v.regex(/\S/u, message),
+        noNulStringAction(message)
+    );
+}
+
+/**
  * Tests the named scalar-array uniqueness rule shared by Valibot and JSON Schema generation.
  * Restricting this helper to JSON scalars keeps Set equality equivalent to `uniqueItems`.
  * @param values Scalar array values to compare by JSON-compatible equality.

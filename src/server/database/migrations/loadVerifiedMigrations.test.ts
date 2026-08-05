@@ -27,7 +27,7 @@ async function copyMigrationGraph(): Promise<string> {
 function reviewedMigration() {
     const migration = migrationManifest[0];
     if (!migration) {
-        throw new Error("Expected the migration manifest to contain one node");
+        throw new Error("Expected the migration manifest to contain a foundation node");
     }
     return migration;
 }

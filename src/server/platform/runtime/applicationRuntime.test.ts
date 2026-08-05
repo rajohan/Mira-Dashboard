@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
+import { addMilliseconds, secondsToMilliseconds } from "date-fns";
+import { maxTime } from "date-fns/constants";
 import { Effect, Layer, Stream } from "effect";
 
+import { rejectOnAbort, withTestTimeout } from "../../test/support/promise.ts";
 import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
 import {
     isRealtimeEventStreamError,
     RealtimeEventPumpService,
     RealtimeEventStoreStreamError,
 } from "../realtime/eventPumpService.ts";
+import type { RenewableStreamLease } from "../realtime/renewableStreamLease.ts";
 import { createApplicationRuntime } from "./applicationRuntime.ts";
 
 const delivery: RealtimeEventDelivery = {
@@ -21,6 +25,11 @@ const delivery: RealtimeEventDelivery = {
     },
     id: "1",
     kind: "change",
+};
+
+const stableLease: RenewableStreamLease = {
+    expiresAtMs: maxTime,
+    renew: () => Promise.resolve(stableLease),
 };
 
 describe("application Effect runtime", () => {
@@ -59,10 +68,13 @@ describe("application Effect runtime", () => {
         expect(Object.isFrozen(runtime.services.realtimeEvents)).toBe(true);
 
         const values = await Array.fromAsync(
-            await runtime.services.realtimeEvents.stream({
-                afterId: "0",
-                signal: controller.signal,
-            })
+            await runtime.services.realtimeEvents.stream(
+                {
+                    afterId: "0",
+                    signal: controller.signal,
+                },
+                stableLease
+            )
         );
         expect(values).toEqual([delivery]);
         expect(observedSignal).toBe(controller.signal);
@@ -88,9 +100,10 @@ describe("application Effect runtime", () => {
         let observed: unknown;
 
         try {
-            const deliveries = await runtime.services.realtimeEvents.stream({
-                afterId: "0",
-            });
+            const deliveries = await runtime.services.realtimeEvents.stream(
+                { afterId: "0" },
+                stableLease
+            );
             await Array.fromAsync(deliveries);
         } catch (error) {
             observed = error;
@@ -100,6 +113,39 @@ describe("application Effect runtime", () => {
 
         expect(observed).toBe(expected);
         expect(isRealtimeEventStreamError(observed)).toBe(true);
+    });
+
+    test("completes without opening the source for a pre-aborted signal", async () => {
+        let sourcePulls = 0;
+        const layer = Layer.succeed(
+            RealtimeEventPumpService,
+            RealtimeEventPumpService.of({
+                metricsSnapshot: Effect.die("metrics are not used in this test"),
+                stream: () =>
+                    Stream.fromEffect(
+                        Effect.sync(() => {
+                            sourcePulls += 1;
+                            return delivery;
+                        })
+                    ),
+                wake: Effect.void,
+            })
+        );
+        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const controller = new AbortController();
+        controller.abort();
+
+        try {
+            const deliveries = await runtime.services.realtimeEvents.stream(
+                { afterId: "0", signal: controller.signal },
+                stableLease
+            );
+
+            expect(await Array.fromAsync(deliveries)).toEqual([]);
+            expect(sourcePulls).toBe(0);
+        } finally {
+            await runtime.dispose();
+        }
     });
 
     test("releases a subscription scope when an async consumer stops early", async () => {
@@ -124,9 +170,10 @@ describe("application Effect runtime", () => {
             })
         );
         const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
-        const deliveries = await runtime.services.realtimeEvents.stream({
-            afterId: "0",
-        });
+        const deliveries = await runtime.services.realtimeEvents.stream(
+            { afterId: "0" },
+            stableLease
+        );
 
         try {
             for await (const value of deliveries) {
@@ -137,6 +184,84 @@ describe("application Effect runtime", () => {
             expect(acquisitions).toBe(1);
             expect(releases).toBe(1);
         } finally {
+            await runtime.dispose();
+        }
+    });
+
+    test("interrupts a quiet pull and its renewal when the client aborts", async () => {
+        const leaseDurationMs = secondsToMilliseconds(1);
+        const testTimeoutMs = secondsToMilliseconds(3);
+        const sourceStarted = Promise.withResolvers<void>();
+        const renewalStarted = Promise.withResolvers<AbortSignal>();
+        let sourceReleases = 0;
+        const sourceLease = Effect.acquireRelease(
+            Effect.sync(() => {
+                sourceStarted.resolve();
+            }),
+            () =>
+                Effect.sync(() => {
+                    sourceReleases += 1;
+                })
+        );
+        const pendingSource = sourceLease.pipe(Effect.flatMap(() => Effect.never));
+        const source = Stream.scoped(Stream.fromEffect(pendingSource));
+        const layer = Layer.succeed(
+            RealtimeEventPumpService,
+            RealtimeEventPumpService.of({
+                metricsSnapshot: Effect.die("metrics are not used in this test"),
+                stream: () => source,
+                wake: Effect.void,
+            })
+        );
+        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const controller = new AbortController();
+        let iterator: AsyncIterator<RealtimeEventDelivery> | undefined;
+
+        try {
+            await runtime.initialize();
+            const lease: RenewableStreamLease = {
+                expiresAtMs: addMilliseconds(new Date(), leaseDurationMs).getTime(),
+                renew(signal) {
+                    renewalStarted.resolve(signal);
+                    return rejectOnAbort<RenewableStreamLease>(
+                        signal,
+                        "Realtime lease renewal aborted"
+                    );
+                },
+            };
+            const deliveries = await runtime.services.realtimeEvents.stream(
+                {
+                    afterId: "0",
+                    signal: controller.signal,
+                },
+                lease
+            );
+            iterator = deliveries[Symbol.asyncIterator]();
+            const next = iterator.next();
+
+            await withTestTimeout(
+                sourceStarted.promise,
+                testTimeoutMs,
+                "quiet source pull did not start"
+            );
+            const renewalSignal = await withTestTimeout(
+                renewalStarted.promise,
+                testTimeoutMs,
+                "quiet source pull was not revalidated"
+            );
+            controller.abort();
+            const result = await withTestTimeout(
+                next,
+                testTimeoutMs,
+                "client abort did not stop the realtime iterator"
+            );
+
+            expect(result.done).toBe(true);
+            expect(renewalSignal.aborted).toBe(true);
+            expect(sourceReleases).toBe(1);
+        } finally {
+            controller.abort();
+            await iterator?.return?.();
             await runtime.dispose();
         }
     });

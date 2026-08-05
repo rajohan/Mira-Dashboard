@@ -65,6 +65,12 @@ test("requires canonical incident fingerprints at both persistence boundaries", 
             fingerprint: "A".repeat(64),
         })
     ).toThrow();
+    expect(() =>
+        v.parse(incidentInsertSchema, {
+            ...validIncidentValues,
+            fingerprint: `${"a".repeat(64)}\0suffix`,
+        })
+    ).toThrow();
 });
 
 test("applies the bounded monitoring JSON policy to stored incident details", () => {

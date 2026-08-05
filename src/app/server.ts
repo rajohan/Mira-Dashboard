@@ -10,6 +10,10 @@ import {
     livenessResponse,
     readinessResponse,
 } from "../server/rawHttp/health.ts";
+import {
+    isAllowedRequestSource,
+    parseBrowserOrigin,
+} from "../server/rawHttp/requestSecurity.ts";
 import { appRouter } from "../server/trpc/appRouter.ts";
 import {
     createRequestContext,
@@ -62,6 +66,8 @@ export const serverRequestBodyMaximumBytes = 16 * 1024 * 1024;
 export interface ServerOptions {
     readonly applicationRuntime: ApplicationRuntime;
     readonly authenticateRequest: AuthenticateRequest;
+    /** Explicit public browser origin when TLS terminates at a trusted proxy. */
+    readonly browserOrigin?: string;
     /** Graceful request-drain budget before active connections are forced closed. */
     readonly gracefulShutdownTimeoutMs?: number;
     readonly hostname?: string;
@@ -88,6 +94,10 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             serverGracefulShutdownTimeoutSchema,
             options.gracefulShutdownTimeoutMs ?? serverGracefulShutdownTimeoutDefaultMs
         );
+        const browserOrigin =
+            options.browserOrigin === undefined
+                ? undefined
+                : parseBrowserOrigin(options.browserOrigin);
         await options.applicationRuntime.initialize();
 
         const server = Bun.serve({
@@ -96,6 +106,9 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                 const isTrpcRequest =
                     pathname === trpcEndpoint || pathname.startsWith(`${trpcEndpoint}/`);
                 if (isTrpcRequest) {
+                    if (!isAllowedRequestSource(request, browserOrigin)) {
+                        return new Response("Forbidden", { status: 403 });
+                    }
                     return fetchRequestHandler({
                         createContext: ({ req }) =>
                             createRequestContext({

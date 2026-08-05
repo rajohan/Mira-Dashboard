@@ -4,13 +4,18 @@ import * as v from "valibot";
 
 import { requestAuthenticationSchema } from "./security.ts";
 
+const userId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
+const sessionSelector = "a".repeat(32);
+
 describe("request authentication contract", () => {
     test("normalizes and freezes an authenticated principal", () => {
         const authentication = v.parse(requestAuthenticationSchema, {
             kind: "authenticated",
             principal: {
+                authorizationVersion: 1,
                 capabilities: ["reports:read", "notifications:read"],
-                id: "operator-session",
+                authenticatorId: sessionSelector,
+                id: userId,
                 kind: "session",
             },
         });
@@ -18,8 +23,10 @@ describe("request authentication contract", () => {
         expect(authentication).toEqual({
             kind: "authenticated",
             principal: {
+                authorizationVersion: 1,
                 capabilities: ["notifications:read", "reports:read"],
-                id: "operator-session",
+                authenticatorId: sessionSelector,
+                id: userId,
                 kind: "session",
             },
         });
@@ -35,23 +42,29 @@ describe("request authentication contract", () => {
             {
                 kind: "authenticated",
                 principal: {
+                    authorizationVersion: 1,
                     capabilities: ["reports:read", "reports:read"],
-                    id: "operator-session",
+                    authenticatorId: sessionSelector,
+                    id: userId,
                     kind: "session",
                 },
             },
             {
                 kind: "authenticated",
                 principal: {
+                    authorizationVersion: 1,
                     capabilities: ["unknown:admin"],
-                    id: "operator-session",
+                    authenticatorId: sessionSelector,
+                    id: userId,
                     kind: "session",
                 },
             },
             {
                 kind: "authenticated",
                 principal: {
+                    authorizationVersion: 1,
                     capabilities: [],
+                    authenticatorId: sessionSelector,
                     id: "   ",
                     kind: "session",
                 },
