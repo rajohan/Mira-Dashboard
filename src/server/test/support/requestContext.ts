@@ -103,7 +103,11 @@ export async function waitForTestLogQuiescence(
         }
         await Bun.sleep(5);
     }
-    throw new Error("Test log records did not reach a stable expected count");
+    throw new Error(
+        `Test log records did not reach a stable expected count: expected ${String(
+            expectedCount
+        )}, observed ${String(logLines.length)}: ${JSON.stringify(logLines)}`
+    );
 }
 
 /**
