@@ -142,8 +142,13 @@ build path: releases contain prebuilt assets and production never compiles the f
 
 ## Configuration From Scratch
 
-Configuration is parsed once at each composition root through a Valibot schema. There are no
-scattered `process.env` reads and no truthy-string parsing. Every field declares:
+The greenfield web configuration parser accepts only its registered-key projection. The future
+web and worker composition roots must invoke their role-specific parser exactly once; that startup
+wiring is not implemented by this slice. App, server, and worker source has no scattered
+runtime-environment reads and no truthy-string parsing. Existing repository scripts remain a
+separately typed coexistence surface and retain their explicit environment reads until their target
+composition flows replace them.
+Every registered field declares:
 
 - name, type, allowed values, and default;
 - required process (`web`, `worker`, build, or script);
@@ -157,13 +162,19 @@ non-secret settings, and encrypted secrets. A setting is not duplicated across e
 database with implicit precedence. If bootstrap requires a temporary precedence rule, it is
 explicitly modeled as a bootstrap state and disappears after completion.
 
+The first web parser currently validates an injected registered-key projection. Its project-root
+field is only a lexically normalized absolute staging value: the future process composition must
+resolve its real path and enforce the managed-filesystem containment policy before opening host
+paths. Startup wiring and that filesystem validation are not claimed by this slice.
+
 The target repository uses a base TypeScript configuration plus strict browser, server/worker, and
 script project references so browser libraries are unavailable to server code and Bun/filesystem
-types are unavailable to browser code. The current rewrite has a complete strict server graph and
-selected restricted-import/composition tests, but it does not yet have every target project
-reference or path boundary. Completing and mechanically enforcing those partitions remains a
-cutover gate. `bunfig.toml` contains only shared Bun test and selected serve-plugin configuration;
-operational policy lives in typed source, not hidden shell environment.
+types are unavailable to browser code. The rewrite now has strict contracts/shared, browser,
+server, worker, and script graphs plus an authoritative path-aware source-boundary check. Oxlint
+also rejects supported import/global patterns as a fast feedback layer. Browser and worker
+composition roots remain unimplemented, but adding an unclassified `src/app` root or a forbidden
+edge fails the boundary gate. `bunfig.toml` contains only shared Bun test and selected serve-plugin
+configuration; operational policy lives in typed source, not hidden shell environment.
 
 ## Generated Documentation
 
@@ -176,7 +187,7 @@ Documentation generation is a product feature and a CI invariant, not an optiona
 | Procedure registry              | tRPC names, kinds, auth/capabilities, input/output schemas, errors, examples, emitted events |
 | Raw HTTP registry               | methods, paths, auth, content types, range/stream behavior, status codes                     |
 | Event registry                  | topic, event type, entity/operation, payload schema, retention, snapshot/resync procedure    |
-| Valibot config schema           | environment/settings names, types, defaults, secret flags, process ownership                 |
+| Application config registry     | environment/settings names, types, defaults, secret flags, process ownership                 |
 | Drizzle schema                  | intended tables, columns, types, relations, constraints, and declared indexes                |
 | Applied temporary SQLite schema | tables, columns, checks, foreign keys, indexes, partial predicates                           |
 | Browser route registry          | URL, navigation label, feature owner, query/search schema, required procedures               |
@@ -246,6 +257,14 @@ Every request, job, Gateway call, and domain transaction receives a correlation 
 logs use stable event names and include release identity, process role, duration, outcome, and
 safe identifiers. They do not serialize arbitrary request bodies or command environments.
 
+The current web factory contract requires one process logger, installs it as the only Effect
+logger on the existing `ManagedRuntime`, and reuses that exact instance at ordinary HTTP/tRPC
+boundaries. Its serializer emits bounded NDJSON from event-specific allowlisted fields and flushes
+the synchronous sink after runtime disposal; a sink failure emits one constant direct-stderr
+fallback without recursive logging. The future executable web/worker composition roots still own creation of
+the stdout/stderr sink, release/config identity, and startup/shutdown events; this slice does not
+claim that absent process entrypoint.
+
 Expose distinct probes:
 
 - **live:** the process event loop can answer;
@@ -308,8 +327,10 @@ Additional safeguards:
 
 The exact naming may change. This is the **target** Bun command-role inventory, not a claim that
 the current `package.json` already exposes every alias. Today the rewrite uses separate strict
-`typecheck:server` and `typecheck:qualification` graphs plus the existing frontend/backend lanes;
-the complete project-reference partitions remain the future cutover gate described above.
+browser, contracts/shared, server, worker, scripts, and qualification typecheck commands plus the
+existing frontend/backend lanes. `check:boundaries` and `test:boundaries` are required by the
+server-foundation CI lane. A single top-level target `typecheck` alias remains future command
+consolidation, not missing boundary enforcement.
 
 ```text
 dev                     local Bun server + worker + frontend development

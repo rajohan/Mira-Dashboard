@@ -110,6 +110,15 @@ function parseKeyRing(serializedKeyRing: unknown) {
     }
 }
 
+/**
+ * Validates the bounded TOTP encryption-keyring format without exposing key material.
+ * @param serializedKeyRing Untrusted serialized keyring configuration.
+ * @throws {TypeError} When the keyring is malformed, ambiguous, or outside its bounds.
+ */
+export function assertValidTotpEncryptionKeyRing(serializedKeyRing: unknown): void {
+    parseKeyRing(serializedKeyRing);
+}
+
 function isCanonicalSecurityRecordId(value: string): boolean {
     return v.safeParse(securityRecordIdSchema, value, { abortEarly: true }).success;
 }

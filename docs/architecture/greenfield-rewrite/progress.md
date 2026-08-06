@@ -7,15 +7,15 @@
 This matrix is the living phase status. Update it in the same change that materially advances or
 closes a phase; dated entries below provide the evidence, not a second status source.
 
-| Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                 |
-| ----------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`, including build, transport, database/outbox, browser data, chat batching, shutdown, parity, OpenClaw source audit, and capped resource evidence.                                                                  |
-| 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP policy, realtime outbox, and the current generated-doc subset exist; browser/worker roots, complete import enforcement, complete generated references, and release/rollback closure remain.                                                                     |
-| 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates. |
-| 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                           |
-| 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                      |
-| 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                         |
-| 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                    |
+| Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`, including build, transport, database/outbox, browser data, chat batching, shutdown, parity, OpenClaw source audit, and capped resource evidence.                                                                                                                                |
+| 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP/realtime foundations, source-boundary enforcement, staged typed configuration, generated configuration reference, structured logging/request correlation, and procedure error policy exist; executable web/worker roots, database runtime, browser shell, complete generated references, and release/rollback closure remain. |
+| 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                               |
+| 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                                                                                         |
+| 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                                    |
+| 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                       |
+| 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                                  |
 
 ### 2026-08-03 — Phase 0 started
 
@@ -367,9 +367,9 @@ closes a phase; dated entries below provide the evidence, not a second status so
   process-runtime reuse, abort propagation, and subscription cleanup.
 - No transport or utility dependency was added. Browser realtime continues to use tRPC SSE rather
   than Socket.IO; OpenClaw Gateway continues to use Bun's native outbound WebSocket. Authentication
-  retains revocable opaque credential validators rather than JWTs, configuration uses Bun plus
-  composition-root Valibot parsing rather than `dotenv`, and HTTP calls use tRPC/native `fetch`
-  rather than Axios.
+  retains revocable opaque credential validators rather than JWTs, configuration is staged as an
+  injected Valibot parser rather than `dotenv`, and HTTP calls use tRPC/native `fetch` rather than
+  Axios. Composition-root configuration wiring remains Phase 1 work.
 
 ### 2026-08-05 — Security core and fresh database baseline implemented
 
@@ -649,6 +649,56 @@ closes a phase; dated entries below provide the evidence, not a second status so
     | Child-process cancel  |         117,194,752 |        1,531 |         24 |
 
 - Phase 0 is complete, but the rewrite is not: Phase 1 remains in progress with browser/worker
-  roots, complete import enforcement, complete generated references, immutable release/rollback,
-  and end-to-end empty-database web/worker delivery still open. Final production load, restore,
-  cutover, and legacy-removal evidence remains in Phase 6.
+  roots, complete generated references, immutable release/rollback, and end-to-end empty-database
+  web/worker delivery still open. Final production load, restore, cutover, and legacy-removal
+  evidence remains in Phase 6.
+
+### 2026-08-06 — Source-boundary enforcement foundation
+
+- A Babel-AST gate now accounts for static imports, type imports, re-exports, literal and
+  nonliteral dynamic imports, and `require` calls. It discovers JavaScript/JSX, ESM/CJS, and
+  TypeScript extension variants across `src`, repository scripts, and the reviewed Drizzle and
+  Tailwind root configurations. It permits `.tsx` only in the strict browser graph and otherwise
+  fails closed unless source is `.ts`; unknown root executables and top-level source directories
+  also fail. Relative specifiers require an explicit reviewed extension and an exact contained
+  target. Production source additionally fails on unclassified process roots, repository aliases,
+  unreviewed URL schemes, repository escapes, source-tree symlinks, test imports, forbidden
+  cross-process directions, and binding-aware environment, module-loader, code-evaluation, or
+  process-execution authority outside its explicit role. This is source-policy enforcement rather
+  than a runtime sandbox. Coexistence scripts retain only their reviewed authorities and explicit
+  environment reads.
+- The only script imports into the legacy backend/frontend are frozen as an exact 18-edge
+  coexistence allowlist. New legacy edges fail CI.
+- Strict TypeScript graphs now isolate contracts/shared, browser, server, worker, and scripts.
+  Supported Oxlint restricted-import/global rules provide a fast guard, while the AST checker is
+  authoritative. The server-foundation job runs both checker tests and every greenfield typecheck.
+
+### 2026-08-06 — Typed configuration, errors, and observability boundary
+
+- One immutable registry now owns the 13 accepted web/worker environment names, value policy,
+  process roles, defaults, secret/browser exposure, restart semantics, and generated reference
+  text. The app-owned environment source projects only registered keys for the selected role;
+  server modules cannot import it or read runtime environment aliases directly. The injected
+  Valibot parser produces a deeply frozen web configuration with exact origin, trusted-proxy,
+  loopback Gateway, WebAuthn, duration, path, log-level, and redacted TOTP-keyring policy. A real
+  executable process root and realpath validation remain Phase 1 delivery work.
+- `docs/generated/configuration.md` is derived from the same registry and fails closed on missing
+  metadata, duplicate fields, or a secret marked value-visible. Rejected values and Valibot issues
+  never enter configuration errors, inspection, JSON, logs, or documentation.
+- The existing process `ManagedRuntime` now requires and installs exactly one structured logger,
+  and the HTTP/tRPC boundaries reuse that exact instance. Runtime-allowlisted event/component/
+  field/outcome/correlation data produces bounded NDJSON; unknown messages and fields are dropped
+  or normalized, failures retain only coarse tags plus a bounded fingerprint, and sink faults emit
+  one constant stderr fallback. Sink writes and flushes must settle synchronously, and runtime
+  disposal precedes the idempotent flush.
+- The Bun request boundary creates correlation before application routing. Application responses
+  receive `x-request-id`, and each dispatch emits exactly one response-created, sanitized-defect,
+  or client-cancellation event. Cancellation carries no defect fingerprint. SSE termination
+  observability remains assigned to the later realtime/browser lifecycle rather than being
+  overstated here. Bun's outer pre-dispatch body ceiling remains the documented exception.
+- The actual 36-procedure router, public contract metadata, and a server-owned
+  `ContractErrorCode` allowlist now match mechanically. Immediate and deferred subscription errors
+  outside a route's declared set are internalized, as is any implemented procedure missing from
+  the policy; framework routing and input/transport validation remain implicit. Phase 1 is still
+  in progress: executable web/worker roots, database runtime, worker lifecycle, browser shell, and
+  release/rollback delivery remain open.

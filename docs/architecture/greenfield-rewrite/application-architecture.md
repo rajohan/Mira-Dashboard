@@ -176,11 +176,20 @@ Architectural dependency rules:
   imported only by Drizzle Kit or a database composition root. Domain modules import tables and
   validators directly.
 
-The current server typecheck covers the complete `src/app`, `src/contracts`, `src/server`, and
-`src/shared` graph, while Oxlint already enforces targeted restricted imports in the browser.
-Focused composition and contract tests enforce selected runtime boundaries. Complete path-based
-restricted-import rules (or equivalent project-reference partitions) remain a required cutover gate;
-this document does not claim that every rule above is mechanically enforced before that gate lands.
+The rewrite now has separate strict TypeScript graphs for contracts/shared, browser, server,
+worker, and scripts. An authoritative Babel-AST policy check discovers JavaScript, JSX, ESM/CJS,
+and TypeScript extension variants across `src`, repository scripts, and the reviewed root
+configurations for Drizzle and Tailwind. It permits `.tsx` only in the strict browser graph and
+`.ts` in every other scanned role, rejects unknown root executables and top-level source
+directories, and requires reviewed relative extensions resolving to exact contained targets. The
+same binding-aware analysis classifies every composition root, enforces the dependency directions
+above, and rejects nonliteral production loads, unreviewed module schemes and aliases, runtime
+environment escape paths, code/module loaders, and process-execution authorities outside their
+explicit roles. Source-tree symlinks are prohibited and the temporary script edges into the legacy
+tree are frozen exactly. Fast Oxlint restrictions provide earlier feedback for supported import
+and global patterns; the AST check is the path-aware policy gate for the source surfaces it
+explicitly scans, not a replacement for runtime sandboxing. The browser and worker graphs are ready
+for their composition roots, which are not yet implemented.
 
 ## Application API
 
@@ -342,8 +351,17 @@ the richer runtime type adds no value.
 
 ### Errors and context
 
-The raw tRPC HTTP handler creates the request ID and resolves direct-client provenance against the
-exact trusted-proxy allowlist before context construction. `createContext` then authenticates the
+The Bun `fetch` boundary creates one request ID before URL routing so application-handled health,
+readiness, not-found, tRPC, raw rejection, and sanitized defect responses share the same
+correlation header. Every dispatch records exactly one outcome event: `http.response.created` for
+a returned response, `http.request.failed` for a sanitized defect response, or
+`http.request.cancelled` for client cancellation. For SSE the response-created event marks
+successful dispatch, not stream termination; close/cancel/error observability remains part of the
+browser/realtime lifecycle slice. Client cancellation is informational and carries neither a
+failure fingerprint nor a server-error outcome. Bun's outer 64 KiB pre-dispatch body ceiling
+remains a transport safeguard and may reject before application correlation exists. The raw tRPC
+handler receives the generated ID and resolves direct-client provenance against the exact
+trusted-proxy allowlist before context construction. `createContext` then authenticates the
 already parsed session or automation credential and establishes identity plus audit correlation
 once. Reusable procedure builders are limited to:
 
@@ -354,17 +372,23 @@ once. Reusable procedure builders are limited to:
 
 Expected errors use a small stable code set such as `UNAUTHORIZED`, `FORBIDDEN`, `CONFLICT`,
 `NOT_FOUND`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, and `SERVICE_UNAVAILABLE` with safe
-structured details. Stack traces, command output, filesystem paths, and upstream secrets never
-enter client error shapes.
+structured details. The `ContractErrorCode` union, all 36 actual router paths, the server-owned
+runtime allowlist, and generated contract metadata must match exactly. The base procedure
+middleware enforces that allowlist for immediate and deferred subscription failures; an
+implemented procedure missing from the policy or an undeclared code becomes a redacted internal
+defect. Framework-owned routing and input/transport validation remain implicit. Stack traces,
+command output, filesystem paths, and upstream secrets never enter client error shapes.
 
 Server orchestration represents expected failures as tagged Effect errors in the typed error
 channel. The tRPC boundary exhaustively maps those internal tags to the stable client code set;
 unknown defects and internal `cause` values may be logged only through a redaction boundary and are
-never serialized to clients. Until that logger bridge exists, the boundary records only safe,
-constant failure markers.
+never serialized to clients. One caller-supplied process logger is installed as the only logger on
+the existing `ManagedRuntime` and exposed by `ApplicationRuntime` to ordinary TypeScript
+boundaries. Event-specific allowlists drop unknown fields and Effect messages/annotations; runtime
+disposal precedes the logger's idempotent flush.
 
-The web `ApplicationRuntime` merges the realtime pump and one process-scoped authentication-work
-service into the same `ManagedRuntime`. That authentication service owns separate bounded admission
+The web `ApplicationRuntime` merges the structured logger, realtime pump, and one process-scoped
+authentication-work service into the same `ManagedRuntime`. That authentication service owns separate bounded admission
 and active-work semaphores for Gateway verification, password/Argon2 work, TOTP AES/HMAC work, and
 WebAuthn parsing/signature verification, plus a scoped fiber set for work that outlives an
 interrupted caller. Queued cancellation releases admission immediately; active non-cooperative

@@ -9,7 +9,6 @@
         "backend/src/**/*.ts",
         "backend/test/**/*.ts",
         "contracts/**/*.ts",
-        "scripts/**/*.ts",
         "test/**/*.ts",
         "frontend/src/globals.d.ts"
     ]

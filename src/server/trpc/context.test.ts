@@ -57,6 +57,7 @@ describe("tRPC request context", () => {
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
             pendingLoginCredential: credentials.pendingLogin,
             request,
+            requestId: "request-context-1",
             responseHeaders,
         });
 
@@ -86,6 +87,7 @@ describe("tRPC request context", () => {
             },
         });
         expect(context.responseHeaders).toBe(responseHeaders);
+        expect(context.requestId).toBe("request-context-1");
         expect(context.userAgent).toBe("Context Test Browser");
         expect("dispose" in context.services).toBe(false);
         if (context.authentication.kind === "authenticated") {
@@ -110,6 +112,7 @@ describe("tRPC request context", () => {
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
             pendingLoginCredential: credentials.pendingLogin,
             request,
+            requestId: "request-context-2",
             responseHeaders: new Headers(),
         });
 
@@ -145,6 +148,7 @@ describe("tRPC request context", () => {
                 mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
                 pendingLoginCredential: credentials.pendingLogin,
                 request,
+                requestId: "request-context-3",
                 responseHeaders: new Headers(),
             });
         } catch (error) {

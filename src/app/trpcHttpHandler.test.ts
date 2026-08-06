@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { createStructuredLogger } from "../server/platform/observability/structuredLogger.ts";
 import {
     createTestApplicationRuntime,
     createTestServerSecurityServices,
@@ -27,6 +28,7 @@ interface EarlyRejectionExpectation {
 async function expectEarlyRejectionCancelsBody(
     input: EarlyRejectionExpectation
 ): Promise<void> {
+    const logLines: string[] = [];
     const cancellationReasons: unknown[] = [];
     const body = new ReadableStream<Uint8Array>({
         cancel(reason) {
@@ -41,19 +43,40 @@ async function expectEarlyRejectionCancelsBody(
         ...(input.headers === undefined ? {} : { headers: input.headers }),
         method: "POST",
     });
+    const logger = createStructuredLogger({
+        identity: {
+            bun: "1.4.0-test",
+            pid: 123,
+            processRole: "web",
+            release: "handler-test",
+            service: "mira-dashboard",
+        },
+        sink: {
+            write(line) {
+                logLines.push(line);
+            },
+        },
+    });
     const handler = createTrpcHttpHandler({
         ...createTestServerSecurityServices(),
-        applicationRuntime: createTestApplicationRuntime(),
+        applicationRuntime: createTestApplicationRuntime({ logger }),
         ...(input.browserOrigin === undefined
             ? {}
             : { browserOrigin: input.browserOrigin }),
     });
 
-    const response = await handler(request, new URL(request.url), unreachableBunServer);
+    const response = await handler(
+        request,
+        new URL(request.url),
+        unreachableBunServer,
+        "01900000-0000-7000-8000-000000000001"
+    );
 
     expect(response.status).toBe(input.expectedStatus);
     expect(await response.text()).toBe(input.expectedBody);
     expect(cancellationReasons).toEqual([input.expectedCancellationReason]);
+    expect(response.headers.get("x-request-id")).toBeNull();
+    expect(logLines).toEqual([]);
 }
 
 describe("tRPC HTTP handler early rejection", () => {
@@ -89,4 +112,57 @@ describe("tRPC HTTP handler early rejection", () => {
             expectedStatus: 400,
             path: "/trpc/auth.login?batch=1",
         }));
+});
+
+test("redacts an unexpected context defect through the tRPC boundary", async () => {
+    const sentinel = "context-failure-secret";
+    const logLines: string[] = [];
+    const request = new Request("https://dashboard.example/trpc/auth.status");
+    const logger = createStructuredLogger({
+        identity: {
+            bun: "1.4.0-test",
+            pid: 123,
+            processRole: "web",
+            release: "handler-test",
+            service: "mira-dashboard",
+        },
+        sink: {
+            write(line) {
+                logLines.push(line);
+            },
+        },
+    });
+    const handler = createTrpcHttpHandler({
+        ...createTestServerSecurityServices(),
+        applicationRuntime: createTestApplicationRuntime({ logger }),
+        authenticateCredential() {
+            throw new Error(sentinel);
+        },
+    });
+    const bunServer = {
+        requestIP: () => ({ address: "127.0.0.1" }),
+        timeout(_request: Request, seconds: number) {
+            expect(seconds).toBeGreaterThan(0);
+        },
+    };
+
+    const response = await handler(
+        request,
+        new URL(request.url),
+        bunServer,
+        "01900000-0000-7000-8000-000000000001"
+    );
+    const records = logLines.map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("x-request-id")).toBeNull();
+    expect(records).toHaveLength(1);
+    expect(JSON.stringify(records)).not.toContain(sentinel);
+    expect(records[0]).toMatchObject({
+        event: "trpc.request.defect",
+        outcome: "server-error",
+    });
+    expect(records[0]).toMatchObject({
+        requestId: "01900000-0000-7000-8000-000000000001",
+    });
 });

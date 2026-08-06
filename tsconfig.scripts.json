@@ -1,0 +1,13 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "lib": ["ESNext"],
+        "types": ["bun-types", "node"]
+    },
+    "include": [
+        "drizzle.config.ts",
+        "frontend/src/globals.d.ts",
+        "scripts/**/*.ts",
+        "tailwind.config.ts"
+    ]
+}

@@ -4,6 +4,7 @@ import { secondsToMilliseconds } from "date-fns";
 import { Effect, Layer, Stream } from "effect";
 
 import { createServer } from "../../../app/server.ts";
+import { createStructuredLogger } from "../../platform/observability/structuredLogger.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import { RealtimeEventPumpService } from "../../platform/realtime/eventPumpService.ts";
 import {
@@ -15,6 +16,7 @@ import {
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
     createTestServerSecurityServices,
+    createTestStructuredLogger,
 } from "../support/requestContext.ts";
 
 function createPendingBunServer(resolveWhenForced = true): {
@@ -51,10 +53,55 @@ function createShutdownTestRuntime(onDispose: () => void) {
         Effect.sync(onDispose)
     );
     const layer = Layer.effect(RealtimeEventPumpService, scopedService);
-    return createApplicationRuntime({ realtimeEventPumpLayer: layer });
+    return createApplicationRuntime({
+        logger: createTestStructuredLogger(),
+        realtimeEventPumpLayer: layer,
+    });
 }
 
 describe("application server shutdown", () => {
+    test("flushes the process logger after runtime disposal", async () => {
+        const fake = createPendingBunServer();
+        const serveSpy = spyOn(Bun, "serve").mockReturnValue(fake.server);
+        const order: string[] = [];
+        const logger = createStructuredLogger({
+            identity: {
+                bun: "1.4.0-test",
+                pid: 123,
+                processRole: "web",
+                release: "server-shutdown-test",
+                service: "mira-dashboard",
+            },
+            sink: {
+                flush() {
+                    order.push("logger-flush");
+                },
+                write() {},
+            },
+        });
+
+        try {
+            const server = await createServer({
+                ...createTestServerSecurityServices(),
+                applicationRuntime: createTestApplicationRuntime({
+                    dispose() {
+                        order.push("runtime-dispose");
+                        return Promise.resolve();
+                    },
+                    logger,
+                }),
+                port: 3100,
+                readiness: createReadinessController(),
+            });
+
+            await server.stop(true);
+
+            expect(order).toEqual(["runtime-dispose", "logger-flush"]);
+        } finally {
+            serveSpy.mockRestore();
+        }
+    });
+
     test("forces immediately when the first stop request is forced", async () => {
         const fake = createPendingBunServer();
         const serveSpy = spyOn(Bun, "serve").mockReturnValue(fake.server);

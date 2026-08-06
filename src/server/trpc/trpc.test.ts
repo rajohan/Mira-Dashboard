@@ -11,9 +11,11 @@ import {
 import { capabilityProcedure, router } from "./trpc.ts";
 
 const capabilityTestRouter = router({
-    readNotifications: capabilityProcedure("notifications:read").query(
-        ({ ctx }) => ctx.principal.kind
-    ),
+    events: router({
+        stream: capabilityProcedure("notifications:read").query(
+            ({ ctx }) => ctx.principal.kind
+        ),
+    }),
 });
 
 describe("tRPC capability procedure", () => {
@@ -30,7 +32,7 @@ describe("tRPC capability procedure", () => {
             const context = await createTestRequestContext(authentication);
             const resolvedPrincipalKind = await capabilityTestRouter
                 .createCaller(context)
-                .readNotifications();
+                .events.stream();
 
             expect(resolvedPrincipalKind).toBe(principalKind);
         }
@@ -45,7 +47,7 @@ describe("tRPC capability procedure", () => {
                     : createTestSessionAuthentication([]);
             const context = await createTestRequestContext(authentication);
             const failure = await captureFailure(() =>
-                capabilityTestRouter.createCaller(context).readNotifications()
+                capabilityTestRouter.createCaller(context).events.stream()
             );
 
             expect(failure).toBeInstanceOf(TRPCError);
@@ -56,7 +58,7 @@ describe("tRPC capability procedure", () => {
     test("rejects an unauthenticated caller before capability evaluation", async () => {
         const context = await createTestRequestContext();
         const failure = await captureFailure(() =>
-            capabilityTestRouter.createCaller(context).readNotifications()
+            capabilityTestRouter.createCaller(context).events.stream()
         );
 
         expect(failure).toBeInstanceOf(TRPCError);

@@ -8,6 +8,8 @@ import {
     authenticationWorkLayer,
     type AuthenticationVerificationWorkOptions,
 } from "../../domains/security/authenticationWorkGate.ts";
+import { createEffectLoggerLayer } from "../observability/effectLogger.ts";
+import type { StructuredLogger } from "../observability/structuredLogger.ts";
 import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
 import type { RealtimeEventStreamOptions } from "../realtime/eventPumpService.ts";
 import { RealtimeEventPumpService } from "../realtime/eventPumpService.ts";
@@ -64,6 +66,8 @@ export interface ApplicationListenerShutdownOptions {
 
 /** Effect-backed lifecycle and request services owned by one long-lived Bun process. */
 export interface ApplicationRuntime {
+    /** Exact process logger installed on this runtime's Effect layer. */
+    readonly logger: StructuredLogger;
     readonly services: ApplicationRuntimeServices;
     dispose(): Promise<void>;
     /** Eagerly builds and caches every process-owned layer before readiness. */
@@ -75,6 +79,7 @@ export interface ApplicationRuntime {
 /** Scoped layers owned by one composition root for the full process lifetime. */
 export interface ApplicationRuntimeOptions {
     readonly authenticationWork?: AuthenticationWorkLayerOptions;
+    readonly logger: StructuredLogger;
     readonly realtimeEventPumpLayer: Layer.Layer<RealtimeEventPumpService>;
 }
 
@@ -205,9 +210,10 @@ export function createApplicationRuntime(
     options: ApplicationRuntimeOptions
 ): ApplicationRuntime {
     const runtime = ManagedRuntime.make(
-        Layer.merge(
+        Layer.mergeAll(
             options.realtimeEventPumpLayer,
-            authenticationWorkLayer(options.authenticationWork)
+            authenticationWorkLayer(options.authenticationWork),
+            createEffectLoggerLayer(options.logger)
         )
     );
     let disposePromise: Promise<void> | undefined;
@@ -337,6 +343,7 @@ export function createApplicationRuntime(
         async initialize() {
             await runtime.context();
         },
+        logger: options.logger,
         services,
         shutdownListener(options: ApplicationListenerShutdownOptions) {
             return runtime.runPromise(coordinatedListenerShutdown(options));

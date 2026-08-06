@@ -343,6 +343,7 @@ export function realtimeEventPumpLayer(
                             ).pipe(
                                 Effect.annotateLogs({
                                     component: "realtime-event-pump",
+                                    event: "realtime.runner.failed",
                                     failureKind: "unexpected-runner-defect",
                                 })
                             );

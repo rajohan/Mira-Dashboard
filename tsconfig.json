@@ -23,8 +23,12 @@
     "files": [],
     "references": [
         { "path": "./tsconfig.app.json" },
+        { "path": "./tsconfig.browser.json" },
+        { "path": "./tsconfig.contracts.json" },
         { "path": "./tsconfig.node.json" },
         { "path": "./tsconfig.qualification.json" },
-        { "path": "./tsconfig.server.json" }
+        { "path": "./tsconfig.scripts.json" },
+        { "path": "./tsconfig.server.json" },
+        { "path": "./tsconfig.worker.json" }
     ]
 }

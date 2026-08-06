@@ -1,3 +1,3 @@
-import { buildFrontend } from "./frontendBuild";
+import { buildFrontend } from "./frontendBuild.ts";
 
 await buildFrontend({ mode: "production" });

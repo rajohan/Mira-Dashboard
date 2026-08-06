@@ -1,0 +1,14 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "lib": ["ESNext"],
+        "types": []
+    },
+    "include": ["src/contracts/**/*.ts", "src/shared/**/*.ts"],
+    "exclude": [
+        "src/**/*.spec.ts",
+        "src/**/*.test.ts",
+        "src/**/__tests__/**/*.ts",
+        "src/**/testSupport/**/*.ts"
+    ]
+}

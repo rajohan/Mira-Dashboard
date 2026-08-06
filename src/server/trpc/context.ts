@@ -31,6 +31,7 @@ export interface RequestContextOptions {
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly request: Request;
+    readonly requestId: string;
     readonly responseHeaders: Headers;
 }
 
@@ -71,7 +72,7 @@ export async function createRequestContext(
         mfaLoginLifecycle: options.mfaLoginLifecycle,
         ...(resolution.lease && { authenticationLease: resolution.lease }),
         pendingLoginCredential: options.pendingLoginCredential,
-        requestId: crypto.randomUUID(),
+        requestId: options.requestId,
         responseHeaders: options.responseHeaders,
         services: options.applicationRuntime.services,
         ...(userAgent !== null && { userAgent }),
