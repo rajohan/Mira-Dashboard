@@ -78,6 +78,8 @@ describe("native Gateway credential verifier", () => {
             "ws://127.0.0.1:0",
             "ws://127.0.0.1:18789/foo/..",
             "ws://127.0.0.1:18789/gateway",
+            "ws://127.0.0.1:18789/?",
+            "ws://127.0.0.1:18789/#",
             "ws://127.0.0.1:18789?token=secret",
             "ws://127.1:18789",
             "ws://user:secret@gateway.example",

@@ -57,11 +57,14 @@ function unavailable(): GatewayCredentialVerifierUnavailableError {
  * @returns Canonical direct-loopback `ws://` endpoint.
  */
 export function parseGatewayCredentialVerifierUrl(value: string): string {
+    // WHATWG URL normalizes bare query and fragment markers to empty fields.
     if (
         value.length === 0 ||
         value.length > gatewayUrlMaximumLength ||
         value !== value.trim() ||
-        containsControlCharacter(value)
+        containsControlCharacter(value) ||
+        value.includes("?") ||
+        value.includes("#")
     ) {
         throw new GatewayCredentialVerifierConfigurationError(
             "Gateway verifier URL is invalid"
