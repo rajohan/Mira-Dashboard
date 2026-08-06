@@ -37,7 +37,7 @@
         "denyWarnings": true,
         "reportUnusedDisableDirectives": "error",
         "typeAware": true,
-        "typeCheck": false
+        "typeCheck": true
     },
     "plugins": [
         "eslint",
@@ -111,73 +111,18 @@
             "files": [
                 "backend/**/*.ts",
                 "frontend/src/test/**/*.{ts,tsx}",
-                "qualification/**/*.ts",
-                "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/app/dashboardServer.ts",
-                "src/app/environmentSource.ts",
-                "src/app/server.ts",
-                "src/app/trpcHttpHandler.ts",
-                "src/app/trpcRequestPolicy.ts",
-                "src/app/worker.ts",
-                "src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "*.config.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
+                "scripts/**/*.ts",
+                "*.config.{js,mjs,cjs,ts}"
             ],
             "globals": {
                 "Bun": "readonly"
             }
         },
         {
-            "excludeFiles": [
-                "**/*.spec.*",
-                "**/*.test.*",
-                "**/__tests__/**",
-                "**/test/**",
-                "**/testSupport/**",
-                "src/app/environmentSource.ts"
-            ],
-            "files": [
-                "src/app/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
-            "rules": {
-                "no-restricted-properties": [
-                    "error",
-                    {
-                        "message": "Read the process environment only through the typed environment source.",
-                        "object": "process",
-                        "property": "env"
-                    },
-                    {
-                        "message": "Read the process environment only through the typed environment source.",
-                        "object": "Bun",
-                        "property": "env"
-                    },
-                    {
-                        "message": "Read the process environment only through the typed environment source.",
-                        "object": "Deno",
-                        "property": "env"
-                    }
-                ]
-            }
-        },
-        {
             "env": {
                 "browser": true
             },
-            "excludeFiles": [
-                "**/*.spec.*",
-                "**/*.test.*",
-                "**/__tests__/**",
-                "**/test/**",
-                "**/testSupport/**"
-            ],
-            "files": [
-                "frontend/src/**/*.{js,jsx,ts,tsx}",
-                "src/app/browser.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/browser/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
+            "files": ["frontend/src/**/*.{js,jsx,ts,tsx}"],
             "jsPlugins": ["oxlint-tailwindcss"],
             "rules": {
                 "no-restricted-imports": [
@@ -213,243 +158,7 @@
             }
         },
         {
-            "excludeFiles": [
-                "**/*.spec.*",
-                "**/*.test.*",
-                "**/__tests__/**",
-                "**/test/**",
-                "**/testSupport/**"
-            ],
-            "files": [
-                "src/contracts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/shared/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
-            "rules": {
-                "no-restricted-globals": [
-                    "error",
-                    {
-                        "checkGlobalObject": true,
-                        "globals": [
-                            "Bun",
-                            "Buffer",
-                            "Deno",
-                            "document",
-                            "navigator",
-                            "process",
-                            "window"
-                        ]
-                    }
-                ],
-                "no-restricted-imports": [
-                    "error",
-                    {
-                        "patterns": [
-                            {
-                                "group": [
-                                    "**/app/**",
-                                    "**/browser/**",
-                                    "**/qualification/**",
-                                    "**/scripts/**",
-                                    "**/server/**",
-                                    "**/worker/**",
-                                    "bun",
-                                    "bun:*",
-                                    "node:*"
-                                ],
-                                "message": "Contracts and shared source must remain environment-neutral."
-                            }
-                        ]
-                    }
-                ]
-            }
-        },
-        {
-            "excludeFiles": [
-                "**/*.spec.*",
-                "**/*.test.*",
-                "**/__tests__/**",
-                "**/test/**",
-                "**/testSupport/**"
-            ],
-            "files": [
-                "src/app/browser.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/browser/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
-            "rules": {
-                "no-restricted-globals": [
-                    "error",
-                    {
-                        "checkGlobalObject": true,
-                        "globals": ["Bun", "Buffer", "Deno", "process"]
-                    }
-                ],
-                "no-restricted-imports": [
-                    "error",
-                    {
-                        "paths": [
-                            {
-                                "importNames": ["memo", "useCallback", "useMemo"],
-                                "message": "React Compiler owns routine memoization; keep explicit memoization out of application code.",
-                                "name": "react"
-                            }
-                        ],
-                        "patterns": [
-                            {
-                                "group": [
-                                    "**/app/**",
-                                    "**/qualification/**",
-                                    "**/scripts/**",
-                                    "**/server/**",
-                                    "**/worker/**",
-                                    "@simplewebauthn/server",
-                                    "@simplewebauthn/server/**",
-                                    "@trpc/server",
-                                    "@trpc/server/**",
-                                    "bun",
-                                    "bun:*",
-                                    "drizzle-orm",
-                                    "drizzle-orm/**",
-                                    "node:*"
-                                ],
-                                "message": "Browser source may import only browser, contract, and environment-neutral shared modules."
-                            }
-                        ]
-                    }
-                ]
-            }
-        },
-        {
-            "excludeFiles": [
-                "**/*.spec.*",
-                "**/*.test.*",
-                "**/__tests__/**",
-                "**/test/**",
-                "**/testSupport/**"
-            ],
-            "files": ["src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
-            "rules": {
-                "no-restricted-imports": [
-                    "error",
-                    {
-                        "patterns": [
-                            {
-                                "group": [
-                                    "**/app/**",
-                                    "**/browser/**",
-                                    "**/qualification/**",
-                                    "**/scripts/**",
-                                    "**/worker/**"
-                                ],
-                                "message": "Server source may import only server, contract, and environment-neutral shared modules."
-                            }
-                        ]
-                    }
-                ]
-            }
-        },
-        {
-            "files": [
-                "src/app/dashboardServer.ts",
-                "src/app/server.ts",
-                "src/app/trpcHttpHandler.ts",
-                "src/app/trpcRequestPolicy.ts"
-            ],
-            "rules": {
-                "no-restricted-imports": [
-                    "error",
-                    {
-                        "patterns": [
-                            {
-                                "group": [
-                                    "**/browser/**",
-                                    "**/qualification/**",
-                                    "**/scripts/**",
-                                    "**/worker/**"
-                                ],
-                                "message": "The web composition root may not import browser, worker, qualification, or script source."
-                            }
-                        ]
-                    }
-                ]
-            }
-        },
-        {
-            "excludeFiles": [
-                "**/*.spec.*",
-                "**/*.test.*",
-                "**/__tests__/**",
-                "**/test/**",
-                "**/testSupport/**"
-            ],
-            "files": [
-                "src/app/worker.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
-            "rules": {
-                "no-restricted-imports": [
-                    "error",
-                    {
-                        "patterns": [
-                            {
-                                "group": [
-                                    "**/app/**",
-                                    "**/browser/**",
-                                    "**/qualification/**",
-                                    "**/scripts/**",
-                                    "**/server/**"
-                                ],
-                                "message": "Worker source may import only worker, contract, and environment-neutral shared modules."
-                            }
-                        ]
-                    }
-                ]
-            }
-        },
-        {
-            "excludeFiles": [
-                "**/*.spec.*",
-                "**/*.test.*",
-                "**/__tests__/**",
-                "**/test/**",
-                "**/testSupport/**"
-            ],
-            "files": [
-                "*.config.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
-            "rules": {
-                "no-restricted-imports": [
-                    "error",
-                    {
-                        "patterns": [
-                            {
-                                "group": [
-                                    "**/qualification/**",
-                                    "**/src/app/**",
-                                    "**/src/browser/**",
-                                    "**/src/server/**",
-                                    "**/src/worker/**"
-                                ],
-                                "message": "Repository scripts may import only script, contract, and environment-neutral shared source."
-                            }
-                        ]
-                    }
-                ]
-            }
-        },
-        {
-            "files": [
-                "backend/src/**/*.ts",
-                "src/app/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/server/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
-            "rules": {
-                "no-console": "error"
-            }
-        },
-        {
-            "files": ["qualification/**/*.ts"],
+            "files": ["backend/src/**/*.ts"],
             "rules": {
                 "no-console": "error"
             }

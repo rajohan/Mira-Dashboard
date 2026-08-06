@@ -1,10 +1,5 @@
 # Endpoint Reference
 
-> **Current-production parity input — not the greenfield API contract.** This route inventory
-> describes the legacy backend and exists so the rewrite does not lose operator-visible behavior.
-> Greenfield contracts are defined by their explicit tRPC/raw-HTTP registries and current generated
-> references; legacy route names and payloads are not compatibility requirements.
-
 This page lists the backend route table. It is intentionally concise: use the
 route files under `backend/src/routes/` for exact validation details.
 
@@ -13,9 +8,7 @@ route files under `backend/src/routes/` for exact validation details.
 | Method | Path                      | Purpose                                                |
 | ------ | ------------------------- | ------------------------------------------------------ |
 | `GET`  | `/api/health/live`        | Public web-process liveness.                           |
-| `HEAD` | `/api/health/live`        | Bodyless public web-process liveness probe.            |
 | `GET`  | `/api/health/ready`       | Public activation readiness; `503` when not ready.     |
-| `HEAD` | `/api/health/ready`       | Bodyless readiness probe with the same status as GET.  |
 | `GET`  | `/api/health/diagnostics` | Authenticated readiness details and dependency status. |
 | `GET`  | `/api/sessions`           | Normalized session snapshot from Gateway.              |
 
@@ -202,13 +195,6 @@ already-running execution finishes cooperatively.
 | `POST` | `/api/backup`       | Creates config backup.                                                 |
 | `POST` | `/api/restart`      | Queues an OpenClaw Gateway restart and waits for its persisted result. |
 
-## Dashboard Settings
-
-| Method | Path            | Purpose                                                       |
-| ------ | --------------- | ------------------------------------------------------------- |
-| `GET`  | `/api/settings` | Reads Dashboard preferences plus current Gateway connection.  |
-| `PUT`  | `/api/settings` | Updates the validated Dashboard preference subset atomically. |
-
 ## Files, Config Files, Logs, Media
 
 | Method | Path                         | Purpose                                                             |
@@ -219,9 +205,8 @@ already-running execution finishes cooperatively.
 | `GET`  | `/api/config-files`          | Lists OpenClaw config files.                                        |
 | `GET`  | `/api/config-files/*`        | Reads a config file under OpenClaw root.                            |
 | `PUT`  | `/api/config-files/*`        | Writes a config file under OpenClaw root.                           |
-| `GET`  | `/api/logs/dashboard`        | Reads the bounded Dashboard service log tail.                       |
-| `GET`  | `/api/logs/openclaw/files`   | Lists readable OpenClaw log files and metadata.                     |
-| `GET`  | `/api/logs/openclaw/content` | Reads a bounded tail from one allowlisted OpenClaw log file.        |
+| `GET`  | `/api/logs/info`             | Lists log files/metadata.                                           |
+| `GET`  | `/api/logs/content`          | Reads log content.                                                  |
 | `GET`  | `/api/media`                 | Serves or safely previews media bytes from OpenClaw media roots.    |
 | `GET`  | `/api/chat/media/outgoing/*` | Proxies an exact managed Gateway media path with backend-held auth. |
 
@@ -242,33 +227,31 @@ upstream download metadata.
 
 ## Docker
 
-| Method   | Path                                             | Purpose                                     |
-| -------- | ------------------------------------------------ | ------------------------------------------- |
-| `GET`    | `/api/docker/containers`                         | Lists containers.                           |
-| `GET`    | `/api/docker/containers/stats`                   | Reads the current container stats snapshot. |
-| `GET`    | `/api/docker/containers/:containerId`            | Reads container details.                    |
-| `POST`   | `/api/docker/containers/:containerId/action`     | Queues a container start/stop/restart.      |
-| `GET`    | `/api/docker/containers/:containerId/logs`       | Reads container logs.                       |
-| `POST`   | `/api/docker/exec/start`                         | Queues a worker-owned container exec job.   |
-| `GET`    | `/api/docker/exec/:jobId`                        | Reads persisted exec output/state.          |
-| `POST`   | `/api/docker/exec/:jobId/stop`                   | Requests exec cancellation.                 |
-| `GET`    | `/api/docker/images`                             | Lists images.                               |
-| `DELETE` | `/api/docker/images/:imageId`                    | Queues image deletion.                      |
-| `GET`    | `/api/docker/volumes`                            | Lists volumes.                              |
-| `DELETE` | `/api/docker/volumes/:volumeName`                | Queues volume deletion.                     |
-| `POST`   | `/api/docker/prune`                              | Queues a Docker prune target.               |
-| `POST`   | `/api/docker/stack/action`                       | Queues a Compose stack action.              |
-| `GET`    | `/api/docker/updater/services`                   | Lists managed update services.              |
-| `GET`    | `/api/docker/updater/events`                     | Lists update events.                        |
-| `POST`   | `/api/docker/updater/run`                        | Queues an updater scan.                     |
-| `POST`   | `/api/docker/updater/services/:serviceId/update` | Queues one managed service update.          |
+| Method   | Path                                             | Purpose                                   |
+| -------- | ------------------------------------------------ | ----------------------------------------- |
+| `GET`    | `/api/docker/containers`                         | Lists containers.                         |
+| `GET`    | `/api/docker/containers/:containerId`            | Reads container details.                  |
+| `POST`   | `/api/docker/containers/:containerId/action`     | Queues a container start/stop/restart.    |
+| `GET`    | `/api/docker/containers/:containerId/logs`       | Reads container logs.                     |
+| `POST`   | `/api/docker/exec/start`                         | Queues a worker-owned container exec job. |
+| `GET`    | `/api/docker/exec/:jobId`                        | Reads persisted exec output/state.        |
+| `POST`   | `/api/docker/exec/:jobId/stop`                   | Requests exec cancellation.               |
+| `GET`    | `/api/docker/images`                             | Lists images.                             |
+| `DELETE` | `/api/docker/images/:imageId`                    | Queues image deletion.                    |
+| `GET`    | `/api/docker/volumes`                            | Lists volumes.                            |
+| `DELETE` | `/api/docker/volumes/:volumeName`                | Queues volume deletion.                   |
+| `POST`   | `/api/docker/prune`                              | Queues a Docker prune target.             |
+| `POST`   | `/api/docker/stack/action`                       | Queues a Compose stack action.            |
+| `GET`    | `/api/docker/updater/services`                   | Lists managed update services.            |
+| `GET`    | `/api/docker/updater/events`                     | Lists update events.                      |
+| `POST`   | `/api/docker/updater/run`                        | Queues an updater scan.                   |
+| `POST`   | `/api/docker/updater/services/:serviceId/update` | Queues one managed service update.        |
 
 ## Pull Requests And Deployments
 
 | Method | Path                                         | Purpose                                                    |
 | ------ | -------------------------------------------- | ---------------------------------------------------------- |
 | `GET`  | `/api/pull-requests`                         | Lists Dashboard PRs.                                       |
-| `POST` | `/api/pull-requests/stacks`                  | Creates one reviewed native GitHub PR stack.               |
 | `POST` | `/api/pull-requests/:number/approve`         | Queues merge, optionally followed by deploy.               |
 | `POST` | `/api/pull-requests/:number/reject`          | Queues reject/close.                                       |
 | `POST` | `/api/pull-requests/:number/review-approval` | Queues review approval.                                    |

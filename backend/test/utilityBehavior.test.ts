@@ -1278,7 +1278,7 @@ describe("backend service utilities", () => {
             );
 
             expect(response.status).toBe(503);
-            const payload: unknown = await response.json();
+            const payload = await response.json();
             expect(payload).toMatchObject({
                 checks: {
                     database: {
