@@ -93,7 +93,6 @@ describe("automation identity schema", () => {
                     expires_at,
                     id,
                     label,
-                    last_used_at,
                     prefix,
                     principal_id,
                     validator_hash
@@ -102,7 +101,6 @@ describe("automation identity schema", () => {
                     5000,
                     '019fc968-1a9b-7771-9f1b-d5b863b0e7b4',
                     'Primary credential',
-                    2000,
                     '${"c".repeat(32)}',
                     'openclaw-task-tracking',
                     '${"d".repeat(64)}'
@@ -184,22 +182,144 @@ describe("automation identity schema", () => {
                         expires_at,
                         id,
                         label,
-                        last_used_at,
                         prefix,
                         principal_id,
+                        revoked_at,
                         validator_hash
                     ) VALUES (
                         1000,
                         5000,
                         '019fc968-1a9b-7774-8f1b-d5b863b0e7b4',
                         'Invalid credential',
-                        5000,
                         '${"e".repeat(32)}',
                         'openclaw-task-tracking',
+                        999,
                         '${"f".repeat(64)}'
                     )
                 `)
             ).toThrow("automation_credentials_time_check");
+
+            expect(() =>
+                database.sqlite.run(`
+                    INSERT INTO automation_credentials (
+                        created_at,
+                        id,
+                        label,
+                        prefix,
+                        principal_id,
+                        replaces_credential_id,
+                        validator_hash
+                    ) VALUES (
+                        2000,
+                        '019fc968-1a9b-7779-8f1b-d5b863b0e7b4',
+                        'Self replacement',
+                        '${"5".repeat(32)}',
+                        'openclaw-task-tracking',
+                        '019fc968-1a9b-7779-8f1b-d5b863b0e7b4',
+                        '${"6".repeat(64)}'
+                    )
+                `)
+            ).toThrow("automation_credentials_replacement_check");
+
+            database.sqlite.run(`
+                INSERT INTO automation_principals (
+                    created_at,
+                    id,
+                    label,
+                    updated_at
+                ) VALUES (1000, 'openclaw-daily-brief', 'OpenClaw daily brief', 1000)
+            `);
+            expect(() =>
+                database.sqlite.run(`
+                    INSERT INTO automation_credentials (
+                        created_at,
+                        id,
+                        label,
+                        prefix,
+                        principal_id,
+                        replaces_credential_id,
+                        validator_hash
+                    ) VALUES (
+                        2000,
+                        '019fc968-1a9b-777c-8f1b-d5b863b0e7b4',
+                        'Cross-principal replacement',
+                        '${"0".repeat(32)}',
+                        'openclaw-daily-brief',
+                        '019fc968-1a9b-7771-9f1b-d5b863b0e7b4',
+                        '${"1".repeat(64)}'
+                    )
+                `)
+            ).toThrow("automation credential replacement must share principal");
+
+            database.sqlite.run(`
+                INSERT INTO automation_credentials (
+                    created_at,
+                    id,
+                    label,
+                    prefix,
+                    principal_id,
+                    replaces_credential_id,
+                    validator_hash
+                ) VALUES (
+                    2000,
+                    '019fc968-1a9b-777a-8f1b-d5b863b0e7b4',
+                    'Replacement one',
+                    '${"7".repeat(32)}',
+                    'openclaw-task-tracking',
+                    '019fc968-1a9b-7771-9f1b-d5b863b0e7b4',
+                    '${"8".repeat(64)}'
+                )
+            `);
+            expect(() =>
+                database.sqlite.run(`
+                    UPDATE automation_credentials
+                    SET principal_id = 'openclaw-daily-brief'
+                    WHERE id = '019fc968-1a9b-777a-8f1b-d5b863b0e7b4'
+                `)
+            ).toThrow("automation credential replacement must share principal");
+            expect(() =>
+                database.sqlite.run(`
+                    UPDATE automation_credentials
+                    SET principal_id = 'openclaw-daily-brief'
+                    WHERE id = '019fc968-1a9b-7771-9f1b-d5b863b0e7b4'
+                `)
+            ).toThrow("automation credential predecessor must share principal");
+            expect(() =>
+                database.sqlite.run(`
+                    INSERT INTO automation_credentials (
+                        created_at,
+                        id,
+                        label,
+                        prefix,
+                        principal_id,
+                        replaces_credential_id,
+                        validator_hash
+                    ) VALUES (
+                        2001,
+                        '019fc968-1a9b-777b-8f1b-d5b863b0e7b4',
+                        'Replacement two',
+                        '${"9".repeat(32)}',
+                        'openclaw-task-tracking',
+                        '019fc968-1a9b-7771-9f1b-d5b863b0e7b4',
+                        '${"a".repeat(64)}'
+                    )
+                `)
+            ).toThrow(
+                "UNIQUE constraint failed: automation_credentials.replaces_credential_id"
+            );
+            database.sqlite.run(`
+                DELETE FROM automation_credentials
+                WHERE id = '019fc968-1a9b-7771-9f1b-d5b863b0e7b4'
+            `);
+            expect(
+                database.sqlite
+                    .query<{ replacesCredentialId: string | null }, []>(`
+                        SELECT replaces_credential_id AS replacesCredentialId
+                        FROM automation_credentials
+                        WHERE id = '019fc968-1a9b-777a-8f1b-d5b863b0e7b4'
+                    `)
+                    .get()
+            ).toEqual({ replacesCredentialId: null });
         } finally {
             database.sqlite.close(true);
         }

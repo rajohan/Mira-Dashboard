@@ -6,6 +6,7 @@ import {
     contractAuthenticationErrorReasons,
     type ContractAuthenticationErrorReason,
 } from "../../contracts/registry.ts";
+import type { ApplicationCapability } from "../../contracts/security.ts";
 import type { RequestContext } from "./context.ts";
 
 const internalErrorMessage = "Internal server error";
@@ -119,6 +120,24 @@ export const authenticatedProcedure = publicProcedure.use(({ ctx, next }) => {
         },
     });
 });
+
+/**
+ * Builds a procedure requiring one exact capability on the validated principal.
+ * Browser sessions and automation callers pass through the same explicit grant check.
+ * @param capability Registered application capability required by the procedure.
+ * @returns Authenticated procedure builder narrowed to a principal with the grant.
+ */
+export function capabilityProcedure(capability: ApplicationCapability) {
+    return authenticatedProcedure.use(({ ctx, next }) => {
+        if (!ctx.principal.capabilities.includes(capability)) {
+            throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "Required application capability is not granted",
+            });
+        }
+        return next({ ctx });
+    });
+}
 
 /** Procedure builder restricted to an authenticated browser session. */
 export const sessionProcedure = authenticatedProcedure.use(({ ctx, next }) => {

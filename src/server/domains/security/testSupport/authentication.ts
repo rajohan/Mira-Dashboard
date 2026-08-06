@@ -104,7 +104,6 @@ export async function openAuthenticationTestDatabase(now = authenticationTestNow
                     expiresAt,
                     id: authenticationTestCredentialId,
                     label: "Primary credential",
-                    lastUsedAt: null,
                     prefix: automation.prefix,
                     principalId: authenticationTestPrincipalId,
                     revokedAt: null,

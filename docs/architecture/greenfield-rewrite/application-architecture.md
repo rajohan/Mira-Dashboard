@@ -205,6 +205,35 @@ Automation scripts import the same `AppRouter` client type. They authenticate wi
 high-entropy bearer credentials whose validators are hashed at rest. There is no second REST
 contract for automation merely because the caller is non-browser TypeScript.
 
+### Browser-managed automation security
+
+The `automationSecurity` namespace owns the complete operator-managed principal and credential
+lifecycle. Its explicit contract registry contains eight procedures:
+
+- `listPrincipals` and `listCredentials` are browser-session-only queries with stable
+  creation-time/ID cursors; and
+- `createPrincipal`, `createCredential`, `rotateCredential`, `revokeCredential`,
+  `replaceCapabilities`, and `disablePrincipal` are browser-session-only mutations that require
+  recent MFA.
+
+An automation principal cannot administer this namespace, even if it has every registered
+application capability. Each mutation revalidates the operator session, authentication version,
+MFA state, and recent-MFA timestamp after acquiring its SQLite immediate-transaction lock. The
+request-context snapshot is an early transport guard, not the authorization decision for the
+state change.
+
+`capabilityProcedure(capability)` remains the reusable boundary for ordinary application
+procedures. It accepts a browser session or an automation principal only when the authenticated
+snapshot contains that exact registered capability; there is no wildcard or capability-prefix
+inheritance. The automation-administration routes deliberately use the stricter session-only
+boundary instead.
+
+Automation lifecycle policy, CSPRNG, SHA-256 derivation, and the short synchronous SQLite units of
+work stay ordinary TypeScript. They neither wait on external resources nor benefit from a new
+Effect service. Effect remains responsible for the process orchestration that actually needs
+cancellation, deadlines, bounded asynchronous concurrency, or scoped lifetime; a route being
+`async` is not by itself a reason to move it into Effect.
+
 ### Raw HTTP exists only for protocol edges
 
 The explicit raw-route registry owns requests whose semantics are HTTP rather than domain RPC:

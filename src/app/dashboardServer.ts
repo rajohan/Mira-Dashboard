@@ -14,6 +14,8 @@ import {
     webAuthnWorkBudgetWindowMs,
 } from "../server/domains/security/authenticationRateLimit.ts";
 import { createAuthenticationWorkBudget } from "../server/domains/security/authenticationWorkBudget.ts";
+import { createAutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
+import { createAutomationLifecycleRepository } from "../server/domains/security/automation/lifecycleRepository.ts";
 import { createMfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import { createMfaLifecycleRepository } from "../server/domains/security/mfa/lifecycleRepository.ts";
 import { createMfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
@@ -30,6 +32,7 @@ export interface DashboardServerOptions extends Omit<
     ServerOptions,
     | "authenticateCredential"
     | "authenticationLifecycle"
+    | "automationSecurityLifecycle"
     | "browserOrigin"
     | "hostname"
     | "mfaAccountLifecycle"
@@ -170,10 +173,17 @@ export function createDashboardServer(
         sessionIdleDurationMs: options.sessionIdleDurationMs,
         verifyGatewayCredential: options.verifyGatewayCredential,
     });
+    const automationSecurityLifecycle = createAutomationSecurityLifecycleService({
+        ...(options.now !== undefined && { now: options.now }),
+        recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
+        repository: createAutomationLifecycleRepository(options.database),
+        sessionIdleDurationMs: options.sessionIdleDurationMs,
+    });
     return createServer({
         applicationRuntime: options.applicationRuntime,
         authenticateCredential: (credential) => authenticator.authenticate(credential),
         authenticationLifecycle,
+        automationSecurityLifecycle,
         browserOrigin,
         gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
         hostname: "127.0.0.1",

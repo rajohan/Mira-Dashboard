@@ -8,11 +8,9 @@ import {
     automationPrincipalIdSchema,
     securityRecordIdSchema,
     opaqueSelectorSchema,
-    type ApplicationCapability,
 } from "../../../contracts/security.ts";
 import { nonnegativeDateAction } from "../../../shared/dateTime.ts";
 import {
-    hasUniqueArrayItems,
     lowercaseSha256Schema,
     positiveSafeIntegerSchema,
 } from "../../../shared/validation.ts";
@@ -45,34 +43,55 @@ const sessionAuthenticationRecordSchema = v.strictObject({
     validatorVersion: validatorVersionSchema,
 });
 
-const automationAuthenticationRowSchema = v.strictObject({
-    capability: v.nullable(applicationCapabilitySchema),
-    credentialCreatedAt: persistedDateSchema,
-    credentialExpiresAt: persistedOptionalDateSchema,
-    credentialId: securityRecordIdSchema,
-    credentialPrefix: opaqueSelectorSchema,
-    credentialRevokedAt: persistedOptionalDateSchema,
-    principalAuthorizationVersion: positiveSafeIntegerSchema(),
-    principalCreatedAt: persistedDateSchema,
-    principalDisabledAt: persistedOptionalDateSchema,
-    principalId: automationPrincipalIdSchema,
-    principalUpdatedAt: persistedDateSchema,
-    validatorHash: lowercaseSha256Schema(),
-    validatorVersion: validatorVersionSchema,
+const automationAuthenticationRowSchema = v.pipe(
+    v.strictObject({
+        capability: v.nullable(applicationCapabilitySchema),
+        capabilityGrantedAt: persistedOptionalDateSchema,
+        credentialCreatedAt: persistedDateSchema,
+        credentialExpiresAt: persistedOptionalDateSchema,
+        credentialId: securityRecordIdSchema,
+        credentialPrefix: opaqueSelectorSchema,
+        credentialRevokedAt: persistedOptionalDateSchema,
+        principalAuthorizationVersion: positiveSafeIntegerSchema(),
+        principalCreatedAt: persistedDateSchema,
+        principalDisabledAt: persistedOptionalDateSchema,
+        principalId: automationPrincipalIdSchema,
+        principalUpdatedAt: persistedDateSchema,
+        validatorHash: lowercaseSha256Schema(),
+        validatorVersion: validatorVersionSchema,
+    }),
+    v.check(
+        (row) => (row.capability === null) === (row.capabilityGrantedAt === null),
+        "Automation capability grant is inconsistent"
+    )
+);
+
+const automationCapabilityGrantSchema = v.strictObject({
+    capability: applicationCapabilitySchema,
+    grantedAt: persistedDateSchema,
 });
 
-const capabilitySetSchema = v.pipe(
-    v.array(applicationCapabilitySchema),
+const capabilityGrantSetSchema = v.pipe(
+    v.array(automationCapabilityGrantSchema),
     v.maxLength(applicationCapabilities.length),
     v.check(
-        hasUniqueArrayItems<ApplicationCapability>,
+        (grants) =>
+            new Set(grants.map(({ capability }) => capability)).size === grants.length,
         "Automation capabilities must be unique"
     ),
-    v.transform((capabilities) => Object.freeze(capabilities.toSorted()))
+    v.transform((grants) =>
+        Object.freeze(
+            grants
+                .toSorted((left, right) =>
+                    left.capability.localeCompare(right.capability)
+                )
+                .map((grant) => Object.freeze(grant))
+        )
+    )
 );
 
 const automationAuthenticationRecordSchema = v.strictObject({
-    capabilities: capabilitySetSchema,
+    capabilityGrants: capabilityGrantSetSchema,
     credentialCreatedAt: persistedDateSchema,
     credentialExpiresAt: persistedOptionalDateSchema,
     credentialId: securityRecordIdSchema,
@@ -139,6 +158,7 @@ function readAutomationRecord(
     const rows = database
         .select({
             capability: automationPrincipalCapabilities.capability,
+            capabilityGrantedAt: automationPrincipalCapabilities.grantedAt,
             credentialCreatedAt: automationCredentials.createdAt,
             credentialExpiresAt: automationCredentials.expiresAt,
             credentialId: automationCredentials.id,
@@ -179,8 +199,15 @@ function readAutomationRecord(
     if (first === undefined) return undefined;
 
     return v.parse(automationAuthenticationRecordSchema, {
-        capabilities: rows.flatMap((row) =>
-            row.capability === null ? [] : [row.capability]
+        capabilityGrants: rows.flatMap((row) =>
+            row.capability === null || row.capabilityGrantedAt === null
+                ? []
+                : [
+                      {
+                          capability: row.capability,
+                          grantedAt: row.capabilityGrantedAt,
+                      },
+                  ]
         ),
         credentialCreatedAt: first.credentialCreatedAt,
         credentialExpiresAt: first.credentialExpiresAt,

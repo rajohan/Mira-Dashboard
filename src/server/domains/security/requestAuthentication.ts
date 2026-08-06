@@ -174,9 +174,16 @@ export function createRequestAuthenticator(
             expectedValidatorHash
         );
         const checkedAt = now();
+        const hasInvalidCapabilityGrant = record?.capabilityGrants.some(
+            ({ grantedAt }) =>
+                compareAsc(grantedAt, record.principalCreatedAt) < 0 ||
+                compareAsc(grantedAt, record.principalUpdatedAt) > 0 ||
+                compareAsc(grantedAt, checkedAt) > 0
+        );
         if (
             record === undefined ||
             !validatorMatches ||
+            hasInvalidCapabilityGrant === true ||
             record.principalDisabledAt !== null ||
             record.credentialRevokedAt !== null ||
             compareAsc(record.credentialCreatedAt, checkedAt) > 0 ||
@@ -194,11 +201,12 @@ export function createRequestAuthenticator(
         if (record.credentialExpiresAt !== null) {
             leaseCandidates.push(record.credentialExpiresAt);
         }
+        const capabilities = record.capabilityGrants.map(({ capability }) => capability);
         const authentication = Object.freeze({
             kind: "authenticated" as const,
             principal: Object.freeze({
                 authorizationVersion: record.principalAuthorizationVersion,
-                capabilities: record.capabilities,
+                capabilities: Object.freeze(capabilities),
                 authenticatorId: record.credentialId,
                 id: record.principalId,
                 kind: "automation" as const,

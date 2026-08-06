@@ -503,3 +503,39 @@
   uniformity, recovery-only login after RP drift, global credential collisions, same-millisecond
   CAS, strict body limits, no-store responses, cookie rotation, and complete mixed-account
   login/step-up/removal.
+
+### 2026-08-06 — Automation principal and credential lifecycle implemented
+
+- The browser-session-only `automationSecurity` namespace now exposes eight strict Valibot/tRPC
+  procedures for stable principal and credential-history listing, principal creation, credential
+  creation, staged rotation, explicit revocation, exact capability replacement, and terminal
+  principal disablement. Automation credentials cannot administer this namespace.
+- Every mutation revalidates the operator session, authentication version, MFA enrollment, and
+  recent-MFA timestamp after entering the same immediate transaction that owns the state change
+  and redacted audit event. Existing-principal mutations use authorization-version CAS; repeated
+  revoke, identical capability replacement, and repeated disable are no-ops without duplicate
+  audit growth.
+- The lifecycle limits enabled principals to 32 and currently usable credentials to four per
+  principal while preserving disabled and revoked history through bounded newest-first composite
+  cursor pages. Lists expose only non-secret prefixes. Create and rotate return the complete
+  domain-bound opaque token once; persisted state contains only its prefix, validator version, and
+  validator hash, and no `last_used_at` write path was introduced.
+- Rotation is lost-response-safe: one linked replacement remains alongside its predecessor until
+  explicit revocation. A partial unique index and custom insert/update integrity triggers prevent
+  multiple active or cross-principal replacement relationships. Losing the response therefore
+  leaves an identifiable replacement that can be revoked and retried without disabling the old
+  credential.
+- Capability grants are exact and fail closed when their timestamp precedes principal creation,
+  follows the principal's current update timestamp, or lies in the future. Real capability changes
+  preserve unchanged grant times and increment the authorization version once; terminal disable
+  increments it and revokes every then-usable credential atomically, while the disabled principal
+  invalidates all historical tokens. Principal inventory/creation, every credential inventory, and
+  enabled-principal credential mutations reject future principal creation/update/disable history
+  and future credential creation/revocation history before cursors or active counts can hide it.
+  This inventory scan also applies after terminal disablement. Clock rollback does not block
+  terminal containment; a future-created row can remain physically unrevoked while principal
+  disablement keeps it invalid after the clock catches up.
+- This slice adds no Effect service: generation, hashing, policy, and SQLite transactions are
+  bounded synchronous work. The deterministic generator now emits all eight procedure rows and 16
+  input/output JSON Schemas; 13/13 documentation tests and `docs:check` pass at this checkpoint.
+  Full repository CI parity remains a delivery gate rather than a claim of this progress entry.

@@ -9,6 +9,8 @@ export const securityExpiresAt = addDays(securityCreatedAt, 30);
 
 export const securityUserId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 export const automationCredentialId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4";
+export const automationReplacementSourceCredentialId =
+    "019fc968-1a9b-7777-9f1b-d5b863b0e7b4";
 export const auditEventId = "019fc968-1a9b-7772-af1b-d5b863b0e7b4";
 export const totpFactorId = "019fc968-1a9b-7773-bf1b-d5b863b0e7b4";
 export const recoveryCodeId = "019fc968-1a9b-7774-8f1b-d5b863b0e7b4";
@@ -124,9 +126,9 @@ export const validAutomationCredentialInsert = Object.freeze({
     expiresAt: null,
     id: automationCredentialId,
     label: "Primary credential",
-    lastUsedAt: null,
     prefix: "c".repeat(32),
     principalId: automationPrincipalId,
+    replacesCredentialId: null,
     revokedAt: null,
     validatorHash: "d".repeat(64),
 });

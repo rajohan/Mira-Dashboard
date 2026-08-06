@@ -1,10 +1,6 @@
 import { toJsonSchema } from "@valibot/to-json-schema";
 
-import {
-    factorLabelMaximumLength,
-    hasValidPossessionFactorInventory,
-    isValidFactorLabel,
-} from "../../src/contracts/accountSecurity.ts";
+import { hasValidPossessionFactorInventory } from "../../src/contracts/accountSecurity.ts";
 import {
     authPasswordMaximumLength,
     authPasswordMinimumLength,
@@ -12,7 +8,29 @@ import {
     hasValidAuthPasswordLength,
     isValidBrowserSessionUserAgent,
 } from "../../src/contracts/auth.ts";
+import {
+    automationCredentialDoesNotReplaceItself,
+    automationCredentialPageCountIsConsistent,
+    automationCredentialPageCursorIsConsistent,
+    automationCredentialRowsHaveStableOrder,
+    automationCredentialTimesAreOrdered,
+    automationPrincipalCredentialCountsAreConsistent,
+    automationPrincipalPageCountsAreConsistent,
+    automationPrincipalPageCursorIsConsistent,
+    automationPrincipalRowsHaveStableOrder,
+    automationPrincipalTimesAreOrdered,
+    createdAutomationCredentialResultIsConsistent,
+    createdAutomationPrincipalResultIsConsistent,
+    disabledAutomationPrincipalResultIsConsistent,
+    revokedAutomationCredentialResultIsConsistent,
+    rotatedAutomationCredentialResultIsConsistent,
+} from "../../src/contracts/automationSecurity.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
+import {
+    isValidSecurityLabel,
+    securityLabelMaximumLength,
+    sortApplicationCapabilities,
+} from "../../src/contracts/security.ts";
 import {
     hasMatchingWebAuthnAuthenticationCredentialIds,
     hasMatchingWebAuthnRegistrationCredentialIds,
@@ -27,7 +45,7 @@ export type SchemaTypeMode = "input" | "output";
 // JSON Schema cannot carry JavaScript's Unicode flag. Encode astral Cf code
 // points as surrogate pairs so this remains equivalent to the Valibot \p{Cc}/\p{Cf}
 // predicate under the documented ECMA-262 pattern dialect.
-const factorLabelControlOrFormatPattern = [
+const securityLabelControlOrFormatPattern = [
     String.raw`[\u0000-\u001F\u007F-\u009F\u00AD\u0600-\u0605\u061C\u06DD\u070F\u0890-\u0891\u08E2\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]`,
     String.raw`\uD804[\uDCBD\uDCCD]`,
     String.raw`\uD80D[\uDC30-\uDC3F]`,
@@ -35,7 +53,87 @@ const factorLabelControlOrFormatPattern = [
     String.raw`\uD834[\uDD73-\uDD7A]`,
     String.raw`\uDB40(?:\uDC01|[\uDC20-\uDC7F])`,
 ].join("|");
-const factorLabelJsonSchemaPattern = `^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:${factorLabelControlOrFormatPattern}))[\\s\\S]+$`;
+const securityLabelJsonSchemaPattern = `^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:${securityLabelControlOrFormatPattern}))[\\s\\S]+$`;
+
+const automationRuntimeCheckComments = new Map<unknown, string>([
+    [
+        automationCredentialTimesAreOrdered,
+        "Live Valibot validation additionally requires credential expiry after creation and revocation no earlier than creation.",
+    ],
+    [
+        automationCredentialDoesNotReplaceItself,
+        "Live Valibot validation additionally requires a replacement credential to reference a different credential ID.",
+    ],
+    [
+        automationPrincipalTimesAreOrdered,
+        "Live Valibot validation additionally orders principal creation, update, and disable timestamps.",
+    ],
+    [
+        automationPrincipalCredentialCountsAreConsistent,
+        "Live Valibot validation additionally bounds active credentials by the total and requires zero active credentials when disabled.",
+    ],
+    [
+        automationPrincipalRowsHaveStableOrder,
+        "Live Valibot validation additionally requires strict newest-first ordering by creation timestamp and ID.",
+    ],
+    [
+        automationCredentialRowsHaveStableOrder,
+        "Live Valibot validation additionally requires strict newest-first ordering by creation timestamp and ID.",
+    ],
+    [
+        automationPrincipalPageCountsAreConsistent,
+        "Live Valibot validation additionally requires principal page and active counts not to exceed the total count.",
+    ],
+    [
+        automationPrincipalPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a principal continuation cursor to identify the returned last row.",
+    ],
+    [
+        automationCredentialPageCountIsConsistent,
+        "Live Valibot validation additionally requires the credential page count not to exceed the total count.",
+    ],
+    [
+        automationCredentialPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a credential continuation cursor to identify the returned last row.",
+    ],
+    [
+        createdAutomationPrincipalResultIsConsistent,
+        "Live Valibot validation additionally binds a new principal to one active initial credential and its matching one-time token prefix.",
+    ],
+    [
+        createdAutomationCredentialResultIsConsistent,
+        "Live Valibot validation additionally requires a new standalone credential and matching one-time token prefix.",
+    ],
+    [
+        rotatedAutomationCredentialResultIsConsistent,
+        "Live Valibot validation additionally requires a staged predecessor link and matching one-time token prefix.",
+    ],
+    [
+        revokedAutomationCredentialResultIsConsistent,
+        "Live Valibot validation additionally requires every revoke result to include its durable revocation timestamp.",
+    ],
+    [
+        disabledAutomationPrincipalResultIsConsistent,
+        "Live Valibot validation additionally requires terminal disabled state and zero newly revoked credentials for an idempotent no-op.",
+    ],
+]);
+
+function appendJsonSchemaComment(
+    jsonSchema: object,
+    comment: string
+): Record<string, unknown> {
+    const existing =
+        "$comment" in jsonSchema
+            ? (jsonSchema as { readonly $comment?: unknown }).$comment
+            : undefined;
+    return {
+        ...jsonSchema,
+        $comment:
+            typeof existing === "string" && existing.length > 0
+                ? `${existing} ${comment}`
+                : comment,
+    };
+}
 
 function readActionRequirement(action: unknown): unknown {
     return typeof action === "object" && action !== null && "requirement" in action
@@ -106,13 +204,13 @@ export function convertContractSchema(
                 }
                 if (
                     valibotAction.type === "check" &&
-                    requirement === isValidFactorLabel
+                    requirement === isValidSecurityLabel
                 ) {
                     return {
                         ...jsonSchema,
-                        maxLength: factorLabelMaximumLength,
+                        maxLength: securityLabelMaximumLength,
                         minLength: 1,
-                        pattern: factorLabelJsonSchemaPattern,
+                        pattern: securityLabelJsonSchemaPattern,
                     };
                 }
                 if (
@@ -155,11 +253,18 @@ export function convertContractSchema(
                             "Live Valibot validation additionally limits the combined TOTP and WebAuthn possession-factor inventory to four.",
                     };
                 }
+                if (valibotAction.type === "check") {
+                    const comment = automationRuntimeCheckComments.get(requirement);
+                    if (comment !== undefined) {
+                        return appendJsonSchemaComment(jsonSchema, comment);
+                    }
+                }
                 // JSON Schema validates the same unique bounded set. Canonical
                 // ordering is a runtime output normalization, not an input rule.
                 if (
                     valibotAction.type === "transform" &&
-                    operation === sortWebAuthnTransports
+                    (operation === sortWebAuthnTransports ||
+                        operation === sortApplicationCapabilities)
                 ) {
                     return jsonSchema;
                 }

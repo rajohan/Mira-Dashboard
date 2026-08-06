@@ -1,5 +1,6 @@
 import { accountSecurityProcedureContracts } from "./accountSecurity.ts";
 import { authProcedureContracts } from "./auth.ts";
+import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
 import { eventsStreamContract } from "./events.ts";
 import type {
     ProcedureContract,
@@ -12,6 +13,7 @@ import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
 export const procedureContracts: readonly ProcedureContract[] = [
     ...accountSecurityProcedureContracts,
     ...authProcedureContracts,
+    ...automationSecurityProcedureContracts,
     eventsStreamContract,
     ...systemProcedureContracts,
 ];

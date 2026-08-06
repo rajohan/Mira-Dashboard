@@ -1,0 +1,36 @@
+{
+  "$id": "urn:mira-dashboard:automationSecurity.replaceCapabilities.input",
+  "type": "object",
+  "properties": {
+    "expectedAuthorizationVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "principalId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "notifications:read",
+          "reports:read"
+        ],
+        "type": "string"
+      },
+      "maxItems": 2,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "expectedAuthorizationVersion",
+    "principalId",
+    "capabilities"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

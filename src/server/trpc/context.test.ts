@@ -5,6 +5,7 @@ import { generateOpaqueToken } from "../shared/opaqueToken.ts";
 import {
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
+    createTestAutomationSecurityLifecycleService,
     createTestMfaAccountLifecycleService,
     createTestMfaLoginLifecycleService,
 } from "../test/support/requestContext.ts";
@@ -23,6 +24,8 @@ describe("tRPC request context", () => {
         let observedCredential: unknown;
         const applicationRuntime = createTestApplicationRuntime();
         const authenticationLifecycle = createTestAuthenticationLifecycleService();
+        const automationSecurityLifecycle =
+            createTestAutomationSecurityLifecycleService();
         const responseHeaders = new Headers();
 
         const context = await createRequestContext({
@@ -30,6 +33,7 @@ describe("tRPC request context", () => {
             authenticationCredential: credentials.authentication,
             authenticationClientSourceId: "client-source-1",
             authenticationLifecycle,
+            automationSecurityLifecycle,
             authenticateCredential(candidate) {
                 observedCredential = candidate;
                 return {
@@ -72,6 +76,7 @@ describe("tRPC request context", () => {
         expect(Object.isFrozen(context.authenticationLease)).toBe(true);
         expect(context.services).toBe(applicationRuntime.services);
         expect(context.authenticationLifecycle).toBe(authenticationLifecycle);
+        expect(context.automationSecurityLifecycle).toBe(automationSecurityLifecycle);
         expect(context.authenticationClientSourceId).toBe("client-source-1");
         expect(context.pendingLoginCredential).toEqual({
             kind: "present",
@@ -99,6 +104,7 @@ describe("tRPC request context", () => {
             authenticationCredential: credentials.authentication,
             authenticationClientSourceId: "client-source-without-user-agent",
             authenticationLifecycle: createTestAuthenticationLifecycleService(),
+            automationSecurityLifecycle: createTestAutomationSecurityLifecycleService(),
             authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
@@ -121,6 +127,8 @@ describe("tRPC request context", () => {
                 authenticationCredential: credentials.authentication,
                 authenticationClientSourceId: "client-source-2",
                 authenticationLifecycle: createTestAuthenticationLifecycleService(),
+                automationSecurityLifecycle:
+                    createTestAutomationSecurityLifecycleService(),
                 authenticateCredential: () => ({
                     authentication: {
                         kind: "authenticated",

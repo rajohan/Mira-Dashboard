@@ -1,5 +1,10 @@
 import * as v from "valibot";
 
+import {
+    applicationCapabilityListSchema,
+    securityRecordIdSchema,
+    type ApplicationCapability,
+} from "../../../contracts/security.ts";
 import { auditEventInsertSchema } from "../../database/validation/auditEvents.ts";
 
 const securityAuditReasonValues = [
@@ -20,10 +25,15 @@ type SecurityAuditReason = (typeof securityAuditReasonValues)[number];
 const securityAuditReasons: ReadonlySet<string> = new Set(securityAuditReasonValues);
 
 export interface SecurityAuditMetadata {
+    readonly addedCapabilities?: readonly ApplicationCapability[];
     readonly reason?: SecurityAuditReason;
     readonly method?: "password" | "recovery" | "totp" | "webauthn";
     readonly pendingMfa?: boolean;
+    readonly predecessorCredentialId?: string;
+    readonly removedCapabilities?: readonly ApplicationCapability[];
+    readonly replacementCredentialId?: string;
     readonly revoked?: boolean;
+    readonly revokedCredentials?: number;
     readonly revokedSessions?: number;
 }
 
@@ -59,7 +69,17 @@ export interface SecurityAuditEventInput {
 export function serializeRedactedAuditMetadata(
     metadata: SecurityAuditMetadata | Readonly<Record<string, unknown>> = {}
 ): string {
-    const sanitized: Record<string, boolean | number | string> = {};
+    const sanitized: Record<
+        string,
+        boolean | number | string | readonly ApplicationCapability[]
+    > = {};
+    const addedCapabilities = v.safeParse(
+        applicationCapabilityListSchema,
+        metadata.addedCapabilities
+    );
+    if (addedCapabilities.success) {
+        sanitized.addedCapabilities = addedCapabilities.output;
+    }
     if (
         typeof metadata.reason === "string" &&
         securityAuditReasons.has(metadata.reason)
@@ -79,6 +99,34 @@ export function serializeRedactedAuditMetadata(
     }
     if (typeof metadata.pendingMfa === "boolean") {
         sanitized.pendingMfa = metadata.pendingMfa;
+    }
+    const predecessorCredentialId = v.safeParse(
+        securityRecordIdSchema,
+        metadata.predecessorCredentialId
+    );
+    if (predecessorCredentialId.success) {
+        sanitized.predecessorCredentialId = predecessorCredentialId.output;
+    }
+    const removedCapabilities = v.safeParse(
+        applicationCapabilityListSchema,
+        metadata.removedCapabilities
+    );
+    if (removedCapabilities.success) {
+        sanitized.removedCapabilities = removedCapabilities.output;
+    }
+    const replacementCredentialId = v.safeParse(
+        securityRecordIdSchema,
+        metadata.replacementCredentialId
+    );
+    if (replacementCredentialId.success) {
+        sanitized.replacementCredentialId = replacementCredentialId.output;
+    }
+    if (
+        typeof metadata.revokedCredentials === "number" &&
+        Number.isSafeInteger(metadata.revokedCredentials) &&
+        metadata.revokedCredentials >= 0
+    ) {
+        sanitized.revokedCredentials = metadata.revokedCredentials;
     }
     if (
         typeof metadata.revokedSessions === "number" &&

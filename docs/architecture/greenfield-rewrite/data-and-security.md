@@ -144,31 +144,35 @@ queryable lifecycle.
 
 ### Index plan
 
-| Query shape              | Index or constraint                                                                     |
-| ------------------------ | --------------------------------------------------------------------------------------- |
-| Session lookup           | unique `auth_sessions(validator_hash)`                                                  |
-| Session expiry cleanup   | `auth_sessions(expires_at_ms)`                                                          |
-| User credentials         | `user_webauthn_credentials(user_id, created_at, id)` and unique credential ID           |
-| WebAuthn challenge       | unique partial binding/purpose indexes plus `(expires_at, id)` cleanup                  |
-| Task board               | `tasks(status, priority, updated_at_ms DESC)`                                           |
-| Task label filter        | `task_labels(label, task_id)`                                                           |
-| Task timeline            | `task_updates(task_id, created_at_ms, id)` and equivalent event index                   |
-| Latest reports           | `reports(kind, occurred_at_ms DESC, id DESC)`                                           |
-| Heartbeat stream         | `reports(source, source_job_id, occurred_at_ms DESC, id DESC)`                          |
-| Active incidents         | partial `incidents(monitor_key, last_seen_at_ms DESC) WHERE state = 'active'`           |
-| Incident identity        | unique `incidents(monitor_key, fingerprint)`                                            |
-| Unread notifications     | partial `notifications(occurred_at_ms DESC) WHERE read_at_ms IS NULL`                   |
-| Incident notification    | unique `(incident_id, incident_generation, channel)` when incident is non-null          |
-| Queue claim              | partial `job_runs(available_at_ms, priority DESC, queued_at_ms) WHERE state = 'queued'` |
-| One active scheduled run | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`        |
-| Worker expiry            | `worker_instances(heartbeat_at_ms)`                                                     |
-| Job timeline             | `job_run_events(job_run_id, sequence)`                                                  |
-| Realtime catch-up        | `realtime_events(topic, id)`                                                            |
-| Chat replay              | unique `chat_run_events(chat_run_id, sequence)`                                         |
-| Deployment history       | `deployments(state, updated_at_ms DESC)`                                                |
-| Docker history           | `docker_update_events(managed_service_id, created_at_ms DESC)`                          |
-| Cache refresh/expiry     | `cache_entries(status, expires_at_ms)`                                                  |
-| Audit cursor             | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                |
+| Query shape                   | Index or constraint                                                                       |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| Session lookup                | unique `auth_sessions(validator_hash)`                                                    |
+| Session expiry cleanup        | `auth_sessions(expires_at_ms)`                                                            |
+| User credentials              | `user_webauthn_credentials(user_id, created_at, id)` and unique credential ID             |
+| WebAuthn challenge            | unique partial binding/purpose indexes plus `(expires_at, id)` cleanup                    |
+| Automation principal history  | `automation_principals_created_id_idx` plus `automation_principals_active_created_id_idx` |
+| Automation credential history | `automation_credentials_principal_created_idx`                                            |
+| Active automation credentials | partial `automation_credentials_active_principal_created_idx` while unrevoked             |
+| Staged credential rotation    | full `automation_credentials_replacement_idx` plus a unique partial replacement index     |
+| Task board                    | `tasks(status, priority, updated_at_ms DESC)`                                             |
+| Task label filter             | `task_labels(label, task_id)`                                                             |
+| Task timeline                 | `task_updates(task_id, created_at_ms, id)` and equivalent event index                     |
+| Latest reports                | `reports(kind, occurred_at_ms DESC, id DESC)`                                             |
+| Heartbeat stream              | `reports(source, source_job_id, occurred_at_ms DESC, id DESC)`                            |
+| Active incidents              | partial `incidents(monitor_key, last_seen_at_ms DESC) WHERE state = 'active'`             |
+| Incident identity             | unique `incidents(monitor_key, fingerprint)`                                              |
+| Unread notifications          | partial `notifications(occurred_at_ms DESC) WHERE read_at_ms IS NULL`                     |
+| Incident notification         | unique `(incident_id, incident_generation, channel)` when incident is non-null            |
+| Queue claim                   | partial `job_runs(available_at_ms, priority DESC, queued_at_ms) WHERE state = 'queued'`   |
+| One active scheduled run      | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`          |
+| Worker expiry                 | `worker_instances(heartbeat_at_ms)`                                                       |
+| Job timeline                  | `job_run_events(job_run_id, sequence)`                                                    |
+| Realtime catch-up             | `realtime_events(topic, id)`                                                              |
+| Chat replay                   | unique `chat_run_events(chat_run_id, sequence)`                                           |
+| Deployment history            | `deployments(state, updated_at_ms DESC)`                                                  |
+| Docker history                | `docker_update_events(managed_service_id, created_at_ms DESC)`                            |
+| Cache refresh/expiry          | `cache_entries(status, expires_at_ms)`                                                    |
+| Audit cursor                  | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                  |
 
 Primary keys and unique constraints already create indexes; the schema does not add redundant
 copies. Partial-index predicates must match query predicates exactly enough for SQLite to use
@@ -181,7 +185,8 @@ Drizzle Kit v1 stores the migration graph as timestamped directories containing
 one evolving `*_dashboard-foundation` baseline generated from the complete current Drizzle schema.
 The generated SQL includes the security identity objects, SQLite `STRICT` table options, canonical
 NUL-free constraints, and deliberate `audit_events WITHOUT ROWID` hardening. The custom audit
-metadata and append-only triggers are reviewed additions because Drizzle does not model them.
+metadata, append-only, monitoring-JSON, and automation replacement-integrity triggers are reviewed
+additions because Drizzle does not model them.
 There is no compatibility preflight or upgrade path for an intermediate rewrite database: every
 test and the final cutover start empty and apply this one baseline. Each schema slice regenerates
 the baseline, reviews the complete SQL/snapshot diff, and updates the explicit manifest checksums.
@@ -284,10 +289,72 @@ query string.
 ### Automation identities
 
 Each automation caller is a named principal with an explicit capability set and one or more
-rotatable credentials. Tokens contain at least 256 bits of randomness, are shown or written to
-the scoped client file once, and are represented in the database only by a versioned validator
-hash and non-secret prefix. Comparison is constant-time. A TypeScript client cannot call a
-procedure outside its principal's capability set even if it knows the procedure name.
+rotatable credentials. Tokens contain at least 256 bits of randomness, are returned to the
+operator once, and are represented in the database only by a versioned validator hash and
+non-secret prefix. Comparison is constant-time. A TypeScript client cannot call a procedure
+outside its principal's capability set even if it knows the procedure name.
+
+The greenfield token is the canonical `32-lowercase-hex-prefix.64-lowercase-hex-validator`
+opaque-token form. Its SHA-256 validator hash is domain-separated by token kind, validator
+version, and prefix, so material from a browser session or pending login cannot be replayed as an
+automation credential. The complete token is returned only by the successful create or staged
+rotate response. Credential history exposes the non-secret prefix, but no list exposes the
+validator, validator hash, validator version, or a reconstructable token. Audit metadata and
+errors omit all token material and operator labels.
+
+The lifecycle enforces these persistent limits and history rules:
+
+- at most 32 principals may be enabled at one time; disabled principal rows remain as history;
+- at most four non-revoked, non-expired credentials may be usable for one principal at one time;
+- principal and credential history are returned newest-first through stable `(created_at, id)`
+  cursors, with bounded pages rather than silent lifetime truncation; and
+- credential use does not write `last_used_at`. Request authentication and renewable-lease
+  validation stay read-only, avoiding a synchronous SQLite write for every request or lease.
+
+The browser-session-only `automationSecurity` namespace lists principals and credential history
+and owns principal creation, credential creation, staged rotation, explicit revocation, exact
+capability replacement, and terminal principal disablement. Every mutation requires recent MFA.
+After acquiring the SQLite immediate-transaction lock, it revalidates the operator's session,
+authentication version, MFA enrollment, and recent-MFA timestamp before changing state. An
+automation principal cannot self-administer this surface, regardless of its capability set.
+
+All mutations against an existing principal carry the expected authorization version. A stale
+version, disabled target, invalid timestamp, active-cap violation, or conflicting replacement
+fails closed. Capability replacement computes an actual set diff, preserves `granted_at` for
+unchanged grants, timestamps only new grants, and increments the authorization version exactly
+once for a real change. An identical replacement is a no-op with no version bump or audit event.
+Authentication and lease renewal reject every grant whose timestamp precedes principal creation,
+follows the principal's current `updated_at`, or lies in the future relative to the validation
+clock. Administration also scans persisted lifecycle history before applying inventory cursors,
+active counts, or new-principal inserts: any principal creation/update/disable timestamp or
+credential creation/revocation timestamp ahead of the transaction clock fails closed. Credential
+inventory performs the complete scan even for a terminally disabled principal, before a cursor can
+page around the future row.
+
+Credential rotation is deliberately staged. `rotateCredential` creates one linked replacement,
+returns its token once, and leaves the predecessor usable while the operator installs and verifies
+the replacement. Explicit revocation completes cutover. If the create response is lost, the
+non-secret replacement remains visible in credential history; the operator can revoke it and retry
+without losing the predecessor. A partial unique index permits at most one unrevoked replacement
+per predecessor. Custom SQLite triggers additionally reject cross-principal or otherwise invalid
+replacement links on insert and update, including an attempt to move a predecessor underneath an
+existing replacement.
+
+Credential revocation is idempotent: a repeat reports no change and appends no duplicate audit
+event. Principal disablement is terminal in this slice; it sets `disabled_at`, increments the
+authorization version, and revokes every then-usable credential in the same transaction. The
+disabled principal makes every historical credential invalid whether or not an already expired
+row receives a redundant revoke timestamp. A clock rollback does not block this terminal
+containment: a credential created ahead of the current clock may remain physically unrevoked, but
+the disabled principal prevents it from authenticating when the clock catches up. Repeating
+disablement is likewise a no-op. Each real
+state transition and its redacted audit event commits together in one synchronous
+`BEGIN IMMEDIATE`; no network call, file I/O, or asynchronous work runs inside that callback.
+
+This lifecycle needs no separate Effect service. CSPRNG, SHA-256 derivation, pure policy, and
+indexed synchronous SQLite operations are bounded local work. Effect remains the boundary for
+operations that materially need cancellation, deadlines, asynchronous concurrency, or scoped
+resources rather than a wrapper for every `async` route.
 
 Authentication is never inferred from localhost, a private IP, or a proxy header. Trusted
 proxy mode names exact proxies and requires them to overwrite forwarded identity headers.

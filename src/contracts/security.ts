@@ -38,6 +38,40 @@ export const securityUsernameSchema = v.pipe(
     v.regex(/^[a-z0-9][a-z0-9._-]*$/u, "Username is invalid")
 );
 
+/** Shared Unicode code-point budget for operator-managed security labels. */
+export const securityLabelMaximumLength = 128;
+
+/**
+ * Validates a bounded, nonblank label without Unicode control or format characters.
+ * @param value Candidate operator-managed label.
+ * @returns Whether the label satisfies the shared security policy.
+ */
+export function isValidSecurityLabel(value: string): boolean {
+    let codePointLength = 0;
+    let hasNonWhitespaceCodePoint = false;
+    for (const codePoint of value) {
+        codePointLength += 1;
+        if (
+            codePointLength > securityLabelMaximumLength ||
+            /\p{Cc}|\p{Cf}/u.test(codePoint)
+        ) {
+            return false;
+        }
+        if (/\S/u.test(codePoint)) hasNonWhitespaceCodePoint = true;
+    }
+    return codePointLength > 0 && hasNonWhitespaceCodePoint;
+}
+
+/** Control-safe label shared by account factors and automation identities. */
+export const securityLabelSchema = v.pipe(
+    v.string("Security label is invalid"),
+    v.minLength(1, "Security label is invalid"),
+    // Valibot counts UTF-16 code units. Two units per code point preserves the
+    // full astral-character budget before the domain predicate runs.
+    v.maxLength(securityLabelMaximumLength * 2, "Security label is invalid"),
+    v.check(isValidSecurityLabel, "Security label is invalid")
+);
+
 /** Stable identifier for a named automation caller, independent of its credentials. */
 export const automationPrincipalIdSchema = v.pipe(
     v.string("Automation principal id is invalid"),
@@ -51,6 +85,13 @@ export const opaqueSelectorSchema = v.pipe(
     v.string("Opaque selector is invalid"),
     v.length(32, "Opaque selector is invalid"),
     v.regex(/^[0-9a-f]{32}$/u, "Opaque selector is invalid")
+);
+
+/** Complete canonical opaque token returned once when a credential is created. */
+export const opaqueTokenSchema = v.pipe(
+    v.string("Opaque token is invalid"),
+    v.length(97, "Opaque token is invalid"),
+    v.regex(/^[0-9a-f]{32}\.[0-9a-f]{64}$/u, "Opaque token is invalid")
 );
 
 /** Canonical UUIDv7 identity for users and managed security records. */
@@ -69,7 +110,20 @@ export const applicationCapabilitySchema = v.picklist(
     "Application capability is invalid"
 );
 
-const principalCapabilitiesSchema = v.pipe(
+/**
+ * Canonicalizes validated capabilities for stable authorization and contract output.
+ * @param capabilities Validated unique application capabilities.
+ * @returns A frozen list in canonical capability order.
+ */
+export function sortApplicationCapabilities(
+    capabilities: ApplicationCapability[]
+): readonly ApplicationCapability[] {
+    const sorted = capabilities.toSorted();
+    Object.freeze(sorted);
+    return sorted;
+}
+
+export const applicationCapabilityListSchema = v.pipe(
     v.array(applicationCapabilitySchema, "Principal capabilities are invalid"),
     v.maxLength(
         applicationCapabilities.length,
@@ -79,14 +133,14 @@ const principalCapabilitiesSchema = v.pipe(
         hasUniqueArrayItems<ApplicationCapability>,
         "Principal capabilities must be unique"
     ),
-    v.transform((capabilities) => Object.freeze(capabilities.toSorted()))
+    v.transform(sortApplicationCapabilities)
 );
 
 const authenticatedPrincipalBaseEntries = {
     authorizationVersion: positiveSafeIntegerSchema(
         "Principal authorization version is invalid"
     ),
-    capabilities: principalCapabilitiesSchema,
+    capabilities: applicationCapabilityListSchema,
 };
 
 const automationAuthenticatedPrincipalSchema = v.strictObject({
