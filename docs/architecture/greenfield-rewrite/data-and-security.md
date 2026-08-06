@@ -148,7 +148,8 @@ queryable lifecycle.
 | ------------------------ | --------------------------------------------------------------------------------------- |
 | Session lookup           | unique `auth_sessions(validator_hash)`                                                  |
 | Session expiry cleanup   | `auth_sessions(expires_at_ms)`                                                          |
-| User credentials         | `user_webauthn_credentials(user_id)` and unique credential ID                           |
+| User credentials         | `user_webauthn_credentials(user_id, created_at, id)` and unique credential ID           |
+| WebAuthn challenge       | unique partial binding/purpose indexes plus `(expires_at, id)` cleanup                  |
 | Task board               | `tasks(status, priority, updated_at_ms DESC)`                                           |
 | Task label filter        | `task_labels(label, task_id)`                                                           |
 | Task timeline            | `task_updates(task_id, created_at_ms, id)` and equivalent event index                   |
@@ -245,16 +246,30 @@ Retain the current security behavior while simplifying its structure:
 
 - first-user bootstrap verifies the OpenClaw Gateway credential before creating the user;
 - passwords use Bun's password hashing with a reviewed Argon2id policy;
-- passkeys/WebAuthn use current SimpleWebAuthn APIs with exact RP ID and origin verification;
-- TOTP and single-use recovery codes remain available;
+- password-first roaming security keys use pinned SimpleWebAuthn APIs with an explicit RP ID,
+  allowlisted origins, ES256-only public keys, required user verification, and no attestation;
+- every WebAuthn ceremony uses one short-lived, purpose-, binding-, authentication-version-, and
+  RP-configuration-bound challenge that is replaced atomically and consumed on the first
+  verification attempt; registration/authenticator parsing and cryptography stay outside SQLite
+  write transactions;
+- WebAuthn binds each credential to an internal user ID and deterministically derives its stable
+  opaque user handle from that binding. Persistence retains only that user binding, the globally
+  unique credential ID, public key, fixed backup-eligibility/device type, mutable backup state, and
+  compare-and-swap counter state; raw responses, challenges, attestation data, and verification
+  errors never enter audit metadata or logs. Credentials from an earlier RP ID remain
+  visible and removable but are marked unusable, are excluded from login and step-up, and cannot
+  justify removal of the last currently usable possession factor;
+- TOTP and single-use recovery codes remain available. A WebAuthn-only account whose credentials
+  belong to an earlier RP ID can still enter a recovery-only password-first pending login, consume
+  one recovery code, and enroll a credential for the current RP ID;
 - password-first MFA login receives only a short-lived pending-login validator;
 - durable browser sessions use random opaque validators, store only their hashes, and enforce
   idle and absolute expiry;
 - recent high-assurance verification is required for secrets, credentials, deploy, rollback,
   restore, exec, Docker mutation, and security administration;
-- the process Effect runtime bounds Gateway, password/Argon2, and TOTP AES/HMAC work with separate
-  concurrency and queue limits; rolling in-memory budgets stop parallel requests before expensive
-  work can outrun durable cooldowns, and a failed authentication attempt retains its active-work
+- the process Effect runtime bounds Gateway, password/Argon2, TOTP AES/HMAC, and WebAuthn
+  parsing/signature work with separate concurrency and queue limits; rolling in-memory budgets
+  stop parallel requests before expensive work can outrun durable cooldowns, and a failed authentication attempt retains its active-work
   permit until the immediate failure/cooldown transaction has settled so the next queued attempt
   observes it;
 - users can inspect and revoke browser sessions; and

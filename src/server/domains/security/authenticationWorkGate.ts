@@ -1,6 +1,10 @@
 import { Context, Data, Effect, Fiber, FiberSet, Layer, Semaphore } from "effect";
 
-export type AuthenticationWorkOperation = "gateway" | "password" | "totp";
+export type AuthenticationWorkOperation = "gateway" | "password" | "totp" | "webauthn";
+type AuthenticationVerificationOperation = Extract<
+    AuthenticationWorkOperation,
+    "gateway" | "webauthn"
+>;
 
 /** Expected rejection when the process-owned authentication queue is full. */
 export class AuthenticationWorkCapacityError extends Data.TaggedError(
@@ -29,13 +33,16 @@ export type AuthenticationWorkError =
     | AuthenticationWorkCapacityError
     | AuthenticationWorkTimeoutError;
 
-export type GatewayAuthenticationWorkFailure =
+export type AuthenticationVerificationWorkFailure =
     | AuthenticationUpstreamUnavailableError
     | AuthenticationWorkTimeoutError;
 
-export type GatewayAuthenticationWorkStartDecision<T> =
+export type AuthenticationVerificationWorkStartDecision<T> =
     | { readonly proceed: true }
     | { readonly proceed: false; readonly value: T };
+
+/** Gateway-facing name for the shared bounded-verification failure. */
+export type GatewayAuthenticationWorkFailure = AuthenticationVerificationWorkFailure;
 
 export type AuthenticationWorkGateResult<T> =
     | { readonly accepted: false }
@@ -49,23 +56,35 @@ export interface AuthenticationWorkGate {
     ): Promise<AuthenticationWorkGateResult<T>>;
 }
 
-export interface GatewayAuthenticationWorkOptions<T = unknown> {
+export interface AuthenticationVerificationWorkOptions<T = unknown> {
     /** Synchronous in-gate admission check run after the active permit is acquired. */
-    readonly onBeforeStart?: () => GatewayAuthenticationWorkStartDecision<T>;
+    readonly onBeforeStart?: () => AuthenticationVerificationWorkStartDecision<T>;
+    /** Synchronous settlement for active work whose caller stopped waiting. */
+    readonly onCancellationBeforeRelease?: () => void;
     /** Synchronous durable settlement that completes before another waiter starts. */
-    readonly onFailureBeforeRelease?: (failure: GatewayAuthenticationWorkFailure) => void;
+    readonly onFailureBeforeRelease?: (
+        failure: AuthenticationVerificationWorkFailure
+    ) => void;
     /** Synchronous result settlement that completes before another waiter starts. */
     readonly onResultBeforeRelease?: (value: T) => void;
     readonly signal?: AbortSignal;
     readonly timeoutMs: number;
 }
 
+/** Gateway-facing name for shared bounded-verification options. */
+export type GatewayAuthenticationWorkOptions<T = unknown> =
+    AuthenticationVerificationWorkOptions<T>;
+
 export interface AuthenticationWorkRuntimeService {
     readonly passwordWorkGate: AuthenticationWorkGate;
     readonly totpWorkGate: AuthenticationWorkGate;
     runGatewayVerification<T>(
         work: (signal: AbortSignal) => Promise<T>,
-        options: GatewayAuthenticationWorkOptions<T>
+        options: AuthenticationVerificationWorkOptions<T>
+    ): Promise<T>;
+    runWebAuthnVerification<T>(
+        work: (signal: AbortSignal) => Promise<T>,
+        options: AuthenticationVerificationWorkOptions<T>
     ): Promise<T>;
 }
 
@@ -76,6 +95,8 @@ export interface AuthenticationWorkLayerOptions {
     readonly passwordMaximumQueued?: number;
     readonly totpMaximumConcurrent?: number;
     readonly totpMaximumQueued?: number;
+    readonly webAuthnMaximumConcurrent?: number;
+    readonly webAuthnMaximumQueued?: number;
 }
 
 interface NormalizedAuthenticationWorkLayerOptions {
@@ -85,32 +106,40 @@ interface NormalizedAuthenticationWorkLayerOptions {
     readonly passwordMaximumQueued: number;
     readonly totpMaximumConcurrent: number;
     readonly totpMaximumQueued: number;
+    readonly webAuthnMaximumConcurrent: number;
+    readonly webAuthnMaximumQueued: number;
 }
 
-interface BoundedAuthenticationGate {
+interface BoundedAuthenticationGate<
+    TOperation extends AuthenticationWorkOperation = AuthenticationWorkOperation,
+> {
     readonly admitted: Semaphore.Semaphore;
     readonly active: Semaphore.Semaphore;
-    readonly operation: AuthenticationWorkOperation;
+    readonly operation: TOperation;
 }
 
-type GatewayTrackedWorkResult<T> =
+type VerificationTrackedWorkResult<T> =
     | { readonly kind: "skipped"; readonly value: T }
     | { readonly kind: "verified"; readonly value: T };
 
+type AuthenticationVerificationEffectRunner = <T>(
+    work: (signal: AbortSignal) => Promise<T>,
+    timeoutMs: number,
+    onBeforeStart?: () => AuthenticationVerificationWorkStartDecision<T>,
+    onCancellationBeforeRelease?: () => void,
+    onFailureBeforeRelease?: (failure: AuthenticationVerificationWorkFailure) => void,
+    onResultBeforeRelease?: (value: T) => void
+) => Effect.Effect<T, AuthenticationWorkError>;
+
 interface AuthenticationWorkServiceShape {
-    readonly runGatewayVerification: <T>(
-        work: (signal: AbortSignal) => Promise<T>,
-        timeoutMs: number,
-        onBeforeStart?: () => GatewayAuthenticationWorkStartDecision<T>,
-        onFailureBeforeRelease?: (failure: GatewayAuthenticationWorkFailure) => void,
-        onResultBeforeRelease?: (value: T) => void
-    ) => Effect.Effect<T, AuthenticationWorkError>;
+    readonly runGatewayVerification: AuthenticationVerificationEffectRunner;
     readonly runPasswordWork: <T>(
         work: () => Promise<T>
     ) => Effect.Effect<T, AuthenticationWorkCapacityError>;
     readonly runTotpWork: <T>(
         work: () => Promise<T>
     ) => Effect.Effect<T, AuthenticationWorkCapacityError>;
+    readonly runWebAuthnVerification: AuthenticationVerificationEffectRunner;
 }
 
 /** Process-scoped Effect service for authentication admission and async work lifetime. */
@@ -127,6 +156,8 @@ const authenticationWorkDefaults: NormalizedAuthenticationWorkLayerOptions =
         passwordMaximumQueued: 3,
         totpMaximumConcurrent: 2,
         totpMaximumQueued: 4,
+        webAuthnMaximumConcurrent: 2,
+        webAuthnMaximumQueued: 4,
     });
 
 function boundedInteger(value: number, minimum: number, label: string): number {
@@ -175,14 +206,26 @@ function normalizedLayerOptions(
             0,
             "TOTP work queue limit"
         ),
+        webAuthnMaximumConcurrent: boundedInteger(
+            options.webAuthnMaximumConcurrent ??
+                authenticationWorkDefaults.webAuthnMaximumConcurrent,
+            1,
+            "WebAuthn verification concurrency limit"
+        ),
+        webAuthnMaximumQueued: boundedInteger(
+            options.webAuthnMaximumQueued ??
+                authenticationWorkDefaults.webAuthnMaximumQueued,
+            0,
+            "WebAuthn verification queue limit"
+        ),
     });
 }
 
-function createGate(
-    operation: AuthenticationWorkOperation,
+function createGate<TOperation extends AuthenticationWorkOperation>(
+    operation: TOperation,
     maximumConcurrent: number,
     maximumQueued: number
-): Effect.Effect<BoundedAuthenticationGate> {
+): Effect.Effect<BoundedAuthenticationGate<TOperation>> {
     return Effect.gen(function* () {
         const active = yield* Semaphore.make(maximumConcurrent);
         const admitted = yield* Semaphore.make(maximumConcurrent + maximumQueued);
@@ -225,6 +268,7 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
     fibers: FiberSet.FiberSet<unknown, AuthenticationUpstreamUnavailableError>,
     work: (signal: AbortSignal) => Effect.Effect<T, E>,
     timeoutMs: number,
+    onCancellationBeforeRelease?: () => void,
     onFailureBeforeRelease?: (failure: E | AuthenticationWorkTimeoutError) => void,
     onResultBeforeRelease?: (value: T) => void
 ): Effect.Effect<T, E | AuthenticationWorkCapacityError | AuthenticationWorkTimeoutError>;
@@ -233,6 +277,7 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
     fibers: FiberSet.FiberSet<unknown, AuthenticationUpstreamUnavailableError>,
     work: (signal: AbortSignal) => Effect.Effect<T, E>,
     timeoutMs?: number,
+    onCancellationBeforeRelease?: () => void,
     onFailureBeforeRelease?: (failure: E | AuthenticationWorkTimeoutError) => void,
     onResultBeforeRelease?: (value: T) => void
 ): Effect.Effect<
@@ -251,6 +296,20 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
             const controller = new AbortController();
             const workerState = { callerInterrupted: false, started: false };
             const failureState = { notified: false };
+            const cancellationState = { notified: false };
+            const notifyCancellationBeforeRelease = (): Effect.Effect<void> =>
+                Effect.sync(() => {
+                    if (
+                        !workerState.started ||
+                        !workerState.callerInterrupted ||
+                        cancellationState.notified ||
+                        onCancellationBeforeRelease === undefined
+                    ) {
+                        return;
+                    }
+                    cancellationState.notified = true;
+                    onCancellationBeforeRelease();
+                });
             const notifyFailureBeforeRelease = (
                 failure: E | AuthenticationWorkTimeoutError
             ): Effect.Effect<void> =>
@@ -293,7 +352,8 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
             ).pipe(
                 Effect.tap(notifyResultBeforeRelease),
                 Effect.tapError(notifyFailureBeforeRelease),
-                Effect.onInterrupt(() => runtimeStopping)
+                Effect.onInterrupt(() => runtimeStopping),
+                Effect.ensuring(notifyCancellationBeforeRelease())
             );
             const worker = Effect.uninterruptibleMask((restoreWorker) =>
                 restoreWorker(Effect.raceFirst(activePermit, abortedBeforeStart)).pipe(
@@ -322,7 +382,7 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
                 });
                 const abortForTimeout = abortControllerEffect(
                     controller,
-                    "Gateway credential verification timed out",
+                    "Authentication verification timed out",
                     "TimeoutError"
                 );
                 const awaitQueuedWorker = Effect.suspend(() => {
@@ -365,6 +425,65 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
     );
 }
 
+function verificationWork<T>(
+    gate: BoundedAuthenticationGate<AuthenticationVerificationOperation>,
+    fibers: FiberSet.FiberSet<unknown, AuthenticationUpstreamUnavailableError>,
+    work: (signal: AbortSignal) => Promise<T>,
+    timeoutMs: number,
+    onBeforeStart?: () => AuthenticationVerificationWorkStartDecision<T>,
+    onCancellationBeforeRelease?: () => void,
+    onFailureBeforeRelease?: (failure: AuthenticationVerificationWorkFailure) => void,
+    onResultBeforeRelease?: (value: T) => void
+): Effect.Effect<T, AuthenticationWorkError> {
+    const operation = (
+        signal: AbortSignal
+    ): Effect.Effect<
+        VerificationTrackedWorkResult<T>,
+        AuthenticationUpstreamUnavailableError
+    > =>
+        Effect.suspend(
+            (): Effect.Effect<
+                VerificationTrackedWorkResult<T>,
+                AuthenticationUpstreamUnavailableError
+            > => {
+                const decision = onBeforeStart?.() ?? {
+                    proceed: true as const,
+                };
+                if (!decision.proceed) {
+                    return Effect.succeed({
+                        kind: "skipped" as const,
+                        value: decision.value,
+                    } satisfies VerificationTrackedWorkResult<T>);
+                }
+                return Effect.tryPromise({
+                    catch: () =>
+                        new AuthenticationUpstreamUnavailableError({
+                            operation: gate.operation,
+                        }),
+                    try: () => work(signal),
+                }).pipe(
+                    Effect.map((value) => ({
+                        kind: "verified" as const,
+                        value,
+                    }))
+                );
+            }
+        );
+    return trackedWork(
+        gate,
+        fibers,
+        operation,
+        timeoutMs,
+        onCancellationBeforeRelease,
+        onFailureBeforeRelease,
+        (result) => {
+            if (result.kind === "verified") {
+                onResultBeforeRelease?.(result.value);
+            }
+        }
+    ).pipe(Effect.map(({ value }) => value));
+}
+
 /**
  * Creates the process-scoped authentication work layer.
  * Timed-out or cancelled callers stop waiting immediately, while a non-cooperative
@@ -398,68 +517,20 @@ export function authenticationWorkLayer(
                 normalized.totpMaximumConcurrent,
                 normalized.totpMaximumQueued
             );
-            const runGatewayVerification = <T>(
-                work: (signal: AbortSignal) => Promise<T>,
-                timeoutMs: number,
-                onBeforeStart?: () => GatewayAuthenticationWorkStartDecision<T>,
-                onFailureBeforeRelease?: (
-                    failure: GatewayAuthenticationWorkFailure
-                ) => void,
-                onResultBeforeRelease?: (value: T) => void
-            ): Effect.Effect<T, AuthenticationWorkError> => {
-                const operation = (
-                    signal: AbortSignal
-                ): Effect.Effect<
-                    GatewayTrackedWorkResult<T>,
-                    AuthenticationUpstreamUnavailableError
-                > =>
-                    Effect.suspend(
-                        (): Effect.Effect<
-                            GatewayTrackedWorkResult<T>,
-                            AuthenticationUpstreamUnavailableError
-                        > => {
-                            const decision = onBeforeStart?.() ?? {
-                                proceed: true as const,
-                            };
-                            if (!decision.proceed) {
-                                return Effect.succeed({
-                                    kind: "skipped" as const,
-                                    value: decision.value,
-                                } satisfies GatewayTrackedWorkResult<T>);
-                            }
-                            return Effect.tryPromise({
-                                catch: () =>
-                                    new AuthenticationUpstreamUnavailableError({
-                                        operation: "gateway",
-                                    }),
-                                try: () => work(signal),
-                            }).pipe(
-                                Effect.map((value) => ({
-                                    kind: "verified" as const,
-                                    value,
-                                }))
-                            );
-                        }
-                    );
-                return trackedWork(
-                    gateway,
-                    fibers,
-                    operation,
-                    timeoutMs,
-                    onFailureBeforeRelease,
-                    (result) => {
-                        if (result.kind === "verified") {
-                            onResultBeforeRelease?.(result.value);
-                        }
-                    }
-                ).pipe(Effect.map(({ value }) => value));
-            };
+            const webAuthn = yield* createGate(
+                "webauthn",
+                normalized.webAuthnMaximumConcurrent,
+                normalized.webAuthnMaximumQueued
+            );
             return AuthenticationWorkService.of({
-                runGatewayVerification,
+                runGatewayVerification: (work, ...options) =>
+                    verificationWork(gateway, fibers, work, ...options),
                 runPasswordWork: (work) =>
                     trackedWork(password, fibers, () => Effect.promise(() => work())),
                 runTotpWork: (work) =>
                     trackedWork(totp, fibers, () => Effect.promise(() => work())),
+                runWebAuthnVerification: (work, ...options) =>
+                    verificationWork(webAuthn, fibers, work, ...options),
             });
         })
     );

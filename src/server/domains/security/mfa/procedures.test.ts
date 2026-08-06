@@ -16,6 +16,15 @@ import {
 } from "../../../test/support/requestContext.ts";
 import { appRouter } from "../../../trpc/appRouter.ts";
 import type { MfaAccountLifecycleService } from "./accountLifecycle.ts";
+import { createWebAuthnAdapter } from "./webauthn/adapter.ts";
+import { createWebAuthnRelyingPartyConfiguration } from "./webauthn/relyingPartyConfiguration.ts";
+import {
+    ceremonyFixtureCredentialId,
+    ceremonyFixtureOrigin,
+    ceremonyFixtureRpId,
+    createAuthenticationFixture,
+    createRegistrationFixture,
+} from "./webauthn/testSupport/ceremonyFixture.ts";
 
 const verifiedAtMs = 1_800_000_000_000;
 const authSession = Object.freeze({
@@ -34,6 +43,7 @@ const disabledSummary: AccountSecuritySummary = {
         methods: [],
         recoveryCodesRemaining: 0,
         totpFactors: [],
+        webAuthnCredentials: [],
     },
     recentAuth: {
         mfa: { recent: false },
@@ -44,6 +54,7 @@ const disabledSummary: AccountSecuritySummary = {
             verifiedAtMs,
         },
     },
+    webAuthn: { available: false },
 };
 
 describe("account-security procedures", () => {
@@ -233,5 +244,156 @@ describe("account-security procedures", () => {
         expect(responseHeaders.get("set-cookie")).toContain(
             "Secure; HttpOnly; SameSite=Strict"
         );
+    });
+
+    test("returns fixed WebAuthn options from the account step-up route", async () => {
+        const relyingParty = createWebAuthnRelyingPartyConfiguration({
+            allowedOrigins: [ceremonyFixtureOrigin],
+            rpId: ceremonyFixtureRpId,
+            rpName: "Mira Dashboard",
+        });
+        const generated = await createWebAuthnAdapter(
+            relyingParty
+        ).generateAuthenticationOptions({
+            allowCredentials: [{ id: ceremonyFixtureCredentialId }],
+        });
+        if (generated.status !== "generated") {
+            throw new Error("Expected WebAuthn authentication options");
+        }
+        const context = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                mfaAccountLifecycle: createTestMfaAccountLifecycleService({
+                    beginWebAuthnStepUp: () =>
+                        Promise.resolve({
+                            expiresAtMs: verifiedAtMs + 60_000,
+                            options: generated.options,
+                            status: "created",
+                        }),
+                }),
+            }
+        );
+
+        expect(
+            await appRouter.createCaller(context).accountSecurity.beginWebAuthnStepUp({})
+        ).toEqual({
+            expiresAtMs: verifiedAtMs + 60_000,
+            options: generated.options,
+        });
+    });
+
+    test("validates WebAuthn step-up output before issuing its session cookie", async () => {
+        const generated = generateOpaqueToken("session");
+        const responseHeaders = new Headers();
+        const webAuthnSession = { ...authSession, authMethod: "webauthn" as const };
+        const context = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                mfaAccountLifecycle: createTestMfaAccountLifecycleService({
+                    stepUpWebAuthn: () =>
+                        Promise.resolve({
+                            method: "webauthn",
+                            session: webAuthnSession,
+                            status: "verified",
+                            token: generated.token,
+                            verifiedAtMs,
+                        }),
+                }),
+                responseHeaders,
+            }
+        );
+
+        const result = await appRouter
+            .createCaller(context)
+            .accountSecurity.stepUpWebAuthn({
+                response: await createAuthenticationFixture({ counter: 1 }),
+            });
+
+        expect(result).toEqual({
+            method: "webauthn",
+            session: webAuthnSession,
+            verifiedAtMs,
+        });
+        expect(JSON.stringify(result)).not.toContain(generated.token);
+        expect(responseHeaders.get("set-cookie")).toContain(
+            `__Host-mira_dashboard_session=${generated.token}`
+        );
+    });
+
+    test("withholds the session cookie for invalid WebAuthn step-up output", async () => {
+        const generated = generateOpaqueToken("session");
+        const responseHeaders = new Headers();
+        const invalidStepUp = (() =>
+            Promise.resolve({
+                method: "webauthn",
+                session: { ...authSession, id: "invalid-session-selector" },
+                status: "verified",
+                token: generated.token,
+                verifiedAtMs,
+            })) as unknown as MfaAccountLifecycleService["stepUpWebAuthn"];
+        const context = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                mfaAccountLifecycle: createTestMfaAccountLifecycleService({
+                    stepUpWebAuthn: invalidStepUp,
+                }),
+                responseHeaders,
+            }
+        );
+
+        const response = await createAuthenticationFixture({ counter: 1 });
+        const failure = await captureFailure(() =>
+            appRouter.createCaller(context).accountSecurity.stepUpWebAuthn({
+                response,
+            })
+        );
+
+        expect(failure).toBeInstanceOf(Error);
+        expect(responseHeaders.get("set-cookie")).toBeNull();
+    });
+
+    test("withholds the first-factor cookie for invalid WebAuthn confirmation output", async () => {
+        const generated = generateOpaqueToken("session");
+        const responseHeaders = new Headers();
+        const invalidConfirmation = (() =>
+            Promise.resolve({
+                credential: {
+                    backedUp: true,
+                    createdAtMs: verifiedAtMs,
+                    deviceType: "multiDevice",
+                    id: "019fc968-1a9b-7778-8f1b-d5b863b0e7b4",
+                    label: "Security key",
+                    transports: ["usb"],
+                    usable: true,
+                },
+                enabledNow: true,
+                recoveryCodes: [],
+                revokedSessions: 0,
+                session: { ...authSession, id: "invalid-session-selector" },
+                status: "confirmed",
+                token: generated.token,
+            })) as unknown as MfaAccountLifecycleService["confirmWebAuthnEnrollment"];
+        const context = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                mfaAccountLifecycle: createTestMfaAccountLifecycleService({
+                    confirmWebAuthnEnrollment: invalidConfirmation,
+                }),
+                responseHeaders,
+            }
+        );
+
+        const failure = await captureFailure(() =>
+            appRouter.createCaller(context).accountSecurity.confirmWebAuthnEnrollment({
+                response: createRegistrationFixture(),
+            })
+        );
+
+        expect(failure).toBeInstanceOf(Error);
+        expect(responseHeaders.get("set-cookie")).toBeNull();
     });
 });

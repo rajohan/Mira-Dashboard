@@ -143,7 +143,7 @@ src/
     <domain>.ts               # browser-safe Valibot schemas and types
   server/
     trpc/
-    raw-http/
+    rawHttp/
     domains/<domain>/         # repository, service, procedures, events
     database/                 # Drizzle schema, native client, transactions
     platform/                 # auth, gateway, jobs, files, observability
@@ -225,13 +225,12 @@ Do not derive documentation by reading private tRPC `_def` fields. Each procedur
 through an explicit registry entry which contains:
 
 - stable procedure name and query/mutation/subscription kind;
-- domain, summary, detailed behavior, and examples;
+- domain and summary;
 - public, session, recent-auth, or capability authorization policy;
 - Valibot input and output schemas;
-- emitted realtime event types;
-- idempotency semantics;
+- request batching, body-budget, and handler-timeout policy;
 - expected error codes; and
-- deprecation state, which should normally remain absent in this no-compatibility design.
+- stable client-action reasons when an authentication policy failure requires a specific flow.
 
 The same schema objects are passed to `.input()` and `.output()`. tRPC may deliberately expose
 SuperJSON-supported values such as `Date`, `Map`, `Set`, or `BigInt` when the richer type improves a
@@ -252,8 +251,8 @@ once. Reusable procedure builders are limited to:
 - `recentAuthProcedure`; and
 - `capabilityProcedure(capability)`.
 
-Expected errors use a small stable code set such as `UNAUTHENTICATED`, `FORBIDDEN`,
-`CONFLICT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `RATE_LIMITED`, and `UNAVAILABLE` with safe
+Expected errors use a small stable code set such as `UNAUTHORIZED`, `FORBIDDEN`, `CONFLICT`,
+`NOT_FOUND`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, and `SERVICE_UNAVAILABLE` with safe
 structured details. Stack traces, command output, filesystem paths, and upstream secrets never
 enter client error shapes.
 
@@ -265,8 +264,8 @@ constant failure markers.
 
 The web `ApplicationRuntime` merges the realtime pump and one process-scoped authentication-work
 service into the same `ManagedRuntime`. That authentication service owns separate bounded admission
-and active-work semaphores for Gateway verification, password/Argon2 work, and TOTP AES/HMAC work,
-plus a scoped fiber set for work that outlives an interrupted caller. Queued cancellation releases
+and active-work semaphores for Gateway verification, password/Argon2 work, TOTP AES/HMAC work, and
+WebAuthn parsing/signature verification, plus a scoped fiber set for work that outlives an interrupted caller. Queued cancellation releases
 admission immediately; active non-cooperative work retains its permit until settlement. Promise-
 facing adapters fold typed capacity into explicit domain throttling outcomes, while Gateway
 capacity, deadline, and unavailable tags are exhaustively translated before the tRPC procedure

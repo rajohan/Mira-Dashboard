@@ -1,13 +1,20 @@
 import { and, eq, gt, isNull, lt, lte, sql } from "drizzle-orm";
 import * as v from "valibot";
 
+import { authChallenges } from "../../../database/schema/authChallenges.ts";
 import { authPendingLogins } from "../../../database/schema/authPendingLogins.ts";
 import type { AuthenticationRateLimitKind } from "../../../database/schema/authRateLimitBuckets.ts";
 import { userRecoveryCodes } from "../../../database/schema/userRecoveryCodes.ts";
 import { userTotpFactors } from "../../../database/schema/userTotpFactors.ts";
+import {
+    userWebAuthnCredentials,
+    webAuthnCounterMaximum,
+} from "../../../database/schema/userWebAuthnCredentials.ts";
+import { authChallengeInsertSchema } from "../../../database/validation/authChallenges.ts";
 import { authPendingLoginInsertSchema } from "../../../database/validation/authPendingLogins.ts";
 import { userRecoveryCodeInsertSchema } from "../../../database/validation/userRecoveryCodes.ts";
 import { userTotpFactorInsertSchema } from "../../../database/validation/userTotpFactors.ts";
+import { userWebAuthnCredentialInsertSchema } from "../../../database/validation/userWebAuthnCredentials.ts";
 import { opaqueTokenValidatorVersion } from "../../../shared/opaqueToken.ts";
 import {
     DrizzleSecurityAuditStore,
@@ -26,14 +33,18 @@ import {
     parsePendingLogin,
     parseRecoveryCode,
     parseTotpFactor,
+    parseWebAuthnChallenge,
+    parseWebAuthnCredential,
     requiredMfaRow,
 } from "./lifecycleRepositoryRecords.ts";
 import {
     pendingLoginAttemptMaximum,
     type AdvanceTotpLastUsedStepInput,
+    type AdvanceWebAuthnCredentialInput,
     type ConfirmTotpFactorInput,
     type ConsumePendingLoginInput,
     type ConsumeRecoveryCodeInput,
+    type ConsumeWebAuthnChallengeInput,
     type DeleteSessionForRotationInput,
     type IncrementPendingLoginAttemptInput,
     type MfaLifecycleUnitOfWork,
@@ -45,6 +56,10 @@ import {
     type MfaTotpFactorInsert,
     type MfaTotpFactorRecord,
     type MfaUserRecord,
+    type MfaWebAuthnChallengeInsert,
+    type MfaWebAuthnChallengeRecord,
+    type MfaWebAuthnCredentialInsert,
+    type MfaWebAuthnCredentialRecord,
     type PruneMfaSessionsInput,
     type UpdateUserMfaStateInput,
 } from "./lifecycleRepositoryTypes.ts";
@@ -92,6 +107,71 @@ export class DrizzleMfaLifecycleUnitOfWork
         return row === undefined ? undefined : parseTotpFactor(row);
     }
 
+    advanceWebAuthnCredential(
+        input: AdvanceWebAuthnCredentialInput
+    ): MfaWebAuthnCredentialRecord | undefined {
+        const usedAtMs = input.usedAt.getTime();
+        const expectedLastUsedAtMs = input.expectedLastUsedAt?.getTime();
+        const counterAdvanced = input.counter > input.expectedCounter;
+        if (
+            !Number.isSafeInteger(input.expectedCounter) ||
+            input.expectedCounter < 0 ||
+            input.expectedCounter > webAuthnCounterMaximum ||
+            !Number.isSafeInteger(input.counter) ||
+            input.counter < 0 ||
+            input.counter > webAuthnCounterMaximum ||
+            ((input.counter > 0 || input.expectedCounter > 0) &&
+                input.counter <= input.expectedCounter) ||
+            input.deviceType !== input.expectedDeviceType ||
+            (input.deviceType === "singleDevice" && input.backedUp) ||
+            !Number.isFinite(usedAtMs) ||
+            (expectedLastUsedAtMs !== undefined &&
+                (!Number.isFinite(expectedLastUsedAtMs) ||
+                    usedAtMs < expectedLastUsedAtMs ||
+                    (!counterAdvanced && usedAtMs === expectedLastUsedAtMs)))
+        ) {
+            throw new RangeError("WebAuthn credential transition is invalid");
+        }
+        const expectedLastUsedAt =
+            input.expectedLastUsedAt === null
+                ? isNull(userWebAuthnCredentials.lastUsedAt)
+                : eq(userWebAuthnCredentials.lastUsedAt, input.expectedLastUsedAt);
+        let advancesLastUsedAt;
+        if (input.expectedLastUsedAt === null) {
+            advancesLastUsedAt = lte(userWebAuthnCredentials.createdAt, input.usedAt);
+        } else if (counterAdvanced) {
+            advancesLastUsedAt = lte(userWebAuthnCredentials.lastUsedAt, input.usedAt);
+        } else {
+            advancesLastUsedAt = lt(userWebAuthnCredentials.lastUsedAt, input.usedAt);
+        }
+        const row = this.#transaction
+            .update(userWebAuthnCredentials)
+            .set({
+                backedUp: input.backedUp,
+                counter: input.counter,
+                deviceType: input.deviceType,
+                lastUsedAt: input.usedAt,
+            })
+            .where(
+                and(
+                    eq(userWebAuthnCredentials.id, input.id),
+                    eq(userWebAuthnCredentials.userId, input.userId),
+                    eq(userWebAuthnCredentials.credentialId, input.credentialId),
+                    eq(userWebAuthnCredentials.counter, input.expectedCounter),
+                    eq(userWebAuthnCredentials.createdAt, input.expectedCreatedAt),
+                    eq(userWebAuthnCredentials.deviceType, input.expectedDeviceType),
+                    eq(userWebAuthnCredentials.backedUp, input.expectedBackedUp),
+                    eq(userWebAuthnCredentials.publicKey, input.expectedPublicKey),
+                    eq(userWebAuthnCredentials.rpId, input.expectedRpId),
+                    expectedLastUsedAt,
+                    advancesLastUsedAt
+                )
+            )
+            .returning()
+            .get();
+        return row === undefined ? undefined : parseWebAuthnCredential(row);
+    }
+
     confirmTotpFactor(input: ConfirmTotpFactorInput): MfaTotpFactorRecord | undefined {
         if (!Number.isSafeInteger(input.lastUsedStep) || input.lastUsedStep < 0) {
             throw new RangeError("TOTP confirmation step is invalid");
@@ -127,10 +207,21 @@ export class DrizzleMfaLifecycleUnitOfWork
     consumePendingLogin(
         input: ConsumePendingLoginInput
     ): MfaPendingLoginRecord | undefined {
-        const methodAllowed =
-            input.method === "recovery"
-                ? eq(authPendingLogins.allowsRecovery, true)
-                : eq(authPendingLogins.allowsTotp, true);
+        let methodAllowed;
+        switch (input.method) {
+            case "recovery": {
+                methodAllowed = eq(authPendingLogins.allowsRecovery, true);
+                break;
+            }
+            case "totp": {
+                methodAllowed = eq(authPendingLogins.allowsTotp, true);
+                break;
+            }
+            case "webauthn": {
+                methodAllowed = eq(authPendingLogins.allowsWebAuthn, true);
+                break;
+            }
+        }
         const row = this.#transaction
             .delete(authPendingLogins)
             .where(
@@ -174,6 +265,39 @@ export class DrizzleMfaLifecycleUnitOfWork
             .returning()
             .get();
         return row === undefined ? undefined : parseRecoveryCode(row);
+    }
+
+    consumeWebAuthnChallenge(
+        input: ConsumeWebAuthnChallengeInput
+    ): MfaWebAuthnChallengeRecord | undefined {
+        const pendingLoginBinding =
+            input.pendingLoginId === null
+                ? isNull(authChallenges.pendingLoginId)
+                : eq(authChallenges.pendingLoginId, input.pendingLoginId);
+        const sessionBinding =
+            input.sessionId === null
+                ? isNull(authChallenges.sessionId)
+                : eq(authChallenges.sessionId, input.sessionId);
+        const row = this.#transaction
+            .delete(authChallenges)
+            .where(
+                and(
+                    eq(authChallenges.id, input.id),
+                    eq(authChallenges.authenticationVersion, input.authenticationVersion),
+                    eq(authChallenges.challenge, input.challenge),
+                    eq(authChallenges.configFingerprint, input.configFingerprint),
+                    eq(authChallenges.createdAt, input.createdAt),
+                    eq(authChallenges.expiresAt, input.expiresAt),
+                    eq(authChallenges.purpose, input.purpose),
+                    pendingLoginBinding,
+                    sessionBinding,
+                    lte(authChallenges.createdAt, input.checkedAt),
+                    gt(authChallenges.expiresAt, input.checkedAt)
+                )
+            )
+            .returning()
+            .get();
+        return row === undefined ? undefined : parseWebAuthnChallenge(row);
     }
 
     deleteOtherSessions(userId: string, retainedSessionId: string): number {
@@ -259,6 +383,30 @@ export class DrizzleMfaLifecycleUnitOfWork
             .run().changes;
     }
 
+    deleteWebAuthnCredential(
+        userId: string,
+        id: string
+    ): MfaWebAuthnCredentialRecord | undefined {
+        const row = this.#transaction
+            .delete(userWebAuthnCredentials)
+            .where(
+                and(
+                    eq(userWebAuthnCredentials.id, id),
+                    eq(userWebAuthnCredentials.userId, userId)
+                )
+            )
+            .returning()
+            .get();
+        return row === undefined ? undefined : parseWebAuthnCredential(row);
+    }
+
+    deleteWebAuthnCredentialsForUser(userId: string): number {
+        return this.#transaction
+            .delete(userWebAuthnCredentials)
+            .where(eq(userWebAuthnCredentials.userId, userId))
+            .run().changes;
+    }
+
     incrementPendingLoginAttempt(
         input: IncrementPendingLoginAttemptInput
     ): MfaPendingLoginRecord | undefined {
@@ -324,6 +472,29 @@ export class DrizzleMfaLifecycleUnitOfWork
         return parseTotpFactor(requiredMfaRow(row, "TOTP-factor insert"));
     }
 
+    insertWebAuthnCredential(
+        input: MfaWebAuthnCredentialInsert
+    ): MfaWebAuthnCredentialRecord {
+        const row = this.#transaction
+            .insert(userWebAuthnCredentials)
+            .values(v.parse(userWebAuthnCredentialInsertSchema, input))
+            .returning()
+            .get();
+        return parseWebAuthnCredential(requiredMfaRow(row, "WebAuthn credential insert"));
+    }
+
+    insertWebAuthnCredentialIfAvailable(
+        input: MfaWebAuthnCredentialInsert
+    ): MfaWebAuthnCredentialRecord | undefined {
+        const row = this.#transaction
+            .insert(userWebAuthnCredentials)
+            .values(v.parse(userWebAuthnCredentialInsertSchema, input))
+            .onConflictDoNothing({ target: userWebAuthnCredentials.credentialId })
+            .returning()
+            .get();
+        return row === undefined ? undefined : parseWebAuthnCredential(row);
+    }
+
     pruneRateLimitBuckets(input: PruneAuthenticationRateLimitBucketsInput): number {
         if (!Number.isSafeInteger(input.maximumBuckets) || input.maximumBuckets < 1) {
             throw new RangeError("Maximum MFA rate-limit bucket count is invalid");
@@ -336,6 +507,31 @@ export class DrizzleMfaLifecycleUnitOfWork
             throw new RangeError("Maximum MFA session count is invalid");
         }
         return this.sessions.pruneSessions(input);
+    }
+
+    replaceWebAuthnChallenge(
+        input: MfaWebAuthnChallengeInsert
+    ): MfaWebAuthnChallengeRecord {
+        const parsed = v.parse(authChallengeInsertSchema, input);
+        let binding;
+        if (parsed.pendingLoginId === null) {
+            if (parsed.sessionId === null) {
+                throw new Error("WebAuthn challenge binding is inconsistent");
+            }
+            binding = eq(authChallenges.sessionId, parsed.sessionId);
+        } else {
+            binding = eq(authChallenges.pendingLoginId, parsed.pendingLoginId);
+        }
+        this.#transaction
+            .delete(authChallenges)
+            .where(and(binding, eq(authChallenges.purpose, parsed.purpose)))
+            .run();
+        const row = this.#transaction
+            .insert(authChallenges)
+            .values(parsed)
+            .returning()
+            .get();
+        return parseWebAuthnChallenge(requiredMfaRow(row, "WebAuthn challenge replace"));
     }
 
     updateUserMfaState(input: UpdateUserMfaStateInput): MfaUserRecord | undefined {

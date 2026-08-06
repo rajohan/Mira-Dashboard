@@ -1,0 +1,88 @@
+{
+  "$id": "urn:mira-dashboard:accountSecurity.stepUpWebAuthn.input",
+  "type": "object",
+  "properties": {
+    "response": {
+      "type": "object",
+      "properties": {
+        "authenticatorAttachment": {
+          "enum": [
+            "cross-platform",
+            "platform"
+          ],
+          "type": "string"
+        },
+        "clientExtensionResults": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "id": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 1024,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "rawId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 1024,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "authenticatorData": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+            },
+            "clientDataJSON": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+            },
+            "userHandle": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+            }
+          },
+          "required": [
+            "authenticatorData",
+            "clientDataJSON",
+            "signature"
+          ],
+          "additionalProperties": false
+        },
+        "type": {
+          "const": "public-key"
+        }
+      },
+      "required": [
+        "clientExtensionResults",
+        "id",
+        "rawId",
+        "response",
+        "type"
+      ],
+      "additionalProperties": false,
+      "$comment": "Live Valibot validation additionally requires id and rawId to match exactly."
+    }
+  },
+  "required": [
+    "response"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

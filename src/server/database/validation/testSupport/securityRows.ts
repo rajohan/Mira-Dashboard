@@ -12,11 +12,15 @@ export const automationCredentialId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4";
 export const auditEventId = "019fc968-1a9b-7772-af1b-d5b863b0e7b4";
 export const totpFactorId = "019fc968-1a9b-7773-bf1b-d5b863b0e7b4";
 export const recoveryCodeId = "019fc968-1a9b-7774-8f1b-d5b863b0e7b4";
+export const webAuthnChallengeId = "019fc968-1a9b-7775-9f1b-d5b863b0e7b4";
+export const webAuthnCredentialRecordId = "019fc968-1a9b-7776-af1b-d5b863b0e7b4";
 export const sessionSelector = "a".repeat(32);
 export const pendingLoginSelector = "c".repeat(32);
 export const recoveryCodeSelector = "d".repeat(32);
 export const tokenValidatorHash = "b".repeat(64);
 export const automationPrincipalId = "openclaw-task-tracking";
+export const webAuthnExternalCredentialId =
+    "AdKXJEch1aV5Wo7bj7qLHskVY4OoNaj9qu8TPdJ7kSAgUeRx";
 
 export const validUserInsert = Object.freeze({
     createdAt: securityCreatedAt,
@@ -46,6 +50,7 @@ export const validAuthSessionInsert = Object.freeze({
 export const validAuthPendingLoginInsert = Object.freeze({
     allowsRecovery: true,
     allowsTotp: true,
+    allowsWebAuthn: false,
     authenticationVersion: 1,
     createdAt: securityCreatedAt,
     expiresAt: addMilliseconds(securityCreatedAt, pendingLoginLifetimeMs),
@@ -76,6 +81,34 @@ export const validUserRecoveryCodeInsert = Object.freeze({
     usedAt: null,
     userId: securityUserId,
     validatorHash: testDashboardPasswordHash,
+});
+
+export const validAuthChallengeInsert = Object.freeze({
+    authenticationVersion: 1,
+    challenge: "A".repeat(32),
+    configFingerprint: "e".repeat(64),
+    createdAt: securityCreatedAt,
+    expiresAt: addMinutes(securityCreatedAt, 5),
+    id: webAuthnChallengeId,
+    pendingLoginId: null,
+    purpose: "registration" as const,
+    sessionId: sessionSelector,
+});
+
+export const validUserWebAuthnCredentialInsert = Object.freeze({
+    algorithm: -7 as const,
+    backedUp: false,
+    counter: 0,
+    createdAt: securityCreatedAt,
+    credentialId: webAuthnExternalCredentialId,
+    deviceType: "singleDevice" as const,
+    id: webAuthnCredentialRecordId,
+    label: "Primary security key",
+    lastUsedAt: null,
+    publicKey: Buffer.from([165, 1, 2]),
+    rpId: "dashboard.example.com",
+    transportMask: 64,
+    userId: securityUserId,
 });
 
 export const validAutomationPrincipalInsert = Object.freeze({

@@ -51,7 +51,6 @@ describe("auth session row schemas", () => {
         },
         { passwordVerifiedAt: addMilliseconds(securityCreatedAt, 1) },
         { authMethod: "recovery" },
-        { authMethod: "webauthn", mfaVerifiedAt: securityCreatedAt },
         { authMethod: "magic-link" },
     ])("rejects invalid session row %#", (replacement) => {
         expect(() =>
@@ -62,7 +61,7 @@ describe("auth session row schemas", () => {
         ).toThrow();
     });
 
-    test.each(["recovery", "totp"] as const)(
+    test.each(["recovery", "totp", "webauthn"] as const)(
         "accepts %s only with a persisted MFA proof",
         (authMethod) => {
             expect(

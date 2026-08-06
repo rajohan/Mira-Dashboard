@@ -1,0 +1,89 @@
+{
+  "$id": "urn:mira-dashboard:auth.beginWebAuthnLogin.output",
+  "type": "object",
+  "properties": {
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "options": {
+      "type": "object",
+      "properties": {
+        "allowCredentials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 1024,
+                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+              },
+              "transports": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "ble",
+                    "cable",
+                    "hybrid",
+                    "internal",
+                    "nfc",
+                    "smart-card",
+                    "usb"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 7,
+                "uniqueItems": true
+              },
+              "type": {
+                "const": "public-key"
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 4
+        },
+        "challenge": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 256,
+          "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+        },
+        "rpId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)$"
+        },
+        "timeout": {
+          "const": 60000
+        },
+        "userVerification": {
+          "const": "required"
+        }
+      },
+      "required": [
+        "allowCredentials",
+        "challenge",
+        "rpId",
+        "timeout",
+        "userVerification"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "expiresAtMs",
+    "options"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -30,7 +30,19 @@ export type MfaLoginFailureReason =
     | "recovery_invalid"
     | "recovery_pending_invalid"
     | "totp_invalid"
-    | "totp_pending_invalid";
+    | "totp_pending_invalid"
+    | "webauthn_invalid"
+    | "webauthn_pending_invalid";
+
+export type MfaLoginProofConsumptionResult = boolean | "state-changed-after-consumption";
+
+function methodForFailureReason(
+    reason: MfaLoginFailureReason
+): MultiFactorAuthenticationMethod {
+    if (reason.startsWith("recovery")) return "recovery";
+    if (reason.startsWith("webauthn")) return "webauthn";
+    return "totp";
+}
 
 export interface MfaLoginCoordinator {
     readonly finishLogin: (
@@ -39,7 +51,7 @@ export interface MfaLoginCoordinator {
         method: MultiFactorAuthenticationMethod,
         completedAt: Date,
         metadata: AuthenticationRequestMetadata,
-        consumeProof: (unit: MfaLifecycleUnitOfWork) => boolean
+        consumeProof: (unit: MfaLifecycleUnitOfWork) => MfaLoginProofConsumptionResult
     ) => CompleteMfaLoginResult;
     readonly recordFailure: (
         resolved: ResolvedPendingLogin | undefined,
@@ -48,6 +60,27 @@ export interface MfaLoginCoordinator {
         failedAt: Date,
         reason: MfaLoginFailureReason,
         unblockedStatus?: "invalid-proof" | "service-unavailable"
+    ) => CompleteMfaLoginResult;
+    readonly recordWebAuthnFailure: (
+        resolved: ResolvedPendingLogin,
+        credential: ParsedOpaqueToken,
+        metadata: AuthenticationRequestMetadata,
+        failedAt: Date,
+        consumeChallenge: (unit: MfaLifecycleUnitOfWork) => boolean,
+        attemptCheckedAt?: Date
+    ) => CompleteMfaLoginResult;
+    readonly recordWebAuthnCancellation: (
+        resolved: ResolvedPendingLogin,
+        metadata: AuthenticationRequestMetadata,
+        cancelledAt: Date,
+        consumeChallenge: (unit: MfaLifecycleUnitOfWork) => boolean
+    ) => void;
+    readonly recordWebAuthnUnavailable: (
+        resolved: ResolvedPendingLogin,
+        metadata: AuthenticationRequestMetadata,
+        failedAt: Date,
+        consumeChallenge: (unit: MfaLifecycleUnitOfWork) => boolean,
+        reason?: "webauthn_configuration_mismatch"
     ) => CompleteMfaLoginResult;
 }
 
@@ -91,6 +124,13 @@ export function createMfaLoginCoordinator(
                 ) {
                     throw new MfaLoginStateChangedError();
                 }
+                const proofConsumption = consumeProof(unit);
+                if (proofConsumption === false) {
+                    throw new MfaLoginStateChangedError();
+                }
+                if (proofConsumption === "state-changed-after-consumption") {
+                    return { status: "state-changed" } as const;
+                }
                 const consumedPending = unit.consumePendingLogin({
                     authenticationVersion: resolved.pending.authenticationVersion,
                     checkedAt: completedAt,
@@ -99,7 +139,7 @@ export function createMfaLoginCoordinator(
                     userId: resolved.user.id,
                     validatorHash: credential.validatorHash,
                 });
-                if (consumedPending === undefined || !consumeProof(unit)) {
+                if (consumedPending === undefined) {
                     throw new MfaLoginStateChangedError();
                 }
                 if (consumedPending.replacedSessionId !== null) {
@@ -196,7 +236,7 @@ export function createMfaLoginCoordinator(
                 action: "auth.login.mfa",
                 actor: { authenticatorId: null, id: "browser", kind: "anonymous" },
                 metadata: {
-                    method: reason.startsWith("recovery") ? "recovery" : "totp",
+                    method: methodForFailureReason(reason),
                     reason,
                 },
                 occurredAt: failedAt,
@@ -217,5 +257,129 @@ export function createMfaLoginCoordinator(
         });
     };
 
-    return Object.freeze({ finishLogin, recordFailure });
+    const recordWebAuthnFailure: MfaLoginCoordinator["recordWebAuthnFailure"] = (
+        resolved,
+        credential,
+        metadata,
+        failedAt,
+        consumeChallenge,
+        attemptCheckedAt = failedAt
+    ) => {
+        const targets = mfaLoginRateLimitTargets(metadata.clientSourceId);
+        try {
+            return repository.withImmediateTransaction((unit) => {
+                if (!consumeChallenge(unit)) {
+                    throw new MfaLoginStateChangedError();
+                }
+                const activeLimit = activeRateLimitForTargets(unit, targets, failedAt);
+                if (activeLimit !== undefined) {
+                    return { ...activeLimit, status: "rate-limited" as const };
+                }
+                const updated = unit.incrementPendingLoginAttempt({
+                    authenticationVersion: resolved.pending.authenticationVersion,
+                    failedAt: attemptCheckedAt,
+                    id: credential.prefix,
+                    userId: resolved.user.id,
+                    validatorHash: credential.validatorHash,
+                });
+                if (updated === undefined) {
+                    throw new MfaLoginStateChangedError();
+                }
+                if (updated.attemptCount === pendingLoginAttemptMaximum) {
+                    unit.deletePendingLogin(updated.userId, updated.id);
+                }
+                const recorded = recordAuthenticationFailures(unit, targets, failedAt);
+                audit(unit, {
+                    action: "auth.login.mfa",
+                    actor: {
+                        authenticatorId: null,
+                        id: "browser",
+                        kind: "anonymous",
+                    },
+                    metadata: { method: "webauthn", reason: "webauthn_invalid" },
+                    occurredAt: failedAt,
+                    outcome: "denied",
+                    requestId: metadata.requestId,
+                    targetId: resolved.user.id,
+                    targetType: "user",
+                });
+                return recorded.retryAfterSeconds === undefined
+                    ? ({ status: "invalid-proof" } as const)
+                    : ({
+                          retryAfterSeconds: recorded.retryAfterSeconds,
+                          status: "rate-limited",
+                      } as const);
+            });
+        } catch (error) {
+            if (error instanceof MfaLoginStateChangedError) {
+                return { status: "state-changed" };
+            }
+            throw error;
+        }
+    };
+
+    const recordWebAuthnCancellation: MfaLoginCoordinator["recordWebAuthnCancellation"] =
+        (resolved, metadata, cancelledAt, consumeChallenge) => {
+            repository.withImmediateTransaction((unit) => {
+                if (!consumeChallenge(unit)) return;
+                audit(unit, {
+                    action: "auth.login.mfa",
+                    actor: {
+                        authenticatorId: null,
+                        id: "browser",
+                        kind: "anonymous",
+                    },
+                    metadata: { method: "webauthn" },
+                    occurredAt: cancelledAt,
+                    outcome: "cancelled",
+                    requestId: metadata.requestId,
+                    targetId: resolved.user.id,
+                    targetType: "user",
+                });
+            });
+        };
+
+    const recordWebAuthnUnavailable: MfaLoginCoordinator["recordWebAuthnUnavailable"] = (
+        resolved,
+        metadata,
+        failedAt,
+        consumeChallenge,
+        reason
+    ) => {
+        try {
+            return repository.withImmediateTransaction((unit) => {
+                if (!consumeChallenge(unit)) {
+                    throw new MfaLoginStateChangedError();
+                }
+                audit(unit, {
+                    action: "auth.login.mfa",
+                    actor: {
+                        authenticatorId: null,
+                        id: "browser",
+                        kind: "anonymous",
+                    },
+                    metadata: { method: "webauthn", ...(reason && { reason }) },
+                    occurredAt: failedAt,
+                    outcome: "failed",
+                    requestId: metadata.requestId,
+                    targetId: resolved.user.id,
+                    targetType: "user",
+                });
+                return { status: "service-unavailable" } as const;
+            });
+        } catch (error) {
+            if (error instanceof MfaLoginStateChangedError) {
+                return { status: "state-changed" };
+            }
+            throw error;
+        }
+    };
+
+    return Object.freeze({
+        finishLogin,
+        recordFailure,
+        recordWebAuthnCancellation,
+        recordWebAuthnFailure,
+        recordWebAuthnUnavailable,
+    });
 }

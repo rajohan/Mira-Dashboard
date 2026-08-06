@@ -11,8 +11,7 @@ import {
 } from "./errors.ts";
 import { realtimeDeliveryToStreamOutput } from "./transport.ts";
 
-/** Authenticated tracked-SSE procedures for durable application events. */
-export const eventsRouter = router({
+const eventsRoutes = {
     stream: authenticatedProcedure
         .input(eventsStreamContract.input)
         .subscription(async function* ({ ctx, input, signal }) {
@@ -48,4 +47,10 @@ export const eventsRouter = router({
                 throw error;
             }
         }),
-});
+};
+
+/** Leaf procedure names owned by the realtime-router composition. */
+export const eventsProcedureNames = Object.freeze(Object.keys(eventsRoutes));
+
+/** Authenticated tracked-SSE procedures for durable application events. */
+export const eventsRouter = router(eventsRoutes);

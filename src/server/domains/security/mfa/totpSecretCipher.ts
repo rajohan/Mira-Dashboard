@@ -2,10 +2,8 @@ import * as v from "valibot";
 
 import { securityRecordIdSchema } from "../../../../contracts/security.ts";
 import {
-    totpEncryptedSecretEnvelopeLength,
-    totpEncryptedSecretEnvelopePattern,
-    totpEncryptionKeyIdMaximumLength,
-    totpEncryptionKeyIdPattern,
+    encryptedTotpSecretEnvelopeSchema,
+    totpEncryptionKeyIdSchema,
 } from "../../../shared/totpSecretFormat.ts";
 import { isCanonicalTotpSecret } from "./totp.ts";
 
@@ -14,30 +12,7 @@ const encryptionKeyRingMaximumBytes = 4 * 1024;
 const encryptionKeyRingMaximumKeys = 8;
 const aesGcmNonceByteLength = 12;
 const aesGcmTagLengthBits = 128;
-/** Minimum canonical TOTP key-id length shared with the SQLite boundary. */
-export const totpEncryptionKeyIdMinimumLength = 1;
-export {
-    totpEncryptedSecretEnvelopeLength,
-    totpEncryptedSecretEnvelopePattern,
-    totpEncryptionKeyIdMaximumLength,
-    totpEncryptionKeyIdPattern,
-} from "../../../shared/totpSecretFormat.ts";
 const encodedEncryptionKeyPattern = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/u;
-
-/** Stable, non-secret identifier for one TOTP encryption key. */
-export const totpEncryptionKeyIdSchema = v.pipe(
-    v.string("TOTP encryption key id is invalid"),
-    v.minLength(totpEncryptionKeyIdMinimumLength, "TOTP encryption key id is invalid"),
-    v.maxLength(totpEncryptionKeyIdMaximumLength, "TOTP encryption key id is invalid"),
-    v.regex(totpEncryptionKeyIdPattern, "TOTP encryption key id is invalid")
-);
-
-/** Canonical versioned AES-256-GCM envelope stored beside its key id. */
-export const encryptedTotpSecretEnvelopeSchema = v.pipe(
-    v.string("Encrypted TOTP secret is invalid"),
-    v.length(totpEncryptedSecretEnvelopeLength, "Encrypted TOTP secret is invalid"),
-    v.regex(totpEncryptedSecretEnvelopePattern, "Encrypted TOTP secret is invalid")
-);
 
 const encodedEncryptionKeySchema = v.pipe(
     v.string("TOTP encryption key is invalid"),

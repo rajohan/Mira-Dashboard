@@ -23,7 +23,7 @@ export const authSessions = sqliteTable(
         authenticatedAt: integer("authenticated_at", { mode: "timestamp_ms" }).notNull(),
         authenticationVersion: integer("authentication_version").notNull(),
         authMethod: text("auth_method", {
-            enum: ["password", "recovery", "totp"],
+            enum: ["password", "recovery", "totp", "webauthn"],
         }).notNull(),
         createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
         expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
@@ -47,7 +47,7 @@ export const authSessions = sqliteTable(
         ),
         check(
             "auth_sessions_auth_method_check",
-            sql`${table.authMethod} IN ('password', 'recovery', 'totp')`
+            sql`${table.authMethod} IN ('password', 'recovery', 'totp', 'webauthn')`
         ),
         check(
             "auth_sessions_expiry_check",

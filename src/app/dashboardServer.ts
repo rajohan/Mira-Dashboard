@@ -10,14 +10,19 @@ import {
     authenticationWorkBudgetWindowMs,
     totpWorkBudgetMaximumUnits,
     totpWorkBudgetWindowMs,
+    webAuthnWorkBudgetMaximumUnits,
+    webAuthnWorkBudgetWindowMs,
 } from "../server/domains/security/authenticationRateLimit.ts";
 import { createAuthenticationWorkBudget } from "../server/domains/security/authenticationWorkBudget.ts";
 import { createMfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import { createMfaLifecycleRepository } from "../server/domains/security/mfa/lifecycleRepository.ts";
 import { createMfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { TotpSecretCipher } from "../server/domains/security/mfa/totpSecretCipher.ts";
+import { createWebAuthnAdapter } from "../server/domains/security/mfa/webauthn/adapter.ts";
+import type { WebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import { createRequestAuthenticator } from "../server/domains/security/requestAuthentication.ts";
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
+import { parseBrowserOrigin } from "../server/rawHttp/requestSecurity.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
 
 /** Production composition inputs above the generic Bun/tRPC server primitive. */
@@ -42,6 +47,31 @@ export interface DashboardServerOptions extends Omit<
     readonly totpSecretCipher: TotpSecretCipher;
     readonly trustedProxyAddresses?: readonly string[];
     readonly verifyGatewayCredential: VerifyGatewayCredential;
+    /** Explicit WebAuthn trust configuration; request host headers are never used. */
+    readonly webAuthnRelyingParty?: WebAuthnRelyingPartyConfiguration;
+    readonly webAuthnVerificationTimeoutMs?: number;
+}
+
+/**
+ * Ensures the HTTP and WebAuthn browser trust boundaries cannot diverge.
+ * @param browserOrigin Explicit public Dashboard browser origin.
+ * @param relyingParty Optional validated WebAuthn trust configuration.
+ * @returns The canonical Dashboard browser origin.
+ */
+export function validateDashboardWebAuthnBrowserOrigin(
+    browserOrigin: string,
+    relyingParty?: WebAuthnRelyingPartyConfiguration
+): string {
+    const canonicalOrigin = parseBrowserOrigin(browserOrigin);
+    if (
+        relyingParty !== undefined &&
+        !relyingParty.allowedOrigins.includes(canonicalOrigin)
+    ) {
+        throw new TypeError(
+            "Dashboard browser origin is absent from the WebAuthn origin allowlist"
+        );
+    }
+    return canonicalOrigin;
 }
 
 /**
@@ -53,6 +83,10 @@ export interface DashboardServerOptions extends Omit<
 export function createDashboardServer(
     options: DashboardServerOptions
 ): Promise<ApplicationServer> {
+    const browserOrigin = validateDashboardWebAuthnBrowserOrigin(
+        options.browserOrigin,
+        options.webAuthnRelyingParty
+    );
     const authenticationWork = options.applicationRuntime.services.authentication;
     const passwordWorkGate = authenticationWork.passwordWorkGate;
     const passwordWorkBudget = createAuthenticationWorkBudget(
@@ -63,6 +97,24 @@ export function createDashboardServer(
         totpWorkBudgetMaximumUnits,
         totpWorkBudgetWindowMs
     );
+    const webAuthnWorkBudget = createAuthenticationWorkBudget(
+        webAuthnWorkBudgetMaximumUnits,
+        webAuthnWorkBudgetWindowMs
+    );
+    const webAuthn =
+        options.webAuthnRelyingParty === undefined
+            ? undefined
+            : Object.freeze({
+                  adapter: createWebAuthnAdapter(options.webAuthnRelyingParty),
+                  relyingParty: options.webAuthnRelyingParty,
+                  ...(options.webAuthnVerificationTimeoutMs === undefined
+                      ? {}
+                      : {
+                            verificationTimeoutMs: options.webAuthnVerificationTimeoutMs,
+                        }),
+                  workBudget: webAuthnWorkBudget,
+                  workRuntime: authenticationWork,
+              });
     const repository = createRequestAuthenticationRepository(options.database);
     const authenticator = createRequestAuthenticator({
         authenticationLeaseDurationMs: options.authenticationLeaseDurationMs,
@@ -80,6 +132,7 @@ export function createDashboardServer(
         totpSecretCipher: options.totpSecretCipher,
         totpWorkBudget,
         totpWorkGate: authenticationWork.totpWorkGate,
+        ...(webAuthn === undefined ? {} : { webAuthn }),
     });
     const mfaAccountLifecycle = createMfaAccountLifecycleService({
         ...(options.now !== undefined && { now: options.now }),
@@ -91,6 +144,19 @@ export function createDashboardServer(
         totpSecretCipher: options.totpSecretCipher,
         totpWorkBudget,
         totpWorkGate: authenticationWork.totpWorkGate,
+        ...(webAuthn === undefined
+            ? {}
+            : {
+                  webAuthnAdapter: webAuthn.adapter,
+                  webAuthnRelyingParty: webAuthn.relyingParty,
+                  ...(webAuthn.verificationTimeoutMs === undefined
+                      ? {}
+                      : {
+                            webAuthnVerificationTimeoutMs: webAuthn.verificationTimeoutMs,
+                        }),
+                  webAuthnWorkBudget,
+                  webAuthnWorkRuntime: authenticationWork,
+              }),
     });
     const authenticationLifecycle = createAuthenticationLifecycleService({
         gatewayVerificationTimeoutMs: options.gatewayVerificationTimeoutMs,
@@ -108,7 +174,7 @@ export function createDashboardServer(
         applicationRuntime: options.applicationRuntime,
         authenticateCredential: (credential) => authenticator.authenticate(credential),
         authenticationLifecycle,
-        browserOrigin: options.browserOrigin,
+        browserOrigin,
         gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
         hostname: "127.0.0.1",
         mfaAccountLifecycle,

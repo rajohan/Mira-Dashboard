@@ -1,13 +1,17 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "c40f2197-7c63-447b-b844-de4bd99a84f2",
+  "id": "ccf6127d-529f-4458-a83b-06bf4c04cfb3",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
     {
       "name": "audit_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "auth_challenges",
       "entityType": "tables"
     },
     {
@@ -68,6 +72,10 @@
     },
     {
       "name": "user_totp_factors",
+      "entityType": "tables"
+    },
+    {
+      "name": "user_webauthn_credentials",
       "entityType": "tables"
     },
     {
@@ -190,6 +198,96 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "authentication_version",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "challenge",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "config_fingerprint",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pending_login_id",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "purpose",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "auth_challenges"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "allows_recovery",
       "entityType": "columns",
       "table": "auth_pending_logins"
@@ -201,6 +299,16 @@
       "default": null,
       "generated": null,
       "name": "allows_totp",
+      "entityType": "columns",
+      "table": "auth_pending_logins"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "allows_webauthn",
       "entityType": "columns",
       "table": "auth_pending_logins"
     },
@@ -1458,6 +1566,136 @@
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "algorithm",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "backed_up",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "counter",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "credential_id",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "device_type",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "label",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_used_at",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "blob",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "public_key",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rp_id",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "transport_mask",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
       "default": "1",
       "generated": null,
       "name": "authentication_version",
@@ -1533,6 +1771,36 @@
       "name": "username",
       "entityType": "columns",
       "table": "users"
+    },
+    {
+      "columns": [
+        "pending_login_id"
+      ],
+      "tableTo": "auth_pending_logins",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_auth_challenges_pending_login_id_auth_pending_logins_id_fk",
+      "entityType": "fks",
+      "table": "auth_challenges"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "tableTo": "auth_sessions",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_auth_challenges_session_id_auth_sessions_id_fk",
+      "entityType": "fks",
+      "table": "auth_challenges"
     },
     {
       "columns": [
@@ -1701,6 +1969,21 @@
     },
     {
       "columns": [
+        "user_id"
+      ],
+      "tableTo": "users",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_user_webauthn_credentials_user_id_users_id_fk",
+      "entityType": "fks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "columns": [
         "principal_id",
         "capability"
       ],
@@ -1716,6 +1999,15 @@
       "nameExplicit": false,
       "name": "audit_events_pk",
       "table": "audit_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "auth_challenges_pk",
+      "table": "auth_challenges",
       "entityType": "pks"
     },
     {
@@ -1849,6 +2141,15 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "user_webauthn_credentials_pk",
+      "table": "user_webauthn_credentials",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "users_pk",
       "table": "users",
       "entityType": "pks"
@@ -1918,6 +2219,60 @@
       "name": "audit_events_target_occurred_idx",
       "entityType": "indexes",
       "table": "audit_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "auth_challenges_expires_at_idx",
+      "entityType": "indexes",
+      "table": "auth_challenges"
+    },
+    {
+      "columns": [
+        {
+          "value": "pending_login_id",
+          "isExpression": false
+        },
+        {
+          "value": "purpose",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "(\"auth_challenges\".\"pending_login_id\" is not null)",
+      "origin": "manual",
+      "name": "auth_challenges_pending_login_purpose_unique",
+      "entityType": "indexes",
+      "table": "auth_challenges"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "purpose",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "(\"auth_challenges\".\"session_id\" is not null)",
+      "origin": "manual",
+      "name": "auth_challenges_session_purpose_unique",
+      "entityType": "indexes",
+      "table": "auth_challenges"
     },
     {
       "columns": [
@@ -2458,6 +2813,42 @@
     {
       "columns": [
         {
+          "value": "credential_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "user_webauthn_credentials_credential_id_unique",
+      "entityType": "indexes",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "user_webauthn_credentials_user_created_idx",
+      "entityType": "indexes",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "columns": [
+        {
           "value": "username",
           "isExpression": false
         }
@@ -2524,7 +2915,43 @@
       "table": "audit_events"
     },
     {
-      "value": "\"allows_recovery\" IN (0, 1) AND \"allows_totp\" IN (0, 1) AND (\"allows_recovery\" + \"allows_totp\") >= 1",
+      "value": "\"authentication_version\" BETWEEN 1 AND 9007199254740991",
+      "name": "auth_challenges_authentication_version_check",
+      "entityType": "checks",
+      "table": "auth_challenges"
+    },
+    {
+      "value": "length(\"challenge\") BETWEEN 32 AND 256 AND instr(\"challenge\", char(0)) = 0 AND \"challenge\" NOT GLOB '*[^A-Za-z0-9_-]*' AND (length(\"challenge\") % 4 = 0 OR (length(\"challenge\") % 4 = 2 AND substr(\"challenge\", -1, 1) GLOB '[AQgw]') OR (length(\"challenge\") % 4 = 3 AND substr(\"challenge\", -1, 1) GLOB '[AEIMQUYcgkosw048]'))",
+      "name": "auth_challenges_challenge_check",
+      "entityType": "checks",
+      "table": "auth_challenges"
+    },
+    {
+      "value": "length(\"config_fingerprint\") = 64 AND instr(\"config_fingerprint\", char(0)) = 0 AND \"config_fingerprint\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "auth_challenges_config_fingerprint_check",
+      "entityType": "checks",
+      "table": "auth_challenges"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "auth_challenges_id_check",
+      "entityType": "checks",
+      "table": "auth_challenges"
+    },
+    {
+      "value": "(\"purpose\" = 'login' AND \"pending_login_id\" IS NOT NULL AND \"session_id\" IS NULL) OR (\"purpose\" IN ('registration', 'step-up') AND \"session_id\" IS NOT NULL AND \"pending_login_id\" IS NULL)",
+      "name": "auth_challenges_binding_check",
+      "entityType": "checks",
+      "table": "auth_challenges"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"created_at\" AND \"expires_at\" <= \"created_at\" + 300000",
+      "name": "auth_challenges_time_check",
+      "entityType": "checks",
+      "table": "auth_challenges"
+    },
+    {
+      "value": "\"allows_recovery\" IN (0, 1) AND \"allows_totp\" IN (0, 1) AND \"allows_webauthn\" IN (0, 1) AND (\"allows_recovery\" + \"allows_totp\" + \"allows_webauthn\") >= 1",
       "name": "auth_pending_logins_methods_check",
       "entityType": "checks",
       "table": "auth_pending_logins"
@@ -2608,7 +3035,7 @@
       "table": "auth_sessions"
     },
     {
-      "value": "\"auth_method\" IN ('password', 'recovery', 'totp')",
+      "value": "\"auth_method\" IN ('password', 'recovery', 'totp', 'webauthn')",
       "name": "auth_sessions_auth_method_check",
       "entityType": "checks",
       "table": "auth_sessions"
@@ -2960,6 +3387,66 @@
       "name": "user_totp_factors_confirmation_check",
       "entityType": "checks",
       "table": "user_totp_factors"
+    },
+    {
+      "value": "\"algorithm\" = -7",
+      "name": "user_webauthn_credentials_algorithm_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "\"counter\" BETWEEN 0 AND 4294967295",
+      "name": "user_webauthn_credentials_counter_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "length(\"credential_id\") BETWEEN 8 AND 1024 AND instr(\"credential_id\", char(0)) = 0 AND \"credential_id\" NOT GLOB '*[^A-Za-z0-9_-]*' AND (length(\"credential_id\") % 4 = 0 OR (length(\"credential_id\") % 4 = 2 AND substr(\"credential_id\", -1, 1) GLOB '[AQgw]') OR (length(\"credential_id\") % 4 = 3 AND substr(\"credential_id\", -1, 1) GLOB '[AEIMQUYcgkosw048]'))",
+      "name": "user_webauthn_credentials_credential_id_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "\"backed_up\" IN (0, 1) AND \"device_type\" IN ('singleDevice', 'multiDevice') AND NOT (\"device_type\" = 'singleDevice' AND \"backed_up\" = 1)",
+      "name": "user_webauthn_credentials_device_state_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "user_webauthn_credentials_id_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "length(\"label\") BETWEEN 1 AND 128 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"label\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
+      "name": "user_webauthn_credentials_label_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "length(\"public_key\") BETWEEN 1 AND 2048",
+      "name": "user_webauthn_credentials_public_key_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "length(\"rp_id\") BETWEEN 1 AND 253 AND instr(\"rp_id\", char(0)) = 0 AND length(trim(\"rp_id\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0",
+      "name": "user_webauthn_credentials_rp_id_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND (\"last_used_at\" IS NULL OR (\"last_used_at\" BETWEEN 0 AND 8640000000000000 AND \"last_used_at\" >= \"created_at\"))",
+      "name": "user_webauthn_credentials_time_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
+    },
+    {
+      "value": "\"transport_mask\" BETWEEN 0 AND 127",
+      "name": "user_webauthn_credentials_transport_mask_check",
+      "entityType": "checks",
+      "table": "user_webauthn_credentials"
     },
     {
       "value": "\"authentication_version\" BETWEEN 1 AND 9007199254740991",

@@ -38,11 +38,17 @@ function createTestMfaLoginLifecycleService(
     return Object.freeze({
         beginPendingLogin:
             overrides.beginPendingLogin ?? (() => ({ status: "identity-changed" })),
+        beginWebAuthnLogin:
+            overrides.beginWebAuthnLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
         completeRecoveryLogin:
             overrides.completeRecoveryLogin ??
             (() => Promise.resolve({ status: "service-unavailable" })),
         completeTotpLogin:
             overrides.completeTotpLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
+        completeWebAuthnLogin:
+            overrides.completeWebAuthnLogin ??
             (() => Promise.resolve({ status: "service-unavailable" })),
         pendingLoginSummary:
             overrides.pendingLoginSummary ?? ((): undefined => undefined),

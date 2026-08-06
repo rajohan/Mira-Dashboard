@@ -3,17 +3,18 @@ import {
     type GeneratedOpaqueToken,
 } from "../../../shared/opaqueToken.ts";
 import { createSecurityAuditEvent, type SecurityAuditEventInput } from "../audit.ts";
-import {
-    browserSessionIdleDurationDefaultMs,
-    browserSessionIdleDurationMaximumMs,
-    browserSessionIdleDurationMinimumMs,
-} from "../authenticationPolicy.ts";
+import { parseBrowserSessionIdleDurationMs } from "../authenticationPolicy.ts";
 import {
     globalRateLimitBlockDurations,
     sourceRateLimitBlockDurations,
+    webAuthnWorkBudgetMaximumUnits,
+    webAuthnWorkBudgetWindowMs,
     type AuthenticationRateLimitTarget,
 } from "../authenticationRateLimit.ts";
-import type { AuthenticationWorkBudget } from "../authenticationWorkBudget.ts";
+import {
+    createAuthenticationWorkBudget,
+    type AuthenticationWorkBudget,
+} from "../authenticationWorkBudget.ts";
 import type { AuthenticationWorkGate } from "../authenticationWorkGate.ts";
 import { verifyDashboardPassword } from "../password.ts";
 import type {
@@ -22,6 +23,22 @@ import type {
 } from "./lifecycleRepositoryTypes.ts";
 import type { MfaLoginLifecycleDependencies } from "./loginLifecycleTypes.ts";
 import type { TotpSecretCipher } from "./totpSecretCipher.ts";
+import type { WebAuthnAdapter } from "./webauthn/adapter.ts";
+import type { WebAuthnRelyingPartyConfiguration } from "./webauthn/relyingPartyConfiguration.ts";
+
+const webAuthnVerificationTimeoutDefaultMs = 5000;
+const webAuthnVerificationTimeoutMinimumMs = 100;
+const webAuthnVerificationTimeoutMaximumMs = 30_000;
+
+export interface MfaLoginWebAuthnContext {
+    readonly adapter: WebAuthnAdapter;
+    readonly relyingParty: WebAuthnRelyingPartyConfiguration;
+    readonly verificationTimeoutMs: number;
+    readonly workBudget: AuthenticationWorkBudget;
+    readonly workRuntime: NonNullable<
+        MfaLoginLifecycleDependencies["webAuthn"]
+    >["workRuntime"];
+}
 
 export interface MfaLoginLifecycleContext {
     readonly audit: (
@@ -30,6 +47,7 @@ export interface MfaLoginLifecycleContext {
     ) => void;
     readonly generatePendingLoginToken: () => GeneratedOpaqueToken;
     readonly generateSessionToken: () => GeneratedOpaqueToken;
+    readonly generateId: () => string;
     readonly now: () => Date;
     readonly passwordWorkBudget: AuthenticationWorkBudget;
     readonly passwordWorkGate: AuthenticationWorkGate;
@@ -42,6 +60,7 @@ export interface MfaLoginLifecycleContext {
         hashInput: string,
         validatorHash: string
     ) => Promise<boolean>;
+    readonly webAuthn?: MfaLoginWebAuthnContext;
 }
 
 export function mfaLoginRateLimitTargets(
@@ -84,21 +103,41 @@ export function createMfaLoginLifecycleContext(
         }
         return value;
     };
-    const sessionIdleDurationMs =
-        dependencies.sessionIdleDurationMs ?? browserSessionIdleDurationDefaultMs;
-    if (
-        !Number.isSafeInteger(sessionIdleDurationMs) ||
-        sessionIdleDurationMs < browserSessionIdleDurationMinimumMs ||
-        sessionIdleDurationMs > browserSessionIdleDurationMaximumMs
-    ) {
-        throw new RangeError("MFA session idle duration is invalid");
-    }
+    const sessionIdleDurationMs = parseBrowserSessionIdleDurationMs(
+        dependencies.sessionIdleDurationMs
+    );
     const audit: MfaLoginLifecycleContext["audit"] = (unit, input) => {
         unit.insertAuditEvent(createSecurityAuditEvent({ ...input, id: generateId() }));
     };
+    let webAuthn: MfaLoginWebAuthnContext | undefined;
+    if (dependencies.webAuthn !== undefined) {
+        const verificationTimeoutMs =
+            dependencies.webAuthn.verificationTimeoutMs ??
+            webAuthnVerificationTimeoutDefaultMs;
+        if (
+            !Number.isSafeInteger(verificationTimeoutMs) ||
+            verificationTimeoutMs < webAuthnVerificationTimeoutMinimumMs ||
+            verificationTimeoutMs > webAuthnVerificationTimeoutMaximumMs
+        ) {
+            throw new RangeError("WebAuthn verification timeout is invalid");
+        }
+        webAuthn = Object.freeze({
+            adapter: dependencies.webAuthn.adapter,
+            relyingParty: dependencies.webAuthn.relyingParty,
+            verificationTimeoutMs,
+            workBudget:
+                dependencies.webAuthn.workBudget ??
+                createAuthenticationWorkBudget(
+                    webAuthnWorkBudgetMaximumUnits,
+                    webAuthnWorkBudgetWindowMs
+                ),
+            workRuntime: dependencies.webAuthn.workRuntime,
+        });
+    }
 
     return Object.freeze({
         audit,
+        generateId,
         generatePendingLoginToken,
         generateSessionToken,
         now,
@@ -110,5 +149,6 @@ export function createMfaLoginLifecycleContext(
         totpWorkBudget: dependencies.totpWorkBudget,
         totpWorkGate: dependencies.totpWorkGate,
         verifyRecoveryCode,
+        ...(webAuthn === undefined ? {} : { webAuthn }),
     });
 }

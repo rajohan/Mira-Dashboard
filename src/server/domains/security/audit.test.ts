@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import { createSecurityAuditEvent, serializeRedactedAuditMetadata } from "./audit.ts";
 
+const parseUnknownJson = (value: string): unknown => JSON.parse(value) as unknown;
+
 describe("security audit boundary", () => {
     test("persists only explicitly allowlisted non-secret metadata", () => {
-        const metadata = JSON.parse(
+        const metadata = parseUnknownJson(
             serializeRedactedAuditMetadata({
                 password: "do-not-store",
                 reason: "invalid_credentials",
@@ -12,7 +14,7 @@ describe("security audit boundary", () => {
                 safe: { nested: { deeper: { value: "hidden" } } },
                 token: "do-not-store",
             })
-        ) as Record<string, unknown>;
+        );
 
         expect(metadata).toEqual({ reason: "invalid_credentials" });
     });
@@ -32,5 +34,24 @@ describe("security audit boundary", () => {
 
         expect(event.metadataJson).toBe('{"reason":"invalid_credentials"}');
         expect(event.authenticatorId).toBeNull();
+    });
+
+    test("redacts raw WebAuthn ceremony material", () => {
+        const metadata = parseUnknownJson(
+            serializeRedactedAuditMetadata({
+                attestationObject: "raw-attestation",
+                challenge: "raw-challenge",
+                clientDataJSON: "raw-client-data",
+                method: "webauthn",
+                publicKey: "raw-public-key",
+                reason: "webauthn_invalid",
+                response: { signature: "raw-signature" },
+            })
+        );
+
+        expect(metadata).toEqual({
+            method: "webauthn",
+            reason: "webauthn_invalid",
+        });
     });
 });

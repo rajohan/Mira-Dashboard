@@ -11,6 +11,7 @@ import {
 import { authenticatedSessionResultSchema } from "../../../contracts/auth.ts";
 import { dashboardTotpPolicy } from "../../domains/security/mfa/totp.ts";
 import { createTotpSecretCipher } from "../../domains/security/mfa/totpSecretCipher.ts";
+import { createWebAuthnRelyingPartyConfiguration } from "../../domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredentials.ts";
 import { openFreshMigratedDatabase } from "./freshDatabase.ts";
@@ -19,6 +20,11 @@ import { createTestApplicationRuntime } from "./requestContext.ts";
 export const mfaHttpSystemBrowserOrigin = "https://dashboard.example";
 export const mfaHttpSystemPassword = "correct-horse-battery";
 export const mfaHttpSystemUsername = "operator";
+export const mfaHttpSystemWebAuthnRelyingParty = createWebAuthnRelyingPartyConfiguration({
+    allowedOrigins: [mfaHttpSystemBrowserOrigin],
+    rpId: "dashboard.example",
+    rpName: "Mira Dashboard",
+});
 
 export type MfaHttpSystemDatabase = Awaited<ReturnType<typeof openFreshMigratedDatabase>>;
 
@@ -299,6 +305,7 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
                 observedGatewayCredential = credential;
                 return Promise.resolve(credential === "gateway-token");
             },
+            webAuthnRelyingParty: mfaHttpSystemWebAuthnRelyingParty,
         });
         const bootstrapResponse = await postTrpcMutation(
             server.url,

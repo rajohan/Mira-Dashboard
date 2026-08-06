@@ -1,27 +1,23 @@
-import { recoveryCodeCount } from "../../../../contracts/accountSecurity.ts";
+import { secondsToMilliseconds } from "date-fns";
+
 import type { AuthenticationMethod } from "../../../../contracts/security.ts";
 import {
     generateOpaqueToken,
     type GeneratedOpaqueToken,
 } from "../../../shared/opaqueToken.ts";
 import { createSecurityAuditEvent, type SecurityAuditEventInput } from "../audit.ts";
-import {
-    browserSessionIdleDurationDefaultMs,
-    browserSessionIdleDurationMaximumMs,
-    browserSessionIdleDurationMinimumMs,
-} from "../authenticationPolicy.ts";
+import { parseBrowserSessionIdleDurationMs } from "../authenticationPolicy.ts";
 import {
     insertBrowserSession,
     type AuthenticatedBrowserIdentity,
 } from "../authenticationSession.ts";
 import type { AuthenticationWorkBudget } from "../authenticationWorkBudget.ts";
-import type { AuthenticationWorkGate } from "../authenticationWorkGate.ts";
+import type {
+    AuthenticationWorkGate,
+    AuthenticationWorkRuntimeService,
+} from "../authenticationWorkGate.ts";
 import { hashDashboardPassword, verifyDashboardPassword } from "../password.ts";
-import {
-    recentAuthenticationWindowDefaultMs,
-    recentAuthenticationWindowMaximumMs,
-    recentAuthenticationWindowMinimumMs,
-} from "../recentAuthentication.ts";
+import { parseRecentAuthenticationWindowMs } from "../recentAuthentication.ts";
 import {
     createAccountLifecycleCryptoHelpers,
     type AccountLifecycleCryptoHelpers,
@@ -38,10 +34,7 @@ import type {
     MfaSessionRecord,
     MfaUserRecord,
 } from "./lifecycleRepositoryTypes.ts";
-import {
-    dashboardRecoveryCodeCount,
-    generateDashboardRecoveryCodes,
-} from "./recoveryCodes.ts";
+import { generateDashboardRecoveryCodes } from "./recoveryCodes.ts";
 import {
     generateDashboardTotpSecret,
     verifyDashboardTotp,
@@ -49,6 +42,12 @@ import {
     type VerifyDashboardTotpInput,
 } from "./totp.ts";
 import type { TotpSecretCipher } from "./totpSecretCipher.ts";
+import { createWebAuthnAdapter, type WebAuthnAdapter } from "./webauthn/adapter.ts";
+import type { WebAuthnRelyingPartyConfiguration } from "./webauthn/relyingPartyConfiguration.ts";
+
+const webAuthnVerificationTimeoutDefaultMs = secondsToMilliseconds(5);
+const webAuthnVerificationTimeoutMinimumMs = 100;
+const webAuthnVerificationTimeoutMaximumMs = secondsToMilliseconds(30);
 
 export interface RotatedSession {
     readonly record: MfaSessionRecord;
@@ -97,6 +96,14 @@ export interface MfaAccountLifecycleContext extends AccountLifecycleCryptoHelper
     readonly verifyTotp: (
         input: VerifyDashboardTotpInput
     ) => Promise<TotpVerificationResult | undefined>;
+    readonly webAuthnAdapter?: WebAuthnAdapter;
+    readonly webAuthnRelyingParty?: WebAuthnRelyingPartyConfiguration;
+    readonly webAuthnVerificationTimeoutMs?: number;
+    readonly webAuthnWorkBudget?: AuthenticationWorkBudget;
+    readonly webAuthnWorkRuntime?: Pick<
+        AuthenticationWorkRuntimeService,
+        "runWebAuthnVerification"
+    >;
 }
 
 const rotateSession: MfaAccountLifecycleContext["rotateSession"] = (
@@ -134,9 +141,6 @@ const rotateSession: MfaAccountLifecycleContext["rotateSession"] = (
 export function createMfaAccountLifecycleContext(
     dependencies: MfaAccountLifecycleDependencies
 ): MfaAccountLifecycleContext {
-    if (dashboardRecoveryCodeCount !== recoveryCodeCount) {
-        throw new Error("Recovery-code policy constants are inconsistent");
-    }
     const generateId = dependencies.generateId ?? (() => Bun.randomUUIDv7());
     const generateRecoveryCodes =
         dependencies.generateRecoveryCodes ?? generateDashboardRecoveryCodes;
@@ -156,24 +160,41 @@ export function createMfaAccountLifecycleContext(
         }
         return value;
     };
-    const sessionIdleDurationMs =
-        dependencies.sessionIdleDurationMs ?? browserSessionIdleDurationDefaultMs;
+    const sessionIdleDurationMs = parseBrowserSessionIdleDurationMs(
+        dependencies.sessionIdleDurationMs
+    );
+    const recentAuthenticationWindowMs = parseRecentAuthenticationWindowMs(
+        dependencies.recentAuthenticationWindowMs
+    );
+    const hasWebAuthnDependency =
+        dependencies.webAuthnAdapter !== undefined ||
+        dependencies.webAuthnRelyingParty !== undefined ||
+        dependencies.webAuthnVerificationTimeoutMs !== undefined ||
+        dependencies.webAuthnWorkBudget !== undefined ||
+        dependencies.webAuthnWorkRuntime !== undefined;
     if (
-        !Number.isSafeInteger(sessionIdleDurationMs) ||
-        sessionIdleDurationMs < browserSessionIdleDurationMinimumMs ||
-        sessionIdleDurationMs > browserSessionIdleDurationMaximumMs
+        hasWebAuthnDependency &&
+        (dependencies.webAuthnRelyingParty === undefined ||
+            dependencies.webAuthnWorkBudget === undefined ||
+            dependencies.webAuthnWorkRuntime === undefined)
     ) {
-        throw new RangeError("MFA session idle duration is invalid");
+        throw new TypeError("WebAuthn account lifecycle dependencies are incomplete");
     }
-    const recentAuthenticationWindowMs =
-        dependencies.recentAuthenticationWindowMs ?? recentAuthenticationWindowDefaultMs;
+    const webAuthnVerificationTimeoutMs =
+        dependencies.webAuthnVerificationTimeoutMs ??
+        webAuthnVerificationTimeoutDefaultMs;
     if (
-        !Number.isSafeInteger(recentAuthenticationWindowMs) ||
-        recentAuthenticationWindowMs < recentAuthenticationWindowMinimumMs ||
-        recentAuthenticationWindowMs > recentAuthenticationWindowMaximumMs
+        !Number.isSafeInteger(webAuthnVerificationTimeoutMs) ||
+        webAuthnVerificationTimeoutMs < webAuthnVerificationTimeoutMinimumMs ||
+        webAuthnVerificationTimeoutMs > webAuthnVerificationTimeoutMaximumMs
     ) {
-        throw new RangeError("Recent-auth window is invalid");
+        throw new RangeError("WebAuthn verification timeout is invalid");
     }
+    const webAuthnAdapter =
+        dependencies.webAuthnRelyingParty === undefined
+            ? undefined
+            : (dependencies.webAuthnAdapter ??
+              createWebAuthnAdapter(dependencies.webAuthnRelyingParty));
 
     const audit = (
         unit: MfaLifecycleUnitOfWork,
@@ -220,5 +241,18 @@ export function createMfaAccountLifecycleContext(
         verifyPassword,
         verifyRecoveryCode,
         verifyTotp,
+        ...(webAuthnAdapter === undefined ? {} : { webAuthnAdapter }),
+        ...(dependencies.webAuthnRelyingParty === undefined
+            ? {}
+            : { webAuthnRelyingParty: dependencies.webAuthnRelyingParty }),
+        ...(dependencies.webAuthnRelyingParty === undefined
+            ? {}
+            : { webAuthnVerificationTimeoutMs }),
+        ...(dependencies.webAuthnWorkBudget === undefined
+            ? {}
+            : { webAuthnWorkBudget: dependencies.webAuthnWorkBudget }),
+        ...(dependencies.webAuthnWorkRuntime === undefined
+            ? {}
+            : { webAuthnWorkRuntime: dependencies.webAuthnWorkRuntime }),
     });
 }

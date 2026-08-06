@@ -438,9 +438,9 @@
   and declare every reachable safe transport error.
 - Account security exposes nine Valibot/tRPC procedures for summary, password reauthentication,
   TOTP enrollment/confirmation/removal, TOTP or recovery step-up, recovery rotation, and MFA
-  disablement. The lifecycle enforces recent-auth policy, a maximum of four confirmed TOTP
-  factors, final-factor protection, ten sequentially hashed recovery codes, and atomic session
-  rotation or cleanup for every security-state transition.
+  disablement. The lifecycle enforces recent-auth policy, a maximum of four aggregate confirmed
+  possession factors, final-factor protection, ten sequentially hashed recovery codes, and atomic
+  session rotation or cleanup for every security-state transition.
 - TOTP secrets use versioned AES-GCM envelopes bound to their user/factor storage context.
   Recovery selectors and validators each retain 128 bits of randomness, only Argon2id hashes are
   persisted, TOTP steps and recovery codes are compare-and-swap consumed, and malformed or
@@ -472,3 +472,34 @@
   application, data/security, runtime/delivery, progress, and implementation-plan chapters. All
   original decisions remain represented, and the progress chapter records each implemented
   slice without turning generated contract facts into handwritten duplicates.
+
+### 2026-08-06 — WebAuthn credential lifecycle implemented
+
+- Password-first WebAuthn now covers pending-login assertion, account enrollment, account step-up,
+  and credential removal through seven strict Valibot/tRPC procedures. The relying-party ID,
+  allowlisted origins, ES256 algorithm, roaming-key attachment, required user verification,
+  discouraged resident keys, and `none` attestation policy come only from typed composition; no
+  request host or forwarding header can influence them.
+- The unpublished fresh-database baseline now contains purpose- and binding-constrained
+  `auth_challenges` plus globally unique `user_webauthn_credentials`. Challenges are short-lived,
+  configuration-fingerprinted, atomically replaced, and consumed exactly once. Credentials retain
+  only the public key, fixed device type, mutable backup state, canonical transports, CAS counter,
+  label, RP ID, and timestamps. Current-RP usability is exposed in account summaries; drifted
+  credentials remain removable but cannot justify removal of the final usable factor.
+- TOTP-only, WebAuthn-only, and mixed accounts share one aggregate four-factor cap and the same
+  recovery, recent-auth, session-rotation, audit, and disablement invariants. The first possession
+  factor enables MFA and creates the recovery set; additional factors do not rotate it. MFA
+  disablement deletes TOTP, WebAuthn credentials, recovery codes, outstanding challenges, pending
+  logins, and obsolete sessions in the same immediate state transition.
+- Registration generation and assertion-option generation stay outside write transactions.
+  Attestation parsing and signature verification run through the process-owned Effect WebAuthn
+  gate with separate two-active/four-queued admission, cancellation/deadline handling, and a shared
+  60-unit-per-minute account/login budget. An admitted ceremony consumes its challenge on success,
+  invalid proof, timeout, upstream failure, active cancellation, expiry, or credential-CAS loss;
+  capacity rejection, rolling-budget rejection, and queued cancellation leave it untouched.
+- Deterministic real ES256 fixtures cover registration, monotonic counters, and valid zero-counter
+  multi-device assertions on the pinned Bun/SimpleWebAuthn versions. Focused repository, lifecycle,
+  adapter, route, migration, and real HTTP coverage proves replay resistance, unknown-credential
+  uniformity, recovery-only login after RP drift, global credential collisions, same-millisecond
+  CAS, strict body limits, no-store responses, cookie rotation, and complete mixed-account
+  login/step-up/removal.

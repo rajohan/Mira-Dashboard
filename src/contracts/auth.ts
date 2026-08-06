@@ -13,6 +13,10 @@ import {
     securityUsernameSchema,
 } from "./security.ts";
 import { emptyInputSchema } from "./system.ts";
+import {
+    webAuthnAuthenticationInputSchema,
+    webAuthnAuthenticationOptionsSchema,
+} from "./webauthn.ts";
 
 const authTimestampSchema = timestampMillisecondsSchema(
     "Authentication timestamp is invalid"
@@ -140,6 +144,13 @@ export const totpLoginInputSchema = v.strictObject({
 export const recoveryLoginInputSchema = v.strictObject({
     code: recoveryCodeInputSchema,
 });
+
+export const beginWebAuthnLoginResultSchema = v.strictObject({
+    expiresAtMs: authTimestampSchema,
+    options: webAuthnAuthenticationOptionsSchema,
+});
+
+export const webAuthnLoginInputSchema = webAuthnAuthenticationInputSchema;
 
 export const passwordChangeInputSchema = v.strictObject({
     currentPassword: authPasswordInputSchema,
@@ -351,6 +362,33 @@ export const authProcedureContracts = [
         transport: authenticationMutationTransport,
     },
     {
+        access: pendingLoginAccess,
+        domain: "auth",
+        errors: ["CONFLICT", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+        input: emptyInputSchema,
+        inputSchemaId: "auth.beginWebAuthnLogin.input",
+        kind: "mutation",
+        name: "auth.beginWebAuthnLogin",
+        output: beginWebAuthnLoginResultSchema,
+        outputSchemaId: "auth.beginWebAuthnLogin.output",
+        summary: "Creates one pending-login-bound WebAuthn assertion challenge.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: pendingLoginAccess,
+        domain: "auth",
+        errors: ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+        input: webAuthnLoginInputSchema,
+        inputSchemaId: "auth.loginWebAuthn.input",
+        kind: "mutation",
+        name: "auth.loginWebAuthn",
+        output: authenticatedSessionResultSchema,
+        outputSchemaId: "auth.loginWebAuthn.output",
+        summary:
+            "Consumes a pending login and WebAuthn challenge to create the browser session.",
+        transport: authenticationMutationTransport,
+    },
+    {
         access: publicAccess,
         domain: "auth",
         errors: [],
@@ -424,6 +462,9 @@ export const authProcedureContracts = [
 export type AuthSessionSummary = v.InferOutput<typeof authSessionSummarySchema>;
 export type AuthStatus = v.InferOutput<typeof authStatusSchema>;
 export type AuthUser = v.InferOutput<typeof authUserSchema>;
+export type BeginWebAuthnLoginResult = v.InferOutput<
+    typeof beginWebAuthnLoginResultSchema
+>;
 export type FirstUserBootstrapInput = v.InferOutput<typeof firstUserBootstrapInputSchema>;
 export type PasswordLoginResult = v.InferOutput<typeof passwordLoginResultSchema>;
 export type PasswordChangeInput = v.InferOutput<typeof passwordChangeInputSchema>;
@@ -433,3 +474,4 @@ export type RecoveryCode = v.InferOutput<typeof recoveryCodeSchema>;
 export type RecoveryCodeInput = v.InferOutput<typeof recoveryCodeInputSchema>;
 export type RecoveryLoginInput = v.InferOutput<typeof recoveryLoginInputSchema>;
 export type TotpLoginInput = v.InferOutput<typeof totpLoginInputSchema>;
+export type WebAuthnLoginInput = v.InferOutput<typeof webAuthnLoginInputSchema>;

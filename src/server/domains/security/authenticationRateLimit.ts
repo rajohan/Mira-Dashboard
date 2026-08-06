@@ -29,6 +29,9 @@ export const authenticationWorkBudgetWindowMs = minutesToMilliseconds(1);
 /** Bounds aggregate AES/HMAC TOTP checks before durable failure cooldowns engage. */
 export const totpWorkBudgetMaximumUnits = 60;
 export const totpWorkBudgetWindowMs = minutesToMilliseconds(1);
+/** Bounds aggregate WebAuthn parsing and signature verification work. */
+export const webAuthnWorkBudgetMaximumUnits = 60;
+export const webAuthnWorkBudgetWindowMs = minutesToMilliseconds(1);
 
 export const sourceRateLimitBlockDurations = [
     { failures: 10, milliseconds: minutesToMilliseconds(15) },

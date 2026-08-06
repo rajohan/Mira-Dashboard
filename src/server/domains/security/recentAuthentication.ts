@@ -38,7 +38,13 @@ function persistedTimestamp(value: Date, label: string): number {
     return timestamp;
 }
 
-function recentAuthenticationWindow(windowMs: number): number {
+/**
+ * Parses the shared recent-authentication window at a policy boundary.
+ * @param value Optional override in milliseconds.
+ * @returns The validated override or the process default.
+ */
+export function parseRecentAuthenticationWindowMs(value?: number): number {
+    const windowMs = value ?? recentAuthenticationWindowDefaultMs;
     if (
         !Number.isSafeInteger(windowMs) ||
         windowMs < recentAuthenticationWindowMinimumMs ||
@@ -102,9 +108,7 @@ export function evaluateRecentAuthentication(
         input.mfaVerifiedAt === null
             ? undefined
             : persistedTimestamp(input.mfaVerifiedAt, "MFA verification");
-    const windowMs = recentAuthenticationWindow(
-        input.windowMs ?? recentAuthenticationWindowDefaultMs
-    );
+    const windowMs = parseRecentAuthenticationWindowMs(input.windowMs);
 
     return Object.freeze({
         mfa: classifyFreshness(

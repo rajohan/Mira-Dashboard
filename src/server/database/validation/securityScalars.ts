@@ -9,12 +9,6 @@ import {
     lowercaseSha256Action,
 } from "../../../shared/validation.ts";
 import { isDashboardPasswordHash } from "../../shared/passwordHash.ts";
-import {
-    encryptedTotpSecretEnvelopeLength,
-    encryptedTotpSecretEnvelopePattern,
-    mfaSecretKeyIdMaximumLength,
-    mfaSecretKeyIdPattern,
-} from "../schema/mfaFormats.ts";
 
 /** Bun Argon2id hash accepted by the security persistence boundary. */
 export const argon2idPasswordHashSchema = v.pipe(
@@ -32,21 +26,6 @@ export const securityLabelSchema = boundedNonBlankTextSchema(
 export const controlSafeSecurityLabelSchema = v.pipe(
     securityLabelSchema,
     v.check((value) => !/[\p{Cc}\p{Cf}]/u.test(value), "Security label is invalid")
-);
-
-/** Identifier selecting one configured AES-GCM key without exposing key material. */
-export const mfaSecretKeyIdSchema = v.pipe(
-    v.string("MFA secret key id is invalid"),
-    v.minLength(1, "MFA secret key id is invalid"),
-    v.maxLength(mfaSecretKeyIdMaximumLength, "MFA secret key id is invalid"),
-    v.regex(mfaSecretKeyIdPattern, "MFA secret key id is invalid")
-);
-
-/** Canonical v1 AES-GCM envelope for one encrypted 20-byte TOTP secret. */
-export const encryptedTotpSecretEnvelopeSchema = v.pipe(
-    v.string("Encrypted TOTP secret is invalid"),
-    v.length(encryptedTotpSecretEnvelopeLength, "Encrypted TOTP secret is invalid"),
-    v.regex(encryptedTotpSecretEnvelopePattern, "Encrypted TOTP secret is invalid")
 );
 
 /** Bounded user-agent metadata without NUL characters. */
