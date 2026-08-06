@@ -189,6 +189,7 @@ export function createAutomationCredentialOperations(
                     });
                     if (principal === undefined) return { status: "not-found" as const };
                     validatedCapabilities(unit, principal, revokedAt);
+                    assertNoFutureCredentialHistory(unit, principal.id, revokedAt);
                     const current = unit.findCredential(
                         input.principalId,
                         input.credentialId

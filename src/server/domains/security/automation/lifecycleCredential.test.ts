@@ -520,6 +520,22 @@ describe("automation credential lifecycle", () => {
                 service.revokeCredential(
                     fixture.identity,
                     {
+                        credentialId: created.result.credential.id,
+                        expectedAuthorizationVersion: 1,
+                        principalId: automationLifecyclePrincipalId,
+                    },
+                    fixture.metadata
+                )
+            ).toEqual({ status: "conflict" });
+            expect(
+                readPersistedAutomationCredentials(fixture.database.sqlite).find(
+                    (credential) => credential.id === created.result.credential.id
+                )?.revokedAt
+            ).toBeNull();
+            expect(
+                service.revokeCredential(
+                    fixture.identity,
+                    {
                         credentialId: futureCredentialId,
                         expectedAuthorizationVersion: 1,
                         principalId: automationLifecyclePrincipalId,
