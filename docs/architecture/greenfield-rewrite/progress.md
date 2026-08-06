@@ -599,7 +599,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 
 - Bun `1.4.0-canary.1+17d684360`, full revision
   `17d6843606d76620cb55d31424d7fb0aed51c367`, passes qualification typecheck and the complete
-  qualification suite: 151 tests, 756 assertions, zero failures, and 31 files. This is the exact
+  qualification suite: 151 tests, 758 assertions, zero failures, and 31 files. This is the exact
   audited candidate for the round, not a repository-wide source-revision pin.
 - The selected frontend path is one compiler-first Bun HTML AOT build. Executable fixture and
   actual-build evidence cover Tailwind, lazy chunks, fail-closed inline event/style/base and

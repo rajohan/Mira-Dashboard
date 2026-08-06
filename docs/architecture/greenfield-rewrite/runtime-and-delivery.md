@@ -60,7 +60,7 @@ environment against the exact candidate binary:
 
 The 2026-08-06 qualification round passes on exact revision
 `17d6843606d76620cb55d31424d7fb0aed51c367`: qualification typecheck passes, and the full suite
-reports 151 tests, 756 assertions, and zero failures across 31 files. Its executable evidence
+reports 151 tests, 758 assertions, and zero failures across 31 files. Its executable evidence
 includes:
 
 - compiler-first Bun HTML AOT output with Tailwind, lazy chunks, fail-closed inline-code and

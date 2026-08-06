@@ -18,6 +18,12 @@ const sourceVersion = "2026.7.2-beta.7";
 const sourceCommit = "dabe1915362e20c25704af91612a32a8f4c96e83";
 const sourceBuiltAt = "2026-08-01T19:22:56.002Z";
 
+async function rejectedError(operation: Promise<unknown>): Promise<Error> {
+    const result = await operation.catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(Error);
+    return result as Error;
+}
+
 async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> {
     const dist = path.join(sourceRoot, "dist");
     const controlUiAssets = path.join(dist, "control-ui", "assets");
@@ -362,9 +368,10 @@ describe("reviewed OpenClaw protocol fixtures", () => {
                 "utf8"
             );
 
-            expect(loadReviewedOpenClawFixtures(fixtureRoot)).rejects.toThrow(
-                "hash mismatch for chat.json"
+            const mismatchError = await rejectedError(
+                loadReviewedOpenClawFixtures(fixtureRoot)
             );
+            expect(mismatchError.message).toContain("hash mismatch for chat.json");
         });
     });
 });
@@ -422,9 +429,12 @@ describe("explicit OpenClaw source audit", () => {
                 expect(() =>
                     assertOpenClawAuditMatchesReviewed(audit, loaded.audit)
                 ).not.toThrow();
-                expect(
+                const existingOutputError = await rejectedError(
                     writeOpenClawAuditCandidate(audit, outputDirectory)
-                ).rejects.toThrow("output directory already exists");
+                );
+                expect(existingOutputError.message).toContain(
+                    "output directory already exists"
+                );
             }
         );
     });
