@@ -1,5 +1,5 @@
 import { constants, type BigIntStats } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export interface BoundedFileReadQualificationHooks {
@@ -33,8 +33,8 @@ function matchesSnapshot(before: BigIntStats, after: BigIntStats): boolean {
 
 /**
  * Reads one stable regular file through a held nonblocking, no-follow descriptor.
- * A second no-follow descriptor revalidates that the requested path still names the
- * same snapshot inside the explicit root before any bytes are returned.
+ * A post-read no-follow path snapshot revalidates that the requested path still names
+ * the same held descriptor snapshot before any bytes are returned.
  * @param absolutePath Absolute file path selected by the qualification caller.
  * @param allowedRoot Explicit root that is permitted to contain the descriptor target.
  * @param maximumBytes Maximum accepted file size.
@@ -71,7 +71,6 @@ export async function readBoundedRegularFile(
     }
 
     let file: Awaited<ReturnType<typeof open>> | undefined;
-    let pathFile: Awaited<ReturnType<typeof open>> | undefined;
     let result: Buffer | undefined;
     let failed = false;
     try {
@@ -106,16 +105,10 @@ export async function readBoundedRegularFile(
         }
 
         const after = await file.stat({ bigint: true });
-        pathFile = await open(
-            requestedPath,
-            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
-        );
-        const revalidatedDescriptorPath = await realpath(`/proc/self/fd/${pathFile.fd}`);
-        const pathState = await pathFile.stat({ bigint: true });
+        const pathState = await lstat(requestedPath, { bigint: true });
         if (
             bytesRead !== expectedBytes ||
             !matchesSnapshot(before, after) ||
-            !isContainedPath(canonicalRoot, revalidatedDescriptorPath) ||
             !pathState.isFile() ||
             !matchesSnapshot(before, pathState)
         ) {
@@ -126,13 +119,6 @@ export async function readBoundedRegularFile(
         failed = true;
     }
 
-    if (pathFile) {
-        try {
-            await pathFile.close();
-        } catch {
-            failed = true;
-        }
-    }
     if (file) {
         try {
             await file.close();
