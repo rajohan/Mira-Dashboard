@@ -6,12 +6,21 @@ import {
     positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
 
-/** Authentication methods represented by durable browser sessions. */
+/** Second-factor methods implemented by this authentication slice. */
+export const multiFactorAuthenticationMethods = ["recovery", "totp"] as const;
+
+export type MultiFactorAuthenticationMethod =
+    (typeof multiFactorAuthenticationMethods)[number];
+
+export const multiFactorAuthenticationMethodSchema = v.picklist(
+    multiFactorAuthenticationMethods,
+    "Multi-factor authentication method is invalid"
+);
+
+/** Authentication methods implemented by durable browser sessions. */
 export const authenticationMethods = [
     "password",
-    "recovery",
-    "totp",
-    "webauthn",
+    ...multiFactorAuthenticationMethods,
 ] as const;
 
 export type AuthenticationMethod = (typeof authenticationMethods)[number];

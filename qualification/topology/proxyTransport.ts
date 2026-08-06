@@ -12,6 +12,9 @@ const fixedHopByHopHeaders = [
 
 const httpTokenPattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
+/** Optional synchronization boundary after one upstream response chunk is forwarded. */
+export type ProxyResponseBodyChunkBoundary = (chunk: Uint8Array) => Promise<void> | void;
+
 function trimOptionalWhitespace(value: string): string {
     return value.replaceAll(/^[\t ]+|[\t ]+$/g, "");
 }
@@ -49,12 +52,14 @@ export function stripHopByHopHeaders(source: Headers): Headers {
  * @param body Upstream response body.
  * @param upstreamController Controller for the upstream request.
  * @param detachRequestAbort Removes the downstream abort listener.
+ * @param chunkBoundary Optional synchronization boundary after forwarding each chunk.
  * @returns A downstream response stream.
  */
 export function createProxyResponseBody(
     body: ReadableStream<Uint8Array>,
     upstreamController: AbortController,
-    detachRequestAbort: () => void
+    detachRequestAbort: () => void,
+    chunkBoundary?: ProxyResponseBodyChunkBoundary
 ): ReadableStream<Uint8Array> {
     const reader = body.getReader();
 
@@ -73,6 +78,9 @@ export function createProxyResponseBody(
                     return;
                 }
                 controller.enqueue(next.value);
+                if (chunkBoundary !== undefined) {
+                    await chunkBoundary(next.value);
+                }
             } catch (error) {
                 detachRequestAbort();
                 if (upstreamController.signal.aborted) {

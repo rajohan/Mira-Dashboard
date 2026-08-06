@@ -1,27 +1,37 @@
 import { describe, expect, test } from "bun:test";
 
+import { readAuthenticationHttpCredentials } from "../rawHttp/authenticationCredentials.ts";
+import { generateOpaqueToken } from "../shared/opaqueToken.ts";
 import {
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
+    createTestMfaAccountLifecycleService,
+    createTestMfaLoginLifecycleService,
 } from "../test/support/requestContext.ts";
 import { createRequestContext } from "./context.ts";
 
 describe("tRPC request context", () => {
     test("validates and freezes the authentication boundary", async () => {
+        const pendingLogin = generateOpaqueToken("pending-login");
         const request = new Request("http://localhost/trpc/events.stream", {
-            headers: { "user-agent": "Context Test Browser" },
+            headers: {
+                cookie: `__Host-mira_dashboard_pending_login=${pendingLogin.token}`,
+                "user-agent": "Context Test Browser",
+            },
         });
-        let observedRequest: Request | undefined;
+        const credentials = readAuthenticationHttpCredentials(request);
+        let observedCredential: unknown;
         const applicationRuntime = createTestApplicationRuntime();
         const authenticationLifecycle = createTestAuthenticationLifecycleService();
         const responseHeaders = new Headers();
 
         const context = await createRequestContext({
             applicationRuntime,
+            authenticationCredential: credentials.authentication,
             authenticationClientSourceId: "client-source-1",
             authenticationLifecycle,
-            authenticateRequest(candidate) {
-                observedRequest = candidate;
+            authenticateCredential(candidate) {
+                observedCredential = candidate;
                 return {
                     authentication: {
                         kind: "authenticated",
@@ -39,11 +49,14 @@ describe("tRPC request context", () => {
                     },
                 };
             },
+            mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
+            mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+            pendingLoginCredential: credentials.pendingLogin,
             request,
             responseHeaders,
         });
 
-        expect(observedRequest).toBe(request);
+        expect(observedCredential).toEqual({ kind: "anonymous" });
         expect(context.authentication).toEqual({
             kind: "authenticated",
             principal: {
@@ -60,6 +73,13 @@ describe("tRPC request context", () => {
         expect(context.services).toBe(applicationRuntime.services);
         expect(context.authenticationLifecycle).toBe(authenticationLifecycle);
         expect(context.authenticationClientSourceId).toBe("client-source-1");
+        expect(context.pendingLoginCredential).toEqual({
+            kind: "present",
+            token: {
+                prefix: pendingLogin.prefix,
+                validatorHash: pendingLogin.validatorHash,
+            },
+        });
         expect(context.responseHeaders).toBe(responseHeaders);
         expect(context.userAgent).toBe("Context Test Browser");
         expect("dispose" in context.services).toBe(false);
@@ -72,26 +92,36 @@ describe("tRPC request context", () => {
     });
 
     test("omits user-agent metadata when the request header is absent", async () => {
+        const request = new Request("http://localhost/trpc/auth.status");
+        const credentials = readAuthenticationHttpCredentials(request);
         const context = await createRequestContext({
             applicationRuntime: createTestApplicationRuntime(),
+            authenticationCredential: credentials.authentication,
             authenticationClientSourceId: "client-source-without-user-agent",
             authenticationLifecycle: createTestAuthenticationLifecycleService(),
-            authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
-            request: new Request("http://localhost/trpc/auth.status"),
+            authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
+            mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
+            mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+            pendingLoginCredential: credentials.pendingLogin,
+            request,
             responseHeaders: new Headers(),
         });
 
         expect(context.userAgent).toBeUndefined();
+        expect(context.pendingLoginCredential).toEqual({ kind: "absent" });
     });
 
     test("rejects malformed authentication service output", async () => {
         let failure: unknown;
         try {
+            const request = new Request("http://localhost/trpc/events.stream");
+            const credentials = readAuthenticationHttpCredentials(request);
             await createRequestContext({
                 applicationRuntime: createTestApplicationRuntime(),
+                authenticationCredential: credentials.authentication,
                 authenticationClientSourceId: "client-source-2",
                 authenticationLifecycle: createTestAuthenticationLifecycleService(),
-                authenticateRequest: () => ({
+                authenticateCredential: () => ({
                     authentication: {
                         kind: "authenticated",
                         principal: {
@@ -103,7 +133,10 @@ describe("tRPC request context", () => {
                         },
                     },
                 }),
-                request: new Request("http://localhost/trpc/events.stream"),
+                mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
+                mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+                pendingLoginCredential: credentials.pendingLogin,
+                request,
                 responseHeaders: new Headers(),
             });
         } catch (error) {

@@ -7,6 +7,11 @@ export const dashboardPasswordHashPolicy = Object.freeze({
     timeCost: 3,
 });
 
+// A non-secret verifier keeps unknown principals and missing one-time proofs on
+// the same Argon2id path as persisted Dashboard credentials.
+export const authenticationDummyPasswordHash =
+    "$argon2id$v=19$m=65536,t=3,p=1$MDsAhQmsM0gKFDPO1S/bJ84KkrIm1Mo2O8GOuFgx0vE$No7wOmqZQ2kag02Z+R1HguKc3iTXaAMmK4n4bW7yoE4";
+
 /**
  * Hashes one validated password using the fixed Dashboard Argon2id policy.
  * @param password Validated operator password.

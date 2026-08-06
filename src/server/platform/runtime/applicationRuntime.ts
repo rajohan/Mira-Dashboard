@@ -1,5 +1,13 @@
-import { Effect, ManagedRuntime, type Layer, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 
+import {
+    type AuthenticationWorkLayerOptions,
+    type AuthenticationWorkRuntimeService,
+    AuthenticationWorkCapacityError,
+    AuthenticationWorkService,
+    authenticationWorkLayer,
+    type GatewayAuthenticationWorkOptions,
+} from "../../domains/security/authenticationWorkGate.ts";
 import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
 import type { RealtimeEventStreamOptions } from "../realtime/eventPumpService.ts";
 import { RealtimeEventPumpService } from "../realtime/eventPumpService.ts";
@@ -18,6 +26,7 @@ export interface RealtimeEventRuntimeService {
 
 /** Request-safe process services without lifecycle controls. */
 export interface ApplicationRuntimeServices {
+    readonly authentication: AuthenticationWorkRuntimeService;
     readonly realtimeEvents: RealtimeEventRuntimeService;
 }
 
@@ -31,7 +40,14 @@ export interface ApplicationRuntime {
 
 /** Scoped layers owned by one composition root for the full process lifetime. */
 export interface ApplicationRuntimeOptions {
+    readonly authenticationWork?: AuthenticationWorkLayerOptions;
     readonly realtimeEventPumpLayer: Layer.Layer<RealtimeEventPumpService>;
+}
+
+function authenticationAbortReason(signal: AbortSignal): unknown {
+    return (
+        signal.reason ?? new DOMException("Authentication request aborted", "AbortError")
+    );
 }
 
 function abortSignalEffect(signal: AbortSignal): Effect.Effect<void> {
@@ -56,9 +72,82 @@ function abortSignalEffect(signal: AbortSignal): Effect.Effect<void> {
 export function createApplicationRuntime(
     options: ApplicationRuntimeOptions
 ): ApplicationRuntime {
-    const runtime = ManagedRuntime.make(options.realtimeEventPumpLayer);
+    const runtime = ManagedRuntime.make(
+        Layer.merge(
+            options.realtimeEventPumpLayer,
+            authenticationWorkLayer(options.authenticationWork)
+        )
+    );
     let disposePromise: Promise<void> | undefined;
+    const runAuthenticationEffect = async <T, E>(
+        effect: Effect.Effect<T, E, AuthenticationWorkService>,
+        signal?: AbortSignal
+    ): Promise<T> => {
+        try {
+            return await runtime.runPromise(effect, { signal });
+        } catch (error) {
+            if (signal?.aborted === true) throw authenticationAbortReason(signal);
+            throw error;
+        }
+    };
     const services: ApplicationRuntimeServices = Object.freeze({
+        authentication: Object.freeze({
+            passwordWorkGate: Object.freeze({
+                async run<T>(work: () => Promise<T>, signal?: AbortSignal) {
+                    try {
+                        const value = await runAuthenticationEffect(
+                            AuthenticationWorkService.pipe(
+                                Effect.flatMap((service) => service.runPasswordWork(work))
+                            ),
+                            signal
+                        );
+                        return { accepted: true as const, value };
+                    } catch (error) {
+                        if (error instanceof AuthenticationWorkCapacityError) {
+                            return { accepted: false as const };
+                        }
+                        throw error;
+                    }
+                },
+            }),
+            totpWorkGate: Object.freeze({
+                async run<T>(work: () => Promise<T>, signal?: AbortSignal) {
+                    try {
+                        const value = await runAuthenticationEffect(
+                            AuthenticationWorkService.pipe(
+                                Effect.flatMap((service) => service.runTotpWork(work))
+                            ),
+                            signal
+                        );
+                        return { accepted: true as const, value };
+                    } catch (error) {
+                        if (error instanceof AuthenticationWorkCapacityError) {
+                            return { accepted: false as const };
+                        }
+                        throw error;
+                    }
+                },
+            }),
+            runGatewayVerification<T>(
+                work: (signal: AbortSignal) => Promise<T>,
+                workOptions: GatewayAuthenticationWorkOptions<T>
+            ) {
+                return runAuthenticationEffect(
+                    AuthenticationWorkService.pipe(
+                        Effect.flatMap((service) =>
+                            service.runGatewayVerification(
+                                work,
+                                workOptions.timeoutMs,
+                                workOptions.onBeforeStart,
+                                workOptions.onFailureBeforeRelease,
+                                workOptions.onResultBeforeRelease
+                            )
+                        )
+                    ),
+                    workOptions.signal
+                );
+            },
+        }),
         realtimeEvents: Object.freeze({
             stream(
                 streamOptions: RealtimeEventStreamOptions,

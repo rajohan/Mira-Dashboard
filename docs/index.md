@@ -13,9 +13,9 @@ away from the system it describes.
   checks, and rollback notes.
 - [Architecture overview](architecture/overview.md) - how the frontend,
   backend, SQLite store, OpenClaw Gateway, and background jobs fit together.
-- [Greenfield rewrite blueprint](architecture/greenfield-rewrite.md) - proposed
-  Bun/tRPC/Drizzle architecture, realtime model, schema, generated docs, and
-  no-compatibility cutover if Dashboard were rebuilt from scratch.
+- [Greenfield rewrite blueprint](architecture/greenfield-rewrite.md) - entry
+  point for the implementation progress, architecture, data/security,
+  runtime/delivery, and phased cutover plan.
 - [Generated Dashboard reference](generated/README.md) - deterministic
   procedure, raw HTTP, realtime, schema, package, and runtime facts emitted
   from source registries.

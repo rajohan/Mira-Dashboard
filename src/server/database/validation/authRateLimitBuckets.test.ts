@@ -52,4 +52,13 @@ describe("authentication rate-limit row schemas", () => {
             })
         ).toThrow();
     });
+
+    test.each(["account-mfa", "login-mfa-global", "login-mfa-source"] as const)(
+        "accepts MFA throttle kind %s",
+        (kind) => {
+            expect(
+                v.parse(authRateLimitBucketInsertSchema, { ...validBucket, kind })
+            ).toBeDefined();
+        }
+    );
 });

@@ -91,6 +91,11 @@ export const eventsStreamContract = {
     output: realtimeStreamOutputSchema,
     outputSchemaId: "events.stream.output",
     summary: "Streams authorized durable changes with tracked resume cursors.",
+    transport: {
+        batching: "adapter-default",
+        handler: "long-lived",
+        requestBody: "default",
+    },
 } as const satisfies ProcedureContract;
 
 export type RealtimeStreamData = v.InferOutput<typeof realtimeStreamDataSchema>;

@@ -20,26 +20,23 @@ import {
 function sessionTimesAreOrdered(session: {
     readonly authenticatedAt: Date;
     readonly createdAt: Date;
-    readonly elevatedAt?: Date | null;
-    readonly elevatedMethod?: string | null;
     readonly expiresAt: Date;
     readonly lastSeenAt: Date;
     readonly mfaVerifiedAt?: Date | null;
+    readonly passwordVerifiedAt: Date;
+    readonly authMethod: string;
 }): boolean {
-    const elevationPairMatches =
-        (session.elevatedAt == null) === (session.elevatedMethod == null);
     return (
         compareAsc(session.authenticatedAt, session.createdAt) <= 0 &&
         compareAsc(session.expiresAt, session.createdAt) > 0 &&
         compareAsc(session.lastSeenAt, session.createdAt) >= 0 &&
         compareAsc(session.lastSeenAt, session.expiresAt) < 0 &&
+        compareAsc(session.passwordVerifiedAt, session.authenticatedAt) >= 0 &&
+        compareAsc(session.passwordVerifiedAt, session.createdAt) <= 0 &&
         (session.mfaVerifiedAt == null ||
             (compareAsc(session.mfaVerifiedAt, session.authenticatedAt) >= 0 &&
-                compareAsc(session.mfaVerifiedAt, session.expiresAt) < 0)) &&
-        elevationPairMatches &&
-        (session.elevatedAt == null ||
-            (compareAsc(session.elevatedAt, session.authenticatedAt) >= 0 &&
-                compareAsc(session.elevatedAt, session.expiresAt) < 0))
+                compareAsc(session.mfaVerifiedAt, session.createdAt) <= 0)) &&
+        (session.authMethod === "password" || session.mfaVerifiedAt != null)
     );
 }
 
@@ -49,12 +46,11 @@ const sessionRefinements = {
         positiveSafeIntegerSchema("Session authentication version is invalid"),
     authMethod: () => authenticationMethodSchema,
     createdAt: nonnegativeDateSchema,
-    elevatedAt: nonnegativeDateSchema,
-    elevatedMethod: () => v.nullable(authenticationMethodSchema),
     expiresAt: nonnegativeDateSchema,
     id: () => opaqueSelectorSchema,
     lastSeenAt: nonnegativeDateSchema,
     mfaVerifiedAt: nonnegativeDateSchema,
+    passwordVerifiedAt: nonnegativeDateSchema,
     userAgent: () => v.nullable(securityUserAgentSchema),
     userId: uuidV7TextSchema,
     validatorHash: sha256TextSchema,

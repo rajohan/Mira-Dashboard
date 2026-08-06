@@ -4,27 +4,112 @@
     {
       "type": "object",
       "properties": {
-        "authenticated": {
-          "const": false
-        },
-        "isBootstrapRequired": {
-          "type": "boolean"
+        "state": {
+          "const": "bootstrap-required"
         }
       },
       "required": [
-        "authenticated",
-        "isBootstrapRequired"
+        "state"
       ],
       "additionalProperties": false
     },
     {
       "type": "object",
       "properties": {
-        "authenticated": {
-          "const": true
+        "state": {
+          "const": "anonymous"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "pendingLogin": {
+          "type": "object",
+          "properties": {
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "recovery",
+                  "totp"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "username": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 32,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            }
+          },
+          "required": [
+            "expiresAtMs",
+            "methods",
+            "username"
+          ],
+          "additionalProperties": false
         },
-        "isBootstrapRequired": {
-          "const": false
+        "state": {
+          "const": "pending-mfa"
+        }
+      },
+      "required": [
+        "pendingLogin",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "pendingLogin": {
+          "type": "object",
+          "properties": {
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "recovery",
+                  "totp"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "username": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 32,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            }
+          },
+          "required": [
+            "expiresAtMs",
+            "methods",
+            "username"
+          ],
+          "additionalProperties": false
         },
         "session": {
           "type": "object",
@@ -38,8 +123,7 @@
               "enum": [
                 "password",
                 "recovery",
-                "totp",
-                "webauthn"
+                "totp"
               ],
               "type": "string"
             },
@@ -85,6 +169,9 @@
           ],
           "additionalProperties": false
         },
+        "state": {
+          "const": "authenticated"
+        },
         "user": {
           "type": "object",
           "properties": {
@@ -110,9 +197,8 @@
         }
       },
       "required": [
-        "authenticated",
-        "isBootstrapRequired",
         "session",
+        "state",
         "user"
       ],
       "additionalProperties": false

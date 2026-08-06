@@ -4,20 +4,30 @@ import {
     type AuthenticationLease,
     parseAuthenticationResolution,
 } from "../domains/security/authenticationResolution.ts";
+import type { MfaAccountLifecycleService } from "../domains/security/mfa/accountLifecycle.ts";
+import type { MfaLoginLifecycleService } from "../domains/security/mfa/loginLifecycle.ts";
 import type {
     ApplicationRuntime,
     ApplicationRuntimeServices,
 } from "../platform/runtime/applicationRuntime.ts";
+import {
+    type PendingLoginCredential,
+    type RawAuthenticationCredential,
+} from "../rawHttp/authenticationCredentials.ts";
 
-/** Authenticator supplied by the security composition root. */
-export type AuthenticateRequest = (request: Request) => unknown;
+/** Parsed-credential authenticator supplied by the security composition root. */
+export type AuthenticateCredential = (credential: RawAuthenticationCredential) => unknown;
 
 /** Dependencies supplied while constructing one application request context. */
 export interface RequestContextOptions {
     readonly applicationRuntime: ApplicationRuntime;
+    readonly authenticationCredential: RawAuthenticationCredential;
     readonly authenticationClientSourceId: string;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
-    readonly authenticateRequest: AuthenticateRequest;
+    readonly authenticateCredential: AuthenticateCredential;
+    readonly mfaAccountLifecycle: MfaAccountLifecycleService;
+    readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+    readonly pendingLoginCredential: PendingLoginCredential;
     readonly request: Request;
     readonly responseHeaders: Headers;
 }
@@ -28,6 +38,9 @@ export interface RequestContext {
     readonly authenticationClientSourceId: string;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly authenticationLease?: AuthenticationLease;
+    readonly mfaAccountLifecycle: MfaAccountLifecycleService;
+    readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+    readonly pendingLoginCredential: PendingLoginCredential;
     readonly requestId: string;
     readonly responseHeaders: Headers;
     readonly services: ApplicationRuntimeServices;
@@ -43,14 +56,17 @@ export async function createRequestContext(
     options: RequestContextOptions
 ): Promise<RequestContext> {
     const resolution = parseAuthenticationResolution(
-        await options.authenticateRequest(options.request)
+        await options.authenticateCredential(options.authenticationCredential)
     );
     const userAgent = options.request.headers.get("user-agent");
     return Object.freeze({
         authentication: resolution.authentication,
         authenticationClientSourceId: options.authenticationClientSourceId,
         authenticationLifecycle: options.authenticationLifecycle,
+        mfaAccountLifecycle: options.mfaAccountLifecycle,
+        mfaLoginLifecycle: options.mfaLoginLifecycle,
         ...(resolution.lease && { authenticationLease: resolution.lease }),
+        pendingLoginCredential: options.pendingLoginCredential,
         requestId: crypto.randomUUID(),
         responseHeaders: options.responseHeaders,
         services: options.applicationRuntime.services,

@@ -1,0 +1,17 @@
+{
+  "$id": "urn:mira-dashboard:auth.loginTotp.input",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "minLength": 6,
+      "maxLength": 6,
+      "pattern": "^\\d{6}$"
+    }
+  },
+  "required": [
+    "code"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

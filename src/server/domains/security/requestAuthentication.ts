@@ -1,4 +1,3 @@
-import { CookieMap } from "bun";
 import {
     addMilliseconds,
     compareAsc,
@@ -21,8 +20,8 @@ import {
     parseSchemaWithRangeError,
     positiveSafeIntegerSchema,
 } from "../../../shared/validation.ts";
+import type { RawAuthenticationCredential } from "../../rawHttp/authenticationCredentials.ts";
 import { areSha256DigestsEqual, sha256Hex } from "../../shared/crypto.ts";
-import { parseOpaqueToken, type ParsedOpaqueToken } from "../../shared/opaqueToken.ts";
 import {
     browserSessionIdleDurationDefaultMs,
     browserSessionIdleDurationMaximumMs,
@@ -30,13 +29,10 @@ import {
 } from "./authenticationPolicy.ts";
 import type { AuthenticationResolution } from "./authenticationResolution.ts";
 import type {
-    AuthenticationRepository,
     AutomationAuthenticationRecord,
+    RequestAuthenticationRepository,
     SessionAuthenticationRecord,
-} from "./repository.ts";
-
-/** Browser session cookie read only by the server. */
-export const dashboardSessionCookieName = "__Host-mira_dashboard_session";
+} from "./requestAuthenticationRepository.ts";
 
 const defaultAuthenticationLeaseDurationMs = secondsToMilliseconds(30);
 const minimumAuthenticationLeaseDurationMs = secondsToMilliseconds(1);
@@ -63,29 +59,14 @@ const nowSchema = v.pipe(
     v.date("Authentication clock is invalid"),
     nonnegativeDateAction()
 );
-const bearerHeaderSchema = v.pipe(
-    v.string("Automation authorization header is invalid"),
-    v.maxLength(128, "Automation authorization header is invalid"),
-    v.regex(
-        /^bearer [0-9a-f]{32}\.[0-9a-f]{64}$/iu,
-        "Automation authorization header is invalid"
-    ),
-    v.transform((header) => header.slice("Bearer ".length))
-);
-
-type CookieValue =
-    | { readonly kind: "absent" }
-    | { readonly kind: "invalid" }
-    | { readonly kind: "present"; readonly value: string };
-
 export interface RequestAuthenticator {
-    authenticate(request: Request): AuthenticationResolution;
+    authenticate(credential: RawAuthenticationCredential): AuthenticationResolution;
 }
 
 export interface RequestAuthenticatorOptions {
     readonly authenticationLeaseDurationMs?: number;
     readonly now?: () => Date;
-    readonly repository: AuthenticationRepository;
+    readonly repository: RequestAuthenticationRepository;
     readonly sessionIdleDurationMs?: number;
 }
 
@@ -123,42 +104,6 @@ function durationExpiry(now: Date, durationMs: number): Date {
     return isValid(expiry) ? expiry : toDate(maxTime);
 }
 
-function readSingleCookie(request: Request, name: string): CookieValue {
-    const header = request.headers.get("cookie");
-    if (header === null) return { kind: "absent" };
-
-    const matchingParts = header.split(";").filter((part) => {
-        const normalized = part.trim();
-        const separator = normalized.indexOf("=");
-        const cookieName =
-            separator === -1 ? normalized : normalized.slice(0, separator).trim();
-        return cookieName === name;
-    });
-    if (matchingParts.length > 1) return { kind: "invalid" };
-    if (matchingParts.length === 0) return { kind: "absent" };
-    if (!matchingParts[0]?.includes("=")) return { kind: "invalid" };
-
-    try {
-        const value = new CookieMap(header).get(name);
-        return value === null ? { kind: "invalid" } : { kind: "present", value };
-    } catch {
-        return { kind: "invalid" };
-    }
-}
-
-/**
- * Detects an ambiguous request carrying both automation and browser credentials.
- * Any occurrence of the Dashboard cookie counts, including malformed or duplicate values.
- * @param request Candidate HTTP request.
- * @returns Whether both credential classes are present.
- */
-export function hasAmbiguousAuthenticationCredentials(request: Request): boolean {
-    return (
-        request.headers.get("authorization") !== null &&
-        readSingleCookie(request, dashboardSessionCookieName).kind !== "absent"
-    );
-}
-
 /**
  * Creates strict single-credential request authentication with bounded revalidation leases.
  * Authentication and revalidation are read-only: SSE and polling never touch idle activity.
@@ -182,6 +127,7 @@ export function createRequestAuthenticator(
         record: SessionAuthenticationRecord | undefined,
         expectedValidatorHash: string
     ): AuthenticationResolution => {
+        const checkedAt = now();
         const validatorMatches = areSha256DigestsEqual(
             record?.validatorHash ?? dummyValidatorHash,
             expectedValidatorHash
@@ -190,12 +136,18 @@ export function createRequestAuthenticator(
             record === undefined ||
             !validatorMatches ||
             record.userDisabledAt !== null ||
-            record.authenticationVersion !== record.userAuthenticationVersion
+            record.authenticationVersion !== record.userAuthenticationVersion ||
+            compareAsc(record.createdAt, checkedAt) > 0 ||
+            compareAsc(record.lastSeenAt, checkedAt) > 0 ||
+            (record.mfaVerifiedAt !== null &&
+                compareAsc(record.mfaVerifiedAt, checkedAt) > 0) ||
+            (record.userMfaEnabledAt !== null &&
+                (record.mfaVerifiedAt === null ||
+                    compareAsc(record.mfaVerifiedAt, record.userMfaEnabledAt) < 0))
         ) {
             return unauthenticatedResolution("invalid");
         }
 
-        const checkedAt = now();
         const idleExpiresAt = durationExpiry(record.lastSeenAt, sessionIdleDurationMs);
         const validUntil = min([record.expiresAt, idleExpiresAt]);
         if (compareAsc(validUntil, checkedAt) <= 0) {
@@ -237,6 +189,9 @@ export function createRequestAuthenticator(
             !validatorMatches ||
             record.principalDisabledAt !== null ||
             record.credentialRevokedAt !== null ||
+            compareAsc(record.credentialCreatedAt, checkedAt) > 0 ||
+            compareAsc(record.principalCreatedAt, checkedAt) > 0 ||
+            compareAsc(record.principalUpdatedAt, checkedAt) > 0 ||
             (record.credentialExpiresAt !== null &&
                 compareAsc(record.credentialExpiresAt, checkedAt) <= 0)
         ) {
@@ -270,46 +225,28 @@ export function createRequestAuthenticator(
         );
     };
 
-    const authenticateAutomation = (authorization: string): AuthenticationResolution => {
-        const bearer = v.safeParse(bearerHeaderSchema, authorization, {
-            abortEarly: true,
-        });
-        if (!bearer.success) return unauthenticatedResolution("invalid");
-        const token = parseOpaqueToken(bearer.output, "automation");
-        if (token === undefined) return unauthenticatedResolution("invalid");
-        return automationResolution(
-            options.repository.findAutomationByPrefix(token.prefix),
-            token.validatorHash
-        );
-    };
-
-    const authenticateSession = (token: ParsedOpaqueToken): AuthenticationResolution =>
-        sessionResolution(
-            options.repository.findSessionById(token.prefix),
-            token.validatorHash
-        );
-
     return Object.freeze({
-        authenticate(request: Request) {
-            if (hasAmbiguousAuthenticationCredentials(request)) {
-                return unauthenticatedResolution("invalid");
+        authenticate(credential: RawAuthenticationCredential) {
+            switch (credential.kind) {
+                case "anonymous":
+                case "invalid": {
+                    return unauthenticatedResolution(credential.kind);
+                }
+                case "automation": {
+                    return automationResolution(
+                        options.repository.findAutomationByPrefix(
+                            credential.token.prefix
+                        ),
+                        credential.token.validatorHash
+                    );
+                }
+                case "session": {
+                    return sessionResolution(
+                        options.repository.findSessionById(credential.token.prefix),
+                        credential.token.validatorHash
+                    );
+                }
             }
-            const authorization = request.headers.get("authorization");
-            if (authorization !== null) {
-                return authenticateAutomation(authorization);
-            }
-
-            const cookie = readSingleCookie(request, dashboardSessionCookieName);
-            if (cookie.kind === "absent") {
-                return unauthenticatedResolution("anonymous");
-            }
-            if (cookie.kind === "invalid") {
-                return unauthenticatedResolution("invalid");
-            }
-            const token = parseOpaqueToken(cookie.value, "session");
-            return token === undefined
-                ? unauthenticatedResolution("invalid")
-                : authenticateSession(token);
         },
     });
 }

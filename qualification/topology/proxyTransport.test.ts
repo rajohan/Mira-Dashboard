@@ -86,4 +86,46 @@ describe("qualification proxy transport", () => {
         expect(upstreamController.signal.reason).toBe(expectedError);
         expect(detachCount).toBe(1);
     });
+
+    test("holds the next upstream read at an explicit forwarded-chunk boundary", async () => {
+        const encoder = new TextEncoder();
+        const upstream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode("connected"));
+                controller.enqueue(encoder.encode("queued"));
+                controller.close();
+            },
+        });
+        const boundaryReached = Promise.withResolvers<void>();
+        const releaseBoundary = Promise.withResolvers<void>();
+        let boundaryCalls = 0;
+        const downstream = createProxyResponseBody(
+            upstream,
+            new AbortController(),
+            () => {},
+            async () => {
+                boundaryCalls += 1;
+                if (boundaryCalls === 1) {
+                    boundaryReached.resolve();
+                    await releaseBoundary.promise;
+                }
+            }
+        );
+        const reader = downstream.getReader();
+
+        const firstRead = reader.read();
+        await boundaryReached.promise;
+        const first = await firstRead;
+        expect(new TextDecoder().decode(first.value)).toBe("connected");
+        let secondReadSettled = false;
+        const secondRead = reader.read().finally(() => {
+            secondReadSettled = true;
+        });
+        await Bun.sleep(0);
+        expect(secondReadSettled).toBeFalse();
+
+        releaseBoundary.resolve();
+        const second = await secondRead;
+        expect(new TextDecoder().decode(second.value)).toBe("queued");
+    });
 });

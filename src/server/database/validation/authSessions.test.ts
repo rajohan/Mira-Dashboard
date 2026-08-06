@@ -18,8 +18,6 @@ describe("auth session row schemas", () => {
         expect(
             v.parse(authSessionSelectSchema, {
                 ...validAuthSessionInsert,
-                elevatedAt: null,
-                elevatedMethod: null,
                 mfaVerifiedAt: null,
                 userAgent: null,
                 validatorVersion: 1,
@@ -46,13 +44,14 @@ describe("auth session row schemas", () => {
         { authenticatedAt: addMilliseconds(securityCreatedAt, 1) },
         { lastSeenAt: securityExpiresAt },
         { expiresAt: securityCreatedAt },
-        { elevatedAt: securityCreatedAt },
         { userAgent: "\t\n" },
         { userAgent: "browser\0agent" },
         {
-            elevatedAt: subMilliseconds(securityCreatedAt, 1),
-            elevatedMethod: "password",
+            passwordVerifiedAt: subMilliseconds(securityCreatedAt, 1),
         },
+        { passwordVerifiedAt: addMilliseconds(securityCreatedAt, 1) },
+        { authMethod: "recovery" },
+        { authMethod: "webauthn", mfaVerifiedAt: securityCreatedAt },
         { authMethod: "magic-link" },
     ])("rejects invalid session row %#", (replacement) => {
         expect(() =>
@@ -62,4 +61,17 @@ describe("auth session row schemas", () => {
             })
         ).toThrow();
     });
+
+    test.each(["recovery", "totp"] as const)(
+        "accepts %s only with a persisted MFA proof",
+        (authMethod) => {
+            expect(
+                v.parse(authSessionInsertSchema, {
+                    ...validAuthSessionInsert,
+                    authMethod,
+                    mfaVerifiedAt: securityCreatedAt,
+                })
+            ).toBeDefined();
+        }
+    );
 });

@@ -1,9 +1,15 @@
-import { createProxyResponseBody, stripHopByHopHeaders } from "./proxyTransport.ts";
+import {
+    createProxyResponseBody,
+    type ProxyResponseBodyChunkBoundary,
+    stripHopByHopHeaders,
+} from "./proxyTransport.ts";
 
 /** TLS and loopback target for one qualification reverse proxy. */
 export interface HttpsReverseProxyOptions {
     certificate: string;
     privateKey: string;
+    /** Optional qualification-test synchronization after forwarding each response chunk. */
+    responseBodyChunkBoundary?: ProxyResponseBodyChunkBoundary;
     target: URL;
 }
 
@@ -93,7 +99,8 @@ export function startHttpsReverseProxy(options: HttpsReverseProxyOptions) {
                         : createProxyResponseBody(
                               upstream.body,
                               upstreamController,
-                              detachRequestAbort
+                              detachRequestAbort,
+                              options.responseBodyChunkBoundary
                           ),
                     {
                         headers: downstreamHeaders,
