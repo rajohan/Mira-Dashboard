@@ -61,7 +61,7 @@ function errorReasonsLabel(contract: ProcedureContract): string {
  * @returns Generated Markdown index.
  */
 export function renderGeneratedIndex(): string {
-    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n`;
+    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}## Current Generated Subset\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n\n## Required Before Cutover\n\nThe target generator must also emit database, configuration, and browser route/feature references plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.\n`;
 }
 
 /**

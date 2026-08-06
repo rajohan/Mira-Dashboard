@@ -249,7 +249,11 @@ columns rather than an opaque JSON convention.
 
 Retain the current security behavior while simplifying its structure:
 
-- first-user bootstrap verifies the OpenClaw Gateway credential before creating the user;
+- first-user bootstrap verifies the OpenClaw Gateway credential through one native protocol-v4
+  handshake before creating the user. The one-shot verifier was checked against the OpenClaw
+  version installed on the target host on 2026-08-06, permits only an explicit literal-loopback
+  `ws://` root endpoint, sends the candidate only in `connect.params.auth.token`, and stores
+  neither the candidate nor Gateway connection state;
 - passwords use Bun's password hashing with a reviewed Argon2id policy;
 - password-first roaming security keys use pinned SimpleWebAuthn APIs with an explicit RP ID,
   allowlisted origins, ES256-only public keys, required user verification, and no attestation;
@@ -280,6 +284,32 @@ Retain the current security behavior while simplifying its structure:
 - users can inspect and revoke browser sessions; and
 - credential, session, password, and MFA changes invalidate the appropriate authentication
   version or validators atomically.
+
+The Gateway handshake requests `operator.admin` only because the installed release exposes
+`snapshot.authMode` at that scope; it sends no post-connect RPC and initiates close after the
+terminal response. Success requires protocol 4, operator role, negotiated `operator.admin`, and
+token auth mode. The protocol adapter accepts only text JSON and exactly one challenge plus its
+matching response. The challenge
+is capped at 4 KiB; the current installed hello ceiling is 25 MiB. Binary, unknown, duplicate,
+out-of-order, wrong-ID, contradictory, auth-disabled, malformed, oversized, incompatible, or
+closed flows fail immediately as one redacted upstream-unavailable result. Only structured
+`AUTH_TOKEN_MISMATCH` is an invalid credential.
+
+The upgrade includes no Origin, authorization, forwarding, or subprotocol header and no token in
+the URL. The verifier never reconnects or retries, including on `startup-sidecars`; the whole HTTP
+bootstrap request must be retried under durable cooldown. Every terminal path after socket
+construction initiates close, and the Promise plus its Effect permit settles only after native
+close is observed. User/session publication remains behind successful verification and the
+empty-user invariant is rechecked in the immediate creation transaction. The native WebSocket
+adapter remains a narrow Promise port inside the separate Effect gate, deadline, cancellation, and
+active-work boundary.
+
+This evidence closes only first-user credential verification. It does not qualify Phase 4's
+persistent Gateway lifecycle, events, sessions, chat, or cron behavior. Every later OpenClaw
+integration must first audit the then-installed OpenClaw source and protocol. Legacy Dashboard
+integrations remain parity input rather than authority. The complete assets, misuse cases,
+controls, tests, and residual risks are recorded in the
+[Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md).
 
 Session cookies are `Secure`, `HttpOnly`, `SameSite=Strict`, narrowly scoped, and never readable
 by JavaScript. Unsafe browser requests require exact allowed Origin and Fetch Metadata before

@@ -1,5 +1,10 @@
 # Endpoint Reference
 
+> **Current-production parity input — not the greenfield API contract.** This route inventory
+> describes the legacy backend and exists so the rewrite does not lose operator-visible behavior.
+> Greenfield contracts are defined by their explicit tRPC/raw-HTTP registries and current generated
+> references; legacy route names and payloads are not compatibility requirements.
+
 This page lists the backend route table. It is intentionally concise: use the
 route files under `backend/src/routes/` for exact validation details.
 

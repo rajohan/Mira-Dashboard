@@ -9,6 +9,9 @@ important trust boundaries:
 - Dashboard backend to host shell/Docker operations;
 - Dashboard backend to local SQLite state.
 
+The consolidated server-side assets, misuse cases, executable controls, and residual risks are in
+the [greenfield Phase 2 threat model](greenfield-phase-two-threat-model.md).
+
 ## Route Authentication
 
 The greenfield server exposes only these public authentication operations:
@@ -65,10 +68,25 @@ password verification and hashing. Persisted password hashes must use the one
 canonical Bun Argon2id PHC form `v=19,m=65536,t=3,p=1` with 32-byte salt and
 digest fields. Dashboard rejects every other PHC form before calling Bun, so a
 corrupt or future write path cannot select an attacker-sized Argon2 cost.
-Gateway verification has a separate two-operation/four-item gate, a
-five-second deadline, and request-abort propagation. Timed-out underlying
-verifier promises remain counted until they actually settle; a verifier that
-ignores cancellation therefore cannot accumulate unbounded orphan work.
+Gateway verification has a separate two-operation/four-item gate, a five-second
+deadline, and request-abort propagation. The production adapter performs one
+native protocol-v4 handshake audited against installed OpenClaw
+`2026.7.2-beta.7 (dabe191)` over an explicit literal-loopback `ws://` endpoint;
+it is not a persistent Gateway client. The handshake requests `operator.admin`
+only to expose and require token auth mode in the current `hello-ok`, sends no
+post-connect RPC, and allows exactly one text challenge plus its matching text
+response. The challenge is capped at 4 KiB and the current installed hello at
+25 MiB. Binary, unknown, duplicate, out-of-order, wrong-ID, contradictory, or
+additional frames fail immediately. The upgrade has no Origin, authorization,
+forwarding, or subprotocol header and no token-bearing URL.
+
+The verifier never reconnects or retries internally, including when OpenClaw
+reports `startup-sidecars`; the operator/client retries the complete HTTP
+bootstrap request under durable cooldown. Success, rejection, listener setup,
+transport error, and abort initiate native close. Once a socket exists, the
+Promise and its Effect permit settle only after close is observed. A timed-out
+or otherwise non-cooperative verifier therefore cannot accumulate unbounded
+orphan work by releasing permits while sockets remain live.
 Overflow or an exhausted budget fails with `TOO_MANY_REQUESTS`; queued attempts
 recheck durable cooldown state before consuming resources. TOTP decrypt and HMAC
 work uses a separate two-operation/four-item gate plus a shared rolling budget of
@@ -113,7 +131,7 @@ usable factor must also preserve another TOTP or current-RP WebAuthn factor.
 This permits old-RP cleanup without letting drifted credentials strand the next
 login. Disabling MFA requires both a recent second factor and the current
 password, removes all factors/codes and outstanding WebAuthn challenges, and
-revokes all sessions.
+rotates the current session while removing every other session.
 
 Host-control actions require a second-factor verification within the
 configurable recent-auth window (`MIRA_DASHBOARD_RECENT_AUTH_MINUTES`, 10 minutes
@@ -123,25 +141,18 @@ operations, session mutations, job cancellation, and other centrally classified
 privileged mutations. A user without MFA receives `mfa_enrollment_required`; a
 stale MFA session receives `step_up_required`. The frontend opens one global
 verification dialog when the server-relative verification lifetime expires; the
-client clock is not an MFA authority. If a request races that deadline, the
-shared HTTP/WebSocket clients hold the rejected action, complete step-up,
-reconnect WebSockets in every open tab with the rotated session cookie, and retry
-replay-safe requests once. Held actions remain bound to their authenticated user
-and browser-session identity, except for an explicitly signaled, short-lived
-same-user rotation whose previous and replacement session selectors are
-reconciled. Each rotation signal reconnects a socket only once, while cross-tab
-step-up completion also requires a coherent fresh security summary. One-shot
-request bodies never replay. Session-bound selectors and WebAuthn responses opt
-out of both recovery paths. Expiring TOTP enrollment codes opt out of
-post-verification replay, but a replayable JSON request can be sent once after a
-signaled same-user stale `401` because request policy rejected it before the
-handler. Chat keeps its optimistic message during this flow and restores unsent
-composer input if delivery still fails. The recent-auth window is fixed rather
-than extended by general page activity, so an active or compromised browser
-cannot keep privileged access fresh indefinitely. Socket retry waiters inherit
-the originating request's reconnect deadline (including indefinite operations)
-and reject instead of reopening a connection after a terminal authorization
-failure.
+client clock is not an MFA authority. If an HTTP mutation races that deadline,
+the shared HTTP client may hold only an explicitly replay-safe action, complete
+step-up, reconcile the same-user session rotation, and retry once. One-shot
+request bodies, session-bound selectors, WebAuthn responses, and expiring TOTP
+enrollment proofs never replay. Cross-tab completion also requires a coherent
+fresh security summary. Each tab's authenticated tRPC SSE subscription
+reconnects through normal Fetch/EventSource behavior with the rotated session
+cookie and resumes from its tracked cursor; there is no browser application
+WebSocket to reconnect. Future chat sends remain ordinary HTTP mutations and
+chat updates use this SSE path. The recent-auth window is fixed rather than
+extended by general page activity, so an active or compromised browser cannot
+keep privileged access fresh indefinitely.
 
 Changing the Dashboard password requires the current password plus recent MFA
 when enabled, rotates the current session, and revokes every other session.
@@ -472,8 +483,9 @@ First-user bootstrap is special because it is unauthenticated by design. It must
 stay narrow:
 
 - reject once users exist;
-- validate the submitted OpenClaw Gateway credential through the injected
-  Gateway verifier without persisting the submitted credential;
+- validate the submitted OpenClaw Gateway credential through the native direct-loopback one-shot
+  v4 Gateway verifier, including operator role, negotiated handshake scope, and token auth mode,
+  without persisting the submitted credential;
 - bound overlapping Gateway and Argon2 work;
 - avoid publishing a usable Dashboard user while Gateway validation is pending;
 - recheck the empty-user invariant inside the immediate creation transaction;
@@ -481,9 +493,9 @@ stay narrow:
 - atomically create the user, hashed-validator session, audit event, and
   cooldown cleanup.
 
-After bootstrap is complete, `auth.bootstrap` returns `CONFLICT`. It verifies a
-credential already owned by the Gateway composition root and never switches or
-stores Gateway credentials.
+After bootstrap is complete, `auth.bootstrap` returns `CONFLICT`. Verification sends the submitted
+candidate only in the one `connect` handshake and never switches a persistent Dashboard Gateway
+client or stores Gateway credentials.
 
 Bootstrap still creates an ordinary password-authenticated session after
 Gateway validation. It does not require a physical key during initial setup.
@@ -505,7 +517,10 @@ Do not print Gateway credential values. Infrastructure credentials remain in
 the environment/Doppler composition boundary and outside SQLite. First-user
 bootstrap passes the submitted value directly to the bounded Gateway verifier,
 then discards it. Dashboard stores neither plaintext nor an encrypted copy of
-that bootstrap credential.
+that bootstrap credential. The Phase 2 verifier is a one-shot installed-protocol check, not
+evidence for persistent Gateway lifecycle behavior. Before later OpenClaw integration, audit the
+then-installed source and protocol again; current-production Dashboard integrations are parity
+evidence only.
 
 ## Host Operations
 
