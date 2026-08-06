@@ -39,4 +39,5 @@ coexisting application or its `node_modules`.
 
 Cutover preserves the Git repository metadata, removes the retired application tree, and promotes
 the **contents** of this directory to the repository root. No application import or configuration
-path should need rewriting during that promotion.
+path should need rewriting during that promotion. Persistent state stays in the existing
+`<project-root>/production/state` project tree and is not moved outside the Dashboard project.

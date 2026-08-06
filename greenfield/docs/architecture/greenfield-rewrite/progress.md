@@ -716,12 +716,13 @@ closes a phase; dated entries below provide the evidence, not a second status so
 
 ### 2026-08-06 — Process-owned database runtime
 
-- The production `ManagedRuntime` now owns one strict native SQLite connection and the exact
-  Drizzle client built from it. Dashboard repositories and the database-backed realtime pump use
-  that same handle; request handling cannot create or dispose a database or runtime. The layer
-  graph finalizes realtime before a passive checkpoint and strict SQLite close, and the process
-  logger flushes only after runtime disposal. Listener drain still completes before this sequence,
-  with readiness withdrawn before drain begins.
+- The production Dashboard runtime now coordinates a dedicated database `ManagedRuntime` with a
+  separate application `ManagedRuntime`. The retained database scope owns one strict native SQLite
+  connection and the exact Drizzle client built from it; Dashboard repositories and the
+  database-backed realtime pump use that same handle through narrow ports. Request handling cannot
+  create or dispose a database or runtime. Listener drain completes first, then the application
+  scope finalizes realtime and authentication work before the database scope passively checkpoints
+  and strictly closes SQLite; the process logger flushes only after both scopes are disposed.
 - Startup verifies the complete release-owned migration graph before database mutation. The Linux
   artifact reader holds descriptor-rooted directories and regular files through `/proc/self/fd`,
   rejects symlinks, hardlinks, special files, inventory drift, path replacement, invalid UTF-8,
@@ -731,7 +732,12 @@ closes a phase; dated entries below provide the evidence, not a second status so
   directory. Dashboard creates a missing file with exclusive no-follow `0600` semantics, opens it
   through SQLite with `create: false`, pins and revalidates the directory and file device/inode
   identities, and validates every rollback-journal, shared-memory, or WAL sidecar present during
-  acquisition as a single-link current-user-owned `0600` regular file.
+  acquisition as a single-link current-user-owned `0600` regular file. It also rejects a writable
+  or untrusted ancestor chain and never mutates host permissions. Persistent state remains at
+  `<project-root>/production/state` inside the existing project layout. The future greenfield
+  bootstrap/release boundary must safely protect that ancestor chain before runtime validation; on
+  the current host this includes clearing group write from `/home/ubuntu/projects`. That caller and
+  its disposable-host activation test remain an explicit Phase 1 blocker.
 - Every connection verifies foreign keys and checks enabled, `trusted_schema` disabled, WAL,
   `synchronous=FULL`, a 1,000-page automatic checkpoint, and `busy_timeout=0`. Zero is deliberate:
   SQLite never blocks the Bun thread waiting for another process; bounded Effect schedules own

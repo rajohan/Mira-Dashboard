@@ -263,14 +263,20 @@ logs use stable event names and include release identity, process role, duration
 safe identifiers. They do not serialize arbitrary request bodies or command environments.
 
 The current production web runtime requires one process logger, installs it as the only Effect
-logger, and reuses that exact instance at ordinary HTTP/tRPC boundaries. The same `ManagedRuntime`
-owns the retained SQLite/Drizzle service and its database-backed realtime dependency. After the
-listener settles, realtime finalizes before passive checkpoint and strict database close; the
-synchronous log sink flushes last. Its serializer emits bounded NDJSON from event-specific
-allowlisted fields, and a sink failure emits one constant direct-stderr fallback without recursive
-logging. The future executable web/worker composition roots still own creation of the stdout/stderr
-sink, release/config identity, and startup/shutdown events; this slice does not claim that absent
-process entrypoint.
+logger in the application scope, and reuses that exact instance at ordinary HTTP/tRPC boundaries.
+The Dashboard composition root coordinates that application `ManagedRuntime` with a separate,
+retained database `ManagedRuntime`. The database-backed realtime layer and all repositories receive
+the same SQLite/Drizzle service through narrow ports. After the listener settles, the application
+scope finalizes realtime and authentication work before the database scope performs its passive
+checkpoint and strict close; the synchronous log sink flushes last. Its serializer emits bounded
+NDJSON from event-specific allowlisted fields, and a sink failure emits one constant direct-stderr
+fallback without recursive logging. The future executable web/worker composition roots still own
+creation of the stdout/stderr sink, release/config identity, and startup/shutdown events; this slice
+does not claim that absent process entrypoint. Replacement production units must bind both streams,
+including the direct-stderr fallback, to project-derived files beneath
+`<project-root>/production/state/logs`; default journald persistence, `LogsDirectory=`, and a
+configurable external log root are forbidden. Transient job units route their streams beneath
+`<project-root>/production/state/job-output` instead.
 
 Expose distinct probes:
 
@@ -408,25 +414,51 @@ after the rewritten executable roots and immutable release wrapper exist, then v
 referenced path and the measured resource limits in CI. Until then, the absence of
 `greenfield/systemd/` is an explicit incomplete delivery item rather than a compatibility link.
 
+Persistent state remains inside the existing Dashboard project layout at
+`<project-root>/production/state`, but outside every immutable release directory. Production
+composition derives that path from `MIRA_DASHBOARD_PROJECT_ROOT`; neither configuration nor a
+systemd `StateDirectory=` may select a separate state root. The future greenfield bootstrap/release
+boundary must create that directory as current-user-owned `0700` and protect its existing ancestor
+chain before activation. For a non-sticky ancestor owned by the managed UID, preparation may only
+clear group/other write bits through a no-follow directory descriptor, preserve every other
+permission, verify device/inode before and after, and then revalidate the whole chain. It must fail
+closed for symlinks, ownership drift, or a writable foreign-owned ancestor; application runtime
+startup never repairs permissions. On the current host, first cutover therefore requires
+`chmod go-w /home/ubuntu/projects` (currently `0775` to `0755`) without moving any project data.
+The real bootstrap/release caller, the production-path composition tests, and the replacement-unit
+assertions remain blocking Phase 1 delivery items. Unit source remains under
+`<project-root>/production/checkout/systemd` or the active development worktree. Only installed
+copies of systemd unit files may live outside `<project-root>/development` or
+`<project-root>/production`; all Dashboard state, logs, backups, runtime binaries, checkouts, and
+release artifacts remain inside those project directories.
+
 Recommended layout:
 
 ```text
-production/
-  releases/<release-id>/
-    server/
-    browser/
-    migrations/
-    docs/generated/
-    scripts/
-    release-manifest.json
-  releases/current -> <release-id>
-  releases/previous -> <release-id>
-  runtimes/bun/<exact-revision>/bun
-  state/
-    mira-dashboard.db
-    backups/
-    job-output/
-    logs/
+<project-root>/
+  production/
+    checkout/
+    releases/<release-id>/
+      server/
+      browser/
+      migrations/
+      docs/generated/
+      scripts/
+      release-manifest.json
+    releases/current -> <release-id>
+    releases/previous -> <release-id>
+    runtimes/bun/<exact-revision>/bun
+    state/
+      mira-dashboard.db
+      backups/
+      job-output/
+      logs/
+  development/
+    state/
+      local/
+      preview/
+      remote/
+    worktrees/<name>/
 ```
 
 The release manifest contains Git commit, clean-tree state, Bun revision, lockfile hash,
@@ -437,14 +469,17 @@ Deployment flow:
 
 1. Build and test one artifact using the same resolved Bun runtime throughout the build.
 2. Transfer or materialize it into a new immutable release directory and verify every hash.
-3. Acquire the deployment lease, drain active jobs, enter maintenance mode, and quiesce all
+3. Prepare and verify `<project-root>/production/state` plus its protected ancestor chain before
+   changing the active release pointer.
+4. Acquire the deployment lease, drain active jobs, enter maintenance mode, and quiesce all
    database writers.
-4. Snapshot and verify the current database while writers remain stopped.
-5. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
+5. Snapshot and verify the current database while writers remain stopped.
+6. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
    database state.
-6. Start worker and web against the candidate, with readiness deadlines.
-7. Run authenticated smoke checks, including tRPC, SSE, Gateway, docs, and one safe queued job.
-8. Atomically record current/previous and prune only releases whose manifests verify.
+7. Let one deployment-held initializer create or promote the database, then start worker in
+   `validate-only` mode and web against the candidate, with readiness deadlines.
+8. Run authenticated smoke checks, including tRPC, SSE, Gateway, docs, and one safe queued job.
+9. Atomically record current/previous and prune only releases whose manifests verify.
 
 Because the new application carries no schema compatibility code, rollback is a **release and
 database pair**. If activation crosses a non-backward-compatible migration, rollback restores

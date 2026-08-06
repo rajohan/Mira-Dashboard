@@ -6,6 +6,7 @@ import {
     mkdtemp,
     rename,
     rm,
+    stat,
     symlink,
     writeFile,
 } from "node:fs/promises";
@@ -84,15 +85,29 @@ describe("database runtime path policy", () => {
         );
     });
 
-    test("rejects a replaceable state-directory entry beneath a writable parent", async () => {
+    test("accepts a state directory beneath a non-writable traversable ancestor", async () => {
         const parentDirectory = await privateTemporaryDirectory();
         const stateDirectory = path.join(parentDirectory, "state");
         await mkdir(stateDirectory, { mode: 0o700 });
-        await chmod(parentDirectory, 0o777);
+        await chmod(parentDirectory, 0o755);
+
+        const prepared = await prepareDatabasePath(stateDirectory, true);
+        expect(prepared?.filePath).toBe(
+            path.join(stateDirectory, dashboardDatabaseFileName)
+        );
+    });
+
+    test("rejects an owner-owned 0775 ancestor without changing its mode", async () => {
+        const parentDirectory = await privateTemporaryDirectory();
+        const stateDirectory = path.join(parentDirectory, "state");
+        await mkdir(stateDirectory, { mode: 0o700 });
+        await chmod(parentDirectory, 0o775);
 
         const failure = await rejectionOf(prepareDatabasePath(stateDirectory, true));
+        const parentStatus = await stat(parentDirectory);
         expect(failure).toBeInstanceOf(DatabaseRuntimePathError);
         expect(failure).toMatchObject({ reason: "state-directory-invalid" });
+        expect(parentStatus.mode & 0o777).toBe(0o775);
     });
 
     test("rejects symlinked, multiply linked, and permissive database files", async () => {
@@ -171,6 +186,22 @@ describe("database runtime path policy", () => {
         const prepared = await prepareDatabasePath(directory, true);
         if (!prepared) throw new Error("Expected a prepared database path");
         await chmod(directory, 0o750);
+
+        const failure = await rejectionOf(assertDatabasePathStillValid(prepared));
+        expect(failure).toBeInstanceOf(DatabaseRuntimePathError);
+        expect(failure).toMatchObject({ reason: "state-directory-invalid" });
+    });
+
+    test("detects state-directory entry replacement after preparation", async () => {
+        const parentDirectory = await privateTemporaryDirectory();
+        const stateDirectory = path.join(parentDirectory, "state");
+        const displacedDirectory = path.join(parentDirectory, "displaced-state");
+        await mkdir(stateDirectory, { mode: 0o700 });
+        const prepared = await prepareDatabasePath(stateDirectory, true);
+        if (!prepared) throw new Error("Expected a prepared database path");
+
+        await rename(stateDirectory, displacedDirectory);
+        await mkdir(stateDirectory, { mode: 0o700 });
 
         const failure = await rejectionOf(assertDatabasePathStillValid(prepared));
         expect(failure).toBeInstanceOf(DatabaseRuntimePathError);

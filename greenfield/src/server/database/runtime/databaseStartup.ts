@@ -226,6 +226,9 @@ function startOrValidateDatabase(
     let state = inspectMigrationState(database, migrations);
 
     if (state === "empty" && options.startupMode === "validate-only") {
+        // Acquire the writer slot before rechecking so a concurrent initializer must
+        // either commit first or remain excluded. This transaction starts a fresh
+        // snapshot; the already-current validation path below stays deferred.
         const recheck = database.transaction(() =>
             inspectMigrationState(database, migrations)
         );

@@ -309,6 +309,119 @@ describe("process WebAuthn verification work service", () => {
         }
     });
 
+    test.each(["result", "failure"] as const)(
+        "keeps one timeout settlement when non-cooperative work finishes late with %s",
+        async (lateOutcome) => {
+            const runtime = createApplicationRuntime({
+                authenticationWork: {
+                    webAuthnMaximumConcurrent: 1,
+                    webAuthnMaximumQueued: 1,
+                },
+                logger: testStructuredLogger,
+                realtimeEventPumpLayer: inertRealtimeLayer,
+            });
+            const finishWork = Promise.withResolvers<string>();
+            const releaseSettlement = Promise.withResolvers<void>();
+            const settlementStarted = Promise.withResolvers<void>();
+            const workStarted = Promise.withResolvers<void>();
+            let callerSettled = false;
+            let cancellationSettlements = 0;
+            let failureSettlements = 0;
+            let replacementStarted = false;
+            let resultSettlements = 0;
+
+            try {
+                await runtime.initialize();
+                const webAuthn = webAuthnRunner(runtime);
+                const verification = webAuthn(
+                    () => {
+                        workStarted.resolve();
+                        return finishWork.promise;
+                    },
+                    {
+                        onCancellationBeforeRelease: () => {
+                            cancellationSettlements += 1;
+                        },
+                        onFailureBeforeRelease: async (failure) => {
+                            expect(failure).toBeInstanceOf(
+                                AuthenticationWorkTimeoutError
+                            );
+                            failureSettlements += 1;
+                            settlementStarted.resolve();
+                            await releaseSettlement.promise;
+                        },
+                        onResultBeforeRelease: () => {
+                            resultSettlements += 1;
+                        },
+                        timeoutMs: 20,
+                    }
+                );
+                void verification.then(
+                    () => {
+                        callerSettled = true;
+                        return true;
+                    },
+                    () => {
+                        callerSettled = true;
+                        return false;
+                    }
+                );
+                const verificationFailure = captureFailure(() => verification);
+                await workStarted.promise;
+                await settlementStarted.promise;
+
+                if (lateOutcome === "result") {
+                    finishWork.resolve("late result");
+                } else {
+                    finishWork.reject(new Error("late private verifier failure"));
+                }
+                await yieldToWorkService();
+
+                expect(callerSettled).toBeFalse();
+                expect(failureSettlements).toBe(1);
+                expect(resultSettlements).toBe(0);
+                expect(cancellationSettlements).toBe(0);
+
+                const replacement = webAuthn(
+                    () => {
+                        replacementStarted = true;
+                        return Promise.resolve("replacement");
+                    },
+                    { timeoutMs: 5000 }
+                );
+                await yieldToWorkService();
+                expect(replacementStarted).toBeFalse();
+                expect(
+                    await captureFailure(() =>
+                        webAuthn(() => Promise.resolve("overflow"), {
+                            timeoutMs: 5000,
+                        })
+                    )
+                ).toMatchObject({
+                    _tag: "AuthenticationWorkCapacityError",
+                    operation: "webauthn",
+                });
+
+                releaseSettlement.resolve();
+                const failure = await verificationFailure;
+                expect(failure).toBeInstanceOf(AuthenticationWorkTimeoutError);
+                expect(failure).toMatchObject({
+                    operation: "webauthn",
+                    timeoutMs: 20,
+                });
+                expect(await replacement).toBe("replacement");
+                expect(replacementStarted).toBeTrue();
+                expect(failureSettlements).toBe(1);
+                expect(resultSettlements).toBe(0);
+                expect(cancellationSettlements).toBe(0);
+            } finally {
+                finishWork.resolve("cleanup");
+                releaseSettlement.resolve();
+                await runtime.dispose();
+            }
+        }
+    );
+
     test("redacts defects and retains active capacity after timeout and abort", async () => {
         const runtime = createApplicationRuntime({
             authenticationWork: {

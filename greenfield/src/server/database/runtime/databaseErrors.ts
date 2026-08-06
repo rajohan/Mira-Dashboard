@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 
+const TaggedErrorClass = Schema.TaggedError;
+
 export type DatabaseRuntimePathFailureReason =
     | "database-file-invalid"
     | "state-directory-invalid";
@@ -14,7 +16,7 @@ export type DatabaseRuntimeStartupFailureReason =
     | "options-invalid";
 
 /** Expected failure when the retained database path violates its private-file policy. */
-export class DatabaseRuntimePathError extends Schema.TaggedErrorClass<DatabaseRuntimePathError>(
+export class DatabaseRuntimePathError extends TaggedErrorClass<DatabaseRuntimePathError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimePathError"
 )("DatabaseRuntimePathError", {
     message: Schema.String,
@@ -25,7 +27,7 @@ export class DatabaseRuntimePathError extends Schema.TaggedErrorClass<DatabaseRu
 }) {}
 
 /** Expected, redacted startup failure that is safe to cross the runtime boundary. */
-export class DatabaseRuntimeStartupError extends Schema.TaggedErrorClass<DatabaseRuntimeStartupError>(
+export class DatabaseRuntimeStartupError extends TaggedErrorClass<DatabaseRuntimeStartupError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeStartupError"
 )("DatabaseRuntimeStartupError", {
     message: Schema.String,
@@ -41,7 +43,7 @@ export class DatabaseRuntimeStartupError extends Schema.TaggedErrorClass<Databas
 }) {}
 
 /** Expected startup failure while another process owns SQLite migration admission. */
-export class DatabaseRuntimeLockTimeoutError extends Schema.TaggedErrorClass<DatabaseRuntimeLockTimeoutError>(
+export class DatabaseRuntimeLockTimeoutError extends TaggedErrorClass<DatabaseRuntimeLockTimeoutError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeLockTimeoutError"
 )("DatabaseRuntimeLockTimeoutError", {
     message: Schema.String,
@@ -49,7 +51,7 @@ export class DatabaseRuntimeLockTimeoutError extends Schema.TaggedErrorClass<Dat
 }) {}
 
 /** Expected write failure after bounded asynchronous SQLite admission retry. */
-export class DatabaseRuntimeWriteAdmissionTimeoutError extends Schema.TaggedErrorClass<DatabaseRuntimeWriteAdmissionTimeoutError>(
+export class DatabaseRuntimeWriteAdmissionTimeoutError extends TaggedErrorClass<DatabaseRuntimeWriteAdmissionTimeoutError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeWriteAdmissionTimeoutError"
 )("DatabaseRuntimeWriteAdmissionTimeoutError", {
     message: Schema.String,
@@ -57,28 +59,28 @@ export class DatabaseRuntimeWriteAdmissionTimeoutError extends Schema.TaggedErro
 }) {}
 
 /** Expected non-replayed contention after an immediate transaction was admitted. */
-export class DatabaseRuntimeWriteContentionError extends Schema.TaggedErrorClass<DatabaseRuntimeWriteContentionError>(
+export class DatabaseRuntimeWriteContentionError extends TaggedErrorClass<DatabaseRuntimeWriteContentionError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeWriteContentionError"
 )("DatabaseRuntimeWriteContentionError", {
     message: Schema.String,
 }) {}
 
 /** Fail-closed signal that a published database needs a verified release snapshot. */
-export class DatabaseRuntimeSnapshotRequiredError extends Schema.TaggedErrorClass<DatabaseRuntimeSnapshotRequiredError>(
+export class DatabaseRuntimeSnapshotRequiredError extends TaggedErrorClass<DatabaseRuntimeSnapshotRequiredError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeSnapshotRequiredError"
 )("DatabaseRuntimeSnapshotRequiredError", {
     message: Schema.String,
 }) {}
 
 /** Sanitized failure from a process-owned passive WAL checkpoint. */
-export class DatabaseRuntimeCheckpointError extends Schema.TaggedErrorClass<DatabaseRuntimeCheckpointError>(
+export class DatabaseRuntimeCheckpointError extends TaggedErrorClass<DatabaseRuntimeCheckpointError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeCheckpointError"
 )("DatabaseRuntimeCheckpointError", {
     message: Schema.String,
 }) {}
 
 /** Sanitized failure while closing the process-owned native SQLite handle. */
-export class DatabaseRuntimeCloseError extends Schema.TaggedErrorClass<DatabaseRuntimeCloseError>(
+export class DatabaseRuntimeCloseError extends TaggedErrorClass<DatabaseRuntimeCloseError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeCloseError"
 )("DatabaseRuntimeCloseError", {
     message: Schema.String,

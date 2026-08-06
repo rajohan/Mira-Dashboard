@@ -25,6 +25,10 @@ import {
     databaseRuntimeLayer,
     type DatabaseRuntimeLayerOptions,
 } from "./databaseService.ts";
+import {
+    initializeDatabaseRuntime,
+    normalizeDatabaseRuntimeOptions,
+} from "./databaseStartup.ts";
 
 const migrationsDirectory = path.resolve(import.meta.dir, "../../../../migrations");
 const releaseId = "0".repeat(40);
@@ -45,6 +49,12 @@ async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
     } catch (error) {
         return error;
     }
+}
+
+function bindCallable(member: unknown, receiver: object): unknown {
+    if (typeof member !== "function") return member;
+    return (...arguments_: unknown[]): unknown =>
+        Reflect.apply(member, receiver, arguments_) as unknown;
 }
 
 function options(
@@ -181,7 +191,7 @@ describe("database runtime service", () => {
         );
     });
 
-    test("validate-only waits for a concurrent empty-database initializer", async () => {
+    test("validate-only rechecks empty state after a concurrent initializer commits", async () => {
         const stateDirectory = await privateTemporaryDirectory();
         const databasePath = path.join(stateDirectory, "mira-dashboard.db");
         await writeFile(databasePath, "", { mode: 0o600 });
@@ -194,32 +204,68 @@ describe("database runtime service", () => {
         initializer.run("PRAGMA journal_mode = WAL");
         initializer.run("PRAGMA busy_timeout = 0");
         initializer.run("BEGIN IMMEDIATE");
-        let validationSettled = false;
+        const validator = new Database(databasePath, { strict: true });
+        const initialSchemaRead = Promise.withResolvers<unknown>();
+        let initialSchemaReadRecorded = false;
 
         try {
-            const validation = buildRuntime(options(stateDirectory, "validate-only"));
-            void validation.then(
-                () => {
-                    validationSettled = true;
-                    return true;
-                },
-                () => {
-                    validationSettled = true;
-                    return false;
-                }
-            );
-            await Bun.sleep(25);
-            expect(validationSettled).toBeFalse();
             applyVerifiedMigrations(initializer, migrations, { releaseId });
-            await Bun.sleep(10);
-            expect(validationSettled).toBeFalse();
+            const validationBoundary = new Proxy(validator, {
+                get(target, property) {
+                    if (property === "query") {
+                        return ((sql: string) => {
+                            const statement = target.query(sql);
+                            if (
+                                !initialSchemaReadRecorded &&
+                                sql.includes("SELECT 1 AS present")
+                            ) {
+                                return new Proxy(statement, {
+                                    get(statementTarget, statementProperty) {
+                                        if (statementProperty === "get") {
+                                            return () => {
+                                                const observation: unknown =
+                                                    statementTarget.get();
+                                                initialSchemaReadRecorded = true;
+                                                initialSchemaRead.resolve(observation);
+                                                return observation;
+                                            };
+                                        }
+                                        const member: unknown = Reflect.get(
+                                            statementTarget,
+                                            statementProperty,
+                                            statementTarget
+                                        );
+                                        return bindCallable(member, statementTarget);
+                                    },
+                                });
+                            }
+                            return statement;
+                        }) as Database["query"];
+                    }
+                    const member: unknown = Reflect.get(target, property, target);
+                    return bindCallable(member, target);
+                },
+            });
+            const normalizedOptions = normalizeDatabaseRuntimeOptions(
+                options(stateDirectory, "validate-only")
+            );
+            const startup = initializeDatabaseRuntime(
+                validationBoundary,
+                migrations,
+                normalizedOptions
+            );
+            const validation = Effect.runPromise(startup);
+            void validation.catch(() => null);
+            expect(await initialSchemaRead.promise).toBeNull();
+            expect(initializer.inTransaction).toBeTrue();
             initializer.run("COMMIT");
+            const diagnostics = await validation;
 
-            const validated = await validation;
-            expect(validated.service.diagnostics.appliedMigrations).toBe(0);
-            expect(validated.service.diagnostics.startupMode).toBe("validate-only");
+            expect(diagnostics.appliedMigrations).toBe(0);
+            expect(diagnostics.startupMode).toBe("validate-only");
         } finally {
             if (initializer.inTransaction) initializer.run("ROLLBACK");
+            validator.close(true);
             initializer.close(true);
         }
     });

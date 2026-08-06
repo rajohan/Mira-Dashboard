@@ -394,18 +394,21 @@ Server orchestration represents expected failures as tagged Effect errors in the
 channel. The tRPC boundary exhaustively maps those internal tags to the stable client code set;
 unknown defects and internal `cause` values may be logged only through a redaction boundary and are
 never serialized to clients. One caller-supplied process logger is installed as the only logger on
-the existing `ManagedRuntime` and exposed by `ApplicationRuntime` to ordinary TypeScript
+the application `ManagedRuntime` and exposed by `ApplicationRuntime` to ordinary TypeScript
 boundaries. Event-specific allowlists drop unknown fields and Effect messages/annotations; runtime
 disposal precedes the logger's idempotent flush.
 
-The production web `ApplicationRuntime` merges the structured logger, process-owned SQLite layer,
-database-backed realtime pump, and one process-scoped authentication-work service into the same
-`ManagedRuntime`. The database layer loads and verifies the release migration graph before opening
-one fixed private state file, configures and verifies the connection policy, and constructs
-Drizzle from that retained native handle. The composition root obtains that one ORM for every
-domain repository, while the realtime layer depends on the same service and therefore finalizes
-before SQLite. The narrower generic runtime factory remains available for focused service and
-transport tests with an injected realtime layer.
+The production web `DashboardApplicationRuntime` coordinates two eagerly initialized,
+process-owned scopes. A retained database `ManagedRuntime` loads and verifies the release migration
+graph before opening one fixed private state file, configures and verifies the connection policy,
+and constructs Drizzle from that retained native handle. A separate application `ManagedRuntime`
+owns the structured logger, database-backed realtime pump, and process-scoped authentication-work
+service. The composition root obtains the same ORM and bounded write-admission port for every
+domain repository; the realtime layer depends on that retained database service. Shutdown disposes
+the application scope before the database scope, so realtime and every claimed durable
+authentication settlement finish before SQLite is checkpointed and closed. The narrower generic
+runtime factory remains available for focused service and transport tests with an injected realtime
+layer.
 
 The authentication service owns separate bounded admission and active-work semaphores for Gateway
 verification, password/Argon2 work, TOTP AES/HMAC work, and WebAuthn parsing/signature
@@ -416,15 +419,15 @@ while Gateway capacity, deadline, and unavailable tags are exhaustively translat
 tRPC procedure maps the resulting domain outcome. No request creates or disposes a database or
 runtime.
 
-The same `ManagedRuntime` coordinates listener shutdown. An external `stop(true)` request crosses
+The application `ManagedRuntime` coordinates listener shutdown. An external `stop(true)` request crosses
 the Promise-facing composition boundary as an abort signal; Effect owns the graceful-stop fiber,
 deadline/force race, tagged stop and timeout failures, separately bounded force attempt, and
 settlement of the original graceful operation before the runtime scope is disposed. A rejected
 graceful stop receives one bounded best-effort force attempt while preserving the initiating
-failure. No second runtime or manual timer/`Promise.race` shutdown system is created.
+failure. No request-local runtime or manual timer/`Promise.race` shutdown system is created.
 After listener settlement, runtime finalization closes realtime, passively checkpoints and strictly
 closes SQLite, and only then flushes the process logger. If listener escalation cannot prove
-settlement, the server keeps runtime resources alive for supervisor containment rather than
+settlement, the server keeps both runtime scopes alive for supervisor containment rather than
 closing a database beneath potentially active requests.
 
 ## Realtime Architecture

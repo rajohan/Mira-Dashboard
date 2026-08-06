@@ -105,7 +105,7 @@ export interface DashboardDatabaseRuntimeService extends ImmediateDatabaseWriteA
     readonly orm: () => Promise<SQLiteBunDatabase>;
 }
 
-/** Application runtime whose database and realtime pump share one process scope. */
+/** Process runtime coordinating ordered application and retained database scopes. */
 export interface DashboardApplicationRuntime extends ApplicationRuntime {
     readonly database: DashboardDatabaseRuntimeService;
 }

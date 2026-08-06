@@ -28,7 +28,9 @@ the remaining rewrite phases are still incomplete.
 - create immutable build/release manifests and resource-capped development/test scripts; and
 - implement probes and observability.
 
-**Exit gate:** empty database, docs, build, web, worker, and paired rollback work end-to-end.
+**Exit gate:** greenfield bootstrap protects the existing project ancestor chain and provisions one
+canonical `<project-root>/production/state` root for the static web/worker UID; empty database,
+docs, build, web, worker, and paired rollback then work end-to-end.
 
 ### Phase 2: trust and transport
 
@@ -145,6 +147,9 @@ The rewrite is ready only when all of the following are true:
   after a resolved incident reappears;
 - database constraints, query plans, migrations, backup, restore, retention, WAL, and paired
   rollback are verified;
+- greenfield bootstrap provisions the same canonical `<project-root>/production/state` root for web
+  and worker, and activation fails before pointer promotion on ancestor ownership, mode, symlink,
+  or identity drift;
 - the Drizzle schema, generated fresh baseline, and an introspected freshly initialized database
   agree in CI;
 - authentication, step-up, automation scopes, dangerous adapters, file boundaries, secret

@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Exit, Fiber, FiberSet, Layer, Semaphore } from "effect";
+import { Context, Data, Effect, Fiber, FiberSet, Layer, Semaphore } from "effect";
 
 export type AuthenticationWorkOperation = "gateway" | "password" | "totp" | "webauthn";
 type AuthenticationVerificationOperation = Extract<
@@ -307,7 +307,8 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
 
             const controller = new AbortController();
             const workerState = { callerInterrupted: false, started: false };
-            const upstreamCompleted = Promise.withResolvers<void>();
+            // This milestone ends the verifier deadline before durable settlement begins.
+            const verificationOutcome = Promise.withResolvers<void>();
             type SettlementClaim = Readonly<{
                 promise: Promise<void>;
                 source: "cancellation" | "failure" | "result" | "timeout";
@@ -348,8 +349,8 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
                         "cancellation",
                         onCancellationBeforeRelease
                     );
-                    return awaitSettlement(claim).pipe(Effect.orDie);
-                });
+                    return awaitSettlement(claim);
+                }).pipe(Effect.uninterruptible, Effect.orDie);
             const notifyFailureBeforeRelease = (
                 failure: E | AuthenticationWorkTimeoutError
             ): Effect.Effect<void, AuthenticationWorkSettlementError> =>
@@ -357,12 +358,12 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
                     if (workerState.callerInterrupted) {
                         return Effect.void;
                     }
+                    verificationOutcome.resolve();
                     const { claim } = beginSettlement("failure", () =>
                         onFailureBeforeRelease?.(failure)
                     );
-                    upstreamCompleted.resolve();
-                    return Effect.uninterruptible(awaitSettlement(claim));
-                });
+                    return awaitSettlement(claim);
+                }).pipe(Effect.uninterruptible);
             const notifyResultBeforeRelease = (
                 value: T
             ): Effect.Effect<void, AuthenticationWorkSettlementError> =>
@@ -370,12 +371,12 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
                     if (workerState.callerInterrupted) {
                         return Effect.void;
                     }
+                    verificationOutcome.resolve();
                     const { claim } = beginSettlement("result", () =>
                         onResultBeforeRelease?.(value)
                     );
-                    upstreamCompleted.resolve();
-                    return Effect.uninterruptible(awaitSettlement(claim));
-                });
+                    return awaitSettlement(claim);
+                }).pipe(Effect.uninterruptible);
             const activePermit = gate.active.take(1).pipe(Effect.as(true as const));
             const abortedBeforeStart = abortSignalEffect(controller.signal).pipe(
                 Effect.as(false as const)
@@ -386,7 +387,7 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
                 const claim = settlementState.claim;
                 return claim === undefined
                     ? Effect.void
-                    : awaitSettlement(claim).pipe(Effect.ignore);
+                    : awaitSettlement(claim).pipe(Effect.uninterruptible, Effect.ignore);
             });
             const releaseWorkerPermits = awaitClaimBeforeRelease.pipe(
                 Effect.andThen(releaseAdmission)
@@ -454,7 +455,7 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
                                   Effect.andThen(awaitQueuedWorker),
                                   Effect.andThen(Effect.fail(timeoutFailure))
                               )
-                            : Effect.promise(() => upstreamCompleted.promise)
+                            : awaitSettlement(claim)
                     )
                 );
                 const continueUnlessTimeoutOwnsSettlement = Effect.suspend(() =>
@@ -462,25 +463,15 @@ function trackedWork<T, E extends AuthenticationUpstreamUnavailableError>(
                         ? Effect.never
                         : Effect.void
                 );
-                const awaitUpstreamMilestone = Effect.promise(
-                    () => upstreamCompleted.promise
-                ).pipe(Effect.andThen(continueUnlessTimeoutOwnsSettlement));
-                const awaitWorkerOutcome = Fiber.await(fiber).pipe(
-                    Effect.flatMap((exit) =>
-                        Effect.suspend(() => {
-                            if (settlementState.claim?.source === "timeout") {
-                                return Effect.never;
-                            }
-                            return Exit.isSuccess(exit)
-                                ? Effect.void
-                                : Effect.failCause(exit.cause);
-                        })
-                    )
-                );
                 const awaitUpstream = Effect.raceFirst(
-                    awaitUpstreamMilestone,
-                    awaitWorkerOutcome
+                    Effect.promise(() => verificationOutcome.promise).pipe(
+                        Effect.andThen(continueUnlessTimeoutOwnsSettlement)
+                    ),
+                    Fiber.await(fiber).pipe(
+                        Effect.andThen(continueUnlessTimeoutOwnsSettlement)
+                    )
                 ).pipe(
+                    Effect.asVoid,
                     Effect.timeoutOrElse({
                         duration: timeoutMs,
                         orElse: () => timeoutFallback,

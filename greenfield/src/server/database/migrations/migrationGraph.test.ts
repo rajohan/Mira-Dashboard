@@ -5,8 +5,14 @@ import {
     migrationsDirectory,
     openFreshMigratedDatabase,
 } from "../../test/support/freshDatabase.ts";
-import { applyVerifiedMigrations } from "./applyVerifiedMigrations.ts";
-import { loadVerifiedMigrations } from "./loadVerifiedMigrations.ts";
+import {
+    applyVerifiedMigrations,
+    maximumExpectedSchemaObjectCount,
+} from "./applyVerifiedMigrations.ts";
+import {
+    loadVerifiedMigrations,
+    type VerifiedMigration,
+} from "./loadVerifiedMigrations.ts";
 
 interface IntegrityRow {
     integrity_check: string;
@@ -45,6 +51,29 @@ const expectedTables: string[] = [
     "users",
 ];
 describe("database migration graph", () => {
+    test("bounds schema inventory by the largest valid prefix before later object drops", () => {
+        const migrations = [
+            {
+                id: "20260806000000_schema-inventory-peak",
+                migrationSha256: "0".repeat(64),
+                snapshotSha256: "1".repeat(64),
+                statements: [
+                    "CREATE TABLE retained (id INTEGER PRIMARY KEY) STRICT",
+                    "CREATE TABLE removed (id INTEGER PRIMARY KEY, value TEXT NOT NULL) STRICT",
+                    "CREATE INDEX removed_value_index ON removed(value)",
+                ],
+            },
+            {
+                id: "20260806000001_drop-schema-objects",
+                migrationSha256: "2".repeat(64),
+                snapshotSha256: "3".repeat(64),
+                statements: ["DROP TABLE removed"],
+            },
+        ] satisfies readonly VerifiedMigration[];
+
+        expect(maximumExpectedSchemaObjectCount(migrations)).toBe(3);
+    });
+
     test("contains one reviewed baseline applicable to an empty database", async () => {
         const migrations = await loadVerifiedMigrations({
             directory: migrationsDirectory,

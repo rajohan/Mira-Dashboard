@@ -13,13 +13,19 @@
   current Bun driver no longer accepts the legacy `schema` option; add its explicit `relations`
   model only for domains that use the relational query API. Pin and revalidate the directory/file
   identities during acquisition, and reject a rollback-journal, shared-memory, or WAL sidecar
-  unless it is a single-link current-user-owned `0600` regular file.
+  unless it is a single-link current-user-owned `0600` regular file. Reject a parent chain whose
+  ownership or write permissions let another principal replace the validated directory entry;
+  application startup never chmods, chowns, or otherwise repairs that chain.
 - Enable and verify foreign keys and checks, disable `trusted_schema`, select WAL with
   `synchronous=FULL` and a 1,000-page automatic checkpoint, and set `busy_timeout=0`. The zero
   timeout is the measured non-blocking policy: a synchronous SQLite wait must not stall Bun's
   event loop. Effect owns explicit bounded retry/deadline schedules at cross-process admission and
-  read boundaries; the future worker's write adapters must adopt the same explicit policy before
-  that process starts.
+  read boundaries. Every current domain repository receives the same process-owned asynchronous
+  write-admission port: it may retry only before `BEGIN IMMEDIATE` admits the transaction and the
+  synchronous callback starts. A callback is never replayed. Exhausted admission and post-admission
+  contention remain typed failures; only mutation routes that declare temporary write unavailability
+  expose the fixed redacted `SERVICE_UNAVAILABLE` response. The future worker must use the same
+  explicit policy before that process starts.
 - Use Drizzle's typed query builder for ordinary reads/writes and its parameterized `sql`
   tagged template for SQLite-specific queries, CTEs, queue claims, and expressions not
   represented cleanly by the builder.
@@ -232,7 +238,8 @@ table/column existence fallbacks.
 Retention remains explicit per append-only table. The later maintenance job removes bounded
 batches, requests passive checkpoints during normal operation, exposes WAL/checkpoint health, and
 runs expensive optimization only under a resource-scoped job. Backups include database plus
-release/schema identity and remain restore-tested release artifacts.
+release/schema identity, resolve only beneath
+`<project-root>/production/state/backups`, and remain restore-tested release artifacts.
 
 ## Worker and Privileged Operations
 
@@ -251,7 +258,7 @@ Queue behavior is explicit:
 - resource leases prevent conflicting deploy, restore, Docker, or OpenClaw operations;
 - cancel requests are persisted and propagated to the child process group;
 - stdout/stderr are incrementally bounded, redacted, and spilled to a controlled log file when
-  necessary; and
+  necessary only beneath `<project-root>/production/state/job-output`; and
 - final structured output is validated before persistence or display.
 
 `Bun.spawn` receives argument arrays, a deliberate environment allowlist, an explicit working

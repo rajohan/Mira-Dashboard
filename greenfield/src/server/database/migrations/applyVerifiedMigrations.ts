@@ -114,7 +114,15 @@ function expectedSchemaObjects(
     }
 }
 
-function maximumExpectedSchemaObjectCount(
+/**
+ * Finds the bounded schema-inventory high-water mark across every migration prefix.
+ * Later migrations may drop reviewed objects, so the final graph size is not a safe
+ * bound for inspecting a database stopped at an earlier valid prefix.
+ * @param migrations Ordered checksum-verified migration graph.
+ * @returns Maximum schema-object count across all prefixes, bounded at 4096.
+ * @internal
+ */
+export function maximumExpectedSchemaObjectCount(
     migrations: readonly VerifiedMigration[]
 ): number {
     const expectedDatabase = new Database(":memory:", { strict: true });
