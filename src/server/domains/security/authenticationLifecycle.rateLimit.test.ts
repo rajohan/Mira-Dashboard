@@ -4,6 +4,7 @@ import { Effect, Layer, Stream } from "effect";
 
 import { RealtimeEventPumpService } from "../../platform/realtime/eventPumpService.ts";
 import { createApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
+import { createTestStructuredLogger } from "../../test/support/requestContext.ts";
 import { createAuthenticationWorkBudget } from "./authenticationWorkBudget.ts";
 import {
     bootstrapAuthenticationLifecycle,
@@ -19,6 +20,8 @@ const inertRealtimeLayer = Layer.succeed(
     })
 );
 
+const testStructuredLogger = createTestStructuredLogger();
+
 describe("authentication lifecycle rate limits", () => {
     test("commits Gateway cooldown before admitting the production Effect queue", async () => {
         const runtime = createApplicationRuntime({
@@ -26,6 +29,7 @@ describe("authentication lifecycle rate limits", () => {
                 gatewayMaximumConcurrent: 1,
                 gatewayMaximumQueued: 5,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const firstStarted = Promise.withResolvers<void>();
@@ -90,6 +94,7 @@ describe("authentication lifecycle rate limits", () => {
                 gatewayMaximumConcurrent: 1,
                 gatewayMaximumQueued: 5,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const firstStarted = Promise.withResolvers<void>();

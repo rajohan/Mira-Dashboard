@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
 import { securityRecordIdSchema } from "../../../../contracts/security.ts";
+import { utf8ByteLength } from "../../../../shared/encoding.ts";
 import {
     encryptedTotpSecretEnvelopeSchema,
     totpEncryptionKeyIdSchema,
@@ -13,6 +14,7 @@ const encryptionKeyRingMaximumKeys = 8;
 const aesGcmNonceByteLength = 12;
 const aesGcmTagLengthBits = 128;
 const encodedEncryptionKeyPattern = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/u;
+const textEncoder = new TextEncoder();
 
 const encodedEncryptionKeySchema = v.pipe(
     v.string("TOTP encryption key is invalid"),
@@ -51,7 +53,6 @@ const encryptionKeyRingSchema = v.pipe(
     }, "TOTP encryption keyring is inconsistent")
 );
 
-const textEncoder = new TextEncoder();
 const fatalTextDecoder = new TextDecoder("utf-8", { fatal: true });
 
 function invalidKeyRingError(): TypeError {
@@ -99,7 +100,7 @@ function parseKeyRing(serializedKeyRing: unknown) {
     if (
         typeof serializedKeyRing !== "string" ||
         serializedKeyRing.length > encryptionKeyRingMaximumBytes ||
-        textEncoder.encode(serializedKeyRing).byteLength > encryptionKeyRingMaximumBytes
+        utf8ByteLength(serializedKeyRing) > encryptionKeyRingMaximumBytes
     ) {
         throw invalidKeyRingError();
     }
@@ -108,6 +109,15 @@ function parseKeyRing(serializedKeyRing: unknown) {
     } catch {
         throw invalidKeyRingError();
     }
+}
+
+/**
+ * Validates the bounded TOTP encryption-keyring format without exposing key material.
+ * @param serializedKeyRing Untrusted serialized keyring configuration.
+ * @throws {TypeError} When the keyring is malformed, ambiguous, or outside its bounds.
+ */
+export function assertValidTotpEncryptionKeyRing(serializedKeyRing: unknown): void {
+    parseKeyRing(serializedKeyRing);
 }
 
 function isCanonicalSecurityRecordId(value: string): boolean {

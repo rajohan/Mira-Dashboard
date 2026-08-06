@@ -16,60 +16,80 @@ type ErrorProcedure =
     | "tampered-policy-cause"
     | "unexpected";
 
+const errorProcedurePaths = {
+    expected: "events.stream",
+    "forged-policy-cause": "accountSecurity.summary",
+    mfa_enrollment_required: "accountSecurity.stepUpRecovery",
+    step_up_required: "auth.changePassword",
+    "tampered-policy-cause": "auth.revokeSession",
+    unexpected: "system.runtimeIdentity",
+} as const satisfies Readonly<Record<ErrorProcedure, string>>;
+
 async function queryWireBody(procedure: ErrorProcedure): Promise<{
     response: Response;
     text: string;
 }> {
     const errorRouter = router({
-        expected: publicProcedure.query(() => {
-            throw new TRPCError({ code: "BAD_REQUEST", message: "Safe client error" });
+        accountSecurity: router({
+            stepUpRecovery: publicProcedure.query(() => {
+                throw authenticationPolicyError(
+                    "mfa_enrollment_required",
+                    "Multi-factor authentication enrollment is required"
+                );
+            }),
+            summary: publicProcedure.query(() => {
+                throw new TRPCError({
+                    cause: Object.assign(new Error(sentinel), {
+                        reason: "step_up_required",
+                    }),
+                    code: "FORBIDDEN",
+                    message: "Safe client error",
+                });
+            }),
         }),
-        "forged-policy-cause": publicProcedure.query(() => {
-            throw new TRPCError({
-                cause: Object.assign(new Error(sentinel), {
+        auth: router({
+            changePassword: publicProcedure.query(() => {
+                throw authenticationPolicyError(
+                    "step_up_required",
+                    "Recent authentication is required"
+                );
+            }),
+            revokeSession: publicProcedure.query(() => {
+                const error = authenticationPolicyError(
+                    "step_up_required",
+                    "Recent authentication is required"
+                );
+                const { cause } = error;
+                if (cause === undefined) {
+                    throw new Error("Authentication policy cause is missing");
+                }
+                Object.assign(cause, {
+                    message: sentinel,
+                    reason: "unknown_policy_reason",
+                });
+                throw error;
+            }),
+        }),
+        events: router({
+            stream: publicProcedure.query(() => {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: "Safe client error",
+                });
+            }),
+        }),
+        system: router({
+            runtimeIdentity: publicProcedure.query(() => {
+                throw Object.assign(new Error(sentinel), {
                     reason: "step_up_required",
-                }),
-                code: "FORBIDDEN",
-                message: "Safe client error",
-            });
-        }),
-        mfa_enrollment_required: publicProcedure.query(() => {
-            throw authenticationPolicyError(
-                "mfa_enrollment_required",
-                "Multi-factor authentication enrollment is required"
-            );
-        }),
-        "tampered-policy-cause": publicProcedure.query(() => {
-            const error = authenticationPolicyError(
-                "step_up_required",
-                "Recent authentication is required"
-            );
-            const { cause } = error;
-            if (cause === undefined) {
-                throw new Error("Authentication policy cause is missing");
-            }
-            Object.assign(cause, {
-                message: sentinel,
-                reason: "unknown_policy_reason",
-            });
-            throw error;
-        }),
-        step_up_required: publicProcedure.query(() => {
-            throw authenticationPolicyError(
-                "step_up_required",
-                "Recent authentication is required"
-            );
-        }),
-        unexpected: publicProcedure.query(() => {
-            throw Object.assign(new Error(sentinel), {
-                reason: "step_up_required",
-            });
+                });
+            }),
         }),
     });
     const response = await fetchRequestHandler({
         createContext: () => createTestRequestContext(),
         endpoint: "/trpc",
-        req: new Request(`http://localhost/trpc/${procedure}`),
+        req: new Request(`http://localhost/trpc/${errorProcedurePaths[procedure]}`),
         router: errorRouter,
     });
     return { response, text: await response.text() };

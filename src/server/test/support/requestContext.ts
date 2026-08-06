@@ -13,6 +13,10 @@ import type {
 import type { AutomationSecurityLifecycleService } from "../../domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
+import {
+    createStructuredLogger,
+    type StructuredLogger,
+} from "../../platform/observability/structuredLogger.ts";
 import type {
     ApplicationRuntime,
     RealtimeEventRuntimeService,
@@ -29,6 +33,82 @@ const anonymousAuthentication: RequestAuthentication = { kind: "anonymous" };
 export const testSecurityUserId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 export const testSessionSelector = "a".repeat(32);
 export const testAutomationCredentialId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4";
+
+const inertStructuredLogSink = Object.freeze({
+    write(): undefined {},
+});
+
+/**
+ * Creates an inert process logger for tests that compose runtime or server roots.
+ * @returns A complete structured logger that discards every validated record.
+ */
+export function createTestStructuredLogger(): StructuredLogger {
+    return createStructuredLogger({
+        identity: {
+            bun: "test-bun",
+            pid: 1,
+            processRole: "web",
+            release: "test-release",
+            service: "mira-dashboard",
+        },
+        sink: inertStructuredLogSink,
+    });
+}
+
+/** Capturing logger fixture for assertions at application logging boundaries. */
+export interface CapturingTestStructuredLogger {
+    readonly logger: StructuredLogger;
+    readonly logLines: string[];
+}
+
+/**
+ * Creates a test logger and its captured serialized records.
+ * @returns Stable logger fixture with an initially empty record buffer.
+ */
+export function createCapturingTestStructuredLogger(): CapturingTestStructuredLogger {
+    const logLines: string[] = [];
+    const logger = createStructuredLogger({
+        identity: {
+            bun: "test-bun",
+            pid: 1,
+            processRole: "web",
+            release: "test-release",
+            service: "mira-dashboard",
+        },
+        sink: {
+            write(line) {
+                logLines.push(line);
+            },
+        },
+    });
+    return { logger, logLines };
+}
+
+/**
+ * Waits until the expected number of asynchronous log records remains stable.
+ * @param logLines Captured serialized log records.
+ * @param expectedCount Exact terminal record count.
+ */
+export async function waitForTestLogQuiescence(
+    logLines: readonly string[],
+    expectedCount: number
+): Promise<void> {
+    let stableObservations = 0;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (logLines.length === expectedCount) {
+            stableObservations += 1;
+            if (stableObservations === 3) return;
+        } else {
+            stableObservations = 0;
+        }
+        await Bun.sleep(5);
+    }
+    throw new Error(
+        `Test log records did not reach a stable expected count: expected ${String(
+            expectedCount
+        )}, observed ${String(logLines.length)}: ${JSON.stringify(logLines)}`
+    );
+}
 
 /**
  * Creates one valid session identity with the requested test capabilities.
@@ -95,6 +175,7 @@ interface TestApplicationRuntimeOverrides {
     readonly authentication?: AuthenticationWorkRuntimeService;
     readonly dispose?: ApplicationRuntime["dispose"];
     readonly initialize?: ApplicationRuntime["initialize"];
+    readonly logger?: StructuredLogger;
     readonly shutdownListener?: ApplicationRuntime["shutdownListener"];
     readonly stream?: RealtimeEventRuntimeService["stream"];
 }
@@ -306,6 +387,7 @@ export function createTestApplicationRuntime(
     return Object.freeze({
         dispose: overrides.dispose ?? (() => Promise.resolve()),
         initialize: overrides.initialize ?? (() => Promise.resolve()),
+        logger: overrides.logger ?? createTestStructuredLogger(),
         services: Object.freeze({
             authentication: overrides.authentication ?? inertAuthenticationRuntime,
             realtimeEvents: Object.freeze({
@@ -339,6 +421,7 @@ export function createTestRequestContext(
         readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
         readonly mfaLoginLifecycle?: MfaLoginLifecycleService;
         readonly request?: Request;
+        readonly requestId?: string;
         readonly responseHeaders?: Headers;
     } = {}
 ): Promise<RequestContext> {
@@ -361,6 +444,7 @@ export function createTestRequestContext(
             options.mfaLoginLifecycle ?? createTestMfaLoginLifecycleService(),
         pendingLoginCredential: credentials.pendingLogin,
         request,
+        requestId: options.requestId ?? "test-request-id",
         responseHeaders: options.responseHeaders ?? new Headers(),
     });
 }

@@ -155,7 +155,7 @@ describe("events.stream procedure", () => {
         expect((failures[2] as TRPCError).code).toBe("FORBIDDEN");
     });
 
-    test("maps typed Effect stream failures and preserves unknown defects", async () => {
+    test("maps typed Effect stream failures and contains unknown defects", async () => {
         const typedFailure = new RealtimeEventStoreStreamError({
             message: "internal store detail",
         });
@@ -163,7 +163,7 @@ describe("events.stream procedure", () => {
 
         for (const [failure, expected] of [
             [typedFailure, "SERVICE_UNAVAILABLE"],
-            [defect, undefined],
+            [defect, "INTERNAL_SERVER_ERROR"],
         ] as const) {
             const runtime = createTestApplicationRuntime({
                 stream: () =>
@@ -186,12 +186,12 @@ describe("events.stream procedure", () => {
                 )
             );
 
-            if (expected === undefined) {
-                expect(observed).toBe(defect);
-            } else {
-                expect(observed).toBeInstanceOf(TRPCError);
-                expect((observed as TRPCError).code).toBe(expected);
+            expect(observed).toBeInstanceOf(TRPCError);
+            expect((observed as TRPCError).code).toBe(expected);
+            if (expected === "SERVICE_UNAVAILABLE") {
                 expect((observed as TRPCError).message).not.toContain("internal");
+            } else {
+                expect((observed as TRPCError).cause).toBe(defect);
             }
         }
     });

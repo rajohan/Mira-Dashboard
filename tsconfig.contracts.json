@@ -1,0 +1,16 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        // Contracts/shared stay environment-neutral: no DOM, Bun, or Node ambient types;
+        // byte budgets therefore use the shared manual UTF-8 counter.
+        "lib": ["ESNext"],
+        "types": []
+    },
+    "include": ["src/contracts/**/*.ts", "src/shared/**/*.ts"],
+    "exclude": [
+        "src/**/*.spec.ts",
+        "src/**/*.test.ts",
+        "src/**/__tests__/**/*.ts",
+        "src/**/testSupport/**/*.ts"
+    ]
+}

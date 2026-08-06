@@ -28,6 +28,22 @@ describe("generated contract documentation", () => {
 
         expect([...first]).toEqual([...second]);
         expect(first.get("README.md")).toContain("[tRPC procedures](procedures.md)");
+        expect(first.get("README.md")).toContain(
+            "[Application configuration](configuration.md)"
+        );
+        expect(first.get("README.md")).not.toContain(
+            "database, configuration, and browser"
+        );
+        const configurationDocumentation = first.get("configuration.md");
+        expect(configurationDocumentation).toContain(
+            "| Environment | Typed field | Type / enumerated values | Validation constraints | Default behavior | Process roles | Secret | Browser exposure | Operational effect | Restart | Development/test overrides | Description |"
+        );
+        expect(configurationDocumentation).toContain(
+            "| `MIRA_DASHBOARD_LOG_LEVEL` | `logLevel` | `log-level`; `debug`, `error`, `info`, `warn` | Exactly one enumerated structured-log level. | `info` | `web`, `worker`, `script` | No | Value |"
+        );
+        expect(configurationDocumentation).toContain(
+            "| `MIRA_DASHBOARD_TOTP_KEYRING` | `totpKeyring` | `json-secret`; values withheld | Version 1 JSON with one to eight unique AES-256 keys and one active key, at most 4096 code units. | Required; value withheld | `web` | Yes | Presence only |"
+        );
         const procedureDocumentation = first.get("procedures.md");
         expect(procedureDocumentation).toContain("`auth.bootstrap`");
         expect(procedureDocumentation).toContain("`auth.changePassword`");

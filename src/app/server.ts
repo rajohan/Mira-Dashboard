@@ -35,7 +35,7 @@ const serverGracefulShutdownTimeoutSchema = v.pipe(
 
 async function primaryErrorAfterCleanup(
     primaryError: unknown,
-    cleanup: () => Promise<void>
+    cleanup: () => Promise<void> | void
 ): Promise<unknown> {
     try {
         await cleanup();
@@ -44,6 +44,61 @@ async function primaryErrorAfterCleanup(
         // Preserve the initiating failure, which identifies the original defect.
     }
     return primaryError;
+}
+
+async function disposeRuntimeAndFlush(
+    applicationRuntime: ApplicationRuntime
+): Promise<void> {
+    try {
+        await applicationRuntime.dispose();
+    } catch (error) {
+        throw await primaryErrorAfterCleanup(error, () => {
+            applicationRuntime.logger.flush();
+        });
+    }
+    applicationRuntime.logger.flush();
+}
+
+function responseWithRequestId(response: Response, requestId: string): Response {
+    const headers = new Headers(response.headers);
+    headers.set("x-request-id", requestId);
+    return new Response(response.body, {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+    });
+}
+
+function requestDurationMs(startedAtMs: number): number {
+    const elapsedMs = performance.now() - startedAtMs;
+    if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return 0;
+    return Math.min(Number.MAX_SAFE_INTEGER, Math.round(elapsedMs));
+}
+
+function requestOutcome(status: number): "rejected" | "server-error" | "success" {
+    if (status >= 500) return "server-error";
+    if (status >= 400) return "rejected";
+    return "success";
+}
+
+function internalServerErrorResponse(requestId: string): Response {
+    return new Response("Internal Server Error", {
+        headers: {
+            "cache-control": "no-store",
+            "x-request-id": requestId,
+        },
+        status: 500,
+    });
+}
+
+function cancelledRequestResponse(requestId: string): Response {
+    return new Response(null, {
+        headers: {
+            "cache-control": "no-store",
+            "x-request-id": requestId,
+        },
+        status: 499,
+    });
 }
 
 export {
@@ -86,6 +141,7 @@ export interface ApplicationServer {
  */
 export async function createServer(options: ServerOptions): Promise<ApplicationServer> {
     try {
+        const logger = options.applicationRuntime.logger;
         readRuntimeIdentity();
         const gracefulShutdownTimeoutMs = v.parse(
             serverGracefulShutdownTimeoutSchema,
@@ -109,22 +165,86 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
 
         const server = Bun.serve({
             async fetch(request, bunServer) {
-                const requestUrl = new URL(request.url);
-                const pathname = requestUrl.pathname;
-                if (isTrpcRequestPath(pathname)) {
-                    return handleTrpcHttpRequest(request, requestUrl, bunServer);
+                const requestId = crypto.randomUUID();
+                const startedAtMs = performance.now();
+                try {
+                    const requestUrl = new URL(request.url);
+                    const pathname = requestUrl.pathname;
+                    let response: Response;
+                    if (isTrpcRequestPath(pathname)) {
+                        response = await handleTrpcHttpRequest(
+                            request,
+                            requestUrl,
+                            bunServer,
+                            requestId
+                        );
+                    } else {
+                        const healthProbeMethod: HealthProbeMethod | undefined =
+                            request.method === "GET" || request.method === "HEAD"
+                                ? request.method
+                                : undefined;
+                        if (healthProbeMethod && pathname === healthLivenessPath) {
+                            response = livenessResponse(healthProbeMethod);
+                        } else if (
+                            healthProbeMethod &&
+                            pathname === healthReadinessPath
+                        ) {
+                            response = readinessResponse(
+                                healthProbeMethod,
+                                options.readiness
+                            );
+                        } else {
+                            response = new Response("Not found", { status: 404 });
+                        }
+                    }
+                    if (request.signal.aborted) {
+                        logger.info({
+                            component: "http",
+                            durationMs: requestDurationMs(startedAtMs),
+                            event: "http.request.cancelled",
+                            fields: { kind: "http-request", method: request.method },
+                            outcome: "cancelled",
+                            requestId,
+                        });
+                        return cancelledRequestResponse(requestId);
+                    }
+                    const correlatedResponse = responseWithRequestId(response, requestId);
+                    logger.info({
+                        component: "http",
+                        durationMs: requestDurationMs(startedAtMs),
+                        event: "http.response.created",
+                        fields: {
+                            kind: "http-response",
+                            method: request.method,
+                            status: correlatedResponse.status,
+                        },
+                        outcome: requestOutcome(correlatedResponse.status),
+                        requestId,
+                    });
+                    return correlatedResponse;
+                } catch (error) {
+                    if (request.signal.aborted) {
+                        logger.info({
+                            component: "http",
+                            durationMs: requestDurationMs(startedAtMs),
+                            event: "http.request.cancelled",
+                            fields: { kind: "http-request", method: request.method },
+                            outcome: "cancelled",
+                            requestId,
+                        });
+                        return cancelledRequestResponse(requestId);
+                    }
+                    logger.error({
+                        component: "http",
+                        durationMs: requestDurationMs(startedAtMs),
+                        event: "http.request.failed",
+                        failure: error,
+                        fields: { kind: "http-request", method: request.method },
+                        outcome: "server-error",
+                        requestId,
+                    });
+                    return internalServerErrorResponse(requestId);
                 }
-                const healthProbeMethod: HealthProbeMethod | undefined =
-                    request.method === "GET" || request.method === "HEAD"
-                        ? request.method
-                        : undefined;
-                if (healthProbeMethod && pathname === healthLivenessPath) {
-                    return livenessResponse(healthProbeMethod);
-                }
-                if (healthProbeMethod && pathname === healthReadinessPath) {
-                    return readinessResponse(healthProbeMethod, options.readiness);
-                }
-                return new Response("Not found", { status: 404 });
             },
             hostname: options.hostname,
             idleTimeout: serverIdleTimeoutSeconds,
@@ -162,7 +282,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                         options.readiness.markUnavailable();
                         throw error;
                     }
-                    await options.applicationRuntime.dispose();
+                    await disposeRuntimeAndFlush(options.applicationRuntime);
                 })();
                 return stopPromise;
             },
@@ -170,7 +290,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
         });
     } catch (error) {
         throw await primaryErrorAfterCleanup(error, () =>
-            options.applicationRuntime.dispose()
+            disposeRuntimeAndFlush(options.applicationRuntime)
         );
     }
 }

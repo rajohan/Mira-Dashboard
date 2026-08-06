@@ -13,8 +13,8 @@ import {
     measureFrontendBundle,
     writeFrontendHtmlAppEntrypoint,
     writePrecompressedFrontendAssets,
-} from "./frontendBuildArtifacts";
-import reactCompilerPlugin from "./reactCompilerPlugin";
+} from "./frontendBuildArtifacts.ts";
+import reactCompilerPlugin from "./reactCompilerPlugin.ts";
 
 type FrontendBuildMode = "development" | "production";
 

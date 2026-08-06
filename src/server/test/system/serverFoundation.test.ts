@@ -4,6 +4,7 @@ import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 
 import {
+    authenticationRequestBodyMaximumBytes,
     type ApplicationServer,
     createServer,
     serverRequestBodyMaximumBytes,
@@ -15,13 +16,22 @@ import {
 } from "../../platform/readiness/readinessState.ts";
 import * as runtimeIdentityModule from "../../platform/runtime/readRuntimeIdentity.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
+import { rejectOnAbort, withTestTimeout } from "../support/promise.ts";
 import {
+    createCapturingTestStructuredLogger,
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
     createTestServerSecurityServices,
+    waitForTestLogQuiescence,
 } from "../support/requestContext.ts";
 
 const servers: ApplicationServer[] = [];
+const requestIdPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function compareUnknownStrings(left: unknown, right: unknown): number {
+    return String(left).localeCompare(String(right));
+}
 
 async function startServer(): Promise<{
     readiness: ReadinessController;
@@ -88,15 +98,23 @@ describe("system foundation", () => {
         const misleadingTrpcPrefix = await fetch(new URL("/trpc-unrelated", server.url));
 
         expect(liveness.status).toBe(200);
+        expect(liveness.headers.get("x-request-id")).toMatch(requestIdPattern);
         expect(await liveness.json()).toEqual({ status: "live" });
         expect(readiness.status).toBe(503);
+        expect(readiness.headers.get("x-request-id")).toMatch(requestIdPattern);
         expect(await readiness.json()).toEqual({ status: "not-ready" });
         expect(headLiveness.status).toBe(200);
+        expect(headLiveness.headers.get("x-request-id")).toMatch(requestIdPattern);
         expect(await headLiveness.text()).toBe("");
         expect(headReadiness.status).toBe(503);
+        expect(headReadiness.headers.get("x-request-id")).toMatch(requestIdPattern);
         expect(await headReadiness.text()).toBe("");
         expect(missing.status).toBe(404);
+        expect(missing.headers.get("x-request-id")).toMatch(requestIdPattern);
         expect(misleadingTrpcPrefix.status).toBe(404);
+        expect(misleadingTrpcPrefix.headers.get("x-request-id")).toMatch(
+            requestIdPattern
+        );
 
         readinessController.markReady();
         const ready = await fetch(new URL("/api/health/ready", server.url));
@@ -109,7 +127,19 @@ describe("system foundation", () => {
         expect(await unavailable.json()).toEqual({ status: "not-ready" });
     });
 
-    test("rejects request bodies above the bounded application transport budget", async () => {
+    test("correlates request bodies rejected by the application transport budget", async () => {
+        const { server } = await startServer();
+        const response = await fetch(new URL("/trpc/auth.status", server.url), {
+            body: "x".repeat(authenticationRequestBodyMaximumBytes + 1),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+        });
+
+        expect(response.status).toBe(413);
+        expect(response.headers.get("x-request-id")).toMatch(requestIdPattern);
+    });
+
+    test("keeps the Bun pre-dispatch request-body ceiling", async () => {
         const { server } = await startServer();
         const response = await fetch(
             new URL("/trpc/system.runtimeIdentity", server.url),
@@ -121,6 +151,194 @@ describe("system foundation", () => {
         );
 
         expect(response.status).toBe(413);
+    });
+
+    test("emits one correlated response-created event for every response class", async () => {
+        const { logger, logLines } = createCapturingTestStructuredLogger();
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime({ logger }),
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+
+        const responses = await Promise.all([
+            fetch(new URL("/api/health/live", server.url)),
+            fetch(new URL("/api/unknown", server.url)),
+            fetch(new URL("/trpc/system.runtimeIdentity", server.url)),
+        ]);
+        await Promise.all(responses.map((response) => response.text()));
+        await waitForTestLogQuiescence(logLines, 3);
+        const records = logLines.map(
+            (line) => JSON.parse(line) as Record<string, unknown>
+        );
+
+        expect(records).toHaveLength(3);
+        expect(records.map((record) => record.event)).toEqual([
+            "http.response.created",
+            "http.response.created",
+            "http.response.created",
+        ]);
+        expect(
+            records.map((record) => record.requestId).toSorted(compareUnknownStrings)
+        ).toEqual(
+            responses
+                .map((response) => response.headers.get("x-request-id"))
+                .toSorted(compareUnknownStrings)
+        );
+        expect(
+            records.every(
+                (record) =>
+                    Number.isSafeInteger(record.durationMs) &&
+                    Number(record.durationMs) >= 0
+            )
+        ).toBe(true);
+    });
+
+    test("classifies an aborted streaming upload without a server-error event", async () => {
+        const { logger, logLines } = createCapturingTestStructuredLogger();
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime({ logger }),
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+        const abortController = new AbortController();
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode("{"));
+            },
+        });
+        const pendingRequest = fetch(new URL("/trpc/auth.status", server.url), {
+            body,
+            headers: { "content-type": "application/json" },
+            method: "POST",
+            signal: abortController.signal,
+        }).catch((error: unknown) => error);
+
+        await Bun.sleep(50);
+        abortController.abort();
+        expect(await pendingRequest).toBeInstanceOf(Error);
+        await waitForTestLogQuiescence(logLines, 1);
+
+        const records = logLines.map(
+            (line) => JSON.parse(line) as Record<string, unknown>
+        );
+        expect(records).toHaveLength(1);
+        expect(records[0]).toMatchObject({
+            component: "http",
+            event: "http.request.cancelled",
+            level: "info",
+            outcome: "cancelled",
+        });
+        expect(records[0]).not.toHaveProperty("failure");
+        expect(logLines.join("\n")).not.toContain("server-error");
+    });
+
+    test("classifies resolver cancellation after dispatch as one cancellation event", async () => {
+        const { logger, logLines } = createCapturingTestStructuredLogger();
+        const resolverStarted = Promise.withResolvers<void>();
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime({ logger }),
+            authenticationLifecycle: createTestAuthenticationLifecycleService({
+                login(_input, metadata) {
+                    resolverStarted.resolve();
+                    if (metadata.signal === undefined) {
+                        return Promise.reject(
+                            new Error("Login resolver did not receive cancellation")
+                        );
+                    }
+                    return rejectOnAbort(metadata.signal, "Login request was cancelled");
+                },
+            }),
+            authenticateCredential: () => ({
+                authentication: { kind: "anonymous" },
+            }),
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+        const abortController = new AbortController();
+        const pendingRequest = fetch(new URL("/trpc/auth.login", server.url), {
+            body: JSON.stringify({
+                json: {
+                    password: "correct-horse-battery",
+                    username: "operator",
+                },
+            }),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+            signal: abortController.signal,
+        }).catch((error: unknown) => error);
+
+        await withTestTimeout(
+            resolverStarted.promise,
+            1000,
+            "Login resolver did not start"
+        );
+        abortController.abort();
+        expect(await pendingRequest).toBeInstanceOf(Error);
+        await waitForTestLogQuiescence(logLines, 1);
+
+        const records = logLines.map(
+            (line) => JSON.parse(line) as Record<string, unknown>
+        );
+        expect(records).toHaveLength(1);
+        expect(records[0]).toMatchObject({
+            component: "http",
+            event: "http.request.cancelled",
+            level: "info",
+            outcome: "cancelled",
+        });
+        expect(records[0]).not.toHaveProperty("failure");
+        expect(logLines.join("\n")).not.toContain("server-error");
+        expect(logLines.join("\n")).not.toContain("trpc.request.defect");
+        expect(logLines.join("\n")).not.toContain("http.response.created");
+        expect(logLines.join("\n")).not.toContain("http.request.failed");
+    });
+
+    test("returns a correlated sanitized 500 when a raw handler defects", async () => {
+        const sentinel = "readiness-defect-secret";
+        const { logger, logLines } = createCapturingTestStructuredLogger();
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime({ logger }),
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: {
+                isReady() {
+                    throw new Error(sentinel);
+                },
+                markReady() {},
+                markUnavailable() {},
+            },
+        });
+        servers.push(server);
+
+        const response = await fetch(new URL("/api/health/ready", server.url));
+        const body = await response.text();
+        const requestId = response.headers.get("x-request-id");
+        await waitForTestLogQuiescence(logLines, 1);
+
+        expect(response.status).toBe(500);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(requestId).toMatch(requestIdPattern);
+        expect(body).toBe("Internal Server Error");
+        expect(body).not.toContain(sentinel);
+        expect(logLines).toHaveLength(1);
+        expect(JSON.stringify(logLines)).not.toContain(sentinel);
+        expect(JSON.parse(logLines[0] ?? "null")).toMatchObject({
+            component: "http",
+            event: "http.request.failed",
+            outcome: "server-error",
+            requestId,
+        });
     });
 
     test("rejects untrusted browser requests before authentication", async () => {

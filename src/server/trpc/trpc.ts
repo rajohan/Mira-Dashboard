@@ -8,6 +8,10 @@ import {
 } from "../../contracts/registry.ts";
 import type { ApplicationCapability } from "../../contracts/security.ts";
 import type { RequestContext } from "./context.ts";
+import {
+    applyProcedureExpectedErrorPolicy,
+    applyProcedureExpectedErrorPolicyToOutput,
+} from "./procedureErrorPolicy.ts";
 
 const internalErrorMessage = "Internal server error";
 const contractAuthenticationErrorReasonSet: ReadonlySet<string> = new Set(
@@ -65,8 +69,18 @@ const trpc = initTRPC.context<RequestContext>().create({
     transformer: superjson,
 });
 
-/** Base procedure builder for explicitly public contracts. */
-export const publicProcedure = trpc.procedure;
+/** Base procedure builder with fail-closed expected-error enforcement. */
+export const publicProcedure = trpc.procedure.use(async ({ next, path }) => {
+    const result = await next();
+    if (!result.ok) {
+        const error = applyProcedureExpectedErrorPolicy(path, result.error);
+        return error === result.error ? result : { ...result, error };
+    }
+    return {
+        ...result,
+        data: applyProcedureExpectedErrorPolicyToOutput(path, result.data),
+    };
+});
 
 /**
  * Builds one client-actionable authentication-policy rejection.

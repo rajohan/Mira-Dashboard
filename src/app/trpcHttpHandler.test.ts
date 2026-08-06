@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    createCapturingTestStructuredLogger,
     createTestApplicationRuntime,
     createTestServerSecurityServices,
 } from "../server/test/support/requestContext.ts";
@@ -27,6 +28,7 @@ interface EarlyRejectionExpectation {
 async function expectEarlyRejectionCancelsBody(
     input: EarlyRejectionExpectation
 ): Promise<void> {
+    const { logger, logLines } = createCapturingTestStructuredLogger();
     const cancellationReasons: unknown[] = [];
     const body = new ReadableStream<Uint8Array>({
         cancel(reason) {
@@ -43,17 +45,24 @@ async function expectEarlyRejectionCancelsBody(
     });
     const handler = createTrpcHttpHandler({
         ...createTestServerSecurityServices(),
-        applicationRuntime: createTestApplicationRuntime(),
+        applicationRuntime: createTestApplicationRuntime({ logger }),
         ...(input.browserOrigin === undefined
             ? {}
             : { browserOrigin: input.browserOrigin }),
     });
 
-    const response = await handler(request, new URL(request.url), unreachableBunServer);
+    const response = await handler(
+        request,
+        new URL(request.url),
+        unreachableBunServer,
+        "01900000-0000-7000-8000-000000000001"
+    );
 
     expect(response.status).toBe(input.expectedStatus);
     expect(await response.text()).toBe(input.expectedBody);
     expect(cancellationReasons).toEqual([input.expectedCancellationReason]);
+    expect(response.headers.get("x-request-id")).toBeNull();
+    expect(logLines).toEqual([]);
 }
 
 describe("tRPC HTTP handler early rejection", () => {
@@ -89,4 +98,43 @@ describe("tRPC HTTP handler early rejection", () => {
             expectedStatus: 400,
             path: "/trpc/auth.login?batch=1",
         }));
+});
+
+test("redacts an unexpected context defect through the tRPC boundary", async () => {
+    const sentinel = "context-failure-secret";
+    const { logger, logLines } = createCapturingTestStructuredLogger();
+    const request = new Request("https://dashboard.example/trpc/auth.status");
+    const handler = createTrpcHttpHandler({
+        ...createTestServerSecurityServices(),
+        applicationRuntime: createTestApplicationRuntime({ logger }),
+        authenticateCredential() {
+            throw new Error(sentinel);
+        },
+    });
+    const bunServer = {
+        requestIP: () => ({ address: "127.0.0.1" }),
+        timeout(_request: Request, seconds: number) {
+            expect(seconds).toBeGreaterThan(0);
+        },
+    };
+
+    const response = await handler(
+        request,
+        new URL(request.url),
+        bunServer,
+        "01900000-0000-7000-8000-000000000001"
+    );
+    const records = logLines.map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("x-request-id")).toBeNull();
+    expect(records).toHaveLength(1);
+    expect(JSON.stringify(records)).not.toContain(sentinel);
+    expect(records[0]).toMatchObject({
+        event: "trpc.request.defect",
+        outcome: "server-error",
+    });
+    expect(records[0]).toMatchObject({
+        requestId: "01900000-0000-7000-8000-000000000001",
+    });
 });

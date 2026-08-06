@@ -5,6 +5,7 @@ import { Effect, Layer, Stream } from "effect";
 import { RealtimeEventPumpService } from "../../platform/realtime/eventPumpService.ts";
 import { createApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
 import { captureFailure } from "../../test/support/promise.ts";
+import { createTestStructuredLogger } from "../../test/support/requestContext.ts";
 import {
     type AuthenticationVerificationWorkOptions,
     AuthenticationUpstreamUnavailableError,
@@ -19,6 +20,8 @@ const inertRealtimeLayer = Layer.succeed(
         wake: Effect.void,
     })
 );
+
+const testStructuredLogger = createTestStructuredLogger();
 
 async function yieldToWorkService(): Promise<void> {
     await Promise.resolve();
@@ -36,6 +39,7 @@ function webAuthnRunner(runtime: ReturnType<typeof createApplicationRuntime>) {
 describe("process WebAuthn verification work service", () => {
     test("uses an independent default two-active/four-queued gate", async () => {
         const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const releaseActive = Promise.withResolvers<void>();
@@ -93,6 +97,7 @@ describe("process WebAuthn verification work service", () => {
                 webAuthnMaximumConcurrent: 1,
                 webAuthnMaximumQueued: 1,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const releaseFirst = Promise.withResolvers<void>();
@@ -155,6 +160,7 @@ describe("process WebAuthn verification work service", () => {
                 webAuthnMaximumConcurrent: 1,
                 webAuthnMaximumQueued: 0,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const timedWork = Promise.withResolvers<boolean>();
@@ -252,6 +258,7 @@ describe("process WebAuthn verification work service", () => {
                 webAuthnMaximumConcurrent: 1,
                 webAuthnMaximumQueued: 1,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const releaseResult = Promise.withResolvers<void>();
@@ -339,18 +346,21 @@ describe("process WebAuthn verification work service", () => {
         expect(() =>
             createApplicationRuntime({
                 authenticationWork: { webAuthnMaximumConcurrent: 0 },
+                logger: testStructuredLogger,
                 realtimeEventPumpLayer: inertRealtimeLayer,
             })
         ).toThrow("WebAuthn verification concurrency limit is invalid");
         expect(() =>
             createApplicationRuntime({
                 authenticationWork: { webAuthnMaximumQueued: -1 },
+                logger: testStructuredLogger,
                 realtimeEventPumpLayer: inertRealtimeLayer,
             })
         ).toThrow("WebAuthn verification queue limit is invalid");
         expect(() =>
             createApplicationRuntime({
                 authenticationWork: { webAuthnMaximumQueued: 1.5 },
+                logger: testStructuredLogger,
                 realtimeEventPumpLayer: inertRealtimeLayer,
             })
         ).toThrow(RangeError);
