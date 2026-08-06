@@ -1,0 +1,76 @@
+{
+    "authority": {
+        "cancelTarget": "task-id",
+        "ledgerScope": "global-with-optional-filters",
+        "sessionFilterRequired": false
+    },
+    "cancellation": {
+        "canonicalCompletionCanWinRace": true,
+        "cascadesSubagentDescendants": true,
+        "notFoundIsRpcSuccess": true,
+        "operatorControlBypassesCallerSessionOwnership": true,
+        "refusalIsRpcSuccess": true,
+        "subagentCancellationIsProvisional": true,
+        "terminalTaskIsNotCancelled": true
+    },
+    "domain": "tasks",
+    "event": {
+        "actions": ["deleted", "restored", "upserted"],
+        "delivery": "best-effort-drop-if-slow",
+        "name": "task"
+    },
+    "gatewayEvents": ["task"],
+    "list": {
+        "cursor": "decimal-offset",
+        "defaultLimit": 100,
+        "filters": ["agentId", "sessionKey", "status"],
+        "maximumLimit": 500,
+        "ordering": "last-activity-descending"
+    },
+    "methodPermissions": [
+        {
+            "controlPlaneWrite": false,
+            "name": "tasks.cancel",
+            "scope": "operator.write"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "tasks.get",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "tasks.list",
+            "scope": "operator.read"
+        }
+    ],
+    "methods": ["tasks.cancel", "tasks.get", "tasks.list"],
+    "promptVisibility": {
+        "getIncludesBoundedPrompt": true,
+        "listAndEventsOmitPrompt": true,
+        "promptChars": 4000
+    },
+    "runtimeMappings": [
+        { "internal": "cancelled", "wire": "cancelled" },
+        { "internal": "failed", "wire": "failed" },
+        { "internal": "lost", "wire": "failed" },
+        { "internal": "queued", "wire": "queued" },
+        { "internal": "running", "wire": "running" },
+        { "internal": "succeeded", "wire": "completed" },
+        { "internal": "timed_out", "wire": "timed_out" }
+    ],
+    "schemaVersion": 1,
+    "statuses": ["queued", "running", "completed", "failed", "cancelled", "timed_out"],
+    "uiProjection": {
+        "activeSnapshotLimit": 200,
+        "cancelledAndTimedOutUseFailedGroup": true,
+        "detailUsesTasksGet": true,
+        "eventBufferDuringSnapshot": true,
+        "finishedSnapshotLimit": 100,
+        "nonSubagentOpenSessionLink": true,
+        "reconnectRefetch": true,
+        "restoredEventRefetch": true,
+        "stopRequiresOperatorWrite": true,
+        "subagentOpenSessionLink": false
+    }
+}

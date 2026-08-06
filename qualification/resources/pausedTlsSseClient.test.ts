@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
+import { Effect, Exit, Fiber, Result, Scope } from "effect";
+import { TestClock } from "effect/testing";
+
 import {
     QualificationEventFeed,
     qualificationEventLimits,
@@ -9,7 +12,14 @@ import { waitFor } from "../test/waitFor.ts";
 import { startHttpsReverseProxy } from "../topology/httpsReverseProxy.ts";
 import { createTestTlsIdentity } from "../topology/testTlsIdentity.ts";
 import { startQualificationServer } from "../trpc/server.ts";
-import { openPausedTlsSseClient, type PausedTlsSseClient } from "./pausedTlsSseClient.ts";
+import {
+    openPausedTlsSseClient,
+    PausedTlsSseClientArgumentError,
+    PausedTlsSseClientDeadlineError,
+    PausedTlsSseClientOperationError,
+    pausedTlsSseClientResource,
+    withPausedTlsSseClientDeadline,
+} from "./pausedTlsSseClient.ts";
 import { sseMemoryQualificationPolicy } from "./resourcePolicy.ts";
 
 const qualificationCookie = "mira_qualification=paused-native-client";
@@ -65,13 +75,77 @@ describe("paused native TLS SSE client", () => {
             if (!(failure instanceof Error)) {
                 throw new Error("Expected the invalid cookie to be rejected");
             }
+            expect(failure).toBeInstanceOf(PausedTlsSseClientArgumentError);
             expect(failure.message).toContain("cookie must not contain CR or LF");
         }
     });
 
+    test("tags a native connection failure", async () => {
+        const tlsIdentity = await createTestTlsIdentity();
+        const listener = Bun.listen({
+            data: undefined,
+            hostname: "127.0.0.1",
+            port: 0,
+            socket: {
+                data() {},
+            },
+        });
+        const closedPort = listener.port;
+        listener.stop(true);
+
+        try {
+            const failure = await openPausedTlsSseClient(
+                new URL(`https://127.0.0.1:${closedPort}`),
+                tlsIdentity.certificate,
+                qualificationCookie,
+                1000
+            ).then(
+                () => null,
+                (error: unknown) => error
+            );
+
+            expect(failure).toBeInstanceOf(PausedTlsSseClientOperationError);
+            expect(failure).toMatchObject({ operation: "connect" });
+        } finally {
+            await tlsIdentity.dispose();
+        }
+    });
+
+    test("interrupts pending Effect work when its deadline expires", async () => {
+        let interrupted = false;
+        const pending = Effect.callback<void>(() =>
+            Effect.sync(() => {
+                interrupted = true;
+            })
+        );
+        const program = Effect.gen(function* () {
+            const fiber = yield* withPausedTlsSseClientDeadline(
+                pending,
+                "connect",
+                25
+            ).pipe(Effect.result, Effect.forkChild);
+            yield* Effect.yieldNow;
+            yield* TestClock.adjust(25);
+            yield* Effect.yieldNow;
+            return yield* Fiber.join(fiber);
+        });
+        const outcome = await Effect.runPromise(
+            Effect.provide(program, TestClock.layer())
+        );
+
+        expect(interrupted).toBe(true);
+        expect(Result.isFailure(outcome)).toBe(true);
+        if (Result.isSuccess(outcome)) return;
+        expect(outcome.failure).toBeInstanceOf(PausedTlsSseClientDeadlineError);
+        expect(outcome.failure).toMatchObject({
+            message: "Paused SSE client did not connect within 25 ms",
+            operation: "connect",
+            timeoutMs: 25,
+        });
+    });
+
     test("propagates a paused TLS receive window to the bounded event queue", async () => {
         const cleanup = new AsyncCleanupStack();
-        let client: PausedTlsSseClient | undefined;
 
         try {
             const tlsIdentity = await createTestTlsIdentity();
@@ -96,18 +170,25 @@ describe("paused native TLS SSE client", () => {
             });
             cleanup.defer("paused client proxy", () => proxy.stop(true));
             cleanup.defer("paused client read boundary", () => readBoundary.release());
-            const pendingClient = openPausedTlsSseClient(
-                proxy.url,
-                tlsIdentity.certificate,
-                qualificationCookie,
-                2000
+            const clientScope = await Effect.runPromise(Scope.make());
+            cleanup.defer("paused native client scope", () =>
+                Effect.runPromise(Scope.close(clientScope, Exit.void))
+            );
+            const pendingClient = Effect.runPromise(
+                Scope.provide(clientScope)(
+                    pausedTlsSseClientResource(
+                        proxy.url,
+                        tlsIdentity.certificate,
+                        qualificationCookie,
+                        2000
+                    )
+                )
             );
             void pendingClient.then(
                 () => clientPaused.resolve(),
                 (error: unknown) => clientPaused.reject(error)
             );
-            client = await pendingClient;
-            cleanup.defer("paused native client", () => client?.close());
+            await pendingClient;
             await readBoundary.boundaryHeld;
             await waitFor(() => eventFeed.activeSubscriberCount === 1);
 
@@ -147,8 +228,7 @@ describe("paused native TLS SSE client", () => {
                     qualificationEventLimits.maximumSubscriberQueuedPayloadBytes,
             });
 
-            await client.close();
-            client = undefined;
+            await Effect.runPromise(Scope.close(clientScope, Exit.void));
             readBoundary.release();
             await waitFor(
                 () =>

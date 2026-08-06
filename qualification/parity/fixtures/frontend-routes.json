@@ -1,0 +1,272 @@
+{
+    "contentPolicy": {
+        "containsHostConfiguration": false,
+        "containsRuntimeState": false,
+        "containsSecrets": false,
+        "sourceBacked": true
+    },
+    "routes": [
+        {
+            "access": "session",
+            "featureOwner": "overview",
+            "moduleKey": "dashboard",
+            "navigationLabel": "Dashboard",
+            "navigationPosition": 0,
+            "pageModule": "../pages/Dashboard",
+            "path": "/",
+            "searchNormalizer": null,
+            "sourceRouteName": "index",
+            "target": {
+                "delivery": "planned",
+                "path": "/",
+                "phase": "phase-3"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "agents",
+            "moduleKey": "agents",
+            "navigationLabel": "Agents",
+            "navigationPosition": 2,
+            "pageModule": "../pages/Agents",
+            "path": "/agents",
+            "searchNormalizer": null,
+            "sourceRouteName": "agents",
+            "target": {
+                "delivery": "planned",
+                "path": "/agents",
+                "phase": "phase-3"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "chat",
+            "moduleKey": "chat",
+            "navigationLabel": "Chat",
+            "navigationPosition": 4,
+            "pageModule": "../pages/Chat",
+            "path": "/chat",
+            "searchNormalizer": "normalizeChatSearch",
+            "sourceRouteName": "chat",
+            "target": {
+                "delivery": "planned",
+                "path": "/chat",
+                "phase": "phase-4"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "database",
+            "moduleKey": "database",
+            "navigationLabel": "Database",
+            "navigationPosition": 11,
+            "pageModule": "../pages/Database",
+            "path": "/database",
+            "searchNormalizer": null,
+            "sourceRouteName": "database",
+            "target": {
+                "delivery": "planned",
+                "path": "/database",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "delivery",
+            "moduleKey": "delivery",
+            "navigationLabel": "Delivery",
+            "navigationPosition": 8,
+            "pageModule": "../pages/Delivery",
+            "path": "/delivery",
+            "searchNormalizer": null,
+            "sourceRouteName": "delivery",
+            "target": {
+                "delivery": "planned",
+                "path": "/delivery",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "docker",
+            "moduleKey": "docker",
+            "navigationLabel": "Docker",
+            "navigationPosition": 10,
+            "pageModule": "../pages/Docker",
+            "path": "/docker",
+            "searchNormalizer": null,
+            "sourceRouteName": "docker",
+            "target": {
+                "delivery": "planned",
+                "path": "/docker",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "files",
+            "moduleKey": "files",
+            "navigationLabel": "Files",
+            "navigationPosition": 9,
+            "pageModule": "../pages/Files",
+            "path": "/files",
+            "searchNormalizer": null,
+            "sourceRouteName": "files",
+            "target": {
+                "delivery": "planned",
+                "path": "/files",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "schedules-jobs",
+            "moduleKey": "jobs",
+            "navigationLabel": "Jobs",
+            "navigationPosition": 6,
+            "pageModule": "../pages/Jobs",
+            "path": "/jobs",
+            "searchNormalizer": null,
+            "sourceRouteName": "jobs",
+            "target": {
+                "delivery": "planned",
+                "path": "/jobs",
+                "phase": "phase-3"
+            }
+        },
+        {
+            "access": "public",
+            "featureOwner": "security",
+            "moduleKey": "login",
+            "navigationLabel": null,
+            "navigationPosition": null,
+            "pageModule": "../pages/Login",
+            "path": "/login",
+            "searchNormalizer": null,
+            "sourceRouteName": "login",
+            "target": {
+                "delivery": "planned",
+                "path": "/login",
+                "phase": "phase-2"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "logs",
+            "moduleKey": "logs",
+            "navigationLabel": "Logs",
+            "navigationPosition": 5,
+            "pageModule": "../pages/Logs",
+            "path": "/logs",
+            "searchNormalizer": null,
+            "sourceRouteName": "logs",
+            "target": {
+                "delivery": "planned",
+                "path": "/logs",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "moltbook",
+            "moduleKey": "moltbook",
+            "navigationLabel": "Moltbook",
+            "navigationPosition": 12,
+            "pageModule": "../pages/Moltbook",
+            "path": "/moltbook",
+            "searchNormalizer": null,
+            "sourceRouteName": "moltbook",
+            "target": {
+                "delivery": "planned",
+                "path": "/moltbook",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "monitoring",
+            "moduleKey": "reports",
+            "navigationLabel": "Reports",
+            "navigationPosition": 7,
+            "pageModule": "../pages/Reports",
+            "path": "/reports",
+            "searchNormalizer": null,
+            "sourceRouteName": "reports",
+            "target": {
+                "delivery": "planned",
+                "path": "/reports",
+                "phase": "phase-3"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "gateway-sessions",
+            "moduleKey": "sessions",
+            "navigationLabel": "Sessions",
+            "navigationPosition": 3,
+            "pageModule": "../pages/Sessions",
+            "path": "/sessions",
+            "searchNormalizer": null,
+            "sourceRouteName": "sessions",
+            "target": {
+                "delivery": "planned",
+                "path": "/sessions",
+                "phase": "phase-4"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "settings",
+            "moduleKey": "settings",
+            "navigationLabel": "Settings",
+            "navigationPosition": 14,
+            "pageModule": "../pages/Settings",
+            "path": "/settings",
+            "searchNormalizer": "normalizeSettingsSearch",
+            "sourceRouteName": "settings",
+            "target": {
+                "delivery": "planned",
+                "path": "/settings",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "tasks",
+            "moduleKey": "tasks",
+            "navigationLabel": "Tasks",
+            "navigationPosition": 1,
+            "pageModule": "../pages/Tasks",
+            "path": "/tasks",
+            "searchNormalizer": null,
+            "sourceRouteName": "tasks",
+            "target": {
+                "delivery": "planned",
+                "path": "/tasks",
+                "phase": "phase-3"
+            }
+        },
+        {
+            "access": "session",
+            "featureOwner": "terminal",
+            "moduleKey": "terminal",
+            "navigationLabel": "Terminal",
+            "navigationPosition": 13,
+            "pageModule": "../pages/Terminal",
+            "path": "/terminal",
+            "searchNormalizer": null,
+            "sourceRouteName": "terminal",
+            "target": {
+                "delivery": "planned",
+                "path": "/terminal",
+                "phase": "phase-5"
+            }
+        }
+    ],
+    "schemaVersion": 1,
+    "sources": {
+        "navigation": "frontend/src/components/layout/Layout.tsx",
+        "routeModules": "frontend/src/lib/routeModules.ts",
+        "router": "frontend/src/router.tsx"
+    }
+}

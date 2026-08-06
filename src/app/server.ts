@@ -6,7 +6,7 @@ import type { AuthenticationLifecycleService } from "../server/domains/security/
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
-import type { ReadinessState } from "../server/platform/readiness/readinessState.ts";
+import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
 import {
@@ -33,18 +33,6 @@ const serverGracefulShutdownTimeoutSchema = v.pipe(
     )
 );
 
-function createShutdownDeadline(timeoutMs: number): {
-    cancel(): void;
-    readonly outcome: Promise<"timed-out">;
-} {
-    const deadline = Promise.withResolvers<"timed-out">();
-    const timeout = setTimeout(() => deadline.resolve("timed-out"), timeoutMs);
-    return {
-        cancel: () => clearTimeout(timeout),
-        outcome: deadline.promise,
-    };
-}
-
 async function primaryErrorAfterCleanup(
     primaryError: unknown,
     cleanup: () => Promise<void>
@@ -53,7 +41,7 @@ async function primaryErrorAfterCleanup(
         await cleanup();
     } catch {
         // The process boundary cannot recover from a cleanup double-fault.
-        // Preserve the initiating failure, which identifies the startup defect.
+        // Preserve the initiating failure, which identifies the original defect.
     }
     return primaryError;
 }
@@ -79,7 +67,7 @@ export interface ServerOptions {
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly port: number;
-    readonly readiness: ReadinessState;
+    readonly readiness: ReadinessController;
     /** Exact proxy peers allowed to supply one overwritten client address. */
     readonly trustedProxyAddresses?: readonly string[];
 }
@@ -152,43 +140,29 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
         } catch (error) {
             throw await primaryErrorAfterCleanup(error, () => server.stop(true));
         }
-        const forceStopRequest = Promise.withResolvers<"forced">();
-        let forceStopRequested = false;
+        const forceStopController = new AbortController();
         let stopPromise: Promise<void> | undefined;
 
         return Object.freeze({
             port: serverPort,
             stop(force = false) {
-                if (force && !forceStopRequested) {
-                    forceStopRequested = true;
-                    forceStopRequest.resolve("forced");
-                }
+                if (force) forceStopController.abort();
                 stopPromise ??= (async () => {
                     try {
-                        if (forceStopRequested) {
-                            await server.stop(true);
-                            return;
-                        }
-
-                        const gracefulStop = server.stop(false);
-                        const deadline = createShutdownDeadline(
-                            gracefulShutdownTimeoutMs
-                        );
-                        try {
-                            const outcome = await Promise.race([
-                                gracefulStop.then(() => "drained" as const),
-                                forceStopRequest.promise,
-                                deadline.outcome,
-                            ]);
-                            if (outcome !== "drained") {
-                                await server.stop(true);
-                            }
-                        } finally {
-                            deadline.cancel();
-                        }
-                    } finally {
-                        await options.applicationRuntime.dispose();
+                        await options.applicationRuntime.shutdownListener({
+                            forceSignal: forceStopController.signal,
+                            gracefulShutdownTimeoutMs,
+                            stop: (forceListener) => server.stop(forceListener),
+                        });
+                    } catch (error) {
+                        // A listener-stop rejection cannot prove that no request can still enter
+                        // the runtime. Withdraw readiness and preserve process services for the
+                        // supervisor's terminal containment instead of disposing them underneath
+                        // a potentially live listener.
+                        options.readiness.markUnavailable();
+                        throw error;
                     }
+                    await options.applicationRuntime.dispose();
                 })();
                 return stopPromise;
             },

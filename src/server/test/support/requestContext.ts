@@ -95,6 +95,7 @@ interface TestApplicationRuntimeOverrides {
     readonly authentication?: AuthenticationWorkRuntimeService;
     readonly dispose?: ApplicationRuntime["dispose"];
     readonly initialize?: ApplicationRuntime["initialize"];
+    readonly shutdownListener?: ApplicationRuntime["shutdownListener"];
     readonly stream?: RealtimeEventRuntimeService["stream"];
 }
 
@@ -316,6 +317,9 @@ export function createTestApplicationRuntime(
                         )),
             }),
         }),
+        shutdownListener:
+            overrides.shutdownListener ??
+            ((options) => options.stop(options.forceSignal.aborted)),
     });
 }
 

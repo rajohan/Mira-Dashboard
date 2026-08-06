@@ -1,0 +1,19 @@
+{
+    "gatewayEvents": ["agent"],
+    "methods": [
+        "agent",
+        "agent.identity.get",
+        "agent.wait",
+        "agents.create",
+        "agents.delete",
+        "agents.files.get",
+        "agents.files.list",
+        "agents.files.set",
+        "agents.list",
+        "agents.update",
+        "agents.workspace.get",
+        "agents.workspace.list"
+    ],
+    "schemaVersion": 1,
+    "domain": "agents"
+}

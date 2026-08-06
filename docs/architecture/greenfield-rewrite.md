@@ -1,9 +1,11 @@
 # Greenfield Rewrite Blueprint
 
-> **Status:** implementation started. The rewrite is built beside the current production
-> implementation and targets a fresh database with no compatibility layer.
+> **Status:** implementation active. Phase 0 evidence is complete and Phase 2 is complete for its
+> stated server scope; the remaining foundation, browser, domain, Gateway/chat, privileged,
+> hardening, and cutover phases are incomplete. The rewrite is built beside the current
+> production implementation and targets a fresh database with no compatibility layer.
 >
-> **Audit date:** 2026-08-04. Package versions and the Bun canary snapshot in this document
+> **Audit date:** 2026-08-06. Package versions and the Bun canary snapshot in this document
 > are point-in-time facts. They are rechecked during an explicit candidate-promotion round,
 > not for ordinary feature or review commits.
 

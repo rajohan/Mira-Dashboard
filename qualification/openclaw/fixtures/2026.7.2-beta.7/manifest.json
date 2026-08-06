@@ -1,0 +1,183 @@
+{
+    "components": [
+        {
+            "file": "agents.json",
+            "sha256": "0f4dabfe6373bc1448bd5b3f3e6926a2e4f2cec47a18a4443a82785f1e5cfeae"
+        },
+        {
+            "file": "chat.json",
+            "sha256": "e7a2520f9506b64b5acd6083e15aef8890be26c625bf7630341284e063a50ccc"
+        },
+        {
+            "file": "cron.json",
+            "sha256": "1a7916667cba1e13bf830ae6e92f7a027beb28d22d1235f73fa0b77f92f826b9"
+        },
+        {
+            "file": "gateway.json",
+            "sha256": "4b3bfa47e9bb0f8e96e519acbb6bdce18ba7c303778980216109a369a6086137"
+        },
+        {
+            "file": "sessions.json",
+            "sha256": "a335ae2b415016e805246dc2650e43158eddb4e6f36df6996fd69dad01d06074"
+        },
+        {
+            "file": "tasks.json",
+            "sha256": "a179bd882f1397941743841ba10cdece0616f3123f8c972bfbf5c7668c538f65"
+        }
+    ],
+    "contentPolicy": {
+        "containsHostConfiguration": false,
+        "containsRuntimeState": false,
+        "containsSecrets": false,
+        "sourceArtifacts": "hashes-only",
+        "syntheticPayloadsOnly": true
+    },
+    "schemaVersion": 1,
+    "source": {
+        "builtAt": "2026-08-01T19:22:56.002Z",
+        "commit": "dabe1915362e20c25704af91612a32a8f4c96e83",
+        "packageName": "openclaw",
+        "protocolVersion": 4,
+        "version": "2026.7.2-beta.7"
+    },
+    "sourceArtifacts": [
+        {
+            "bytes": 132,
+            "path": "dist/build-info.json",
+            "role": "build-info",
+            "sha256": "623249d20e099eec46ac4c3c281ad8672737919b68b74d1da62f94c3432ab491"
+        },
+        {
+            "bytes": 14070,
+            "path": "dist/chat-abort-BhN5ed23.js",
+            "role": "chat-run-projection",
+            "sha256": "a1c96ee4d16954fee214ab43fa1528a2f5650231fa64e9db9562cf9580cf6891"
+        },
+        {
+            "bytes": 43792,
+            "path": "dist/server-chat-CdNm7sYZ.js",
+            "role": "chat-streaming",
+            "sha256": "b5c177536b7d7c89be6327f9146a8cf8223b70bb9f202f07ade55c3bad1d9ea8"
+        },
+        {
+            "bytes": 527552,
+            "path": "dist/control-ui/assets/chat-page-6DmC-GhZ.js",
+            "role": "control-ui-chat",
+            "sha256": "5ff8d222793f85b73c7b8baa93a7e9ab30762c826793e9e59087fefbfa14be7c"
+        },
+        {
+            "bytes": 14333,
+            "path": "dist/control-ui/assets/chat-session-rail-BrqMURJB.js",
+            "role": "control-ui-plan-rail",
+            "sha256": "af63092637ece340a6d751f15de1a1a64a03aa35ff9d4872dc7d2334915f447c"
+        },
+        {
+            "bytes": 251651,
+            "path": "dist/control-ui/assets/chat-message-0eXitjaF.js",
+            "role": "control-ui-plan-renderer",
+            "sha256": "a42e193f44dd1066309961c94aafdbe116efa419aa8416a60166bc686dbefb2c"
+        },
+        {
+            "bytes": 2735,
+            "path": "dist/server-methods-list-BBb6tAGx.js",
+            "role": "gateway-events",
+            "sha256": "c2574b2acf54a3b9983a53cb1305d443c8e50d132fc4879c16a2890277f2c714"
+        },
+        {
+            "bytes": 663,
+            "path": "dist/server-constants-DKuFNbQH.js",
+            "role": "gateway-limits",
+            "sha256": "f91c3844f4ba9518e94bd84a71e72bbefe4ea36a61a90b81b16a30e60b06bb9e"
+        },
+        {
+            "bytes": 32625,
+            "path": "dist/server-methods-qb0Zm5m_.js",
+            "role": "gateway-methods",
+            "sha256": "87e0150acf911d80b2af719c9550a5295d22b83a0eda94e4ab18ccdfdac54222"
+        },
+        {
+            "bytes": 32788,
+            "path": "dist/server-ws-runtime-BSymIEDW.js",
+            "role": "gateway-websocket",
+            "sha256": "ef51e2b35c7d1172dda3e1049caa6de7d0e8d5fde64267e06086689c7a01e652"
+        },
+        {
+            "bytes": 33960,
+            "path": "dist/core-descriptors-BbSqaxhR.js",
+            "role": "method-descriptors",
+            "sha256": "9f67a7220b8753996feb74a9bf76529b955b39983667f57565aa2cb977770e04"
+        },
+        {
+            "bytes": 113599,
+            "path": "package.json",
+            "role": "package-metadata",
+            "sha256": "19153cb18fadae0b12627274e86e2bf8ccec619e3b0141af24dac4acac0823cb"
+        },
+        {
+            "bytes": 871605,
+            "path": "dist/openclaw-tools-DsjdCfmj.js",
+            "role": "plan-tool",
+            "sha256": "f05a1a4164690da8040561c572435264d991f424bb1bf7845a685a84a09f4643"
+        },
+        {
+            "bytes": 793342,
+            "path": "dist/index-Dfn_edHo.d.ts",
+            "role": "protocol-declarations",
+            "sha256": "5bfb08c959f6e37b0f900e065e436876f729d183b430b96f0c569b0a5bb7ed1a"
+        },
+        {
+            "bytes": 380524,
+            "path": "dist/src-Bf6X-__K.js",
+            "role": "protocol-schemas",
+            "sha256": "8a6305a5f56b7c853ad1964c1df093d41c17d2812e8356685280ef4f84d893fb"
+        },
+        {
+            "bytes": 638,
+            "path": "dist/version-CwNT1gaY.js",
+            "role": "protocol-version",
+            "sha256": "fb5bf01f88b38b22bb05bb91538fed58db58038359e43017b68e4c989c971f76"
+        },
+        {
+            "bytes": 62049,
+            "path": "dist/server-runtime-subscriptions-BQ4b3zkh.js",
+            "role": "runtime-subscriptions",
+            "sha256": "171c52bd6a3d10e8555fdaf00aed3ce225fd465911ef8958ce8235751a4c6f7b"
+        },
+        {
+            "bytes": 3364,
+            "path": "dist/session-companion-rpc-BItcEiDG.js",
+            "role": "session-companion-rpc",
+            "sha256": "30ef81d5df4c08320bcbdf6fdbb831a83ac0e1d383e06f878717080b92e72479"
+        },
+        {
+            "bytes": 16104,
+            "path": "dist/session-companion-ask-DdsC3uMJ.js",
+            "role": "session-companion-runtime",
+            "sha256": "9a7057f9fb6e44ef642f9a6413bb716076c5633cbc68f186d3da81cfb8e5dce1"
+        },
+        {
+            "bytes": 24828,
+            "path": "dist/subagent-control-BLCfdEdC.js",
+            "role": "subagent-control",
+            "sha256": "216871a7c7e5aa26644425f2daf9e238961f84ee0aa95c89fb21c68090e93b88"
+        },
+        {
+            "bytes": 102984,
+            "path": "dist/task-registry-CSGqEUH0.js",
+            "role": "task-registry",
+            "sha256": "fb7ab0badc2453c326edb76099a7324340251df46e7ec0b9b9ef7123b3b7e97b"
+        },
+        {
+            "bytes": 2419,
+            "path": "dist/task-summary-gsUnf0hI.js",
+            "role": "task-summary",
+            "sha256": "d0d13f8077a61d3e4d656f18306368360a991a7c6bfaf526be9d01b30f712ab9"
+        },
+        {
+            "bytes": 4058,
+            "path": "dist/tasks-Btru2I19.js",
+            "role": "tasks-handlers",
+            "sha256": "5616d32c248fb98f38e1bccdc85fdb92acba492410da085a7876e29ea4a648e3"
+        }
+    ]
+}

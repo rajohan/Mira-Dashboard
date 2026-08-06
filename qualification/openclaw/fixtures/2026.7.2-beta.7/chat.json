@@ -1,0 +1,90 @@
+{
+    "gatewayEvents": ["agent", "chat", "session.message", "session.tool"],
+    "methods": [
+        "chat.abort",
+        "chat.history",
+        "chat.inject",
+        "chat.message.get",
+        "chat.metadata",
+        "chat.send",
+        "chat.startup",
+        "chat.toolTitles"
+    ],
+    "schemaVersion": 1,
+    "domain": "chat",
+    "streamingPolicy": {
+        "coalescedAgentStreams": ["assistant", "thinking"],
+        "deltaThrottleMs": 150,
+        "flushBeforeBoundaries": ["item.start", "tool.start"],
+        "flushBufferedDeltaBeforeTerminal": true,
+        "terminalStates": ["final", "aborted", "error"]
+    },
+    "syntheticScenarios": [
+        {
+            "events": [
+                {
+                    "delta": "Checking cancellation.",
+                    "kind": "agent-delta",
+                    "seq": 1,
+                    "stream": "assistant",
+                    "text": "Checking cancellation."
+                },
+                {
+                    "deltaText": "Checking cancellation.",
+                    "kind": "chat-delta",
+                    "seq": 2
+                },
+                {
+                    "kind": "chat-terminal",
+                    "seq": 3,
+                    "state": "aborted",
+                    "stopReason": "cancelled"
+                }
+            ],
+            "id": "cancelled-run"
+        },
+        {
+            "events": [
+                {
+                    "delta": "Inspecting synthetic input.",
+                    "kind": "agent-delta",
+                    "seq": 1,
+                    "stream": "thinking",
+                    "text": "Inspecting synthetic input."
+                },
+                {
+                    "delta": "Running the fixture tool.",
+                    "kind": "agent-delta",
+                    "seq": 2,
+                    "stream": "assistant",
+                    "text": "Running the fixture tool."
+                },
+                {
+                    "kind": "tool-start",
+                    "seq": 3,
+                    "toolCallId": "fixture-tool-1",
+                    "toolName": "fixture.lookup"
+                },
+                {
+                    "kind": "tool-result",
+                    "outcome": "ok",
+                    "seq": 4,
+                    "toolCallId": "fixture-tool-1",
+                    "toolName": "fixture.lookup"
+                },
+                {
+                    "deltaText": "Fixture complete.",
+                    "kind": "chat-delta",
+                    "seq": 5
+                },
+                {
+                    "kind": "chat-terminal",
+                    "seq": 6,
+                    "state": "final",
+                    "stopReason": "completed"
+                }
+            ],
+            "id": "completed-tool-run"
+        }
+    ]
+}
