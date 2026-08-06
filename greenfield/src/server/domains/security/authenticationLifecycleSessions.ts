@@ -80,9 +80,9 @@ export function createAuthenticationSessionOperations(
             });
         },
 
-        logout(identity, metadata) {
+        async logout(identity, metadata) {
             if (identity === undefined) return false;
-            return context.repository.withImmediateTransaction((unit) => {
+            return await context.repository.withImmediateTransaction((unit) => {
                 const occurredAt = context.now();
                 const revoked = unit.deleteSession(identity.userId, identity.sessionId);
                 if (!revoked) return false;
@@ -99,8 +99,8 @@ export function createAuthenticationSessionOperations(
             });
         },
 
-        revokeSession(identity, sessionId, metadata) {
-            return context.repository.withImmediateTransaction((unit) => {
+        async revokeSession(identity, sessionId, metadata) {
+            return await context.repository.withImmediateTransaction((unit) => {
                 const occurredAt = context.now();
                 const user = unit.findUserById(identity.userId);
                 const actorSession = unit.findSession(
@@ -178,7 +178,7 @@ export function createAuthenticationSessionOperations(
             };
         },
 
-        touchSession(identity) {
+        async touchSession(identity) {
             const touchedAt = context.now();
             const user = context.repository.findUserById(identity.userId);
             const current = context.repository.findSession(
@@ -200,7 +200,7 @@ export function createAuthenticationSessionOperations(
             ) {
                 return { lastSeenAtMs: getTime(current.lastSeenAt) };
             }
-            const updated = context.repository.withImmediateTransaction((unit) => {
+            const updated = await context.repository.withImmediateTransaction((unit) => {
                 const currentUser = unit.findUserById(identity.userId);
                 if (
                     currentUser === undefined ||

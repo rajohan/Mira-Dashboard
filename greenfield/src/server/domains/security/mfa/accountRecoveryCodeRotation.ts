@@ -80,7 +80,7 @@ export function createAccountRecoveryCodeRotationOperation(
             const rotatedAt = now();
 
             try {
-                return repository.withImmediateTransaction((unit) => {
+                return await repository.withImmediateTransaction((unit) => {
                     const current = currentAccount(
                         unit,
                         identity,

@@ -123,7 +123,7 @@ export function createBeginWebAuthnEnrollmentOperation(
             const expiresAt = addMilliseconds(createdAt, webAuthnCeremonyTimeoutMs);
             const challengeId = generateId();
             try {
-                return repository.withImmediateTransaction((unit) => {
+                return await repository.withImmediateTransaction((unit) => {
                     const current = currentAccount(
                         unit,
                         identity,

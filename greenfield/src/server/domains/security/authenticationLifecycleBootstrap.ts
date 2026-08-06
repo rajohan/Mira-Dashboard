@@ -68,7 +68,7 @@ function recordBootstrapFailure(
 }
 
 function mapBootstrapFailure(
-    failure: ReturnType<typeof recordBootstrapFailure>,
+    failure: Awaited<ReturnType<typeof recordBootstrapFailure>>,
     fallbackStatus: "gateway-unavailable" | "invalid-gateway"
 ) {
     if (failure.status === "closed" || failure.status === "rate-limited") {
@@ -111,20 +111,24 @@ export function createAuthenticationBootstrapOperation(
             }
 
             let settledGatewayFailure: ReturnType<typeof mapBootstrapFailure> | undefined;
-            const settleGatewayFailure = (
+            let gatewayFailureSettlement:
+                | Promise<ReturnType<typeof mapBootstrapFailure>>
+                | undefined;
+            const settleGatewayFailure = async (
                 reason: "gateway_unavailable" | "invalid_gateway",
                 fallbackStatus: "gateway-unavailable" | "invalid-gateway"
-            ): ReturnType<typeof mapBootstrapFailure> => {
-                settledGatewayFailure ??= mapBootstrapFailure(
-                    recordBootstrapFailure(
-                        context,
-                        rateLimitTargets,
-                        context.now(),
-                        metadata,
-                        reason
-                    ),
-                    fallbackStatus
-                );
+            ): Promise<ReturnType<typeof mapBootstrapFailure>> => {
+                if (settledGatewayFailure !== undefined) {
+                    return settledGatewayFailure;
+                }
+                gatewayFailureSettlement ??= recordBootstrapFailure(
+                    context,
+                    rateLimitTargets,
+                    context.now(),
+                    metadata,
+                    reason
+                ).then((failure) => mapBootstrapFailure(failure, fallbackStatus));
+                settledGatewayFailure = await gatewayFailureSettlement;
                 return settledGatewayFailure;
             };
 
@@ -152,11 +156,14 @@ export function createAuthenticationBootstrapOperation(
                             };
                             return false;
                         },
-                        onInvalid: () => {
-                            settleGatewayFailure("invalid_gateway", "invalid-gateway");
+                        onInvalid: async () => {
+                            await settleGatewayFailure(
+                                "invalid_gateway",
+                                "invalid-gateway"
+                            );
                         },
-                        onUnavailable: () => {
-                            settleGatewayFailure(
+                        onUnavailable: async () => {
+                            await settleGatewayFailure(
                                 "gateway_unavailable",
                                 "gateway-unavailable"
                             );
@@ -179,7 +186,10 @@ export function createAuthenticationBootstrapOperation(
                 ) {
                     throw error;
                 }
-                return settleGatewayFailure("gateway_unavailable", "gateway-unavailable");
+                return await settleGatewayFailure(
+                    "gateway_unavailable",
+                    "gateway-unavailable"
+                );
             }
 
             metadata.signal?.throwIfAborted();
@@ -187,7 +197,7 @@ export function createAuthenticationBootstrapOperation(
                 return settledGatewayFailure;
             }
             if (!gatewayCredentialIsValid) {
-                return settleGatewayFailure("invalid_gateway", "invalid-gateway");
+                return await settleGatewayFailure("invalid_gateway", "invalid-gateway");
             }
 
             if (context.repository.countUsers() !== 0) {
@@ -207,7 +217,7 @@ export function createAuthenticationBootstrapOperation(
                 const passwordHash = await context.hashPassword(input.password);
                 metadata.signal?.throwIfAborted();
                 const createdAt = context.now();
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     if (unit.countUsers() !== 0) {
                         return { status: "closed" } as const;
                     }

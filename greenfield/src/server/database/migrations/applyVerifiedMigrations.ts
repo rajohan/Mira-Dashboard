@@ -34,6 +34,7 @@ const nonAdvancingMigrationClockError =
     "Migration appliedAt must advance beyond stored migration history";
 const schemaHistoryMismatchError =
     "Database schema does not match reviewed migration history";
+const maximumReviewedSchemaObjectCount = 4096;
 const migrationAppliedAtSchema = timestampMillisecondsSchema(
     "Migration appliedAt must be valid Date milliseconds"
 );
@@ -73,19 +74,23 @@ function runMigrationStatements(database: Database, statements: readonly string[
     }
 }
 
-function applicationSchemaObjects(database: Database): SchemaObjectRow[] {
+function applicationSchemaObjects(
+    database: Database,
+    maximumRows: number
+): SchemaObjectRow[] {
     const rows: unknown = database
         .query(`
             SELECT name, sql, tbl_name AS tableName, type
             FROM sqlite_schema
             WHERE name NOT GLOB 'sqlite_*'
             ORDER BY type, name
+            LIMIT ?
         `)
-        .all();
+        .all(maximumRows + 1);
     const validation = v.safeParse(schemaObjectRowsSchema, rows, {
         abortEarly: true,
     });
-    if (!validation.success) {
+    if (!validation.success || validation.output.length > maximumRows) {
         throw new Error(schemaHistoryMismatchError);
     }
     return validation.output;
@@ -100,7 +105,33 @@ function expectedSchemaObjects(
         for (const migration of migrations) {
             runMigrationStatements(expectedDatabase, migration.statements);
         }
-        return applicationSchemaObjects(expectedDatabase);
+        return applicationSchemaObjects(
+            expectedDatabase,
+            maximumReviewedSchemaObjectCount
+        );
+    } finally {
+        expectedDatabase.close(true);
+    }
+}
+
+function maximumExpectedSchemaObjectCount(
+    migrations: readonly VerifiedMigration[]
+): number {
+    const expectedDatabase = new Database(":memory:", { strict: true });
+    let maximumCount = 0;
+
+    try {
+        for (const migration of migrations) {
+            runMigrationStatements(expectedDatabase, migration.statements);
+            maximumCount = Math.max(
+                maximumCount,
+                applicationSchemaObjects(
+                    expectedDatabase,
+                    maximumReviewedSchemaObjectCount
+                ).length
+            );
+        }
+        return maximumCount;
     } finally {
         expectedDatabase.close(true);
     }
@@ -111,15 +142,18 @@ function assertSchemaMatchesReviewedHistory(
     migrations: readonly VerifiedMigration[],
     appliedCount: number
 ): void {
-    const actual = applicationSchemaObjects(database);
     const expected = expectedSchemaObjects(migrations.slice(0, appliedCount));
+    const actual = applicationSchemaObjects(database, expected.length);
 
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
         throw new Error("Database schema does not match reviewed migration history");
     }
 }
 
-function readAppliedMigrations(database: Database): AppliedMigrationRow[] {
+function readAppliedMigrations(
+    database: Database,
+    maximumRows: number
+): AppliedMigrationRow[] {
     const rows: unknown = database
         .query(`
             SELECT
@@ -129,12 +163,13 @@ function readAppliedMigrations(database: Database): AppliedMigrationRow[] {
                 release_id AS releaseId
             FROM schema_migrations
             ORDER BY id
+            LIMIT ?
         `)
-        .all();
+        .all(maximumRows + 1);
     const validation = v.safeParse(appliedMigrationRowsSchema, rows, {
         abortEarly: true,
     });
-    if (!validation.success) {
+    if (!validation.success || validation.output.length > maximumRows) {
         throw new Error(migrationHistoryMismatchError);
     }
     return validation.output;
@@ -255,9 +290,10 @@ export function applyVerifiedMigrations(
         throw new Error("Migration release id must be a full lowercase commit SHA");
     }
     assertConstraintEnforcement(database);
+    const maximumSchemaObjects = maximumExpectedSchemaObjectCount(migrations);
 
     const apply = database.transaction(() => {
-        const schemaObjects = applicationSchemaObjects(database);
+        const schemaObjects = applicationSchemaObjects(database, maximumSchemaObjects);
         const hasMigrationHistory = schemaObjects.some(
             (object) => object.type === "table" && object.name === "schema_migrations"
         );
@@ -265,7 +301,9 @@ export function applyVerifiedMigrations(
             throw new Error("Initialized database is missing migration history");
         }
 
-        const applied = hasMigrationHistory ? readAppliedMigrations(database) : [];
+        const applied = hasMigrationHistory
+            ? readAppliedMigrations(database, migrations.length)
+            : [];
         if (hasMigrationHistory && applied.length === 0) {
             throw new Error("Initialized database has empty migration history");
         }
@@ -296,7 +334,7 @@ export function applyVerifiedMigrations(
             );
         }
 
-        const finalApplied = readAppliedMigrations(database);
+        const finalApplied = readAppliedMigrations(database, migrations.length);
         assertAppliedPrefix(finalApplied, migrations);
         if (finalApplied.length !== migrations.length) {
             throw new Error("Database migration history is incomplete after application");
@@ -308,4 +346,35 @@ export function applyVerifiedMigrations(
     });
 
     return apply.immediate();
+}
+
+/**
+ * Validates one already-current database without taking SQLite's writer slot.
+ * The deferred read snapshot keeps history, schema, and integrity evidence coherent
+ * while WAL writers in the serving generation continue independently.
+ * @param database Retained native SQLite connection.
+ * @param migrations Complete checksum-verified canonical migration graph.
+ * @param checkedAt Application clock used to reject future ledger history.
+ */
+export function validateVerifiedMigrations(
+    database: Database,
+    migrations: readonly VerifiedMigration[],
+    checkedAt: Date = new Date()
+): void {
+    assertCanonicalVerifiedGraph(migrations);
+    assertConstraintEnforcement(database);
+
+    const validate = database.transaction(() => {
+        const applied = readAppliedMigrations(database, migrations.length);
+        assertAppliedPrefix(applied, migrations);
+        if (applied.length !== migrations.length) {
+            throw new Error("Database migration history is incomplete");
+        }
+        planMigrationAppliedAtValues(getTime(checkedAt), 0, latestAppliedAt(applied));
+        assertSchemaMatchesReviewedHistory(database, migrations, applied.length);
+        assertConstraintEnforcement(database);
+        assertDatabaseIntegrity(database);
+    });
+
+    validate.deferred();
 }

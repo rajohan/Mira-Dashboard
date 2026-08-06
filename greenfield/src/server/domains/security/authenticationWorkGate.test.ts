@@ -182,7 +182,7 @@ describe("process authentication work service", () => {
             });
 
             pending.resolve(false);
-            await Promise.resolve();
+            await Bun.sleep(0);
             expect(
                 await gateway(() => Promise.resolve(true), { timeoutMs: 100 })
             ).toBeTrue();

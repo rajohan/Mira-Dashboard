@@ -134,13 +134,13 @@ export const authPublicRoutes = {
     logout: publicProcedure
         .input(emptyInputSchema)
         .output(okResultSchema)
-        .mutation(({ ctx }) => {
-            ctx.authenticationLifecycle.logout(
+        .mutation(async ({ ctx }) => {
+            await ctx.authenticationLifecycle.logout(
                 currentSessionIdentity(ctx),
                 authenticationRequestMetadata(ctx, undefined)
             );
             if (ctx.pendingLoginCredential.kind === "present") {
-                ctx.mfaLoginLifecycle.revokePendingLogin(
+                await ctx.mfaLoginLifecycle.revokePendingLogin(
                     ctx.pendingLoginCredential.token,
                     authenticationRequestMetadata(ctx, undefined)
                 );

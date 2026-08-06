@@ -48,6 +48,21 @@ export class DatabaseRuntimeLockTimeoutError extends Schema.TaggedErrorClass<Dat
     timeoutMs: Schema.Number,
 }) {}
 
+/** Expected write failure after bounded asynchronous SQLite admission retry. */
+export class DatabaseRuntimeWriteAdmissionTimeoutError extends Schema.TaggedErrorClass<DatabaseRuntimeWriteAdmissionTimeoutError>(
+    "mira-dashboard/server/database/runtime/DatabaseRuntimeWriteAdmissionTimeoutError"
+)("DatabaseRuntimeWriteAdmissionTimeoutError", {
+    message: Schema.String,
+    timeoutMs: Schema.Number,
+}) {}
+
+/** Expected non-replayed contention after an immediate transaction was admitted. */
+export class DatabaseRuntimeWriteContentionError extends Schema.TaggedErrorClass<DatabaseRuntimeWriteContentionError>(
+    "mira-dashboard/server/database/runtime/DatabaseRuntimeWriteContentionError"
+)("DatabaseRuntimeWriteContentionError", {
+    message: Schema.String,
+}) {}
+
 /** Fail-closed signal that a published database needs a verified release snapshot. */
 export class DatabaseRuntimeSnapshotRequiredError extends Schema.TaggedErrorClass<DatabaseRuntimeSnapshotRequiredError>(
     "mira-dashboard/server/database/runtime/DatabaseRuntimeSnapshotRequiredError"
@@ -82,6 +97,8 @@ const databaseRuntimeErrorSchema = Schema.Union([
     DatabaseRuntimePathError,
     DatabaseRuntimeSnapshotRequiredError,
     DatabaseRuntimeStartupError,
+    DatabaseRuntimeWriteAdmissionTimeoutError,
+    DatabaseRuntimeWriteContentionError,
 ]);
 
 /** Runtime guard for failures crossing the database layer boundary. */
@@ -90,4 +107,24 @@ export const isDatabaseRuntimeError = Schema.is(databaseRuntimeErrorSchema);
 export type DatabaseRuntimeError =
     | DatabaseRuntimeAcquisitionError
     | DatabaseRuntimeCheckpointError
-    | DatabaseRuntimeCloseError;
+    | DatabaseRuntimeCloseError
+    | DatabaseRuntimeWriteAdmissionTimeoutError
+    | DatabaseRuntimeWriteContentionError;
+
+export type DatabaseRuntimeWriteUnavailableError =
+    | DatabaseRuntimeWriteAdmissionTimeoutError
+    | DatabaseRuntimeWriteContentionError;
+
+/**
+ * Runtime guard for temporary write-contention failures safe to map to HTTP 503.
+ * @param error Unknown failure crossing the database boundary.
+ * @returns Whether the failure represents bounded write unavailability.
+ */
+export function isDatabaseRuntimeWriteUnavailableError(
+    error: unknown
+): error is DatabaseRuntimeWriteUnavailableError {
+    return (
+        error instanceof DatabaseRuntimeWriteAdmissionTimeoutError ||
+        error instanceof DatabaseRuntimeWriteContentionError
+    );
+}

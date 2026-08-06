@@ -127,8 +127,8 @@ export const automationSecurityRoutes = {
     createPrincipal: sessionProcedure
         .input(createAutomationPrincipalInputSchema)
         .output(createAutomationPrincipalResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.automationSecurityLifecycle.createPrincipal(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.automationSecurityLifecycle.createPrincipal(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)
@@ -148,8 +148,8 @@ export const automationSecurityRoutes = {
     createCredential: sessionProcedure
         .input(createAutomationCredentialInputSchema)
         .output(createAutomationCredentialResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.automationSecurityLifecycle.createCredential(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.automationSecurityLifecycle.createCredential(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)
@@ -162,8 +162,8 @@ export const automationSecurityRoutes = {
     rotateCredential: sessionProcedure
         .input(rotateAutomationCredentialInputSchema)
         .output(rotateAutomationCredentialResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.automationSecurityLifecycle.rotateCredential(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.automationSecurityLifecycle.rotateCredential(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)
@@ -176,8 +176,8 @@ export const automationSecurityRoutes = {
     revokeCredential: sessionProcedure
         .input(revokeAutomationCredentialInputSchema)
         .output(revokeAutomationCredentialResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.automationSecurityLifecycle.revokeCredential(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.automationSecurityLifecycle.revokeCredential(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)
@@ -190,8 +190,8 @@ export const automationSecurityRoutes = {
     replaceCapabilities: sessionProcedure
         .input(replaceAutomationCapabilitiesInputSchema)
         .output(replaceAutomationCapabilitiesResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.automationSecurityLifecycle.replaceCapabilities(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.automationSecurityLifecycle.replaceCapabilities(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)
@@ -211,8 +211,8 @@ export const automationSecurityRoutes = {
     disablePrincipal: sessionProcedure
         .input(disableAutomationPrincipalInputSchema)
         .output(disableAutomationPrincipalResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.automationSecurityLifecycle.disablePrincipal(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.automationSecurityLifecycle.disablePrincipal(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)

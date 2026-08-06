@@ -631,6 +631,7 @@ const existingPrincipalMutationErrors = [
     "CONFLICT",
     "FORBIDDEN",
     "NOT_FOUND",
+    "SERVICE_UNAVAILABLE",
     "UNAUTHORIZED",
 ] as const;
 const credentialGenerationErrors = [

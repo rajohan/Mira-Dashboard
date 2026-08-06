@@ -40,9 +40,9 @@ export function createRemoveTotpFactorOperation(
     } = context;
 
     return Object.freeze({
-        removeTotpFactor(identity, input, metadata) {
+        async removeTotpFactor(identity, input, metadata) {
             const occurredAt = now();
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const account = activeAccount(
                     unit,
                     identity,

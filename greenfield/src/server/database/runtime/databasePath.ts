@@ -73,6 +73,23 @@ function matchesPrivateDatabaseFilePolicy(stat: BigIntStats, userId: number): bo
     );
 }
 
+function matchesProtectedAncestorPolicy(
+    stat: BigIntStats,
+    childOwnerId: bigint,
+    userId: number
+): boolean {
+    const ownerId = stat.uid;
+    const trustedOwner = ownerId === 0n || ownerId === BigInt(userId);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !trustedOwner) return false;
+
+    const writableByAnotherPrincipal = (stat.mode & 0o022n) !== 0n;
+    if (!writableByAnotherPrincipal) return true;
+
+    const sticky = (stat.mode & 0o1000n) !== 0n;
+    const protectedChildOwner = childOwnerId === 0n || childOwnerId === BigInt(userId);
+    return sticky && protectedChildOwner;
+}
+
 function identityOf(stat: BigIntStats): DatabasePathIdentity {
     return Object.freeze({ device: stat.dev, inode: stat.ino });
 }
@@ -82,6 +99,27 @@ function sameIdentity(
     expected: DatabasePathIdentity
 ): boolean {
     return actual.device === expected.device && actual.inode === expected.inode;
+}
+
+async function assertProtectedStateDirectoryAncestors(
+    stateDirectory: string,
+    stateDirectoryStat: BigIntStats,
+    userId: number
+): Promise<void> {
+    let childPath = stateDirectory;
+    let childOwnerId = stateDirectoryStat.uid;
+
+    while (true) {
+        const parentPath = path.dirname(childPath);
+        if (parentPath === childPath) return;
+
+        const parentStat = await lstat(parentPath, { bigint: true });
+        if (!matchesProtectedAncestorPolicy(parentStat, childOwnerId, userId)) {
+            throw invalidStateDirectory();
+        }
+        childPath = parentPath;
+        childOwnerId = parentStat.uid;
+    }
 }
 
 async function assertCanonicalPrivateStateDirectory(stateDirectory: string): Promise<{
@@ -109,6 +147,7 @@ async function assertCanonicalPrivateStateDirectory(stateDirectory: string): Pro
         ) {
             throw invalidStateDirectory();
         }
+        await assertProtectedStateDirectoryAncestors(canonicalDirectory, stat, userId);
         return {
             directory: canonicalDirectory,
             identity: identityOf(stat),

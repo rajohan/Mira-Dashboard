@@ -1,6 +1,7 @@
 import { getTime, hoursToMilliseconds, subMilliseconds } from "date-fns";
 import { Effect } from "effect";
 
+import { testImmediateDatabaseWriteAdmission } from "../../../test/support/databaseWriteAdmission.ts";
 import type { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
 import { createMonitoringRepository } from "../repository.ts";
 import { createMonitoringService, type MonitoringSubmissionError } from "../service.ts";
@@ -95,7 +96,10 @@ export function serviceFor(
         generateId: overrides.generateId ?? idGenerator(),
         nowMs: () => eventNowMs,
         realtimeRetentionMs: oneDayMs,
-        repository: createMonitoringRepository(database.orm),
+        repository: createMonitoringRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        ),
         wakeEventPump: overrides.wakeEventPump,
     });
 }
@@ -103,14 +107,14 @@ export function serviceFor(
 export type TestMonitoringService = ReturnType<typeof createMonitoringService>;
 
 export function submitSnapshot(service: TestMonitoringService, input: unknown) {
-    return Effect.runSync(service.submitCompleteSnapshot(input));
+    return Effect.runPromise(service.submitCompleteSnapshot(input));
 }
 
 export function submitSnapshotFailure(
     service: TestMonitoringService,
     input: unknown
-): MonitoringSubmissionError {
-    return Effect.runSync(Effect.flip(service.submitCompleteSnapshot(input)));
+): Promise<MonitoringSubmissionError> {
+    return Effect.runPromise(Effect.flip(service.submitCompleteSnapshot(input)));
 }
 
 export { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";

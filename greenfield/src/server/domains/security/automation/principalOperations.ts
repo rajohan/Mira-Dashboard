@@ -67,10 +67,10 @@ export function createAutomationPrincipalOperations(
     "createPrincipal" | "disablePrincipal" | "listPrincipals" | "replaceCapabilities"
 > {
     return {
-        createPrincipal(identity, input, metadata) {
+        async createPrincipal(identity, input, metadata) {
             const generation = generateCredentialMaterials(context);
             try {
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     const createdAt = context.now();
                     const policy = context.authorizeAdministration(
                         unit,
@@ -163,9 +163,9 @@ export function createAutomationPrincipalOperations(
             }
         },
 
-        disablePrincipal(identity, input, metadata) {
+        async disablePrincipal(identity, input, metadata) {
             try {
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     const disabledAt = context.now();
                     const policy = context.authorizeAdministration(
                         unit,
@@ -266,9 +266,9 @@ export function createAutomationPrincipalOperations(
             }
         },
 
-        replaceCapabilities(identity, input, metadata) {
+        async replaceCapabilities(identity, input, metadata) {
             try {
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     const replacedAt = context.now();
                     const policy = context.authorizeAdministration(
                         unit,

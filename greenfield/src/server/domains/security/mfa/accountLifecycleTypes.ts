@@ -269,12 +269,12 @@ export interface MfaAccountLifecycleService {
         identity: AuthenticatedBrowserIdentity,
         input: RemoveTotpFactorInput,
         metadata: AuthenticationRequestMetadata
-    ): RemoveTotpFactorResult;
+    ): Promise<RemoveTotpFactorResult>;
     removeWebAuthnCredential(
         identity: AuthenticatedBrowserIdentity,
         input: RemoveWebAuthnCredentialInput,
         metadata: AuthenticationRequestMetadata
-    ): RemoveWebAuthnCredentialResult;
+    ): Promise<RemoveWebAuthnCredentialResult>;
     rotateRecoveryCodes(
         identity: AuthenticatedBrowserIdentity,
         metadata: AuthenticationRequestMetadata

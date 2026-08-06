@@ -42,7 +42,7 @@ describe("automation credential lifecycle", () => {
         const creationService = fixture.createService();
 
         try {
-            const created = creationService.createPrincipal(
+            const created = await creationService.createPrincipal(
                 fixture.identity,
                 {
                     ...initialPrincipalInput,
@@ -66,7 +66,7 @@ describe("automation credential lifecycle", () => {
             const rotationService = fixture.createService({ repository });
             const auditCount = readAutomationAuditEvents(fixture.database.sqlite).length;
             expect(
-                rotationService.rotateCredential(
+                await rotationService.rotateCredential(
                     fixture.identity,
                     {
                         credentialId: created.result.credential.id,
@@ -93,7 +93,7 @@ describe("automation credential lifecycle", () => {
         const creationService = fixture.createService();
 
         try {
-            const created = creationService.createPrincipal(
+            const created = await creationService.createPrincipal(
                 fixture.identity,
                 initialPrincipalInput,
                 fixture.metadata
@@ -119,7 +119,7 @@ describe("automation credential lifecycle", () => {
                     return id;
                 },
             });
-            const rotation = rotationService.rotateCredential(
+            const rotation = await rotationService.rotateCredential(
                 fixture.identity,
                 {
                     credentialId: created.result.credential.id,
@@ -152,7 +152,7 @@ describe("automation credential lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 initialPrincipalInput,
                 fixture.metadata
@@ -162,7 +162,7 @@ describe("automation credential lifecycle", () => {
 
             const rotatedAt = addMilliseconds(automationLifecycleInitialNow, 1);
             fixture.setNow(rotatedAt);
-            const rotation = service.rotateCredential(
+            const rotation = await service.rotateCredential(
                 fixture.identity,
                 {
                     credentialId: created.result.credential.id,
@@ -188,7 +188,7 @@ describe("automation credential lifecycle", () => {
                 fixture.database.sqlite
             ).length;
             expect(
-                service.rotateCredential(
+                await service.rotateCredential(
                     fixture.identity,
                     {
                         credentialId: created.result.credential.id,
@@ -205,7 +205,7 @@ describe("automation credential lifecycle", () => {
 
             const revokedAt = addMilliseconds(rotatedAt, 1);
             fixture.setNow(revokedAt);
-            const lostReplacementRevoke = service.revokeCredential(
+            const lostReplacementRevoke = await service.revokeCredential(
                 fixture.identity,
                 {
                     credentialId: rotation.result.credential.id,
@@ -222,7 +222,7 @@ describe("automation credential lifecycle", () => {
                 fixture.database.sqlite
             ).length;
             expect(
-                service.revokeCredential(
+                await service.revokeCredential(
                     fixture.identity,
                     {
                         credentialId: rotation.result.credential.id,
@@ -238,7 +238,7 @@ describe("automation credential lifecycle", () => {
 
             const retriedAt = addMilliseconds(revokedAt, 1);
             fixture.setNow(retriedAt);
-            const retry = service.rotateCredential(
+            const retry = await service.rotateCredential(
                 fixture.identity,
                 {
                     credentialId: created.result.credential.id,
@@ -264,7 +264,7 @@ describe("automation credential lifecycle", () => {
             const finalRevokeAt = addMilliseconds(retriedAt, 1);
             fixture.setNow(finalRevokeAt);
             expect(
-                service.revokeCredential(
+                await service.revokeCredential(
                     fixture.identity,
                     {
                         credentialId: created.result.credential.id,
@@ -301,7 +301,7 @@ describe("automation credential lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 initialPrincipalInput,
                 fixture.metadata
@@ -319,23 +319,22 @@ describe("automation credential lifecycle", () => {
                 { label: "Fourth credential" },
             ] as const;
             for (const credential of credentialInputs) {
-                expect(
-                    service.createCredential(
-                        fixture.identity,
-                        {
-                            credential,
-                            expectedAuthorizationVersion: 1,
-                            principalId: automationLifecyclePrincipalId,
-                        },
-                        fixture.metadata
-                    ).status
-                ).toBe("created");
+                const result = await service.createCredential(
+                    fixture.identity,
+                    {
+                        credential,
+                        expectedAuthorizationVersion: 1,
+                        principalId: automationLifecyclePrincipalId,
+                    },
+                    fixture.metadata
+                );
+                expect(result.status).toBe("created");
             }
             const auditCountAtCapacity = readAutomationAuditEvents(
                 fixture.database.sqlite
             ).length;
             expect(
-                service.createCredential(
+                await service.createCredential(
                     fixture.identity,
                     {
                         credential: { label: "Over capacity" },
@@ -351,20 +350,19 @@ describe("automation credential lifecycle", () => {
 
             const afterExpiry = addMilliseconds(shortExpiry, 1);
             fixture.setNow(afterExpiry);
-            expect(
-                service.createCredential(
-                    fixture.identity,
-                    {
-                        credential: {
-                            expiresAtMs: addHours(afterExpiry, 1).getTime(),
-                            label: "Capacity after expiry",
-                        },
-                        expectedAuthorizationVersion: 1,
-                        principalId: automationLifecyclePrincipalId,
+            const createdAfterExpiry = await service.createCredential(
+                fixture.identity,
+                {
+                    credential: {
+                        expiresAtMs: addHours(afterExpiry, 1).getTime(),
+                        label: "Capacity after expiry",
                     },
-                    fixture.metadata
-                ).status
-            ).toBe("created");
+                    expectedAuthorizationVersion: 1,
+                    principalId: automationLifecyclePrincipalId,
+                },
+                fixture.metadata
+            );
+            expect(createdAfterExpiry.status).toBe("created");
             expect(
                 fixture.repository.countActiveCredentials(
                     automationLifecyclePrincipalId,
@@ -396,7 +394,7 @@ describe("automation credential lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 initialPrincipalInput,
                 fixture.metadata
@@ -410,7 +408,7 @@ describe("automation credential lifecycle", () => {
             });
             const auditCount = readAutomationAuditEvents(fixture.database.sqlite).length;
 
-            expect(() =>
+            expect(
                 faulting.revokeCredential(
                     fixture.identity,
                     {
@@ -420,7 +418,7 @@ describe("automation credential lifecycle", () => {
                     },
                     fixture.metadata
                 )
-            ).toThrow();
+            ).rejects.toThrow();
             expect(
                 readPersistedAutomationCredentials(fixture.database.sqlite)[0]?.revokedAt
             ).toBeNull();
@@ -437,7 +435,7 @@ describe("automation credential lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 initialPrincipalInput,
                 fixture.metadata
@@ -453,7 +451,7 @@ describe("automation credential lifecycle", () => {
                 "Future credential two",
                 "Future credential three",
             ]) {
-                const futureCredential = service.createCredential(
+                const futureCredential = await service.createCredential(
                     fixture.identity,
                     {
                         credential: { label },
@@ -482,7 +480,7 @@ describe("automation credential lifecycle", () => {
                 fixture.database.sqlite
             ).length;
             expect(
-                service.createCredential(
+                await service.createCredential(
                     fixture.identity,
                     {
                         credential: { label: "Rollback overflow" },
@@ -493,7 +491,7 @@ describe("automation credential lifecycle", () => {
                 )
             ).toEqual({ status: "conflict" });
             expect(
-                service.rotateCredential(
+                await service.rotateCredential(
                     fixture.identity,
                     {
                         credentialId: created.result.credential.id,
@@ -517,7 +515,7 @@ describe("automation credential lifecycle", () => {
                 })
             ).toEqual({ status: "session-changed" });
             expect(
-                service.revokeCredential(
+                await service.revokeCredential(
                     fixture.identity,
                     {
                         credentialId: created.result.credential.id,
@@ -533,7 +531,7 @@ describe("automation credential lifecycle", () => {
                 )?.revokedAt
             ).toBeNull();
             expect(
-                service.revokeCredential(
+                await service.revokeCredential(
                     fixture.identity,
                     {
                         credentialId: futureCredentialId,
@@ -545,20 +543,19 @@ describe("automation credential lifecycle", () => {
             ).toEqual({ status: "conflict" });
 
             fixture.setNow(futureAt);
-            expect(
-                service.revokeCredential(
-                    fixture.identity,
-                    {
-                        credentialId: created.result.credential.id,
-                        expectedAuthorizationVersion: 1,
-                        principalId: automationLifecyclePrincipalId,
-                    },
-                    fixture.metadata
-                ).status
-            ).toBe("revoked");
+            const futureRevocation = await service.revokeCredential(
+                fixture.identity,
+                {
+                    credentialId: created.result.credential.id,
+                    expectedAuthorizationVersion: 1,
+                    principalId: automationLifecyclePrincipalId,
+                },
+                fixture.metadata
+            );
+            expect(futureRevocation.status).toBe("revoked");
             fixture.setNow(rolledBackAt);
             expect(
-                service.revokeCredential(
+                await service.revokeCredential(
                     fixture.identity,
                     {
                         credentialId: created.result.credential.id,
@@ -578,7 +575,7 @@ describe("automation credential lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 initialPrincipalInput,
                 fixture.metadata
@@ -588,17 +585,16 @@ describe("automation credential lifecycle", () => {
 
             const futureAt = addMinutes(automationLifecycleInitialNow, 2);
             fixture.setNow(futureAt);
-            expect(
-                service.revokeCredential(
-                    fixture.identity,
-                    {
-                        credentialId: created.result.credential.id,
-                        expectedAuthorizationVersion: 1,
-                        principalId: automationLifecyclePrincipalId,
-                    },
-                    fixture.metadata
-                ).status
-            ).toBe("revoked");
+            const futureRevocation = await service.revokeCredential(
+                fixture.identity,
+                {
+                    credentialId: created.result.credential.id,
+                    expectedAuthorizationVersion: 1,
+                    principalId: automationLifecyclePrincipalId,
+                },
+                fixture.metadata
+            );
+            expect(futureRevocation.status).toBe("revoked");
 
             fixture.setNow(addMinutes(automationLifecycleInitialNow, 1));
             const credentialCount = readPersistedAutomationCredentials(
@@ -612,7 +608,7 @@ describe("automation credential lifecycle", () => {
                 })
             ).toEqual({ status: "session-changed" });
             expect(
-                service.createCredential(
+                await service.createCredential(
                     fixture.identity,
                     {
                         credential: { label: "Rollback credential" },

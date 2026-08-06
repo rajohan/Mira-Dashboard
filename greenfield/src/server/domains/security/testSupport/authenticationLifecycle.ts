@@ -5,6 +5,7 @@ import {
     createTestAuthenticationWorkGate,
     createTestGatewayWorkRuntime,
 } from "../../../test/support/authenticationWorkGate.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
 import {
     createAuthenticationLifecycleService,
@@ -46,7 +47,7 @@ export interface AuthenticationLifecycleHarnessOptions {
 }
 
 const unavailablePendingLoginLifecycle: PendingLoginLifecyclePort = Object.freeze({
-    beginPendingLogin: () => ({ status: "mfa-unavailable" as const }),
+    beginPendingLogin: () => Promise.resolve({ status: "mfa-unavailable" as const }),
 });
 
 export async function createAuthenticationLifecycleHarness(
@@ -83,7 +84,10 @@ export async function createAuthenticationLifecycleHarness(
         ...(options.recentAuthenticationWindowMs !== undefined && {
             recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
         }),
-        repository: createAuthenticationLifecycleRepository(database.orm),
+        repository: createAuthenticationLifecycleRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        ),
         verifyGatewayCredential: (credential, signal) => {
             gatewayVerificationCalls += 1;
             if (options.verifyGatewayCredential !== undefined) {

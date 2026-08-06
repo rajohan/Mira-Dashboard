@@ -271,7 +271,9 @@ export function createWebAuthnLoginProofOperation(
             let attemptedAt: Date | undefined;
             let settledResult: CompleteMfaLoginResult | undefined;
 
-            const settleInvalidProof = (failedAt: Date): CompleteMfaLoginResult =>
+            const settleInvalidProof = (
+                failedAt: Date
+            ): Promise<CompleteMfaLoginResult> =>
                 coordinator.recordWebAuthnFailure(
                     resolved,
                     pendingCredential,
@@ -280,7 +282,7 @@ export function createWebAuthnLoginProofOperation(
                     (unit) => consumeChallenge(unit, challenge, attemptedAt ?? checkedAt),
                     attemptedAt ?? checkedAt
                 );
-            const settleUnavailable = (failedAt: Date): CompleteMfaLoginResult =>
+            const settleUnavailable = (failedAt: Date): Promise<CompleteMfaLoginResult> =>
                 coordinator.recordWebAuthnUnavailable(
                     resolved,
                     metadata,
@@ -382,8 +384,8 @@ export function createWebAuthnLoginProofOperation(
                                 attemptedAt = admittedAt;
                                 return { proceed: true };
                             },
-                        onCancellationBeforeRelease: () => {
-                            coordinator.recordWebAuthnCancellation(
+                        onCancellationBeforeRelease: async () => {
+                            await coordinator.recordWebAuthnCancellation(
                                 resolved,
                                 metadata,
                                 now(),
@@ -395,12 +397,14 @@ export function createWebAuthnLoginProofOperation(
                                     )
                             );
                         },
-                        onFailureBeforeRelease: () => {
+                        onFailureBeforeRelease: async () => {
                             if (attemptedAt !== undefined) {
-                                settledResult = settleUnavailable(now());
+                                settledResult = await settleUnavailable(now());
                             }
                         },
-                        onResultBeforeRelease: (result: WebAuthnLoginWorkResult) => {
+                        onResultBeforeRelease: async (
+                            result: WebAuthnLoginWorkResult
+                        ) => {
                             if (result.kind !== "verification") return;
                             const verification = result.result;
                             if (
@@ -412,15 +416,15 @@ export function createWebAuthnLoginProofOperation(
                                     verification.verification
                                 )
                             ) {
-                                settledResult = settleInvalidProof(now());
+                                settledResult = await settleInvalidProof(now());
                                 return;
                             }
                             const completedAt = now();
                             if (compareAsc(completedAt, challenge.expiresAt) >= 0) {
-                                settledResult = settleInvalidProof(completedAt);
+                                settledResult = await settleInvalidProof(completedAt);
                                 return;
                             }
-                            settledResult = coordinator.finishLogin(
+                            settledResult = await coordinator.finishLogin(
                                 resolved,
                                 pendingCredential,
                                 "webauthn",

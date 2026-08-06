@@ -56,7 +56,7 @@ describe("MFA account maintenance lifecycle", () => {
                 accountLifecycleMetadata("begin-pending-before-disable")
             );
             expect(pending.status).toBe("created");
-            harness.repository.withImmediateTransaction((unit) => {
+            await harness.repository.withImmediateTransaction((unit) => {
                 unit.insertSession({
                     ...validAuthSessionInsert,
                     authenticatedAt: subMinutes(accountLifecycleNow, 5),

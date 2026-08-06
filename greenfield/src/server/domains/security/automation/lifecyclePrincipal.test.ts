@@ -38,7 +38,7 @@ describe("automation principal lifecycle", () => {
 
         try {
             expect(
-                service.createPrincipal(
+                await service.createPrincipal(
                     fixture.identity,
                     principalInput,
                     fixture.metadata
@@ -66,7 +66,7 @@ describe("automation principal lifecycle", () => {
 
         try {
             expect(
-                service.createPrincipal(
+                await service.createPrincipal(
                     fixture.identity,
                     principalInput,
                     fixture.metadata
@@ -102,25 +102,23 @@ describe("automation principal lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            expect(
-                service.createPrincipal(
-                    fixture.identity,
-                    principalInput,
-                    fixture.metadata
-                ).status
-            ).toBe("created");
+            const created = await service.createPrincipal(
+                fixture.identity,
+                principalInput,
+                fixture.metadata
+            );
+            expect(created.status).toBe("created");
             fixture.setNow(addMinutes(automationLifecycleInitialNow, 2));
-            expect(
-                service.replaceCapabilities(
-                    fixture.identity,
-                    {
-                        capabilities: ["notifications:read", "reports:read"],
-                        expectedAuthorizationVersion: 1,
-                        principalId: automationLifecyclePrincipalId,
-                    },
-                    fixture.metadata
-                ).status
-            ).toBe("replaced");
+            const replaced = await service.replaceCapabilities(
+                fixture.identity,
+                {
+                    capabilities: ["notifications:read", "reports:read"],
+                    expectedAuthorizationVersion: 1,
+                    principalId: automationLifecyclePrincipalId,
+                },
+                fixture.metadata
+            );
+            expect(replaced.status).toBe("replaced");
             fixture.setNow(addMinutes(automationLifecycleInitialNow, 1));
             expect(service.listPrincipals(fixture.identity, { limit: 10 })).toEqual({
                 status: "session-changed",
@@ -137,16 +135,15 @@ describe("automation principal lifecycle", () => {
         const rollbackPrincipalId = "rollback-principal";
 
         try {
-            expect(
-                service.createPrincipal(
-                    fixture.identity,
-                    principalInput,
-                    fixture.metadata
-                ).status
-            ).toBe("created");
+            const created = await service.createPrincipal(
+                fixture.identity,
+                principalInput,
+                fixture.metadata
+            );
+            expect(created.status).toBe("created");
             const futureAt = addMinutes(automationLifecycleInitialNow, 2);
             fixture.setNow(futureAt);
-            const future = service.createPrincipal(
+            const future = await service.createPrincipal(
                 fixture.identity,
                 {
                     ...principalInput,
@@ -175,7 +172,7 @@ describe("automation principal lifecycle", () => {
             ).length;
             const auditCount = readAutomationAuditEvents(fixture.database.sqlite).length;
             expect(
-                service.createPrincipal(
+                await service.createPrincipal(
                     fixture.identity,
                     {
                         ...principalInput,
@@ -203,16 +200,15 @@ describe("automation principal lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            expect(
-                service.createPrincipal(
-                    fixture.identity,
-                    principalInput,
-                    fixture.metadata
-                ).status
-            ).toBe("created");
+            const created = await service.createPrincipal(
+                fixture.identity,
+                principalInput,
+                fixture.metadata
+            );
+            expect(created.status).toBe("created");
             const futureAt = addMinutes(automationLifecycleInitialNow, 2);
             fixture.setNow(futureAt);
-            const futureCredential = service.createCredential(
+            const futureCredential = await service.createCredential(
                 fixture.identity,
                 {
                     credential: { label: "Future inventory credential" },
@@ -251,7 +247,7 @@ describe("automation principal lifecycle", () => {
                 .query("UPDATE users SET mfa_enabled_at = NULL WHERE id = ?")
                 .run(automationLifecycleUserId);
             expect(
-                mfaDisabled
+                await mfaDisabled
                     .createService()
                     .createPrincipal(
                         mfaDisabled.identity,
@@ -267,7 +263,7 @@ describe("automation principal lifecycle", () => {
         rolledBack.setNow(subMilliseconds(automationLifecycleSessionCreatedAt, 1));
         try {
             expect(
-                rolledBack
+                await rolledBack
                     .createService()
                     .createPrincipal(
                         rolledBack.identity,
@@ -291,7 +287,7 @@ describe("automation principal lifecycle", () => {
 
         try {
             expect(
-                service.createPrincipal(
+                await service.createPrincipal(
                     fixture.identity,
                     {
                         ...principalInput,
@@ -320,7 +316,7 @@ describe("automation principal lifecycle", () => {
                 },
             });
             expect(
-                service.createPrincipal(
+                await service.createPrincipal(
                     authorized.identity,
                     principalInput,
                     authorized.metadata
@@ -339,7 +335,11 @@ describe("automation principal lifecycle", () => {
                 },
             });
             expect(
-                service.createPrincipal(stale.identity, principalInput, stale.metadata)
+                await service.createPrincipal(
+                    stale.identity,
+                    principalInput,
+                    stale.metadata
+                )
             ).toEqual({ status: "step-up-required" });
         } finally {
             stale.database.sqlite.close(true);
@@ -352,7 +352,7 @@ describe("automation principal lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 {
                     ...principalInput,
@@ -438,7 +438,7 @@ describe("automation principal lifecycle", () => {
         );
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPrincipalIfAvailable({
                     createdAt: automationLifecycleInitialNow,
                     disabledAt: null,
@@ -469,7 +469,7 @@ describe("automation principal lifecycle", () => {
             });
 
             expect(
-                service.createPrincipal(
+                await service.createPrincipal(
                     fixture.identity,
                     principalInput,
                     fixture.metadata
@@ -498,17 +498,16 @@ describe("automation principal lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            expect(
-                service.createPrincipal(
-                    fixture.identity,
-                    principalInput,
-                    fixture.metadata
-                ).status
-            ).toBe("created");
+            const created = await service.createPrincipal(
+                fixture.identity,
+                principalInput,
+                fixture.metadata
+            );
+            expect(created.status).toBe("created");
             const createdAudits = readAutomationAuditEvents(fixture.database.sqlite);
 
             fixture.setNow(addMilliseconds(automationLifecycleInitialNow, 1));
-            const unchanged = service.replaceCapabilities(
+            const unchanged = await service.replaceCapabilities(
                 fixture.identity,
                 {
                     capabilities: ["notifications:read"],
@@ -530,7 +529,7 @@ describe("automation principal lifecycle", () => {
 
             const changedAt = addMilliseconds(automationLifecycleInitialNow, 2);
             fixture.setNow(changedAt);
-            const winner = service.replaceCapabilities(
+            const winner = await service.replaceCapabilities(
                 fixture.identity,
                 {
                     capabilities: ["notifications:read", "reports:read"],
@@ -539,7 +538,7 @@ describe("automation principal lifecycle", () => {
                 },
                 fixture.metadata
             );
-            const stale = service.replaceCapabilities(
+            const stale = await service.replaceCapabilities(
                 fixture.identity,
                 {
                     capabilities: ["reports:read"],
@@ -585,7 +584,7 @@ describe("automation principal lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 principalInput,
                 fixture.metadata
@@ -595,7 +594,7 @@ describe("automation principal lifecycle", () => {
 
             const disabledAt = addMilliseconds(automationLifecycleInitialNow, 1);
             fixture.setNow(disabledAt);
-            const first = service.disablePrincipal(
+            const first = await service.disablePrincipal(
                 fixture.identity,
                 {
                     expectedAuthorizationVersion: 1,
@@ -604,7 +603,7 @@ describe("automation principal lifecycle", () => {
                 fixture.metadata
             );
             const auditCount = readAutomationAuditEvents(fixture.database.sqlite).length;
-            const retry = service.disablePrincipal(
+            const retry = await service.disablePrincipal(
                 fixture.identity,
                 {
                     expectedAuthorizationVersion: 1,
@@ -641,7 +640,7 @@ describe("automation principal lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 principalInput,
                 fixture.metadata
@@ -649,7 +648,7 @@ describe("automation principal lifecycle", () => {
             expect(created.status).toBe("created");
             if (created.status !== "created") return;
 
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 for (let index = 0; index < 4; index += 1) {
                     const token = deterministicAutomationToken(500 + index);
                     expect(
@@ -671,7 +670,7 @@ describe("automation principal lifecycle", () => {
             const disabledAt = addMilliseconds(automationLifecycleInitialNow, 1);
             fixture.setNow(disabledAt);
             expect(
-                service.disablePrincipal(
+                await service.disablePrincipal(
                     fixture.identity,
                     {
                         expectedAuthorizationVersion: 1,
@@ -702,7 +701,7 @@ describe("automation principal lifecycle", () => {
         const service = fixture.createService();
 
         try {
-            const created = service.createPrincipal(
+            const created = await service.createPrincipal(
                 fixture.identity,
                 principalInput,
                 fixture.metadata
@@ -711,7 +710,7 @@ describe("automation principal lifecycle", () => {
             if (created.status !== "created") return;
             const futureCredentialAt = addMinutes(automationLifecycleInitialNow, 2);
             fixture.setNow(futureCredentialAt);
-            const futureCredential = service.createCredential(
+            const futureCredential = await service.createCredential(
                 fixture.identity,
                 {
                     credential: { label: "Future credential" },
@@ -725,7 +724,7 @@ describe("automation principal lifecycle", () => {
             const disabledAt = addMinutes(automationLifecycleInitialNow, 1);
             fixture.setNow(disabledAt);
             expect(
-                service.disablePrincipal(
+                await service.disablePrincipal(
                     fixture.identity,
                     {
                         expectedAuthorizationVersion: 1,

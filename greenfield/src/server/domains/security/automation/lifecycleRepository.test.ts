@@ -15,6 +15,7 @@ import {
     validAutomationCredentialInsert,
     validAutomationPrincipalInsert,
 } from "../../../database/validation/testSupport/securityRows.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
 import { createAutomationLifecycleRepository } from "./lifecycleRepository.ts";
 
@@ -39,7 +40,10 @@ async function openAutomationRepositoryFixture() {
     const database = await openFreshMigratedDatabase();
     return {
         ...database,
-        repository: createAutomationLifecycleRepository(database.orm),
+        repository: createAutomationLifecycleRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        ),
     };
 }
 
@@ -53,7 +57,8 @@ describe("automation lifecycle repository", () => {
         const competing = new Database(databasePath, { strict: true });
         competing.run("PRAGMA busy_timeout = 0");
         const repository = createAutomationLifecycleRepository(
-            drizzle({ client: primary })
+            drizzle({ client: primary }),
+            testImmediateDatabaseWriteAdmission
         );
 
         try {
@@ -67,7 +72,7 @@ describe("automation lifecycle repository", () => {
 
             let callbackFinished = false;
             let immediateCompetingWriterFailure: unknown;
-            const result = repository.withImmediateTransaction(() => {
+            const result = await repository.withImmediateTransaction(() => {
                 try {
                     competing.run("BEGIN IMMEDIATE");
                     competing.run("ROLLBACK");
@@ -97,7 +102,7 @@ describe("automation lifecycle repository", () => {
         const fixture = await openAutomationRepositoryFixture();
 
         try {
-            const created = fixture.repository.withImmediateTransaction((unit) => {
+            const created = await fixture.repository.withImmediateTransaction((unit) => {
                 const principal = unit.insertPrincipalIfAvailable(
                     validAutomationPrincipalInsert
                 );
@@ -165,7 +170,7 @@ describe("automation lifecycle repository", () => {
         const principalIds = ["pagination-a", "pagination-b", "pagination-c"];
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 for (const principalId of principalIds) {
                     expect(
                         unit.insertPrincipalIfAvailable({
@@ -231,7 +236,7 @@ describe("automation lifecycle repository", () => {
         const checkedAt = addMinutes(securityCreatedAt, 10);
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPrincipalIfAvailable(validAutomationPrincipalInsert);
                 unit.insertPrincipalIfAvailable({
                     ...validAutomationPrincipalInsert,
@@ -289,7 +294,7 @@ describe("automation lifecycle repository", () => {
         const secondGrantedAt = addMilliseconds(securityCreatedAt, 2);
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPrincipalIfAvailable(validAutomationPrincipalInsert);
                 expect(
                     unit.replaceCapabilities({
@@ -344,7 +349,7 @@ describe("automation lifecycle repository", () => {
         const laterRevocationAttempt = addMilliseconds(securityCreatedAt, 2);
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPrincipalIfAvailable(validAutomationPrincipalInsert);
                 expect(
                     unit.insertCredentialIfAvailable(validAutomationCredentialInsert)
@@ -410,7 +415,7 @@ describe("automation lifecycle repository", () => {
         const earlierRevokedAt = addMinutes(securityCreatedAt, 3);
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPrincipalIfAvailable(validAutomationPrincipalInsert);
                 unit.insertCredentialIfAvailable({
                     ...validAutomationCredentialInsert,
@@ -483,12 +488,12 @@ describe("automation lifecycle repository", () => {
         const collidingPrincipalId = "collision-target";
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPrincipalIfAvailable(validAutomationPrincipalInsert);
                 unit.insertCredentialIfAvailable(validAutomationCredentialInsert);
             });
 
-            expect(() =>
+            expect(
                 fixture.repository.withImmediateTransaction((unit) => {
                     unit.insertAuditEvent(validAuditEventInsert);
                     expect(
@@ -507,7 +512,7 @@ describe("automation lifecycle repository", () => {
                     ).toBeUndefined();
                     throw new Error("forced automation credential collision rollback");
                 })
-            ).toThrow("forced automation credential collision rollback");
+            ).rejects.toThrow("forced automation credential collision rollback");
 
             expect(
                 fixture.repository.findPrincipal(collidingPrincipalId)

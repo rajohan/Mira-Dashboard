@@ -5,6 +5,7 @@ import { Cause, Effect, Exit } from "effect";
 
 import { incidents } from "../../database/schema/incidents.ts";
 import { notifications } from "../../database/schema/notifications.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { createMonitoringRepository, type MonitoringRepository } from "./repository.ts";
 import {
     createMonitoringService,
@@ -29,7 +30,7 @@ describe("monitoring service", () => {
         const service = serviceFor(database);
 
         try {
-            submitSnapshot(service, snapshot({ completedAtMs: 2000, run: 401 }));
+            await submitSnapshot(service, snapshot({ completedAtMs: 2000, run: 401 }));
             const before = allRowCounts(database);
             const existingNotificationId = database.orm
                 .select({ id: notifications.id })
@@ -42,16 +43,13 @@ describe("monitoring service", () => {
                 generateId: () => generatedIds.shift()!,
             });
 
-            expect(() =>
-                submitSnapshot(
-                    failingService,
-                    snapshot({
-                        completedAtMs: 3000,
-                        problems: [problem("backup")],
-                        run: 402,
-                    })
-                )
-            ).toThrow();
+            const failingSnapshot = snapshot({
+                completedAtMs: 3000,
+                problems: [problem("backup")],
+                run: 402,
+            });
+            const submission = submitSnapshot(failingService, failingSnapshot);
+            expect(submission).rejects.toThrow();
             expect(allRowCounts(database)).toEqual(before);
             expect(database.orm.select().from(incidents).get()).toMatchObject({
                 occurrenceCount: 1,
@@ -62,7 +60,7 @@ describe("monitoring service", () => {
         }
     });
 
-    test("rejects malformed snapshots before entering the repository", () => {
+    test("rejects malformed snapshots before entering the repository", async () => {
         let repositoryEntries = 0;
         const repository: MonitoringRepository = {
             withImmediateTransaction() {
@@ -72,7 +70,7 @@ describe("monitoring service", () => {
         };
         const service = createMonitoringService({ repository });
 
-        const failure = submitSnapshotFailure(service, {
+        const failure = await submitSnapshotFailure(service, {
             ...snapshot({ completedAtMs: 2000, run: 501 }),
             problems: [problem("filesystem"), problem("filesystem")],
         });
@@ -82,7 +80,7 @@ describe("monitoring service", () => {
         expect(repositoryEntries).toBe(0);
     });
 
-    test("rejects a future watermark before entering the repository", () => {
+    test("rejects a future watermark before entering the repository", async () => {
         let repositoryEntries = 0;
         const repository: MonitoringRepository = {
             withImmediateTransaction() {
@@ -95,7 +93,7 @@ describe("monitoring service", () => {
             repository,
         });
 
-        const failure = submitSnapshotFailure(
+        const failure = await submitSnapshotFailure(
             service,
             snapshot({ completedAtMs: 310_001, run: 502 })
         );
@@ -115,10 +113,11 @@ describe("monitoring service", () => {
         });
 
         try {
-            expect(
-                submitSnapshot(service, snapshot({ completedAtMs: 2000, run: 601 }))
-                    .status
-            ).toBe("accepted");
+            const result = await submitSnapshot(
+                service,
+                snapshot({ completedAtMs: 2000, run: 601 })
+            );
+            expect(result.status).toBe("accepted");
             expect(allRowCounts(database)).toMatchObject({
                 incidents: 1,
                 realtimeEvents: 3,
@@ -147,7 +146,7 @@ describe("monitoring service", () => {
         expect(repositoryEntries).toBe(0);
     });
 
-    test("rejects a realtime expiry outside the Date range before repository work", () => {
+    test("rejects a realtime expiry outside the Date range before repository work", async () => {
         let repositoryEntries = 0;
         const repository: MonitoringRepository = {
             withImmediateTransaction() {
@@ -161,7 +160,7 @@ describe("monitoring service", () => {
             repository,
         });
 
-        const exit = Effect.runSyncExit(
+        const exit = await Effect.runPromiseExit(
             service.submitCompleteSnapshot(snapshot({ completedAtMs: 2000, run: 602 }))
         );
 
@@ -176,7 +175,7 @@ describe("monitoring service", () => {
         expect(repositoryEntries).toBe(0);
     });
 
-    test("keeps unknown repository failures in the defect channel", () => {
+    test("keeps unknown repository failures in the defect channel", async () => {
         const repositoryFailure = new Error("repository unavailable");
         const repository: MonitoringRepository = {
             withImmediateTransaction() {
@@ -188,7 +187,7 @@ describe("monitoring service", () => {
             repository,
         });
 
-        const exit = Effect.runSyncExit(
+        const exit = await Effect.runPromiseExit(
             service.submitCompleteSnapshot(snapshot({ completedAtMs: 2000, run: 701 }))
         );
 
@@ -206,7 +205,10 @@ describe("monitoring service", () => {
             generateId: () => uuid(70_000),
             nowMs: () => 10_000,
             realtimeRetentionMs: hoursToMilliseconds(24),
-            repository: createMonitoringRepository(database.orm),
+            repository: createMonitoringRepository(
+                database.orm,
+                testImmediateDatabaseWriteAdmission
+            ),
         });
 
         try {
@@ -216,7 +218,7 @@ describe("monitoring service", () => {
                     snapshot({ completedAtMs: 2000, run: 702 })
                 );
             });
-            const result = Effect.runSync(Effect.provide(program, layer));
+            const result = await Effect.runPromise(Effect.provide(program, layer));
 
             expect(result.status).toBe("accepted");
             expect(allRowCounts(database)).toMatchObject({

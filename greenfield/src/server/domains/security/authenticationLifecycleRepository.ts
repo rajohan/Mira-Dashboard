@@ -1,5 +1,6 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
+import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import type { AuthenticationRateLimitKind } from "../../database/schema/authRateLimitBuckets.ts";
 import { DrizzleAuthenticationRateLimitStore } from "./authenticationRateLimitStore.ts";
 import { DrizzleBrowserSessionStore } from "./browserSessionStore.ts";
@@ -76,7 +77,7 @@ export interface AuthenticationLifecycleRepository {
     ): T;
     withImmediateTransaction<T>(
         callback: (unit: AuthenticationLifecycleUnitOfWork) => SynchronousResult<T>
-    ): T;
+    ): Promise<T>;
 }
 
 class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycleUnitOfWork {
@@ -173,12 +174,14 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
 /**
  * Creates the validated SQLite boundary for mutable browser authentication state.
  * Deferred and immediate callbacks remain synchronous so no asynchronous work can
- * retain a SQLite transaction lock.
+ * retain a SQLite transaction lock; immediate admission and completion are awaited.
  * @param database Process-owned Drizzle SQLite database.
- * @returns Synchronous authentication lifecycle repository.
+ * @param writeAdmission Process-owned bounded immediate-write admission.
+ * @returns Authentication repository with synchronous callbacks and async writes.
  */
 export function createAuthenticationLifecycleRepository(
-    database: SQLiteBunDatabase
+    database: SQLiteBunDatabase,
+    writeAdmission: ImmediateDatabaseWriteAdmission
 ): AuthenticationLifecycleRepository {
     const runTransaction = database.transaction.bind(database) as unknown as <T>(
         callback: (transaction: SecurityTransaction) => T,
@@ -212,13 +215,17 @@ export function createAuthenticationLifecycleRepository(
             callback: (
                 unit: AuthenticationLifecycleUnitOfWork
             ) => SynchronousResult<T> | never
-        ): T {
-            return runTransaction(
-                (transaction): T =>
-                    callback(
-                        new DrizzleAuthenticationLifecycleUnitOfWork(transaction)
-                    ) as T,
-                { behavior: "immediate" }
+        ): Promise<T> {
+            return writeAdmission.run((markTransactionStarted) =>
+                runTransaction(
+                    (transaction): T => {
+                        markTransactionStarted();
+                        return callback(
+                            new DrizzleAuthenticationLifecycleUnitOfWork(transaction)
+                        );
+                    },
+                    { behavior: "immediate" }
+                )
             );
         },
     });

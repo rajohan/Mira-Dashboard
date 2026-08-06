@@ -41,34 +41,37 @@ export interface AutomationSecurityLifecycleService {
         identity: AuthenticatedBrowserIdentity,
         input: CreateAutomationCredentialInput,
         metadata: AuthenticationRequestMetadata
-    ):
+    ): Promise<
         | {
               readonly result: CreateAutomationCredentialResult;
               readonly status: "created";
           }
         | AutomationAdministrationPolicyFailure
         | AutomationAdministrationTargetFailure
-        | AutomationCredentialGenerationFailure;
+        | AutomationCredentialGenerationFailure
+    >;
     createPrincipal(
         identity: AuthenticatedBrowserIdentity,
         input: CreateAutomationPrincipalInput,
         metadata: AuthenticationRequestMetadata
-    ):
+    ): Promise<
         | { readonly result: CreateAutomationPrincipalResult; readonly status: "created" }
         | AutomationAdministrationPolicyFailure
         | AutomationCredentialGenerationFailure
-        | { readonly status: "conflict" };
+        | { readonly status: "conflict" }
+    >;
     disablePrincipal(
         identity: AuthenticatedBrowserIdentity,
         input: DisableAutomationPrincipalInput,
         metadata: AuthenticationRequestMetadata
-    ):
+    ): Promise<
         | {
               readonly result: DisableAutomationPrincipalResult;
               readonly status: "disabled";
           }
         | AutomationAdministrationPolicyFailure
-        | AutomationAdministrationTargetFailure;
+        | AutomationAdministrationTargetFailure
+    >;
     listCredentials(
         identity: AuthenticatedBrowserIdentity,
         input: ListAutomationCredentialsInput
@@ -86,36 +89,39 @@ export interface AutomationSecurityLifecycleService {
         identity: AuthenticatedBrowserIdentity,
         input: ReplaceAutomationCapabilitiesInput,
         metadata: AuthenticationRequestMetadata
-    ):
+    ): Promise<
         | {
               readonly result: ReplaceAutomationCapabilitiesResult;
               readonly status: "replaced";
           }
         | AutomationAdministrationPolicyFailure
-        | AutomationAdministrationTargetFailure;
+        | AutomationAdministrationTargetFailure
+    >;
     revokeCredential(
         identity: AuthenticatedBrowserIdentity,
         input: RevokeAutomationCredentialInput,
         metadata: AuthenticationRequestMetadata
-    ):
+    ): Promise<
         | {
               readonly result: RevokeAutomationCredentialResult;
               readonly status: "revoked";
           }
         | AutomationAdministrationPolicyFailure
-        | AutomationAdministrationTargetFailure;
+        | AutomationAdministrationTargetFailure
+    >;
     rotateCredential(
         identity: AuthenticatedBrowserIdentity,
         input: RotateAutomationCredentialInput,
         metadata: AuthenticationRequestMetadata
-    ):
+    ): Promise<
         | {
               readonly result: RotateAutomationCredentialResult;
               readonly status: "rotated";
           }
         | AutomationAdministrationPolicyFailure
         | AutomationAdministrationTargetFailure
-        | AutomationCredentialGenerationFailure;
+        | AutomationCredentialGenerationFailure
+    >;
 }
 
 export interface AutomationSecurityLifecycleDependencies {

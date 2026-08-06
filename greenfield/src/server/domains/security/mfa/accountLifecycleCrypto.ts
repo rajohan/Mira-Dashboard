@@ -41,7 +41,9 @@ export interface AccountLifecycleCryptoHelpers {
         checkedAt: Date,
         signal: AbortSignal | undefined,
         recheckRateLimit: (() => RateLimitedResult | undefined) | undefined,
-        settleVerification: (verification: ConfirmedTotpFactorsVerification) => Settlement
+        settleVerification: (
+            verification: ConfirmedTotpFactorsVerification
+        ) => Promise<Settlement>
     ) => Promise<Settlement | RateLimitedResult>;
 }
 
@@ -119,7 +121,7 @@ export function createAccountLifecycleCryptoHelpers(
             settleVerification
         ) => {
             if (factors.length === 0) {
-                return settleVerification({ kind: "not-matched" });
+                return await settleVerification({ kind: "not-matched" });
             }
             const admission = await options.totpWorkGate.run(async () => {
                 const activeLimit = recheckRateLimit?.();
@@ -178,7 +180,7 @@ export function createAccountLifecycleCryptoHelpers(
                     verification = { kind: "not-matched" };
                 }
                 signal?.throwIfAborted();
-                return settleVerification(verification);
+                return await settleVerification(verification);
             }, signal);
             return admission.accepted
                 ? admission.value

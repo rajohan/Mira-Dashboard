@@ -80,17 +80,18 @@ function inertWorkRuntime(): WebAuthnWorkRuntime {
             const decision = options.onBeforeStart?.() ?? { proceed: true as const };
             if (!decision.proceed) return decision.value;
             const signal = new AbortController().signal;
+            let value: T;
             try {
-                const value = await work(signal);
-                options.onResultBeforeRelease?.(value);
-                return value;
+                value = await work(signal);
             } catch {
                 const failure = new AuthenticationUpstreamUnavailableError({
                     operation: "webauthn",
                 });
-                options.onFailureBeforeRelease?.(failure);
+                await options.onFailureBeforeRelease?.(failure);
                 throw failure;
             }
+            await options.onResultBeforeRelease?.(value);
+            return value;
         },
     });
 }
@@ -99,19 +100,17 @@ function failingWorkRuntime(
     failure: "capacity" | "timeout" | "upstream"
 ): WebAuthnWorkRuntime {
     return Object.freeze({
-        runWebAuthnVerification<T>(
+        async runWebAuthnVerification<T>(
             _work: (signal: AbortSignal) => Promise<T>,
             options: AuthenticationVerificationWorkOptions<T>
         ): Promise<T> {
             if (failure === "capacity") {
-                return Promise.reject(
-                    new AuthenticationWorkCapacityError({
-                        operation: "webauthn",
-                    })
-                );
+                throw new AuthenticationWorkCapacityError({
+                    operation: "webauthn",
+                });
             }
             const decision = options.onBeforeStart?.() ?? { proceed: true as const };
-            if (!decision.proceed) return Promise.resolve(decision.value);
+            if (!decision.proceed) return decision.value;
             const error =
                 failure === "timeout"
                     ? new AuthenticationWorkTimeoutError({
@@ -121,31 +120,29 @@ function failingWorkRuntime(
                     : new AuthenticationUpstreamUnavailableError({
                           operation: "webauthn",
                       });
-            options.onFailureBeforeRelease?.(error);
-            return Promise.reject(error);
+            await options.onFailureBeforeRelease?.(error);
+            throw error;
         },
     });
 }
 
 function cancellationWorkRuntime(): WebAuthnWorkRuntime {
     return Object.freeze({
-        runWebAuthnVerification<T>(
+        async runWebAuthnVerification<T>(
             _work: (signal: AbortSignal) => Promise<T>,
             options: AuthenticationVerificationWorkOptions<T>
         ): Promise<T> {
             const decision = options.onBeforeStart?.() ?? { proceed: true as const };
-            if (!decision.proceed) return Promise.resolve(decision.value);
-            options.onCancellationBeforeRelease?.();
-            return Promise.reject(
-                new DOMException("WebAuthn request aborted", "AbortError")
-            );
+            if (!decision.proceed) return decision.value;
+            await options.onCancellationBeforeRelease?.();
+            throw new DOMException("WebAuthn request aborted", "AbortError");
         },
     });
 }
 
 function queuedTimeoutWorkRuntime(): WebAuthnWorkRuntime {
     return Object.freeze({
-        runWebAuthnVerification<T>(
+        async runWebAuthnVerification<T>(
             _work: (signal: AbortSignal) => Promise<T>,
             options: AuthenticationVerificationWorkOptions<T>
         ): Promise<T> {
@@ -153,8 +150,8 @@ function queuedTimeoutWorkRuntime(): WebAuthnWorkRuntime {
                 operation: "webauthn",
                 timeoutMs: options.timeoutMs,
             });
-            options.onFailureBeforeRelease?.(failure);
-            return Promise.reject(failure);
+            await options.onFailureBeforeRelease?.(failure);
+            throw failure;
         },
     });
 }
@@ -268,7 +265,7 @@ describe("MFA WebAuthn login lifecycle", () => {
             harness.database.sqlite.run(
                 "UPDATE user_webauthn_credentials SET rp_id = 'legacy.example'"
             );
-            harness.repository.withImmediateTransaction((unit) => {
+            await harness.repository.withImmediateTransaction((unit) => {
                 unit.deleteTotpFactor(mfaLoginUserId, mfaLoginTotpFactorId);
             });
 
@@ -560,7 +557,7 @@ describe("MFA WebAuthn login lifecycle", () => {
             webAuthn: webAuthnDependencies(),
         });
         try {
-            harness.repository.withImmediateTransaction((unit) =>
+            await harness.repository.withImmediateTransaction((unit) =>
                 unit.insertWebAuthnCredential({
                     algorithm: -7,
                     backedUp: true,
@@ -617,7 +614,7 @@ describe("MFA WebAuthn login lifecycle", () => {
         const harness = await createMfaLoginHarness({
             webAuthn: webAuthnDependencies({
                 adapter: fixedChallengeAdapter({
-                    beforeVerification: () => {
+                    beforeVerification: async () => {
                         const current = harnessState.value;
                         if (current === undefined) {
                             throw new Error(
@@ -628,7 +625,7 @@ describe("MFA WebAuthn login lifecycle", () => {
                             "login-mfa-source",
                             mfaLoginClientSourceId
                         );
-                        current.repository.withImmediateTransaction((unit) => {
+                        await current.repository.withImmediateTransaction((unit) => {
                             unit.upsertRateLimitBucket({
                                 blockedUntil: addMinutes(mfaLoginNow, 1),
                                 bucketKey,

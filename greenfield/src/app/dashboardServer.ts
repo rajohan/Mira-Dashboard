@@ -84,45 +84,47 @@ export function validateDashboardWebAuthnBrowserOrigin(
 export async function createDashboardServer(
     options: DashboardServerOptions
 ): Promise<ApplicationServer> {
-    const browserOrigin = validateDashboardWebAuthnBrowserOrigin(
-        options.browserOrigin,
-        options.webAuthnRelyingParty
-    );
-    const verifyGatewayCredential = createGatewayCredentialVerifier({
-        url: options.gatewayUrl,
-    });
-    const authenticationWork = options.applicationRuntime.services.authentication;
-    const passwordWorkGate = authenticationWork.passwordWorkGate;
-    const passwordWorkBudget = createAuthenticationWorkBudget(
-        authenticationWorkBudgetMaximumUnits,
-        authenticationWorkBudgetWindowMs
-    );
-    const totpWorkBudget = createAuthenticationWorkBudget(
-        totpWorkBudgetMaximumUnits,
-        totpWorkBudgetWindowMs
-    );
-    const webAuthnWorkBudget = createAuthenticationWorkBudget(
-        webAuthnWorkBudgetMaximumUnits,
-        webAuthnWorkBudgetWindowMs
-    );
-    const webAuthn =
-        options.webAuthnRelyingParty === undefined
-            ? undefined
-            : Object.freeze({
-                  adapter: createWebAuthnAdapter(options.webAuthnRelyingParty),
-                  relyingParty: options.webAuthnRelyingParty,
-                  ...(options.webAuthnVerificationTimeoutMs === undefined
-                      ? {}
-                      : {
-                            verificationTimeoutMs: options.webAuthnVerificationTimeoutMs,
-                        }),
-                  workBudget: webAuthnWorkBudget,
-                  workRuntime: authenticationWork,
-              });
     let serverOwnsRuntimeCleanup = false;
     try {
+        const browserOrigin = validateDashboardWebAuthnBrowserOrigin(
+            options.browserOrigin,
+            options.webAuthnRelyingParty
+        );
+        const verifyGatewayCredential = createGatewayCredentialVerifier({
+            url: options.gatewayUrl,
+        });
+        const authenticationWork = options.applicationRuntime.services.authentication;
+        const passwordWorkGate = authenticationWork.passwordWorkGate;
+        const passwordWorkBudget = createAuthenticationWorkBudget(
+            authenticationWorkBudgetMaximumUnits,
+            authenticationWorkBudgetWindowMs
+        );
+        const totpWorkBudget = createAuthenticationWorkBudget(
+            totpWorkBudgetMaximumUnits,
+            totpWorkBudgetWindowMs
+        );
+        const webAuthnWorkBudget = createAuthenticationWorkBudget(
+            webAuthnWorkBudgetMaximumUnits,
+            webAuthnWorkBudgetWindowMs
+        );
+        const webAuthn =
+            options.webAuthnRelyingParty === undefined
+                ? undefined
+                : Object.freeze({
+                      adapter: createWebAuthnAdapter(options.webAuthnRelyingParty),
+                      relyingParty: options.webAuthnRelyingParty,
+                      ...(options.webAuthnVerificationTimeoutMs === undefined
+                          ? {}
+                          : {
+                                verificationTimeoutMs:
+                                    options.webAuthnVerificationTimeoutMs,
+                            }),
+                      workBudget: webAuthnWorkBudget,
+                      workRuntime: authenticationWork,
+                  });
         await options.applicationRuntime.initialize();
-        const database = await options.applicationRuntime.database.orm();
+        const databaseRuntime = options.applicationRuntime.database;
+        const database = await databaseRuntime.orm();
         const repository = createRequestAuthenticationRepository(database);
         const authenticator = createRequestAuthenticator({
             authenticationLeaseDurationMs: options.authenticationLeaseDurationMs,
@@ -130,7 +132,7 @@ export async function createDashboardServer(
             repository,
             sessionIdleDurationMs: options.sessionIdleDurationMs,
         });
-        const mfaRepository = createMfaLifecycleRepository(database);
+        const mfaRepository = createMfaLifecycleRepository(database, databaseRuntime);
         const mfaLoginLifecycle = createMfaLoginLifecycleService({
             ...(options.now !== undefined && { now: options.now }),
             passwordWorkBudget,
@@ -175,18 +177,20 @@ export async function createDashboardServer(
             passwordWorkBudget,
             passwordWorkGate,
             recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
-            repository: createAuthenticationLifecycleRepository(database),
+            repository: createAuthenticationLifecycleRepository(
+                database,
+                databaseRuntime
+            ),
             sessionIdleDurationMs: options.sessionIdleDurationMs,
             verifyGatewayCredential,
         });
         const automationSecurityLifecycle = createAutomationSecurityLifecycleService({
             ...(options.now !== undefined && { now: options.now }),
             recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
-            repository: createAutomationLifecycleRepository(database),
+            repository: createAutomationLifecycleRepository(database, databaseRuntime),
             sessionIdleDurationMs: options.sessionIdleDurationMs,
         });
-        serverOwnsRuntimeCleanup = true;
-        return await createServer({
+        const serverOptions: ServerOptions = {
             applicationRuntime: options.applicationRuntime,
             authenticateCredential: (credential) =>
                 authenticator.authenticate(credential),
@@ -200,7 +204,9 @@ export async function createDashboardServer(
             port: options.port,
             readiness: options.readiness,
             trustedProxyAddresses: options.trustedProxyAddresses,
-        });
+        };
+        serverOwnsRuntimeCleanup = true;
+        return await createServer(serverOptions);
     } catch (error) {
         if (!serverOwnsRuntimeCleanup) {
             try {

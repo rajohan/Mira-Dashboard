@@ -167,13 +167,13 @@ export function createAccountWebAuthnStepUpOperation(
                 metadata
             );
             const { settleInvalidProof, settleVerified } = settlement;
-            const consumeWithoutFailure = (
+            const consumeWithoutFailure = async (
                 outcome: "cancelled" | "failed"
-            ): WebAuthnStepUpResult | undefined => {
+            ): Promise<WebAuthnStepUpResult | undefined> => {
                 const admitted = admission;
                 return admitted === undefined
                     ? undefined
-                    : settlement.consumeWithoutFailure(admitted, outcome);
+                    : await settlement.consumeWithoutFailure(admitted, outcome);
             };
 
             try {
@@ -326,27 +326,27 @@ export function createAccountWebAuthnStepUpOperation(
                                     ? { proceed: true }
                                     : { proceed: false, value: decision };
                             },
-                            onCancellationBeforeRelease: () => {
-                                consumeWithoutFailure("cancelled");
+                            onCancellationBeforeRelease: async () => {
+                                await consumeWithoutFailure("cancelled");
                             },
-                            onFailureBeforeRelease: () => {
-                                settledResult = consumeWithoutFailure("failed");
+                            onFailureBeforeRelease: async () => {
+                                settledResult = await consumeWithoutFailure("failed");
                             },
-                            onResultBeforeRelease: (value) => {
+                            onResultBeforeRelease: async (value) => {
                                 if (value.status !== "verified-work") return;
                                 const admitted = admission;
                                 if (admitted === undefined) {
                                     settledResult = { status: "state-changed" };
                                     return;
                                 }
-                                settledResult =
-                                    value.verification.status === "verified"
-                                        ? settleVerified(
-                                              admitted,
-                                              value.verification.verification,
-                                              now()
-                                          )
-                                        : settleInvalidProof(admitted, now());
+                                settledResult = await (value.verification.status ===
+                                "verified"
+                                    ? settleVerified(
+                                          admitted,
+                                          value.verification.verification,
+                                          now()
+                                      )
+                                    : settleInvalidProof(admitted, now()));
                             },
                             signal: metadata.signal,
                             timeoutMs: webAuthnVerificationTimeoutMs,

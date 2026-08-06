@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, link, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    link,
+    mkdir,
+    mkdtemp,
+    rename,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -73,6 +82,17 @@ describe("database runtime path policy", () => {
         expect(await rejectionOf(prepareDatabasePath(linkPath, true))).toBeInstanceOf(
             DatabaseRuntimePathError
         );
+    });
+
+    test("rejects a replaceable state-directory entry beneath a writable parent", async () => {
+        const parentDirectory = await privateTemporaryDirectory();
+        const stateDirectory = path.join(parentDirectory, "state");
+        await mkdir(stateDirectory, { mode: 0o700 });
+        await chmod(parentDirectory, 0o777);
+
+        const failure = await rejectionOf(prepareDatabasePath(stateDirectory, true));
+        expect(failure).toBeInstanceOf(DatabaseRuntimePathError);
+        expect(failure).toMatchObject({ reason: "state-directory-invalid" });
     });
 
     test("rejects symlinked, multiply linked, and permissive database files", async () => {
@@ -151,6 +171,19 @@ describe("database runtime path policy", () => {
         const prepared = await prepareDatabasePath(directory, true);
         if (!prepared) throw new Error("Expected a prepared database path");
         await chmod(directory, 0o750);
+
+        const failure = await rejectionOf(assertDatabasePathStillValid(prepared));
+        expect(failure).toBeInstanceOf(DatabaseRuntimePathError);
+        expect(failure).toMatchObject({ reason: "state-directory-invalid" });
+    });
+
+    test("detects parent-chain policy drift after preparation", async () => {
+        const parentDirectory = await privateTemporaryDirectory();
+        const stateDirectory = path.join(parentDirectory, "state");
+        await mkdir(stateDirectory, { mode: 0o700 });
+        const prepared = await prepareDatabasePath(stateDirectory, true);
+        if (!prepared) throw new Error("Expected a prepared database path");
+        await chmod(parentDirectory, 0o777);
 
         const failure = await rejectionOf(assertDatabasePathStillValid(prepared));
         expect(failure).toBeInstanceOf(DatabaseRuntimePathError);

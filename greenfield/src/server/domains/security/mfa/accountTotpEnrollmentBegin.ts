@@ -105,7 +105,7 @@ export function createBeginTotpEnrollmentOperation(
             });
 
             try {
-                return repository.withImmediateTransaction((unit) => {
+                return await repository.withImmediateTransaction((unit) => {
                     const current = currentAccount(
                         unit,
                         identity,

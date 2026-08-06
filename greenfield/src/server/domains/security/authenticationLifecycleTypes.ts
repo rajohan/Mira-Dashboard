@@ -28,7 +28,7 @@ export type VerifyGatewayCredential = (
 ) => Promise<boolean>;
 
 export interface PendingLoginLifecyclePort {
-    beginPendingLogin(input: BeginPendingLoginInput): BeginPendingLoginResult;
+    beginPendingLogin(input: BeginPendingLoginInput): Promise<BeginPendingLoginResult>;
 }
 
 export interface AuthenticationLifecycleDependencies {
@@ -121,14 +121,14 @@ export interface AuthenticationLifecycleService {
     logout(
         identity: AuthenticatedBrowserIdentity | undefined,
         metadata: AuthenticationRequestMetadata
-    ): boolean;
+    ): Promise<boolean>;
     revokeSession(
         identity: AuthenticatedBrowserIdentity,
         sessionId: string,
         metadata: AuthenticationRequestMetadata
-    ): RevokeSessionResult | undefined;
+    ): Promise<RevokeSessionResult | undefined>;
     status(identity?: AuthenticatedBrowserIdentity): AuthenticationStatus;
     touchSession(
         identity: AuthenticatedBrowserIdentity
-    ): { readonly lastSeenAtMs: number } | undefined;
+    ): Promise<{ readonly lastSeenAtMs: number } | undefined>;
 }

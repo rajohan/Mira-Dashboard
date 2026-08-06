@@ -52,10 +52,10 @@ export function createAutomationCredentialOperations(
     "createCredential" | "listCredentials" | "revokeCredential" | "rotateCredential"
 > {
     return {
-        createCredential(identity, input, metadata) {
+        async createCredential(identity, input, metadata) {
             const generation = generateCredentialMaterials(context);
             try {
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     const createdAt = context.now();
                     const policy = context.authorizeAdministration(
                         unit,
@@ -177,9 +177,9 @@ export function createAutomationCredentialOperations(
             }
         },
 
-        revokeCredential(identity, input, metadata) {
+        async revokeCredential(identity, input, metadata) {
             try {
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     const revokedAt = context.now();
                     const policy = context.authorizeAdministration(
                         unit,
@@ -242,10 +242,10 @@ export function createAutomationCredentialOperations(
             }
         },
 
-        rotateCredential(identity, input, metadata) {
+        async rotateCredential(identity, input, metadata) {
             const generation = generateCredentialMaterials(context);
             try {
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     const createdAt = context.now();
                     const policy = context.authorizeAdministration(
                         unit,

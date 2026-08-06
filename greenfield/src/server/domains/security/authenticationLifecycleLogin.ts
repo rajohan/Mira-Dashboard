@@ -67,7 +67,7 @@ export function createAuthenticationLoginOperation(
                 metadata.signal?.throwIfAborted();
                 const verificationCompletedAt = context.now();
                 if (user === undefined || user.disabledAt !== null || !passwordIsValid) {
-                    const failure = context.repository.withImmediateTransaction(
+                    const failure = await context.repository.withImmediateTransaction(
                         (unit) => {
                             const recorded = recordAuthenticationFailures(
                                 unit,
@@ -99,7 +99,7 @@ export function createAuthenticationLoginOperation(
                     const sourceTarget = rateLimitTargets.find(
                         (target) => target.sourceScoped === true
                     );
-                    const pending = context.mfaLoginLifecycle.beginPendingLogin({
+                    const pending = await context.mfaLoginLifecycle.beginPendingLogin({
                         ...(sourceTarget !== undefined && {
                             clearedPasswordRateLimitBucketKey: rateLimitBucketKey(
                                 sourceTarget.kind,
@@ -121,7 +121,7 @@ export function createAuthenticationLoginOperation(
                     if (pending.status === "mfa-unavailable") {
                         return { status: "service-unavailable" } as const;
                     }
-                    const failure = context.repository.withImmediateTransaction(
+                    const failure = await context.repository.withImmediateTransaction(
                         (unit) => {
                             const recorded = recordAuthenticationFailures(
                                 unit,
@@ -149,7 +149,7 @@ export function createAuthenticationLoginOperation(
                           } as const);
                 }
 
-                return context.repository.withImmediateTransaction((unit) => {
+                return await context.repository.withImmediateTransaction((unit) => {
                     const currentUser = unit.findUserById(user.id);
                     if (
                         currentUser === undefined ||

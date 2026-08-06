@@ -29,6 +29,7 @@ import {
     createRequestContext,
     type RequestContext,
 } from "../../trpc/context.ts";
+import { runTestImmediateDatabaseWrite } from "./databaseWriteAdmission.ts";
 
 const anonymousAuthentication: RequestAuthentication = { kind: "anonymous" };
 
@@ -198,8 +199,8 @@ function runInertAuthenticationVerification<T>(
     const decision = options.onBeforeStart?.() ?? { proceed: true as const };
     if (!decision.proceed) return Promise.resolve(decision.value);
     const signal = options.signal ?? new AbortController().signal;
-    return work(signal).then((value) => {
-        options.onResultBeforeRelease?.(value);
+    return work(signal).then(async (value) => {
+        await options.onResultBeforeRelease?.(value);
         return value;
     });
 }
@@ -229,12 +230,13 @@ export function createTestAuthenticationLifecycleService(
         login:
             overrides.login ??
             (() => Promise.resolve({ status: "bootstrap-required" as const })),
-        logout: overrides.logout ?? (() => false),
-        revokeSession: overrides.revokeSession ?? (() => ({ revoked: false })),
+        logout: overrides.logout ?? (() => Promise.resolve(false)),
+        revokeSession:
+            overrides.revokeSession ?? (() => Promise.resolve({ revoked: false })),
         status:
             overrides.status ??
             (() => ({ authenticated: false, isBootstrapRequired: false })),
-        touchSession: overrides.touchSession ?? ((): undefined => {}),
+        touchSession: overrides.touchSession ?? (() => Promise.resolve(undefined)),
     });
 }
 
@@ -248,21 +250,27 @@ export function createTestAutomationSecurityLifecycleService(
 ): AutomationSecurityLifecycleService {
     return Object.freeze({
         createCredential:
-            overrides.createCredential ?? (() => ({ status: "session-changed" })),
+            overrides.createCredential ??
+            (() => Promise.resolve({ status: "session-changed" })),
         createPrincipal:
-            overrides.createPrincipal ?? (() => ({ status: "session-changed" })),
+            overrides.createPrincipal ??
+            (() => Promise.resolve({ status: "session-changed" })),
         disablePrincipal:
-            overrides.disablePrincipal ?? (() => ({ status: "session-changed" })),
+            overrides.disablePrincipal ??
+            (() => Promise.resolve({ status: "session-changed" })),
         listCredentials:
             overrides.listCredentials ?? (() => ({ status: "session-changed" })),
         listPrincipals:
             overrides.listPrincipals ?? (() => ({ status: "session-changed" })),
         replaceCapabilities:
-            overrides.replaceCapabilities ?? (() => ({ status: "session-changed" })),
+            overrides.replaceCapabilities ??
+            (() => Promise.resolve({ status: "session-changed" })),
         revokeCredential:
-            overrides.revokeCredential ?? (() => ({ status: "session-changed" })),
+            overrides.revokeCredential ??
+            (() => Promise.resolve({ status: "session-changed" })),
         rotateCredential:
-            overrides.rotateCredential ?? (() => ({ status: "session-changed" })),
+            overrides.rotateCredential ??
+            (() => Promise.resolve({ status: "session-changed" })),
     });
 }
 
@@ -297,9 +305,11 @@ export function createTestMfaAccountLifecycleService(
             overrides.reauthenticatePassword ??
             (() => Promise.resolve({ status: "session-changed" })),
         removeTotpFactor:
-            overrides.removeTotpFactor ?? (() => ({ status: "session-changed" })),
+            overrides.removeTotpFactor ??
+            (() => Promise.resolve({ status: "session-changed" })),
         removeWebAuthnCredential:
-            overrides.removeWebAuthnCredential ?? (() => ({ status: "session-changed" })),
+            overrides.removeWebAuthnCredential ??
+            (() => Promise.resolve({ status: "session-changed" })),
         rotateRecoveryCodes:
             overrides.rotateRecoveryCodes ??
             (() => Promise.resolve({ status: "session-changed" })),
@@ -327,7 +337,7 @@ export function createTestMfaLoginLifecycleService(
     return Object.freeze({
         beginPendingLogin:
             overrides.beginPendingLogin ??
-            (() => ({ status: "mfa-unavailable" as const })),
+            (() => Promise.resolve({ status: "mfa-unavailable" as const })),
         beginWebAuthnLogin:
             overrides.beginWebAuthnLogin ??
             (() => Promise.resolve({ status: "service-unavailable" })),
@@ -341,7 +351,8 @@ export function createTestMfaLoginLifecycleService(
             overrides.completeWebAuthnLogin ??
             (() => Promise.resolve({ status: "service-unavailable" })),
         pendingLoginSummary: overrides.pendingLoginSummary ?? ((): undefined => {}),
-        revokePendingLogin: overrides.revokePendingLogin ?? (() => false),
+        revokePendingLogin:
+            overrides.revokePendingLogin ?? (() => Promise.resolve(false)),
     });
 }
 
@@ -420,7 +431,10 @@ export function withTestDashboardDatabase(
 ): DashboardApplicationRuntime {
     return Object.freeze({
         ...applicationRuntime,
-        database: Object.freeze({ orm: () => Promise.resolve(database) }),
+        database: Object.freeze({
+            orm: () => Promise.resolve(database),
+            run: runTestImmediateDatabaseWrite,
+        }),
     });
 }
 

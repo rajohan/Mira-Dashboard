@@ -9,7 +9,10 @@ import {
     DatabaseRuntimePathError,
     DatabaseRuntimeSnapshotRequiredError,
     DatabaseRuntimeStartupError,
+    DatabaseRuntimeWriteAdmissionTimeoutError,
+    DatabaseRuntimeWriteContentionError,
 } from "../../database/runtime/databaseErrors.ts";
+import { AuthenticationWorkSettlementError } from "../../domains/security/authenticationWorkGate.ts";
 import { describeSafeFailure } from "./safeFailure.ts";
 
 class ExpectedFailure extends Data.TaggedError("ApplicationListenerStopError")<{
@@ -135,6 +138,13 @@ test("recognizes every redacted database-runtime failure tag", () => {
             message: "startup failed",
             reason: "database-startup-failed",
         }),
+        new DatabaseRuntimeWriteAdmissionTimeoutError({
+            message: "write admission timed out",
+            timeoutMs: 5000,
+        }),
+        new DatabaseRuntimeWriteContentionError({
+            message: "write contention",
+        }),
     ];
 
     expect(failures.map((failure) => describeSafeFailure(failure).tag)).toEqual([
@@ -144,5 +154,20 @@ test("recognizes every redacted database-runtime failure tag", () => {
         "DatabaseRuntimePathError",
         "DatabaseRuntimeSnapshotRequiredError",
         "DatabaseRuntimeStartupError",
+        "DatabaseRuntimeWriteAdmissionTimeoutError",
+        "DatabaseRuntimeWriteContentionError",
     ]);
+});
+
+test("recognizes redacted authentication settlement failures", () => {
+    const failure = new AuthenticationWorkSettlementError({
+        cause: new Error("private settlement detail"),
+        operation: "webauthn",
+    });
+
+    expect(describeSafeFailure(failure)).toMatchObject({
+        kind: "tagged",
+        name: "AuthenticationWorkSettlementError",
+        tag: "AuthenticationWorkSettlementError",
+    });
 });

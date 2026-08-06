@@ -101,7 +101,7 @@ export function createAccountTotpStepUpOperation(
                         ? undefined
                         : { ...activeLimit, status: "rate-limited" as const };
                 },
-                (settledVerification): TotpStepUpResult => {
+                async (settledVerification): Promise<TotpStepUpResult> => {
                     const verifiedAt = now();
                     if (settledVerification.kind !== "matched") {
                         const unblockedStatus =
@@ -109,7 +109,7 @@ export function createAccountTotpStepUpOperation(
                                 ? "service-unavailable"
                                 : "invalid-proof";
                         try {
-                            return repository.withImmediateTransaction((unit) => {
+                            return await repository.withImmediateTransaction((unit) => {
                                 const activeLimit = activeRateLimitForTargets(
                                     unit,
                                     rateLimitTargets,
@@ -179,7 +179,7 @@ export function createAccountTotpStepUpOperation(
 
                     const sessionToken = generateSessionToken();
                     try {
-                        return repository.withImmediateTransaction((unit) => {
+                        return await repository.withImmediateTransaction((unit) => {
                             const current = currentAccount(
                                 unit,
                                 identity,

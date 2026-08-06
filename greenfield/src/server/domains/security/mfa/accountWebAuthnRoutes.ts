@@ -206,8 +206,8 @@ export const accountWebAuthnRoutes = {
     removeWebAuthnCredential: sessionProcedure
         .input(removeWebAuthnCredentialInputSchema)
         .output(removeWebAuthnCredentialResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.mfaAccountLifecycle.removeWebAuthnCredential(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.mfaAccountLifecycle.removeWebAuthnCredential(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)

@@ -160,7 +160,7 @@ export function createAuthenticationPasswordOperation(
                 metadata.signal?.throwIfAborted();
                 if (!isCurrentPassword) {
                     const failedAt = context.now();
-                    const failure = context.repository.withImmediateTransaction(
+                    const failure = await context.repository.withImmediateTransaction(
                         (unit) => {
                             const state = revalidatePasswordChange(
                                 context,
@@ -210,7 +210,7 @@ export function createAuthenticationPasswordOperation(
                 metadata.signal?.throwIfAborted();
                 const changedAt = context.now();
                 try {
-                    return context.repository.withImmediateTransaction((unit) => {
+                    return await context.repository.withImmediateTransaction((unit) => {
                         const state = revalidatePasswordChange(
                             context,
                             unit,

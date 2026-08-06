@@ -52,7 +52,7 @@ export interface MfaLoginCoordinator {
         completedAt: Date,
         metadata: AuthenticationRequestMetadata,
         consumeProof: (unit: MfaLifecycleUnitOfWork) => MfaLoginProofConsumptionResult
-    ) => CompleteMfaLoginResult;
+    ) => Promise<CompleteMfaLoginResult>;
     readonly recordFailure: (
         resolved: ResolvedPendingLogin | undefined,
         credential: ParsedOpaqueToken,
@@ -60,7 +60,7 @@ export interface MfaLoginCoordinator {
         failedAt: Date,
         reason: MfaLoginFailureReason,
         unblockedStatus?: "invalid-proof" | "service-unavailable"
-    ) => CompleteMfaLoginResult;
+    ) => Promise<CompleteMfaLoginResult>;
     readonly recordWebAuthnFailure: (
         resolved: ResolvedPendingLogin,
         credential: ParsedOpaqueToken,
@@ -68,20 +68,20 @@ export interface MfaLoginCoordinator {
         failedAt: Date,
         consumeChallenge: (unit: MfaLifecycleUnitOfWork) => boolean,
         attemptCheckedAt?: Date
-    ) => CompleteMfaLoginResult;
+    ) => Promise<CompleteMfaLoginResult>;
     readonly recordWebAuthnCancellation: (
         resolved: ResolvedPendingLogin,
         metadata: AuthenticationRequestMetadata,
         cancelledAt: Date,
         consumeChallenge: (unit: MfaLifecycleUnitOfWork) => boolean
-    ) => void;
+    ) => Promise<void>;
     readonly recordWebAuthnUnavailable: (
         resolved: ResolvedPendingLogin,
         metadata: AuthenticationRequestMetadata,
         failedAt: Date,
         consumeChallenge: (unit: MfaLifecycleUnitOfWork) => boolean,
         reason?: "webauthn_configuration_mismatch"
-    ) => CompleteMfaLoginResult;
+    ) => Promise<CompleteMfaLoginResult>;
 }
 
 type MfaLoginCoordinatorPort = Pick<
@@ -100,7 +100,7 @@ export function createMfaLoginCoordinator(
 ): MfaLoginCoordinator {
     const { audit, generateSessionToken, repository, sessionIdleDurationMs } = context;
 
-    const finishLogin: MfaLoginCoordinator["finishLogin"] = (
+    const finishLogin: MfaLoginCoordinator["finishLogin"] = async (
         resolved,
         credential,
         method,
@@ -113,7 +113,7 @@ export function createMfaLoginCoordinator(
         );
         const sessionToken = generateSessionToken();
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const currentUser = unit.findUserById(resolved.user.id);
                 if (
                     currentUser === undefined ||
@@ -205,7 +205,7 @@ export function createMfaLoginCoordinator(
         }
     };
 
-    const recordFailure: MfaLoginCoordinator["recordFailure"] = (
+    const recordFailure: MfaLoginCoordinator["recordFailure"] = async (
         resolved,
         credential,
         metadata,
@@ -214,7 +214,7 @@ export function createMfaLoginCoordinator(
         unblockedStatus = "invalid-proof"
     ) => {
         const targets = mfaLoginRateLimitTargets(metadata.clientSourceId);
-        return repository.withImmediateTransaction((unit) => {
+        return await repository.withImmediateTransaction((unit) => {
             const activeLimit = activeRateLimitForTargets(unit, targets, failedAt);
             if (activeLimit !== undefined) {
                 return { ...activeLimit, status: "rate-limited" as const };
@@ -257,7 +257,7 @@ export function createMfaLoginCoordinator(
         });
     };
 
-    const recordWebAuthnFailure: MfaLoginCoordinator["recordWebAuthnFailure"] = (
+    const recordWebAuthnFailure: MfaLoginCoordinator["recordWebAuthnFailure"] = async (
         resolved,
         credential,
         metadata,
@@ -267,7 +267,7 @@ export function createMfaLoginCoordinator(
     ) => {
         const targets = mfaLoginRateLimitTargets(metadata.clientSourceId);
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 if (!consumeChallenge(unit)) {
                     throw new MfaLoginStateChangedError();
                 }
@@ -319,8 +319,8 @@ export function createMfaLoginCoordinator(
     };
 
     const recordWebAuthnCancellation: MfaLoginCoordinator["recordWebAuthnCancellation"] =
-        (resolved, metadata, cancelledAt, consumeChallenge) => {
-            repository.withImmediateTransaction((unit) => {
+        async (resolved, metadata, cancelledAt, consumeChallenge) => {
+            await repository.withImmediateTransaction((unit) => {
                 if (!consumeChallenge(unit)) return;
                 audit(unit, {
                     action: "auth.login.mfa",
@@ -339,41 +339,36 @@ export function createMfaLoginCoordinator(
             });
         };
 
-    const recordWebAuthnUnavailable: MfaLoginCoordinator["recordWebAuthnUnavailable"] = (
-        resolved,
-        metadata,
-        failedAt,
-        consumeChallenge,
-        reason
-    ) => {
-        try {
-            return repository.withImmediateTransaction((unit) => {
-                if (!consumeChallenge(unit)) {
-                    throw new MfaLoginStateChangedError();
-                }
-                audit(unit, {
-                    action: "auth.login.mfa",
-                    actor: {
-                        authenticatorId: null,
-                        id: "browser",
-                        kind: "anonymous",
-                    },
-                    metadata: { method: "webauthn", ...(reason && { reason }) },
-                    occurredAt: failedAt,
-                    outcome: "failed",
-                    requestId: metadata.requestId,
-                    targetId: resolved.user.id,
-                    targetType: "user",
+    const recordWebAuthnUnavailable: MfaLoginCoordinator["recordWebAuthnUnavailable"] =
+        async (resolved, metadata, failedAt, consumeChallenge, reason) => {
+            try {
+                return await repository.withImmediateTransaction((unit) => {
+                    if (!consumeChallenge(unit)) {
+                        throw new MfaLoginStateChangedError();
+                    }
+                    audit(unit, {
+                        action: "auth.login.mfa",
+                        actor: {
+                            authenticatorId: null,
+                            id: "browser",
+                            kind: "anonymous",
+                        },
+                        metadata: { method: "webauthn", ...(reason && { reason }) },
+                        occurredAt: failedAt,
+                        outcome: "failed",
+                        requestId: metadata.requestId,
+                        targetId: resolved.user.id,
+                        targetType: "user",
+                    });
+                    return { status: "service-unavailable" } as const;
                 });
-                return { status: "service-unavailable" } as const;
-            });
-        } catch (error) {
-            if (error instanceof MfaLoginStateChangedError) {
-                return { status: "state-changed" };
+            } catch (error) {
+                if (error instanceof MfaLoginStateChangedError) {
+                    return { status: "state-changed" };
+                }
+                throw error;
             }
-            throw error;
-        }
-    };
+        };
 
     return Object.freeze({
         finishLogin,

@@ -26,6 +26,7 @@ import {
     validUserTotpFactorInsert,
 } from "../../../database/validation/testSupport/securityRows.ts";
 import { userInsertSchema } from "../../../database/validation/users.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
 import {
     createMfaLifecycleRepository,
@@ -43,7 +44,10 @@ const exhaustedPendingLoginValidatorHash = "f".repeat(64);
 
 async function openMfaRepositoryFixture() {
     const database = await openFreshMigratedDatabase();
-    const repository = createMfaLifecycleRepository(database.orm);
+    const repository = createMfaLifecycleRepository(
+        database.orm,
+        testImmediateDatabaseWriteAdmission
+    );
 
     try {
         database.orm
@@ -55,7 +59,7 @@ async function openMfaRepositoryFixture() {
                 })
             )
             .run();
-        repository.withImmediateTransaction((unit) => {
+        await repository.withImmediateTransaction((unit) => {
             unit.insertSession(validAuthSessionInsert);
             unit.insertPendingLogin(validAuthPendingLoginInsert);
             unit.insertTotpFactor({
@@ -87,7 +91,10 @@ describe("MFA lifecycle repository", () => {
         const primary = new Database(databasePath, { create: true, strict: true });
         const competing = new Database(databasePath, { strict: true });
         competing.run("PRAGMA busy_timeout = 0");
-        const repository = createMfaLifecycleRepository(drizzle({ client: primary }));
+        const repository = createMfaLifecycleRepository(
+            drizzle({ client: primary }),
+            testImmediateDatabaseWriteAdmission
+        );
 
         try {
             let deferredCompetingWriterAcquired = false;
@@ -100,7 +107,7 @@ describe("MFA lifecycle repository", () => {
 
             let callbackFinished = false;
             let immediateCompetingWriterFailure: unknown;
-            const result = repository.withImmediateTransaction(() => {
+            const result = await repository.withImmediateTransaction(() => {
                 try {
                     competing.run("BEGIN IMMEDIATE");
                     competing.run("ROLLBACK");
@@ -130,7 +137,7 @@ describe("MFA lifecycle repository", () => {
         const fixture = await openMfaRepositoryFixture();
 
         try {
-            expect(() =>
+            expect(
                 fixture.repository.withImmediateTransaction((unit) => {
                     expect(
                         unit.advanceTotpLastUsedStep({
@@ -182,7 +189,7 @@ describe("MFA lifecycle repository", () => {
                     unit.deleteRateLimitBucket(rateLimitBucketKey);
                     throw new Error("forced MFA repository rollback");
                 })
-            ).toThrow("forced MFA repository rollback");
+            ).rejects.toThrow("forced MFA repository rollback");
 
             expect(
                 fixture.repository.findTotpFactor(
@@ -234,10 +241,10 @@ describe("MFA lifecycle repository", () => {
                 userId: securityUserId,
             };
             const stepContenders = [
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.advanceTotpLastUsedStep(advanceInput)
                 ),
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.advanceTotpLastUsedStep(advanceInput)
                 ),
             ];
@@ -260,10 +267,10 @@ describe("MFA lifecycle repository", () => {
                 userId: securityUserId,
             };
             const recoveryContenders = [
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumeRecoveryCode(consumeInput)
                 ),
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumeRecoveryCode(consumeInput)
                 ),
             ];
@@ -292,10 +299,10 @@ describe("MFA lifecycle repository", () => {
                 validatorHash: validAuthPendingLoginInsert.validatorHash,
             };
             const consumptionContenders = [
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumePendingLogin(consumeInput)
                 ),
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumePendingLogin(consumeInput)
                 ),
             ];
@@ -306,7 +313,7 @@ describe("MFA lifecycle repository", () => {
                 fixture.repository.findPendingLogin(pendingLoginSelector)
             ).toBeUndefined();
 
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPendingLogin({
                     ...validAuthPendingLoginInsert,
                     id: exhaustedPendingLoginId,
@@ -321,17 +328,16 @@ describe("MFA lifecycle repository", () => {
                 validatorHash: exhaustedPendingLoginValidatorHash,
             };
             for (let attempt = 1; attempt < pendingLoginAttemptMaximum; attempt += 1) {
-                expect(
-                    fixture.repository.withImmediateTransaction((unit) =>
-                        unit.incrementPendingLoginAttempt(incrementInput)
-                    )?.attemptCount
-                ).toBe(attempt);
+                const incremented = await fixture.repository.withImmediateTransaction(
+                    (unit) => unit.incrementPendingLoginAttempt(incrementInput)
+                );
+                expect(incremented?.attemptCount).toBe(attempt);
             }
             const finalAttemptContenders = [
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.incrementPendingLoginAttempt(incrementInput)
                 ),
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.incrementPendingLoginAttempt(incrementInput)
                 ),
             ];
@@ -341,7 +347,7 @@ describe("MFA lifecycle repository", () => {
             );
             expect(finalAttemptContenders[1]).toBeUndefined();
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumePendingLogin({
                         ...consumeInput,
                         id: exhaustedPendingLoginId,

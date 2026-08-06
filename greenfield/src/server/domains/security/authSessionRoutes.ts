@@ -73,8 +73,8 @@ export const authSessionRoutes = {
     revokeSession: sessionProcedure
         .input(sessionRevokeInputSchema)
         .output(authSessionRevokeResultSchema)
-        .mutation(({ ctx, input }) => {
-            const result = ctx.authenticationLifecycle.revokeSession(
+        .mutation(async ({ ctx, input }) => {
+            const result = await ctx.authenticationLifecycle.revokeSession(
                 ctx.sessionIdentity,
                 input.sessionId,
                 authenticationRequestMetadata(ctx, undefined)
@@ -116,8 +116,10 @@ export const authSessionRoutes = {
     touch: sessionProcedure
         .input(emptyInputSchema)
         .output(authSessionTouchResultSchema)
-        .mutation(({ ctx }) => {
-            const result = ctx.authenticationLifecycle.touchSession(ctx.sessionIdentity);
+        .mutation(async ({ ctx }) => {
+            const result = await ctx.authenticationLifecycle.touchSession(
+                ctx.sessionIdentity
+            );
             if (result === undefined) {
                 appendClearedDashboardSessionCookie(ctx.responseHeaders);
                 throw new TRPCError({

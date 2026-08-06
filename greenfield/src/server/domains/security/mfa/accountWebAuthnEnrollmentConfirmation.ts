@@ -175,13 +175,13 @@ export function createConfirmWebAuthnEnrollmentOperation(
                 input,
                 metadata
             );
-            const consumeWithoutProofFailure = (
+            const consumeWithoutProofFailure = async (
                 outcome: "cancelled" | "failed"
-            ): ConfirmWebAuthnEnrollmentResult | undefined => {
+            ): Promise<ConfirmWebAuthnEnrollmentResult | undefined> => {
                 const admitted = admission;
                 return admitted === undefined
                     ? undefined
-                    : settlement.consumeWithoutProofFailure(admitted, outcome);
+                    : await settlement.consumeWithoutProofFailure(admitted, outcome);
             };
 
             try {
@@ -323,13 +323,14 @@ export function createConfirmWebAuthnEnrollmentOperation(
                                     ? { proceed: true }
                                     : { proceed: false, value: decision };
                             },
-                            onCancellationBeforeRelease: () => {
-                                consumeWithoutProofFailure("cancelled");
+                            onCancellationBeforeRelease: async () => {
+                                await consumeWithoutProofFailure("cancelled");
                             },
-                            onFailureBeforeRelease: () => {
-                                settledResult = consumeWithoutProofFailure("failed");
+                            onFailureBeforeRelease: async () => {
+                                settledResult =
+                                    await consumeWithoutProofFailure("failed");
                             },
-                            onResultBeforeRelease: (value) => {
+                            onResultBeforeRelease: async (value) => {
                                 if (value.status !== "verified-work") return;
                                 const admitted = admission;
                                 if (admitted === undefined) {
@@ -338,7 +339,7 @@ export function createConfirmWebAuthnEnrollmentOperation(
                                 }
                                 if (value.verification.status === "verified") {
                                     const verifiedSettlement =
-                                        settlement.settleVerifiedRegistration(
+                                        await settlement.settleVerifiedRegistration(
                                             admitted,
                                             value.verification.verification,
                                             now()
@@ -349,10 +350,11 @@ export function createConfirmWebAuthnEnrollmentOperation(
                                         settledResult = verifiedSettlement.result;
                                     }
                                 } else {
-                                    settledResult = settlement.recordInvalidRegistration(
-                                        admitted,
-                                        now()
-                                    );
+                                    settledResult =
+                                        await settlement.recordInvalidRegistration(
+                                            admitted,
+                                            now()
+                                        );
                                 }
                             },
                             signal: metadata.signal,
@@ -387,7 +389,11 @@ export function createConfirmWebAuthnEnrollmentOperation(
             if ("status" in prepared) return prepared;
             metadata.signal?.throwIfAborted();
             const confirmedAt = now();
-            return settlement.activateFirstCredential(staged, prepared, confirmedAt);
+            return await settlement.activateFirstCredential(
+                staged,
+                prepared,
+                confirmedAt
+            );
         },
     });
 }

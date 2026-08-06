@@ -7,13 +7,17 @@ import {
     minutesToMilliseconds,
     toDate,
 } from "date-fns";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Data, Effect, Layer, Schema } from "effect";
 
 import { timestampMillisecondsSchema } from "../../../shared/dateTime.ts";
 import {
     parseSchemaWithRangeError,
     positiveSafeIntegerSchema,
 } from "../../../shared/validation.ts";
+import {
+    isDatabaseRuntimeWriteUnavailableError,
+    type DatabaseRuntimeWriteUnavailableError,
+} from "../../database/runtime/databaseErrors.ts";
 import {
     MonitoringSnapshotValidationError,
     normalizeMonitoringSnapshot,
@@ -66,6 +70,7 @@ export interface MonitoringServiceDependencies {
 }
 
 export type MonitoringSubmissionError =
+    | DatabaseRuntimeWriteUnavailableError
     | MonitoringRunConflictError
     | MonitoringSnapshotValidationError;
 
@@ -87,6 +92,20 @@ export class MonitoringRunConflictError extends TaggedErrorClass<MonitoringRunCo
     message: Schema.String,
     runId: Schema.String,
 }) {}
+
+class MonitoringUnexpectedSubmissionError extends Data.TaggedError(
+    "MonitoringUnexpectedSubmissionError"
+)<{
+    readonly cause: unknown;
+}> {}
+
+function isMonitoringSubmissionError(error: unknown): error is MonitoringSubmissionError {
+    return (
+        error instanceof MonitoringSnapshotValidationError ||
+        error instanceof MonitoringRunConflictError ||
+        isDatabaseRuntimeWriteUnavailableError(error)
+    );
+}
 
 function emptyCounts(): MutableSubmissionCounts {
     return {
@@ -125,7 +144,9 @@ export function createMonitoringService(
         dependencies.realtimeRetentionMs ?? defaultRealtimeRetentionMilliseconds
     );
 
-    const commitCompleteSnapshot = (input: unknown): MonitoringSubmissionResult => {
+    const commitCompleteSnapshot = async (
+        input: unknown
+    ): Promise<MonitoringSubmissionResult> => {
         const normalized = normalizeMonitoringSnapshot(input);
         const receivedAtMs = parseSchemaWithRangeError(clockMillisecondsSchema, nowMs());
         if (
@@ -140,98 +161,102 @@ export function createMonitoringService(
         const outboxOccurredAt = toDate(receivedAtMs);
         const expiresAt = addMilliseconds(outboxOccurredAt, realtimeRetentionMs);
         parseSchemaWithRangeError(realtimeExpiryMillisecondsSchema, getTime(expiresAt));
-        const committed = dependencies.repository.withImmediateTransaction((unit) => {
-            const existingRun = unit.findRun(normalized.snapshot.runId);
-            if (existingRun !== undefined) {
-                if (existingRun.submissionSha256 !== normalized.submissionSha256) {
-                    throw new MonitoringRunConflictError({
-                        message: `Monitoring run ${normalized.snapshot.runId} was already submitted with different content`,
-                        runId: normalized.snapshot.runId,
-                    });
+        const committed = await dependencies.repository.withImmediateTransaction(
+            (unit) => {
+                const existingRun = unit.findRun(normalized.snapshot.runId);
+                if (existingRun !== undefined) {
+                    if (existingRun.submissionSha256 !== normalized.submissionSha256) {
+                        throw new MonitoringRunConflictError({
+                            message: `Monitoring run ${normalized.snapshot.runId} was already submitted with different content`,
+                            runId: normalized.snapshot.runId,
+                        });
+                    }
+                    return {
+                        ...emptyCounts(),
+                        duplicateRunId: true,
+                        reportId: existingRun.reportId,
+                        runId: existingRun.id,
+                        status: "duplicate" as const,
+                    };
                 }
-                return {
-                    ...emptyCounts(),
-                    duplicateRunId: true,
-                    reportId: existingRun.reportId,
-                    runId: existingRun.id,
-                    status: "duplicate" as const,
-                };
-            }
 
-            const counts = emptyCounts();
-            const latestRun = unit.findLatestCompleteRun(normalized.snapshot.monitorKey);
-            const reportId = generateId();
-            // The resource-scoped maintenance job owns bounded expiry deletion;
-            // request transactions only stamp the durable retention boundary.
+                const counts = emptyCounts();
+                const latestRun = unit.findLatestCompleteRun(
+                    normalized.snapshot.monitorKey
+                );
+                const reportId = generateId();
+                // The resource-scoped maintenance job owns bounded expiry deletion;
+                // request transactions only stamp the durable retention boundary.
 
-            unit.insertReport({
-                bodyMarkdown: normalized.snapshot.report.bodyMarkdown,
-                id: reportId,
-                kind: normalized.snapshot.report.kind,
-                metadataJson: serializeMonitoringJsonObject(
-                    normalized.snapshot.report.metadata
-                ),
-                occurredAt: snapshotOccurredAt,
-                source: normalized.snapshot.report.source,
-                sourceJobId: normalized.snapshot.report.sourceJobId,
-                title: normalized.snapshot.report.title,
-            });
-            unit.insertMonitorRun({
-                completedAt: snapshotOccurredAt,
-                completeSnapshot: true,
-                id: normalized.snapshot.runId,
-                monitorKey: normalized.snapshot.monitorKey,
-                reportId,
-                startedAt: toDate(normalized.snapshot.startedAtMs),
-                state: "succeeded",
-                submissionSha256: normalized.submissionSha256,
-            });
-            insertRealtimeEvent(unit, counts, {
-                entityId: reportId,
-                entityType: "report",
-                expiresAt,
-                occurredAt: outboxOccurredAt,
-                operation: "created",
-                topic: monitoringRealtimeTopics.reports,
-            });
+                unit.insertReport({
+                    bodyMarkdown: normalized.snapshot.report.bodyMarkdown,
+                    id: reportId,
+                    kind: normalized.snapshot.report.kind,
+                    metadataJson: serializeMonitoringJsonObject(
+                        normalized.snapshot.report.metadata
+                    ),
+                    occurredAt: snapshotOccurredAt,
+                    source: normalized.snapshot.report.source,
+                    sourceJobId: normalized.snapshot.report.sourceJobId,
+                    title: normalized.snapshot.report.title,
+                });
+                unit.insertMonitorRun({
+                    completedAt: snapshotOccurredAt,
+                    completeSnapshot: true,
+                    id: normalized.snapshot.runId,
+                    monitorKey: normalized.snapshot.monitorKey,
+                    reportId,
+                    startedAt: toDate(normalized.snapshot.startedAtMs),
+                    state: "succeeded",
+                    submissionSha256: normalized.submissionSha256,
+                });
+                insertRealtimeEvent(unit, counts, {
+                    entityId: reportId,
+                    entityType: "report",
+                    expiresAt,
+                    occurredAt: outboxOccurredAt,
+                    operation: "created",
+                    topic: monitoringRealtimeTopics.reports,
+                });
 
-            if (
-                latestRun?.completedAt !== undefined &&
-                latestRun.completedAt !== null &&
-                !isNewerThanLatestRun(
-                    normalized.snapshot.completedAtMs,
-                    normalized.snapshot.runId,
-                    latestRun.completedAt,
-                    latestRun.id
-                )
-            ) {
+                if (
+                    latestRun?.completedAt !== undefined &&
+                    latestRun.completedAt !== null &&
+                    !isNewerThanLatestRun(
+                        normalized.snapshot.completedAtMs,
+                        normalized.snapshot.runId,
+                        latestRun.completedAt,
+                        latestRun.id
+                    )
+                ) {
+                    return {
+                        ...counts,
+                        duplicateRunId: false,
+                        reportId,
+                        runId: normalized.snapshot.runId,
+                        status: "stale" as const,
+                    };
+                }
+
+                applyMonitoringSnapshotLifecycle({
+                    counts,
+                    expiresAt,
+                    generateId,
+                    outboxOccurredAt,
+                    snapshot: normalized.snapshot,
+                    snapshotOccurredAt,
+                    unit,
+                });
+
                 return {
                     ...counts,
                     duplicateRunId: false,
                     reportId,
                     runId: normalized.snapshot.runId,
-                    status: "stale" as const,
+                    status: "accepted" as const,
                 };
             }
-
-            applyMonitoringSnapshotLifecycle({
-                counts,
-                expiresAt,
-                generateId,
-                outboxOccurredAt,
-                snapshot: normalized.snapshot,
-                snapshotOccurredAt,
-                unit,
-            });
-
-            return {
-                ...counts,
-                duplicateRunId: false,
-                reportId,
-                runId: normalized.snapshot.runId,
-                status: "accepted" as const,
-            };
-        });
+        );
 
         return committed;
     };
@@ -240,19 +265,17 @@ export function createMonitoringService(
         function* (
             input: unknown
         ): Effect.fn.Return<MonitoringSubmissionResult, MonitoringSubmissionError> {
-            const committed = yield* Effect.suspend(() => {
-                try {
-                    return Effect.succeed(commitCompleteSnapshot(input));
-                } catch (error) {
-                    if (
-                        error instanceof MonitoringSnapshotValidationError ||
-                        error instanceof MonitoringRunConflictError
-                    ) {
-                        return Effect.fail(error);
-                    }
-                    return Effect.die(error);
-                }
-            });
+            const committed = yield* Effect.tryPromise({
+                catch: (error) =>
+                    isMonitoringSubmissionError(error)
+                        ? error
+                        : new MonitoringUnexpectedSubmissionError({ cause: error }),
+                try: () => commitCompleteSnapshot(input),
+            }).pipe(
+                Effect.catchTag("MonitoringUnexpectedSubmissionError", (error) =>
+                    Effect.die(error.cause)
+                )
+            );
 
             if (committed.realtimeEvents > 0 && dependencies.wakeEventPump) {
                 yield* Effect.sync(() => {
@@ -271,7 +294,7 @@ export function createMonitoringService(
 }
 
 /**
- * Provides the monitoring application service from its synchronous repository boundary.
+ * Provides the monitoring application service from its asynchronous write boundary.
  * @param dependencies Repository plus replaceable clock, identity, and wakeup boundaries.
  * @returns A layer containing one monitoring application service.
  */

@@ -12,6 +12,7 @@ import {
     parseOpaqueToken,
     type GeneratedOpaqueToken,
 } from "../../../../shared/opaqueToken.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../../../test/support/freshDatabase.ts";
 import { testDashboardPasswordHash } from "../../../../test/support/securityPassword.ts";
 import type {
@@ -94,7 +95,7 @@ export function withAutomationLifecycleRepositoryHooks(
         ...repository,
         withImmediateTransaction<T>(
             callback: (unit: AutomationLifecycleUnitOfWork) => SynchronousResult<T>
-        ): T {
+        ): Promise<T> {
             return repository.withImmediateTransaction((unit) => {
                 hooks.beforeImmediateCallback?.();
                 return callback(unit);
@@ -173,7 +174,10 @@ export async function openAutomationLifecycleFixture(): Promise<AutomationLifecy
             )
             .run();
 
-        const repository = createAutomationLifecycleRepository(database.orm);
+        const repository = createAutomationLifecycleRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
         return {
             createService(overrides = {}) {
                 return createAutomationSecurityLifecycleService({

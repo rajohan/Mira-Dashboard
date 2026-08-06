@@ -144,7 +144,7 @@ describe("MFA account factor lifecycle", () => {
             ).toEqual({ status: "factor-limit" });
             for (const factorId of factorIds.slice(0, -1)) {
                 expect(
-                    harness.service.removeTotpFactor(
+                    await harness.service.removeTotpFactor(
                         enabled.identity,
                         { factorId },
                         accountLifecycleMetadata(`remove-${factorId}`)
@@ -152,7 +152,7 @@ describe("MFA account factor lifecycle", () => {
                 ).toMatchObject({ factorId, removed: true, status: "removed" });
             }
             expect(
-                harness.service.removeTotpFactor(
+                await harness.service.removeTotpFactor(
                     enabled.identity,
                     { factorId: factorIds.at(-1)! },
                     accountLifecycleMetadata("remove-final")

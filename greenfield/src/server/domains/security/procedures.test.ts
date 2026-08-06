@@ -37,7 +37,8 @@ function createTestMfaLoginLifecycleService(
 ): MfaLoginLifecycleService {
     return Object.freeze({
         beginPendingLogin:
-            overrides.beginPendingLogin ?? (() => ({ status: "identity-changed" })),
+            overrides.beginPendingLogin ??
+            (() => Promise.resolve({ status: "identity-changed" })),
         beginWebAuthnLogin:
             overrides.beginWebAuthnLogin ??
             (() => Promise.resolve({ status: "service-unavailable" })),
@@ -52,7 +53,8 @@ function createTestMfaLoginLifecycleService(
             (() => Promise.resolve({ status: "service-unavailable" })),
         pendingLoginSummary:
             overrides.pendingLoginSummary ?? ((): undefined => undefined),
-        revokePendingLogin: overrides.revokePendingLogin ?? (() => false),
+        revokePendingLogin:
+            overrides.revokePendingLogin ?? (() => Promise.resolve(false)),
     });
 }
 
@@ -269,7 +271,7 @@ describe("authentication procedures", () => {
                 createTestApplicationRuntime(),
                 {
                     authenticationLifecycle: createTestAuthenticationLifecycleService({
-                        revokeSession: () => ({ revoked }),
+                        revokeSession: () => Promise.resolve({ revoked }),
                     }),
                     responseHeaders,
                 }
@@ -291,7 +293,7 @@ describe("authentication procedures", () => {
             createTestApplicationRuntime(),
             {
                 authenticationLifecycle: createTestAuthenticationLifecycleService({
-                    revokeSession: () => ({ status: "step-up-required" }),
+                    revokeSession: () => Promise.resolve({ status: "step-up-required" }),
                 }),
                 responseHeaders,
             }
@@ -384,7 +386,7 @@ describe("authentication procedures", () => {
             createTestApplicationRuntime(),
             {
                 authenticationLifecycle: createTestAuthenticationLifecycleService({
-                    revokeSession: (): undefined => {},
+                    revokeSession: () => Promise.resolve(undefined),
                 }),
                 responseHeaders: revokeHeaders,
             }

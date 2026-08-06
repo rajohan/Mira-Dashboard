@@ -19,6 +19,7 @@ import {
 import {
     checkpointDatabasePassive,
     type DatabaseCheckpointDiagnostics,
+    retryDatabaseWriteOperation,
 } from "./databasePolicy.ts";
 import {
     initializeDatabaseRuntime,
@@ -53,6 +54,9 @@ interface DatabaseRuntimeServiceShape {
     >;
     readonly diagnostics: DatabaseRuntimeDiagnostics;
     readonly orm: RuntimeOwnedDatabase;
+    readonly runImmediateWrite: <A>(
+        operation: (markTransactionStarted: () => void) => A
+    ) => Effect.Effect<A, unknown>;
 }
 
 /** Process-scoped, migration-verified SQLite and Drizzle ownership boundary. */
@@ -207,6 +211,7 @@ function acquireDatabaseRuntime(unverifiedOptions: DatabaseRuntimeLayerOptions) 
             checkpointPassive: checkpointDatabasePassive(database),
             diagnostics,
             orm,
+            runImmediateWrite: retryDatabaseWriteOperation,
         });
         checkpointOnRelease = true;
         return service;

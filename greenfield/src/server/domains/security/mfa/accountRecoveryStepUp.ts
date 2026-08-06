@@ -91,7 +91,7 @@ export function createAccountRecoveryStepUpOperation(
                 return { ...activeLimit, status: "rate-limited" };
             }
 
-            const completeVerification = (valid: boolean) => {
+            const completeVerification = async (valid: boolean) => {
                 const verifiedAt = now();
                 if (
                     !valid ||
@@ -99,7 +99,7 @@ export function createAccountRecoveryStepUpOperation(
                     snapshot.recovery === undefined
                 ) {
                     try {
-                        return repository.withImmediateTransaction((unit) => {
+                        return await repository.withImmediateTransaction((unit) => {
                             const activeLimit = activeRateLimitForTargets(
                                 unit,
                                 rateLimitTargets,
@@ -169,7 +169,7 @@ export function createAccountRecoveryStepUpOperation(
                 const verifiedRecovery = snapshot.recovery;
                 const sessionToken = generateSessionToken();
                 try {
-                    return repository.withImmediateTransaction((unit) => {
+                    return await repository.withImmediateTransaction((unit) => {
                         const current = currentAccount(
                             unit,
                             identity,

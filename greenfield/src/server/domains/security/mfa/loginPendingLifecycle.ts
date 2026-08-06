@@ -120,9 +120,9 @@ export function createPendingLoginOperations(
     } = context;
 
     return Object.freeze({
-        beginPendingLogin(input) {
+        async beginPendingLogin(input) {
             const pendingToken = generatePendingLoginToken();
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const user = unit.findUserById(input.userSnapshot.id);
                 if (
                     user === undefined ||
@@ -222,14 +222,14 @@ export function createPendingLoginOperations(
                 : pendingLoginSummary(resolved.pending, resolved.user);
         },
 
-        revokePendingLogin(credential, metadata) {
+        async revokePendingLogin(credential, metadata) {
             const occurredAt = now();
             const resolved = repository.withReadTransaction((reader) =>
                 resolvePendingLogin(reader, credential, occurredAt)
             );
             if (resolved === undefined) return false;
             try {
-                return repository.withImmediateTransaction((unit) => {
+                return await repository.withImmediateTransaction((unit) => {
                     const removed = unit.deletePendingLogin(
                         resolved.user.id,
                         resolved.pending.id

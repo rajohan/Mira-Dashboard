@@ -97,7 +97,7 @@ describe("authentication lifecycle sessions", () => {
                 isBootstrapRequired: false,
             });
             expect(harness.service.listSessions(identity)).toBeUndefined();
-            expect(harness.service.touchSession(identity)).toBeUndefined();
+            expect(await harness.service.touchSession(identity)).toBeUndefined();
         } finally {
             harness.database.sqlite.close(true);
         }
@@ -128,7 +128,7 @@ describe("authentication lifecycle sessions", () => {
 
             const beforeNoop = auditCount();
             expect(
-                harness.service.revokeSession(actorIdentity, "b".repeat(32), {
+                await harness.service.revokeSession(actorIdentity, "b".repeat(32), {
                     clientSourceId: "client-source-1",
                     requestId: "request-noop-revoke",
                 })
@@ -141,7 +141,7 @@ describe("authentication lifecycle sessions", () => {
             expect(harness.service.listSessions(actorIdentity)).toBeUndefined();
             const beforeStale = auditCount();
             expect(
-                harness.service.revokeSession(actorIdentity, second.session.id, {
+                await harness.service.revokeSession(actorIdentity, second.session.id, {
                     clientSourceId: "client-source-1",
                     requestId: "request-stale-revoke",
                 })
@@ -176,7 +176,7 @@ describe("authentication lifecycle sessions", () => {
             harness.advanceSeconds(61);
 
             expect(
-                harness.service.revokeSession(
+                await harness.service.revokeSession(
                     { sessionId: created.session.id, userId: created.user.id },
                     second.session.id,
                     { clientSourceId: "client-source-1", requestId: "request-stale" }
@@ -205,13 +205,13 @@ describe("authentication lifecycle sessions", () => {
             };
 
             expect(
-                harness.service.logout(identity, {
+                await harness.service.logout(identity, {
                     clientSourceId: "client-source-1",
                     requestId: "request-logout",
                 })
             ).toBeTrue();
             expect(
-                harness.service.logout(identity, {
+                await harness.service.logout(identity, {
                     clientSourceId: "client-source-1",
                     requestId: "request-repeat-logout",
                 })
@@ -239,7 +239,7 @@ describe("authentication lifecycle sessions", () => {
             };
             harness.advanceSeconds(60);
 
-            expect(harness.service.touchSession(identity)).toEqual({
+            expect(await harness.service.touchSession(identity)).toEqual({
                 lastSeenAtMs: new Date("2026-08-05T09:01:00.000Z").getTime(),
             });
         } finally {

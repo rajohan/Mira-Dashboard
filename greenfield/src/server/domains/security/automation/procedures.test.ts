@@ -67,22 +67,25 @@ const createCredentialInput = {
 
 function successfulAutomationLifecycle(): AutomationSecurityLifecycleService {
     return createTestAutomationSecurityLifecycleService({
-        createCredential: () => ({
-            result: { credential, token },
-            status: "created",
-        }),
-        createPrincipal: () => ({
-            result: { credential, principal, token },
-            status: "created",
-        }),
-        disablePrincipal: () => ({
-            result: {
-                changed: true,
-                principal: disabledPrincipal,
-                revokedCredentials: 1,
-            },
-            status: "disabled",
-        }),
+        createCredential: () =>
+            Promise.resolve({
+                result: { credential, token },
+                status: "created",
+            }),
+        createPrincipal: () =>
+            Promise.resolve({
+                result: { credential, principal, token },
+                status: "created",
+            }),
+        disablePrincipal: () =>
+            Promise.resolve({
+                result: {
+                    changed: true,
+                    principal: disabledPrincipal,
+                    revokedCredentials: 1,
+                },
+                status: "disabled",
+            }),
         listCredentials: () => ({
             result: {
                 credentials: [credential],
@@ -99,21 +102,24 @@ function successfulAutomationLifecycle(): AutomationSecurityLifecycleService {
             },
             status: "listed",
         }),
-        replaceCapabilities: () => ({
-            result: { changed: false, principal },
-            status: "replaced",
-        }),
-        revokeCredential: () => ({
-            result: { credential: revokedCredential, revoked: true },
-            status: "revoked",
-        }),
-        rotateCredential: () => ({
-            result: {
-                credential: replacementCredential,
-                token: replacementToken,
-            },
-            status: "rotated",
-        }),
+        replaceCapabilities: () =>
+            Promise.resolve({
+                result: { changed: false, principal },
+                status: "replaced",
+            }),
+        revokeCredential: () =>
+            Promise.resolve({
+                result: { credential: revokedCredential, revoked: true },
+                status: "revoked",
+            }),
+        rotateCredential: () =>
+            Promise.resolve({
+                result: {
+                    credential: replacementCredential,
+                    token: replacementToken,
+                },
+                status: "rotated",
+            }),
     });
 }
 

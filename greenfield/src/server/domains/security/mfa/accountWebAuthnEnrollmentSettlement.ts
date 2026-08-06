@@ -86,20 +86,20 @@ export interface AccountWebAuthnEnrollmentSettlement {
         staged: StagedFirstWebAuthnCredential,
         prepared: PreparedRecoveryCodeSet,
         confirmedAt: Date
-    ) => ConfirmWebAuthnEnrollmentResult;
+    ) => Promise<ConfirmWebAuthnEnrollmentResult>;
     readonly consumeWithoutProofFailure: (
         admission: AccountWebAuthnRegistrationAdmission,
         outcome: "cancelled" | "failed"
-    ) => ConfirmWebAuthnEnrollmentResult | undefined;
+    ) => Promise<ConfirmWebAuthnEnrollmentResult | undefined>;
     readonly recordInvalidRegistration: (
         admission: AccountWebAuthnRegistrationAdmission,
         failedAt: Date
-    ) => ConfirmWebAuthnEnrollmentResult;
+    ) => Promise<ConfirmWebAuthnEnrollmentResult>;
     readonly settleVerifiedRegistration: (
         admission: AccountWebAuthnRegistrationAdmission,
         verification: VerifiedWebAuthnRegistration,
         verifiedAt: Date
-    ) => VerifiedWebAuthnEnrollmentSettlement;
+    ) => Promise<VerifiedWebAuthnEnrollmentSettlement>;
 }
 
 function credentialInsert(
@@ -179,12 +179,12 @@ export function createAccountWebAuthnEnrollmentSettlement(
               } as const);
     };
 
-    const recordInvalidRegistration = (
+    const recordInvalidRegistration = async (
         admission: AccountWebAuthnRegistrationAdmission,
         failedAt: Date
-    ): ConfirmWebAuthnEnrollmentResult => {
+    ): Promise<ConfirmWebAuthnEnrollmentResult> => {
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const challenge = unit.findSessionWebAuthnChallenge(
                     identity.sessionId,
                     "registration"
@@ -232,13 +232,13 @@ export function createAccountWebAuthnEnrollmentSettlement(
         }
     };
 
-    const consumeWithoutProofFailure = (
+    const consumeWithoutProofFailure = async (
         admission: AccountWebAuthnRegistrationAdmission,
         outcome: "cancelled" | "failed"
-    ): ConfirmWebAuthnEnrollmentResult | undefined => {
+    ): Promise<ConfirmWebAuthnEnrollmentResult | undefined> => {
         const occurredAt = now();
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const current = activeAccountMatchesSnapshot(
                     unit,
                     identity,
@@ -289,11 +289,11 @@ export function createAccountWebAuthnEnrollmentSettlement(
         }
     };
 
-    const settleVerifiedRegistration = (
+    const settleVerifiedRegistration = async (
         admission: AccountWebAuthnRegistrationAdmission,
         verification: VerifiedWebAuthnRegistration,
         verifiedAt: Date
-    ): VerifiedWebAuthnEnrollmentSettlement => {
+    ): Promise<VerifiedWebAuthnEnrollmentSettlement> => {
         const candidate = credentialInsert(
             generateId,
             input,
@@ -303,7 +303,7 @@ export function createAccountWebAuthnEnrollmentSettlement(
             verifiedAt
         );
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const challenge = unit.findSessionWebAuthnChallenge(
                     identity.sessionId,
                     "registration"
@@ -442,14 +442,14 @@ export function createAccountWebAuthnEnrollmentSettlement(
         }
     };
 
-    const activateFirstCredential = (
+    const activateFirstCredential = async (
         staged: StagedFirstWebAuthnCredential,
         prepared: PreparedRecoveryCodeSet,
         confirmedAt: Date
-    ): ConfirmWebAuthnEnrollmentResult => {
+    ): Promise<ConfirmWebAuthnEnrollmentResult> => {
         const sessionToken = generateSessionToken();
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const current = currentAccount(
                     unit,
                     identity,

@@ -31,7 +31,7 @@ describe("monitoring service", () => {
 
         try {
             expect(
-                submitSnapshot(service, snapshot({ completedAtMs: 2000, run: 101 }))
+                await submitSnapshot(service, snapshot({ completedAtMs: 2000, run: 101 }))
             ).toMatchObject({
                 createdIncidents: 1,
                 observedIncidents: 1,
@@ -58,7 +58,7 @@ describe("monitoring service", () => {
                 title: "Root filesystem almost full",
             });
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({
                         completedAtMs: 3000,
@@ -92,7 +92,7 @@ describe("monitoring service", () => {
             const filesystemProblem = problem("filesystem");
             const backupProblem = problem("backup");
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({
                         completedAtMs: 4000,
@@ -107,7 +107,7 @@ describe("monitoring service", () => {
             });
 
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({
                         completedAtMs: 5000,
@@ -138,7 +138,7 @@ describe("monitoring service", () => {
             ).toEqual(manuallyReadAt);
 
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({
                         completedAtMs: 6000,
@@ -153,7 +153,7 @@ describe("monitoring service", () => {
             });
 
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({
                         completedAtMs: 7000,
@@ -238,11 +238,11 @@ describe("monitoring service", () => {
         const service = serviceFor(database);
 
         try {
-            submitSnapshot(
+            await submitSnapshot(
                 service,
                 snapshot({ completedAtMs: 2000, monitorKey: "stream:a", run: 201 })
             );
-            submitSnapshot(
+            await submitSnapshot(
                 service,
                 snapshot({ completedAtMs: 2100, monitorKey: "stream:b", run: 202 })
             );

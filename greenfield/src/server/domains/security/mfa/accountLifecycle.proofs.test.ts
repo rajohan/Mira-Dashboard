@@ -219,7 +219,7 @@ describe("MFA account proof lifecycle", () => {
         const harness = await createAccountLifecycleHarness();
         try {
             const enabled = await enableAccountMfa(harness);
-            harness.insertUnavailableTotpFactor();
+            await harness.insertUnavailableTotpFactor();
             const initialDecryptionCalls = harness.totpDecryptionCalls();
 
             const results = [];

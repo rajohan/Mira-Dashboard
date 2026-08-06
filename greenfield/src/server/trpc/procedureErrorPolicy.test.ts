@@ -5,6 +5,11 @@ import * as v from "valibot";
 
 import { procedureContracts } from "../../contracts/contractRegistry.ts";
 import type { ProcedureContract } from "../../contracts/registry.ts";
+import {
+    DatabaseRuntimeWriteAdmissionTimeoutError,
+    DatabaseRuntimeWriteContentionError,
+} from "../database/runtime/databaseErrors.ts";
+import { AuthenticationWorkSettlementError } from "../domains/security/authenticationWorkGate.ts";
 import { captureFailure } from "../test/support/promise.ts";
 import { createTestRequestContext } from "../test/support/requestContext.ts";
 import {
@@ -59,7 +64,7 @@ describe("procedure expected-error policy", () => {
         expect(() =>
             Reflect.apply(Array.prototype.push, logoutErrors, ["UNAUTHORIZED"])
         ).toThrow();
-        expect(logoutErrors).toEqual([]);
+        expect(logoutErrors).toEqual(["SERVICE_UNAVAILABLE"]);
     });
 
     test.each(invalidPolicyFixtures)("rejects $name", ({ policy }) => {
@@ -96,6 +101,46 @@ describe("procedure expected-error policy", () => {
         expect(undeclared).toBeInstanceOf(TRPCError);
         expect((undeclared as TRPCError).code).toBe("INTERNAL_SERVER_ERROR");
         expect((undeclared as TRPCError).message).not.toContain(sentinel);
+    });
+
+    test.each([
+        {
+            error: new DatabaseRuntimeWriteAdmissionTimeoutError({
+                message: "private timeout detail",
+                timeoutMs: 5000,
+            }),
+            name: "admission timeout",
+        },
+        {
+            error: new DatabaseRuntimeWriteContentionError({
+                message: "private contention detail",
+            }),
+            name: "post-admission contention",
+        },
+    ])("maps direct and settled $name failures only for declared routes", ({ error }) => {
+        for (const cause of [
+            error,
+            new AuthenticationWorkSettlementError({
+                cause: error,
+                operation: "webauthn",
+            }),
+        ]) {
+            const internal = new TRPCError({
+                cause,
+                code: "INTERNAL_SERVER_ERROR",
+                message: "private tRPC detail",
+            });
+            const declared = applyProcedureExpectedErrorPolicy("auth.logout", internal);
+            expect(declared).toMatchObject({
+                cause: error,
+                code: "SERVICE_UNAVAILABLE",
+                message: "Database write capacity is temporarily unavailable",
+            });
+
+            const undeclared = applyProcedureExpectedErrorPolicy("auth.status", internal);
+            expect(undeclared.code).toBe("INTERNAL_SERVER_ERROR");
+            expect(undeclared.message).not.toContain(error.message);
+        }
     });
 
     test("internalizes expected-looking errors from unregistered procedure paths", async () => {

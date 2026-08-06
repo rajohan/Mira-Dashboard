@@ -136,18 +136,19 @@ const immediateWebAuthnRuntime: Pick<
         const decision = options.onBeforeStart?.() ?? { proceed: true as const };
         if (!decision.proceed) return decision.value;
         const signal = options.signal ?? new AbortController().signal;
+        let value: T;
         try {
-            const value = await work(signal);
-            options.onResultBeforeRelease?.(value);
-            return value;
+            value = await work(signal);
         } catch {
             options.signal?.throwIfAborted();
             const failure = new AuthenticationUpstreamUnavailableError({
                 operation: "webauthn",
             });
-            options.onFailureBeforeRelease?.(failure);
+            await options.onFailureBeforeRelease?.(failure);
             throw failure;
         }
+        await options.onResultBeforeRelease?.(value);
+        return value;
     },
 });
 
@@ -274,7 +275,7 @@ describe("MFA account WebAuthn lifecycle", () => {
         );
         try {
             const enabled = await enableAccountMfa(harness);
-            harness.repository.withImmediateTransaction((unit) =>
+            await harness.repository.withImmediateTransaction((unit) =>
                 unit.insertWebAuthnCredential({
                     algorithm: -7,
                     backedUp: false,
@@ -292,7 +293,7 @@ describe("MFA account WebAuthn lifecycle", () => {
                 })
             );
             expect(
-                harness.service.removeTotpFactor(
+                await harness.service.removeTotpFactor(
                     enabled.identity,
                     { factorId: enabled.factorId },
                     accountLifecycleMetadata("protect-totp-from-old-rp")
@@ -348,7 +349,7 @@ describe("MFA account WebAuthn lifecycle", () => {
                 )
             ).toMatchObject({ counter: 1, lastUsedAt: accountLifecycleNow });
             expect(
-                harness.service.removeTotpFactor(
+                await harness.service.removeTotpFactor(
                     {
                         sessionId: verified.session.id,
                         userId: accountLifecycleUserId,
@@ -358,7 +359,7 @@ describe("MFA account WebAuthn lifecycle", () => {
                 )
             ).toMatchObject({ removed: true, status: "removed" });
             expect(
-                harness.service.removeWebAuthnCredential(
+                await harness.service.removeWebAuthnCredential(
                     {
                         sessionId: verified.session.id,
                         userId: accountLifecycleUserId,
@@ -368,7 +369,7 @@ describe("MFA account WebAuthn lifecycle", () => {
                 )
             ).toEqual({ status: "final-factor" });
             expect(
-                harness.service.removeWebAuthnCredential(
+                await harness.service.removeWebAuthnCredential(
                     {
                         sessionId: verified.session.id,
                         userId: accountLifecycleUserId,
@@ -388,7 +389,7 @@ describe("MFA account WebAuthn lifecycle", () => {
         );
         try {
             const enabled = await enableAccountMfa(harness);
-            harness.repository.withImmediateTransaction((unit) => {
+            await harness.repository.withImmediateTransaction((unit) => {
                 unit.insertWebAuthnCredential({
                     algorithm: -7,
                     backedUp: false,
@@ -423,14 +424,14 @@ describe("MFA account WebAuthn lifecycle", () => {
             });
 
             expect(
-                harness.service.removeWebAuthnCredential(
+                await harness.service.removeWebAuthnCredential(
                     enabled.identity,
                     { credentialId: oldCredentialInternalId },
                     accountLifecycleMetadata("remove-first-drifted-only-factor")
                 )
             ).toMatchObject({ removed: true, status: "removed" });
             expect(
-                harness.service.removeWebAuthnCredential(
+                await harness.service.removeWebAuthnCredential(
                     enabled.identity,
                     { credentialId: secondOldCredentialInternalId },
                     accountLifecycleMetadata("protect-last-drifted-only-factor")
@@ -525,7 +526,7 @@ describe("MFA account WebAuthn lifecycle", () => {
                     })
                 )
                 .run();
-            harness.repository.withImmediateTransaction((unit) =>
+            await harness.repository.withImmediateTransaction((unit) =>
                 unit.insertWebAuthnCredential({
                     algorithm: -7,
                     backedUp: true,
@@ -602,20 +603,20 @@ describe("MFA account WebAuthn lifecycle", () => {
                 ),
         }) as Pick<AuthenticationWorkRuntimeService, "runWebAuthnVerification">;
         const timeoutRuntime = Object.freeze({
-            runWebAuthnVerification<T>(
+            async runWebAuthnVerification<T>(
                 _work: (signal: AbortSignal) => Promise<T>,
                 options: AuthenticationVerificationWorkOptions<T>
             ): Promise<T> {
                 const decision = options.onBeforeStart?.() ?? {
                     proceed: true as const,
                 };
-                if (!decision.proceed) return Promise.resolve(decision.value);
+                if (!decision.proceed) return decision.value;
                 const failure = new AuthenticationWorkTimeoutError({
                     operation: "webauthn",
                     timeoutMs: options.timeoutMs,
                 });
-                options.onFailureBeforeRelease?.(failure);
-                return Promise.reject(failure);
+                await options.onFailureBeforeRelease?.(failure);
+                throw failure;
             },
         });
 
@@ -722,10 +723,10 @@ describe("MFA account WebAuthn lifecycle", () => {
                 if (!decision.proceed) return decision.value;
                 const value = await work(new AbortController().signal);
                 if (!cancelActiveWork) {
-                    options.onResultBeforeRelease?.(value);
+                    await options.onResultBeforeRelease?.(value);
                     return value;
                 }
-                options.onCancellationBeforeRelease?.();
+                await options.onCancellationBeforeRelease?.();
                 throw new DOMException("Test request cancelled", "AbortError");
             },
         });

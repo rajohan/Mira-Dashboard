@@ -13,6 +13,7 @@ import {
     validAuthSessionInsert,
     validUserInsert,
 } from "../../database/validation/testSupport/securityRows.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { createAuthenticationLifecycleRepository } from "./authenticationLifecycleRepository.ts";
 
@@ -24,7 +25,8 @@ describe("authentication lifecycle repository", () => {
         const competing = new Database(databasePath, { strict: true });
         competing.run("PRAGMA busy_timeout = 0");
         const repository = createAuthenticationLifecycleRepository(
-            drizzle({ client: primary })
+            drizzle({ client: primary }),
+            testImmediateDatabaseWriteAdmission
         );
 
         try {
@@ -37,7 +39,7 @@ describe("authentication lifecycle repository", () => {
             expect(deferredCompetingWriterAcquired).toBeTrue();
 
             let immediateCompetingWriterFailure: unknown;
-            repository.withImmediateTransaction(() => {
+            await repository.withImmediateTransaction(() => {
                 try {
                     competing.run("BEGIN IMMEDIATE");
                     competing.run("ROLLBACK");
@@ -61,11 +63,14 @@ describe("authentication lifecycle repository", () => {
 
     test("prunes stale and excess source rate-limit buckets transactionally", async () => {
         const database = await openFreshMigratedDatabase();
-        const repository = createAuthenticationLifecycleRepository(database.orm);
+        const repository = createAuthenticationLifecycleRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
         const startedAt = new Date("2026-08-05T09:00:00.000Z");
 
         try {
-            repository.withImmediateTransaction((unit) => {
+            await repository.withImmediateTransaction((unit) => {
                 const staleAt = addMilliseconds(startedAt, -2);
                 unit.upsertRateLimitBucket({
                     blockedUntil: null,
@@ -112,10 +117,13 @@ describe("authentication lifecycle repository", () => {
 
     test("adapts shared session deletion to boolean lifecycle semantics", async () => {
         const database = await openFreshMigratedDatabase();
-        const repository = createAuthenticationLifecycleRepository(database.orm);
+        const repository = createAuthenticationLifecycleRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
 
         try {
-            repository.withImmediateTransaction((unit) => {
+            await repository.withImmediateTransaction((unit) => {
                 unit.insertUser(validUserInsert);
                 unit.insertSession(validAuthSessionInsert);
                 expect(unit.deleteSession(securityUserId, sessionSelector)).toBeTrue();

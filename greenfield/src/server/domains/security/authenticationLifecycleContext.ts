@@ -55,8 +55,8 @@ export class AuthenticationStateChangedError extends Error {}
 
 export interface GatewayCredentialSettlement {
     readonly shouldVerify: () => boolean;
-    readonly onInvalid: () => void;
-    readonly onUnavailable: (failure: GatewayAuthenticationWorkFailure) => void;
+    readonly onInvalid: () => Promise<void>;
+    readonly onUnavailable: (failure: GatewayAuthenticationWorkFailure) => Promise<void>;
 }
 
 export interface AuthenticationLifecycleContext {
@@ -240,7 +240,7 @@ export function createAuthenticationLifecycleContext(
                         settlement.onUnavailable(failure),
                     onResultBeforeRelease: (valid) => {
                         metadata.signal?.throwIfAborted();
-                        if (!valid) settlement.onInvalid();
+                        return valid ? undefined : settlement.onInvalid();
                     },
                     timeoutMs: gatewayVerificationTimeoutMs,
                 }

@@ -4,6 +4,8 @@ import { TRPCError } from "@trpc/server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import { contractAuthenticationErrorReasons } from "../../../contracts/registry.ts";
+import { DatabaseRuntimeWriteAdmissionTimeoutError } from "../../database/runtime/databaseErrors.ts";
+import { AuthenticationWorkSettlementError } from "../../domains/security/authenticationWorkGate.ts";
 import { authenticationPolicyError, publicProcedure, router } from "../../trpc/trpc.ts";
 import { createTestRequestContext } from "../support/requestContext.ts";
 
@@ -11,12 +13,14 @@ const sentinel = "secret /home/ubuntu/private-stack-path";
 
 type ErrorProcedure =
     | (typeof contractAuthenticationErrorReasons)[number]
+    | "database-write-unavailable"
     | "expected"
     | "forged-policy-cause"
     | "tampered-policy-cause"
     | "unexpected";
 
 const errorProcedurePaths = {
+    "database-write-unavailable": "auth.logout",
     expected: "events.stream",
     "forged-policy-cause": "accountSecurity.summary",
     mfa_enrollment_required: "accountSecurity.stepUpRecovery",
@@ -69,6 +73,15 @@ async function queryWireBody(procedure: ErrorProcedure): Promise<{
                 });
                 throw error;
             }),
+            logout: publicProcedure.query(() => {
+                throw new AuthenticationWorkSettlementError({
+                    cause: new DatabaseRuntimeWriteAdmissionTimeoutError({
+                        message: sentinel,
+                        timeoutMs: 5000,
+                    }),
+                    operation: "webauthn",
+                });
+            }),
         }),
         events: router({
             stream: publicProcedure.query(() => {
@@ -112,6 +125,18 @@ describe("tRPC error transport", () => {
 
         expect(response.status).toBe(400);
         expect(text).toContain("Safe client error");
+        expect(text).not.toContain('"stack"');
+        expect(text).not.toContain('"path"');
+    });
+
+    test("maps durable database-write exhaustion to one redacted 503", async () => {
+        const { response, text } = await queryWireBody("database-write-unavailable");
+
+        expect(response.status).toBe(503);
+        expect(text).toContain("Database write capacity is temporarily unavailable");
+        expect(text).not.toContain(sentinel);
+        expect(text).not.toContain("DatabaseRuntimeWriteAdmissionTimeoutError");
+        expect(text).not.toContain('"cause"');
         expect(text).not.toContain('"stack"');
         expect(text).not.toContain('"path"');
     });

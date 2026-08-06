@@ -55,16 +55,16 @@ export interface AccountWebAuthnStepUpSettlement {
     readonly consumeWithoutFailure: (
         admission: AccountWebAuthnStepUpAdmission,
         outcome: "cancelled" | "failed"
-    ) => WebAuthnStepUpResult | undefined;
+    ) => Promise<WebAuthnStepUpResult | undefined>;
     readonly settleInvalidProof: (
         admission: AccountWebAuthnStepUpAdmission,
         failedAt: Date
-    ) => WebAuthnStepUpResult;
+    ) => Promise<WebAuthnStepUpResult>;
     readonly settleVerified: (
         admission: AccountWebAuthnStepUpAdmission,
         verification: VerifiedWebAuthnAuthentication,
         verifiedAt: Date
-    ) => WebAuthnStepUpResult;
+    ) => Promise<WebAuthnStepUpResult>;
 }
 
 /**
@@ -86,13 +86,13 @@ export function createAccountWebAuthnStepUpSettlement(
     } = context;
     const rateLimitTargets = accountMfaRateLimitTargets(identity.userId);
 
-    const consumeWithoutFailure = (
+    const consumeWithoutFailure = async (
         admitted: AccountWebAuthnStepUpAdmission,
         outcome: "cancelled" | "failed"
-    ): WebAuthnStepUpResult | undefined => {
+    ): Promise<WebAuthnStepUpResult | undefined> => {
         const occurredAt = now();
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const current = activeAccountMatchesSnapshot(
                     unit,
                     identity,
@@ -143,12 +143,12 @@ export function createAccountWebAuthnStepUpSettlement(
         }
     };
 
-    const settleInvalidProof = (
+    const settleInvalidProof = async (
         admitted: AccountWebAuthnStepUpAdmission,
         failedAt: Date
-    ): WebAuthnStepUpResult => {
+    ): Promise<WebAuthnStepUpResult> => {
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const challenge = unit.findSessionWebAuthnChallenge(
                     identity.sessionId,
                     "step-up"
@@ -234,21 +234,21 @@ export function createAccountWebAuthnStepUpSettlement(
         }
     };
 
-    const settleVerified = (
+    const settleVerified = async (
         admitted: AccountWebAuthnStepUpAdmission,
         verification: VerifiedWebAuthnAuthentication,
         verifiedAt: Date
-    ): WebAuthnStepUpResult => {
+    ): Promise<WebAuthnStepUpResult> => {
         if (
             admitted.selectedCredential === undefined ||
             verification.credentialId !== admitted.selectedCredential.credentialId
         ) {
-            return settleInvalidProof(admitted, verifiedAt);
+            return await settleInvalidProof(admitted, verifiedAt);
         }
         const selectedCredential = admitted.selectedCredential;
         const sessionToken = generateSessionToken();
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const challenge = unit.findSessionWebAuthnChallenge(
                     identity.sessionId,
                     "step-up"

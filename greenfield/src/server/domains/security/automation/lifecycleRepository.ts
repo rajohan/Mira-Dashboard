@@ -1,5 +1,6 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
+import type { ImmediateDatabaseWriteAdmission } from "../../../database/immediateWriteAdmission.ts";
 import type {
     SecurityTransaction,
     SynchronousResult,
@@ -15,11 +16,14 @@ import { DrizzleAutomationLifecycleUnitOfWork } from "./lifecycleRepositoryUnitO
 type DrizzleTransactionCallback = Parameters<SQLiteBunDatabase["transaction"]>[0];
 
 /**
- * Creates synchronous deferred/immediate automation-security transactions.
- * @returns A validated repository bound to the supplied process database.
+ * Creates automation-security transactions with synchronous callbacks.
+ * @param database Process-owned Drizzle SQLite database.
+ * @param writeAdmission Process-owned bounded immediate-write admission.
+ * @returns A repository with synchronous callbacks and async immediate writes.
  */
 export function createAutomationLifecycleRepository(
-    database: SQLiteBunDatabase
+    database: SQLiteBunDatabase,
+    writeAdmission: ImmediateDatabaseWriteAdmission
 ): AutomationLifecycleRepository {
     const reader = new DrizzleAutomationLifecycleReader(database);
 
@@ -42,14 +46,18 @@ export function createAutomationLifecycleRepository(
             callback: (
                 unit: AutomationLifecycleUnitOfWork
             ) => SynchronousResult<T> | never
-        ): T {
-            const transactionCallback = ((transaction: SecurityTransaction) =>
-                callback(
-                    new DrizzleAutomationLifecycleUnitOfWork(transaction)
-                )) as DrizzleTransactionCallback;
-            return database.transaction(transactionCallback, {
-                behavior: "immediate",
-            }) as T;
+        ): Promise<T> {
+            return writeAdmission.run((markTransactionStarted) => {
+                const transactionCallback = ((transaction: SecurityTransaction) => {
+                    markTransactionStarted();
+                    return callback(
+                        new DrizzleAutomationLifecycleUnitOfWork(transaction)
+                    );
+                }) as DrizzleTransactionCallback;
+                return database.transaction(transactionCallback, {
+                    behavior: "immediate",
+                }) as T;
+            });
         },
         withReadTransaction<T>(
             callback: (

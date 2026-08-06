@@ -9,6 +9,8 @@ import {
     DatabaseRuntimePathError,
     DatabaseRuntimeSnapshotRequiredError,
     DatabaseRuntimeStartupError,
+    DatabaseRuntimeWriteAdmissionTimeoutError,
+    DatabaseRuntimeWriteContentionError,
 } from "./databaseErrors.ts";
 
 export const databaseRuntimePolicy = Object.freeze({
@@ -18,6 +20,9 @@ export const databaseRuntimePolicy = Object.freeze({
     migrationLockTimeoutMs: 5000,
     synchronousLevel: 2,
     walAutoCheckpointPages: 1000,
+    writeAdmissionRetryBaseDelayMs: 10,
+    writeAdmissionRetryMaximumDelayMs: 250,
+    writeAdmissionTimeoutMs: 5000,
 });
 
 export interface DatabaseConnectionDiagnostics {
@@ -176,16 +181,14 @@ export function configureDatabaseConnection(
 
 const isBusyError = Predicate.isTagged("DatabaseRuntimeBusyError");
 
-function busyRetrySchedule(): Schedule.Schedule<Duration.Duration> {
-    const baseDelay = Duration.millis(
-        databaseRuntimePolicy.migrationLockRetryBaseDelayMs
-    );
+function busyRetrySchedule(
+    baseDelayMs: number,
+    maximumDelayMs: number
+): Schedule.Schedule<Duration.Duration> {
+    const baseDelay = Duration.millis(baseDelayMs);
     return Schedule.exponential(baseDelay).pipe(
         Schedule.modifyDelay(({ duration }) => {
-            const delayMs = Math.min(
-                Duration.toMillis(duration),
-                databaseRuntimePolicy.migrationLockRetryMaximumDelayMs
-            );
+            const delayMs = Math.min(Duration.toMillis(duration), maximumDelayMs);
             return Effect.succeed(Duration.millis(delayMs));
         }),
         Schedule.while(({ input }) => isBusyError(input))
@@ -250,7 +253,12 @@ export function retryDatabaseStartupOperation<A>(
     });
 
     return attempt.pipe(
-        Effect.retry({ schedule: busyRetrySchedule() }),
+        Effect.retry({
+            schedule: busyRetrySchedule(
+                databaseRuntimePolicy.migrationLockRetryBaseDelayMs,
+                databaseRuntimePolicy.migrationLockRetryMaximumDelayMs
+            ),
+        }),
         Effect.timeoutOrElse({
             duration: databaseRuntimePolicy.migrationLockTimeoutMs,
             orElse: () =>
@@ -269,6 +277,63 @@ export function retryDatabaseStartupOperation<A>(
                 })
             )
         )
+    );
+}
+
+/**
+ * Retries synchronous SQLite write admission with asynchronous Effect delays.
+ * Busy/locked failures are replayed only before the transaction callback begins;
+ * a busy completion is surfaced once and every other callback failure is preserved.
+ * @param operation One immediate-transaction attempt receiving its start marker.
+ * @returns The write result or a sanitized temporary-contention failure.
+ */
+export function retryDatabaseWriteOperation<A>(
+    operation: (markTransactionStarted: () => void) => A
+): Effect.Effect<A, unknown> {
+    const attempt: Effect.Effect<A, unknown> = Effect.suspend(() => {
+        let transactionStarted = false;
+        try {
+            return Effect.succeed(
+                operation(() => {
+                    transactionStarted = true;
+                })
+            );
+        } catch (error) {
+            if (!isBusyOrLockedCode(sqliteErrorCode(error))) {
+                return Effect.fail(error);
+            }
+            if (transactionStarted) {
+                return Effect.fail(
+                    new DatabaseRuntimeWriteContentionError({
+                        message: "Database write encountered contention after admission",
+                    })
+                );
+            }
+            return Effect.fail(
+                new DatabaseRuntimeBusyError({
+                    message: "Database write is waiting for admission",
+                })
+            );
+        }
+    });
+    const timeoutFailure = () =>
+        new DatabaseRuntimeWriteAdmissionTimeoutError({
+            message: "Database write admission timed out",
+            timeoutMs: databaseRuntimePolicy.writeAdmissionTimeoutMs,
+        });
+
+    return attempt.pipe(
+        Effect.retry({
+            schedule: busyRetrySchedule(
+                databaseRuntimePolicy.writeAdmissionRetryBaseDelayMs,
+                databaseRuntimePolicy.writeAdmissionRetryMaximumDelayMs
+            ),
+        }),
+        Effect.timeoutOrElse({
+            duration: databaseRuntimePolicy.writeAdmissionTimeoutMs,
+            orElse: () => Effect.fail(timeoutFailure()),
+        }),
+        Effect.catchIf(isBusyError, () => Effect.fail(timeoutFailure()))
     );
 }
 

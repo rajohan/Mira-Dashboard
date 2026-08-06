@@ -16,6 +16,7 @@ import {
     webAuthnExternalCredentialId,
 } from "../../../database/validation/testSupport/securityRows.ts";
 import { userInsertSchema } from "../../../database/validation/users.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
 import { createMfaLifecycleRepository } from "./lifecycleRepository.ts";
 import type {
@@ -36,7 +37,10 @@ const thirdUsedAt = addMilliseconds(secondUsedAt, 1);
 
 async function openWebAuthnRepositoryFixture() {
     const database = await openFreshMigratedDatabase();
-    const repository = createMfaLifecycleRepository(database.orm);
+    const repository = createMfaLifecycleRepository(
+        database.orm,
+        testImmediateDatabaseWriteAdmission
+    );
 
     try {
         database.orm
@@ -48,7 +52,7 @@ async function openWebAuthnRepositoryFixture() {
                 })
             )
             .run();
-        repository.withImmediateTransaction((unit) => {
+        await repository.withImmediateTransaction((unit) => {
             unit.insertSession(validAuthSessionInsert);
             unit.insertPendingLogin({
                 ...validAuthPendingLoginInsert,
@@ -96,7 +100,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
         const fixture = await openWebAuthnRepositoryFixture();
 
         try {
-            const initial = fixture.repository.withImmediateTransaction((unit) =>
+            const initial = await fixture.repository.withImmediateTransaction((unit) =>
                 unit.replaceWebAuthnChallenge(registrationChallenge())
             );
             expect(
@@ -106,13 +110,14 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 )
             ).toEqual(initial);
 
-            const replacement = fixture.repository.withImmediateTransaction((unit) =>
-                unit.replaceWebAuthnChallenge(
-                    registrationChallenge({
-                        challenge: "B".repeat(32),
-                        id: replacementChallengeId,
-                    })
-                )
+            const replacement = await fixture.repository.withImmediateTransaction(
+                (unit) =>
+                    unit.replaceWebAuthnChallenge(
+                        registrationChallenge({
+                            challenge: "B".repeat(32),
+                            id: replacementChallengeId,
+                        })
+                    )
             );
             expect(
                 fixture.repository.findSessionWebAuthnChallenge(
@@ -121,7 +126,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 )
             ).toEqual(replacement);
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumeWebAuthnChallenge({
                         ...initial,
                         checkedAt: addMinutes(initial.createdAt, 1),
@@ -129,7 +134,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 )
             ).toBeUndefined();
 
-            const stepUp = fixture.repository.withImmediateTransaction((unit) =>
+            const stepUp = await fixture.repository.withImmediateTransaction((unit) =>
                 unit.replaceWebAuthnChallenge(
                     registrationChallenge({
                         challenge: "C".repeat(32),
@@ -138,16 +143,17 @@ describe("MFA lifecycle WebAuthn repository", () => {
                     })
                 )
             );
-            const pendingLogin = fixture.repository.withImmediateTransaction((unit) =>
-                unit.replaceWebAuthnChallenge(
-                    registrationChallenge({
-                        challenge: "D".repeat(32),
-                        id: pendingLoginChallengeId,
-                        pendingLoginId: pendingLoginSelector,
-                        purpose: "login",
-                        sessionId: null,
-                    })
-                )
+            const pendingLogin = await fixture.repository.withImmediateTransaction(
+                (unit) =>
+                    unit.replaceWebAuthnChallenge(
+                        registrationChallenge({
+                            challenge: "D".repeat(32),
+                            id: pendingLoginChallengeId,
+                            pendingLoginId: pendingLoginSelector,
+                            purpose: "login",
+                            sessionId: null,
+                        })
+                    )
             );
 
             expect(
@@ -173,7 +179,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 { ...pendingLogin, checkedAt: pendingLogin.expiresAt },
             ]) {
                 expect(
-                    fixture.repository.withImmediateTransaction((unit) =>
+                    await fixture.repository.withImmediateTransaction((unit) =>
                         unit.consumeWebAuthnChallenge(invalidSnapshot)
                     )
                 ).toBeUndefined();
@@ -187,12 +193,12 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 checkedAt: addMinutes(pendingLogin.createdAt, 1),
             };
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumeWebAuthnChallenge(consumeInput)
                 )
             ).toEqual(pendingLogin);
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumeWebAuthnChallenge(consumeInput)
                 )
             ).toBeUndefined();
@@ -205,14 +211,14 @@ describe("MFA lifecycle WebAuthn repository", () => {
         const fixture = await openWebAuthnRepositoryFixture();
 
         try {
-            const inserted = fixture.repository.withImmediateTransaction((unit) =>
+            const inserted = await fixture.repository.withImmediateTransaction((unit) =>
                 unit.insertWebAuthnCredentialIfAvailable(
                     validUserWebAuthnCredentialInsert
                 )
             );
             if (!inserted) throw new Error("Expected available WebAuthn credential");
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.insertWebAuthnCredentialIfAvailable({
                         ...validUserWebAuthnCredentialInsert,
                         id: secondCredentialId,
@@ -237,18 +243,18 @@ describe("MFA lifecycle WebAuthn repository", () => {
             );
 
             const firstZeroCounterInput = advanceCredentialInput(inserted);
-            const firstZeroCounter = fixture.repository.withImmediateTransaction((unit) =>
-                unit.advanceWebAuthnCredential(firstZeroCounterInput)
+            const firstZeroCounter = await fixture.repository.withImmediateTransaction(
+                (unit) => unit.advanceWebAuthnCredential(firstZeroCounterInput)
             );
             expect(firstZeroCounter?.lastUsedAt).toEqual(firstUsedAt);
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.advanceWebAuthnCredential(firstZeroCounterInput)
                 )
             ).toBeUndefined();
             if (!firstZeroCounter) throw new Error("Expected zero-counter CAS winner");
 
-            expect(() =>
+            expect(
                 fixture.repository.withImmediateTransaction((unit) =>
                     unit.advanceWebAuthnCredential(
                         advanceCredentialInput(firstZeroCounter, {
@@ -256,8 +262,8 @@ describe("MFA lifecycle WebAuthn repository", () => {
                         })
                     )
                 )
-            ).toThrow("WebAuthn credential transition is invalid");
-            const secondZeroCounter = fixture.repository.withImmediateTransaction(
+            ).rejects.toThrow("WebAuthn credential transition is invalid");
+            const secondZeroCounter = await fixture.repository.withImmediateTransaction(
                 (unit) =>
                     unit.advanceWebAuthnCredential(
                         advanceCredentialInput(firstZeroCounter, {
@@ -269,7 +275,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
             if (!secondZeroCounter)
                 throw new Error("Expected second zero-counter CAS winner");
 
-            const monotonic = fixture.repository.withImmediateTransaction((unit) =>
+            const monotonic = await fixture.repository.withImmediateTransaction((unit) =>
                 unit.advanceWebAuthnCredential(
                     advanceCredentialInput(secondZeroCounter, {
                         counter: 1,
@@ -279,7 +285,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
             );
             expect(monotonic).toMatchObject({ counter: 1, lastUsedAt: secondUsedAt });
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.advanceWebAuthnCredential(
                         advanceCredentialInput(secondZeroCounter, {
                             counter: 1,
@@ -288,7 +294,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
                     )
                 )
             ).toBeUndefined();
-            expect(() =>
+            expect(
                 fixture.repository.withImmediateTransaction((unit) =>
                     unit.advanceWebAuthnCredential(
                         advanceCredentialInput(monotonic ?? secondZeroCounter, {
@@ -297,8 +303,8 @@ describe("MFA lifecycle WebAuthn repository", () => {
                         })
                     )
                 )
-            ).toThrow("WebAuthn credential transition is invalid");
-            expect(() =>
+            ).rejects.toThrow("WebAuthn credential transition is invalid");
+            expect(
                 fixture.repository.withImmediateTransaction((unit) =>
                     unit.advanceWebAuthnCredential(
                         advanceCredentialInput(secondZeroCounter, {
@@ -310,7 +316,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
                         })
                     )
                 )
-            ).toThrow("WebAuthn credential transition is invalid");
+            ).rejects.toThrow("WebAuthn credential transition is invalid");
         } finally {
             fixture.database.sqlite.close(true);
         }
@@ -320,7 +326,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
         const fixture = await openWebAuthnRepositoryFixture();
 
         try {
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertPendingLogin({
                     ...validAuthPendingLoginInsert,
                     allowsWebAuthn: false,
@@ -336,13 +342,13 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 userId: securityUserId,
                 validatorHash: validAuthPendingLoginInsert.validatorHash,
             };
-            expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+            const consumedPendingLogin =
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumePendingLogin(enabledInput)
-                )?.id
-            ).toBe(pendingLoginSelector);
+                );
+            expect(consumedPendingLogin?.id).toBe(pendingLoginSelector);
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumePendingLogin(enabledInput)
                 )
             ).toBeUndefined();
@@ -353,7 +359,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 validatorHash: webAuthnDisabledPendingLoginValidatorHash,
             };
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.consumePendingLogin(disabledInput)
                 )
             ).toBeUndefined();
@@ -369,13 +375,13 @@ describe("MFA lifecycle WebAuthn repository", () => {
         const fixture = await openWebAuthnRepositoryFixture();
 
         try {
-            expect(() =>
+            expect(
                 fixture.repository.withImmediateTransaction((unit) => {
                     unit.replaceWebAuthnChallenge(registrationChallenge());
                     unit.insertWebAuthnCredential(validUserWebAuthnCredentialInsert);
                     throw new Error("forced WebAuthn repository rollback");
                 })
-            ).toThrow("forced WebAuthn repository rollback");
+            ).rejects.toThrow("forced WebAuthn repository rollback");
             expect(
                 fixture.repository.findSessionWebAuthnChallenge(
                     validAuthSessionInsert.id,
@@ -384,7 +390,7 @@ describe("MFA lifecycle WebAuthn repository", () => {
             ).toBeUndefined();
             expect(fixture.repository.countWebAuthnCredentials(securityUserId)).toBe(0);
 
-            fixture.repository.withImmediateTransaction((unit) => {
+            await fixture.repository.withImmediateTransaction((unit) => {
                 unit.insertWebAuthnCredential(validUserWebAuthnCredentialInsert);
                 unit.insertWebAuthnCredential({
                     ...validUserWebAuthnCredentialInsert,
@@ -394,13 +400,13 @@ describe("MFA lifecycle WebAuthn repository", () => {
                 });
             });
             expect(fixture.repository.countWebAuthnCredentials(securityUserId)).toBe(2);
-            expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+            const deletedCredential = await fixture.repository.withImmediateTransaction(
+                (unit) =>
                     unit.deleteWebAuthnCredential(securityUserId, secondCredentialId)
-                )?.id
-            ).toBe(secondCredentialId);
+            );
+            expect(deletedCredential?.id).toBe(secondCredentialId);
             expect(
-                fixture.repository.withImmediateTransaction((unit) =>
+                await fixture.repository.withImmediateTransaction((unit) =>
                     unit.deleteWebAuthnCredentialsForUser(securityUserId)
                 )
             ).toBe(1);

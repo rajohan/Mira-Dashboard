@@ -122,7 +122,7 @@ export interface AutomationLifecycleUnitOfWork
 export interface AutomationLifecycleRepository extends AutomationLifecycleReader {
     withImmediateTransaction<T>(
         callback: (unit: AutomationLifecycleUnitOfWork) => SynchronousResult<T>
-    ): T;
+    ): Promise<T>;
     withReadTransaction<T>(
         callback: (reader: AutomationLifecycleReader) => SynchronousResult<T>
     ): T;

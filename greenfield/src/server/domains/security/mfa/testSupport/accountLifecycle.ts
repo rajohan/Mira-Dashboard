@@ -10,6 +10,7 @@ import {
 import { userInsertSchema } from "../../../../database/validation/users.ts";
 import { generateOpaqueToken } from "../../../../shared/opaqueToken.ts";
 import { createTestAuthenticationWorkGate } from "../../../../test/support/authenticationWorkGate.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../../../test/support/freshDatabase.ts";
 import { testDashboardPasswordHash } from "../../../../test/support/securityPassword.ts";
 import type { AuthenticationWorkBudget } from "../../authenticationWorkBudget.ts";
@@ -109,7 +110,10 @@ export async function createAccountLifecycleHarness(
     options: AccountLifecycleHarnessOptions = {}
 ) {
     const database = await openFreshMigratedDatabase();
-    const repository = createMfaLifecycleRepository(database.orm);
+    const repository = createMfaLifecycleRepository(
+        database.orm,
+        testImmediateDatabaseWriteAdmission
+    );
     const cryptoTransactionStates: boolean[] = [];
     const consumedWorkUnits: number[] = [];
     const consumedTotpWorkUnits: number[] = [];
@@ -134,7 +138,7 @@ export async function createAccountLifecycleHarness(
                 })
             )
             .run();
-        repository.withImmediateTransaction((unit) => {
+        await repository.withImmediateTransaction((unit) => {
             unit.insertSession({
                 ...validAuthSessionInsert,
                 authenticatedAt: subMinutes(accountLifecycleNow, 5),
@@ -264,8 +268,8 @@ export async function createAccountLifecycleHarness(
             database,
             consumedWorkUnits,
             consumedTotpWorkUnits,
-            insertUnavailableTotpFactor() {
-                repository.withImmediateTransaction((unit) =>
+            async insertUnavailableTotpFactor() {
+                await repository.withImmediateTransaction((unit) =>
                     unit.insertTotpFactor({
                         confirmedAt: accountLifecycleNow,
                         createdAt: subMinutes(accountLifecycleNow, 1),

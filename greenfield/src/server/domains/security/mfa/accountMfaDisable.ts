@@ -76,11 +76,11 @@ export function createAccountMfaDisableOperation(
                 return { ...activeLimit, status: "rate-limited" };
             }
 
-            const completeVerification = (valid: boolean) => {
+            const completeVerification = async (valid: boolean) => {
                 const completedAt = now();
                 if (!valid) {
                     try {
-                        return repository.withImmediateTransaction((unit) => {
+                        return await repository.withImmediateTransaction((unit) => {
                             const activeLimit = activeRateLimitForTargets(
                                 unit,
                                 rateLimitTargets,
@@ -145,7 +145,7 @@ export function createAccountMfaDisableOperation(
 
                 const sessionToken = generateSessionToken();
                 try {
-                    return repository.withImmediateTransaction((unit) => {
+                    return await repository.withImmediateTransaction((unit) => {
                         const current = currentAccount(
                             unit,
                             identity,

@@ -1,5 +1,6 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
+import type { ImmediateDatabaseWriteAdmission } from "../../../database/immediateWriteAdmission.ts";
 import type {
     SecurityTransaction,
     SynchronousResult,
@@ -50,10 +51,12 @@ export type {
  * Immediate callbacks are deliberately synchronous so no expensive cryptography can
  * retain the SQLite write lock across an await.
  * @param database Process-owned Drizzle SQLite database.
- * @returns MFA lifecycle repository with deferred reads and immediate writes.
+ * @param writeAdmission Process-owned bounded immediate-write admission.
+ * @returns MFA repository with deferred reads and admitted async writes.
  */
 export function createMfaLifecycleRepository(
-    database: SQLiteBunDatabase
+    database: SQLiteBunDatabase,
+    writeAdmission: ImmediateDatabaseWriteAdmission
 ): MfaLifecycleRepository {
     const runTransaction = database.transaction.bind(database) as unknown as <T>(
         callback: (transaction: SecurityTransaction) => T,
@@ -83,11 +86,15 @@ export function createMfaLifecycleRepository(
         listWebAuthnCredentials: reader.listWebAuthnCredentials.bind(reader),
         withImmediateTransaction<T>(
             callback: (unit: MfaLifecycleUnitOfWork) => SynchronousResult<T> | never
-        ): T {
-            return runTransaction(
-                (transaction): T =>
-                    callback(new DrizzleMfaLifecycleUnitOfWork(transaction)) as T,
-                { behavior: "immediate" }
+        ): Promise<T> {
+            return writeAdmission.run((markTransactionStarted) =>
+                runTransaction(
+                    (transaction): T => {
+                        markTransactionStarted();
+                        return callback(new DrizzleMfaLifecycleUnitOfWork(transaction));
+                    },
+                    { behavior: "immediate" }
+                )
             );
         },
         withReadTransaction<T>(

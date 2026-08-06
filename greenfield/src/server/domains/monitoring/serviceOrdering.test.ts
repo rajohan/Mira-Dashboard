@@ -24,9 +24,9 @@ describe("monitoring service", () => {
         const first = snapshot({ completedAtMs: 2000, run: 310 });
 
         try {
-            const accepted = submitSnapshot(service, first);
+            const accepted = await submitSnapshot(service, first);
             const afterAccepted = allRowCounts(database);
-            expect(submitSnapshot(service, first)).toMatchObject({
+            expect(await submitSnapshot(service, first)).toMatchObject({
                 duplicateRunId: true,
                 realtimeEvents: 0,
                 reportId: accepted.reportId,
@@ -35,7 +35,7 @@ describe("monitoring service", () => {
             expect(allRowCounts(database)).toEqual(afterAccepted);
             expect(wakeups).toBe(1);
 
-            const conflict = submitSnapshotFailure(service, {
+            const conflict = await submitSnapshotFailure(service, {
                 ...first,
                 report: { ...first.report, bodyMarkdown: "# Corrected" },
             });
@@ -48,7 +48,7 @@ describe("monitoring service", () => {
             expect(wakeups).toBe(1);
 
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({ completedAtMs: 1500, problems: [], run: 309 })
                 )
@@ -69,7 +69,7 @@ describe("monitoring service", () => {
             });
 
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({ completedAtMs: 2000, problems: [], run: 311 })
                 )
@@ -89,10 +89,10 @@ describe("monitoring service", () => {
         const service = serviceFor(database);
 
         try {
-            submitSnapshot(service, snapshot({ completedAtMs: 2000, run: 710 }));
+            await submitSnapshot(service, snapshot({ completedAtMs: 2000, run: 710 }));
 
             const backupProblem = problem("backup");
-            const staleResult = submitSnapshot(
+            const staleResult = await submitSnapshot(
                 service,
                 snapshot({
                     completedAtMs: 2000,
@@ -113,7 +113,7 @@ describe("monitoring service", () => {
             });
 
             expect(
-                submitSnapshot(
+                await submitSnapshot(
                     service,
                     snapshot({ completedAtMs: 2000, problems: [], run: 711 })
                 )

@@ -151,17 +151,17 @@ export function createTestGatewayWorkRuntime(
                         operation: "gateway",
                         timeoutMs: options.timeoutMs,
                     });
-                    options.onFailureBeforeRelease?.(failure);
+                    await options.onFailureBeforeRelease?.(failure);
                     throw failure;
                 }
                 if (outcome.kind === "unavailable") {
                     const failure = new AuthenticationUpstreamUnavailableError({
                         operation: "gateway",
                     });
-                    options.onFailureBeforeRelease?.(failure);
+                    await options.onFailureBeforeRelease?.(failure);
                     throw failure;
                 }
-                options.onResultBeforeRelease?.(outcome.value);
+                await options.onResultBeforeRelease?.(outcome.value);
                 return outcome.value;
             } finally {
                 releaseAllowed = true;

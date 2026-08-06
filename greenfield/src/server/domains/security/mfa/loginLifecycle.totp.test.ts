@@ -243,7 +243,7 @@ describe("MFA TOTP login lifecycle", () => {
     test("accounts for wrong proofs when another TOTP factor is unavailable", async () => {
         const harness = await createMfaLoginHarness();
         try {
-            harness.insertUnavailableTotpFactor();
+            await harness.insertUnavailableTotpFactor();
             const pending = await beginPasswordMfaLogin(
                 harness,
                 "request-unavailable-factor-pending"

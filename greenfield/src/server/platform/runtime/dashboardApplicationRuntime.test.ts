@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { maxTime } from "date-fns/constants";
 
+import type { RuntimeOwnedDatabase } from "../../database/runtime/databaseService.ts";
 import { migrationsDirectory } from "../../test/support/freshDatabase.ts";
 import { withTestTimeout } from "../../test/support/promise.ts";
 import { createTestStructuredLogger } from "../../test/support/requestContext.ts";
@@ -137,6 +138,82 @@ describe("Dashboard application runtime", () => {
                 databaseCloseSpy.mockRestore();
                 pumpCloseSpy.mockRestore();
             }
+        }
+    });
+
+    test("finishes a claimed database settlement before disposing its database scope", async () => {
+        const runtime = await createTestDashboardRuntime();
+        let competingWriter: Database | undefined;
+
+        try {
+            await runtime.initialize();
+            const orm = (await runtime.database.orm()) as RuntimeOwnedDatabase;
+            const databasePath = orm.$client.filename;
+            orm.$client.run(
+                "CREATE TABLE disposal_settlement_probe (value TEXT NOT NULL)"
+            );
+
+            competingWriter = new Database(databasePath, { strict: true });
+            competingWriter.run("PRAGMA busy_timeout = 0");
+            competingWriter.run("BEGIN IMMEDIATE");
+
+            const firstAdmissionAttempt = Promise.withResolvers<void>();
+            let callbackCalls = 0;
+            const verification = runtime.services.authentication.runWebAuthnVerification(
+                () => Promise.resolve("verified"),
+                {
+                    onResultBeforeRelease: () =>
+                        runtime.database.run((markTransactionStarted) => {
+                            firstAdmissionAttempt.resolve();
+                            return orm.$client
+                                .transaction(() => {
+                                    markTransactionStarted();
+                                    callbackCalls += 1;
+                                    orm.$client.run(
+                                        "INSERT INTO disposal_settlement_probe (value) VALUES ('committed')"
+                                    );
+                                })
+                                .immediate();
+                        }),
+                    timeoutMs: 5000,
+                }
+            );
+            const observedVerification = verification.catch(() => null);
+            await firstAdmissionAttempt.promise;
+
+            let disposalCompleted = false;
+            const disposal = runtime.dispose().then(() => {
+                disposalCompleted = true;
+                return true;
+            });
+            await Bun.sleep(30);
+
+            expect(disposalCompleted).toBeFalse();
+            expect(callbackCalls).toBe(0);
+
+            competingWriter.run("ROLLBACK");
+            await disposal;
+            await observedVerification;
+            expect(disposalCompleted).toBeTrue();
+            expect(callbackCalls).toBe(1);
+
+            const verificationDatabase = new Database(databasePath, {
+                readonly: true,
+                strict: true,
+            });
+            try {
+                expect(
+                    verificationDatabase
+                        .query("SELECT value FROM disposal_settlement_probe")
+                        .all()
+                ).toEqual([{ value: "committed" }]);
+            } finally {
+                verificationDatabase.close(true);
+            }
+        } finally {
+            if (competingWriter?.inTransaction) competingWriter.run("ROLLBACK");
+            competingWriter?.close(true);
+            await runtime.dispose();
         }
     });
 });

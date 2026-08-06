@@ -124,8 +124,8 @@ export const accountFactorRoutes = {
     removeTotpFactor: sessionProcedure
         .input(removeTotpFactorInputSchema)
         .output(removeTotpFactorResultSchema)
-        .mutation(({ ctx, input, signal }) => {
-            const result = ctx.mfaAccountLifecycle.removeTotpFactor(
+        .mutation(async ({ ctx, input, signal }) => {
+            const result = await ctx.mfaAccountLifecycle.removeTotpFactor(
                 ctx.sessionIdentity,
                 input,
                 authenticationRequestMetadata(ctx, signal)

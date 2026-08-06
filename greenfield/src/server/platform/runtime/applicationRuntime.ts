@@ -1,10 +1,24 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
-import { Data, Effect, Exit, Fiber, Layer, ManagedRuntime, Stream } from "effect";
+import {
+    Context,
+    Data,
+    Effect,
+    Exit,
+    Fiber,
+    Layer,
+    ManagedRuntime,
+    Stream,
+} from "effect";
 
+import type {
+    ImmediateDatabaseWriteAdmission,
+    MarkDatabaseTransactionStarted,
+} from "../../database/immediateWriteAdmission.ts";
 import {
     databaseRuntimeLayer,
     DatabaseRuntimeService,
     type DatabaseRuntimeLayerOptions,
+    type RuntimeOwnedDatabase,
 } from "../../database/runtime/databaseService.ts";
 import {
     type AuthenticationWorkLayerOptions,
@@ -87,7 +101,7 @@ export interface ApplicationRuntime {
 }
 
 /** Runtime-owned database access exposed only to the Dashboard composition root. */
-export interface DashboardDatabaseRuntimeService {
+export interface DashboardDatabaseRuntimeService extends ImmediateDatabaseWriteAdmission {
     readonly orm: () => Promise<SQLiteBunDatabase>;
 }
 
@@ -377,19 +391,17 @@ function createApplicationRuntimeFromManagedRuntime<RuntimeError>(
     });
 }
 
-function databaseBackedRealtimeEventPumpLayer(): Layer.Layer<
-    RealtimeEventPumpService,
-    never,
-    DatabaseRuntimeService
-> {
+function databaseBackedRealtimeEventPumpLayer<E>(
+    databaseOrm: Effect.Effect<RuntimeOwnedDatabase, E>
+): Layer.Layer<RealtimeEventPumpService, E> {
     return Layer.unwrap(
-        DatabaseRuntimeService.pipe(
-            Effect.map((database) =>
+        databaseOrm.pipe(
+            Effect.map((orm) =>
                 realtimeEventPumpLayer({
                     makePump: (pumpRuntime) =>
                         new RealtimeEventPump({
                             ...pumpRuntime,
-                            store: createRealtimeEventStore(database.orm),
+                            store: createRealtimeEventStore(orm),
                         }),
                 })
             )
@@ -416,21 +428,24 @@ export function createApplicationRuntime(
 }
 
 /**
- * Creates the production Dashboard runtime with SQLite and realtime in one Layer graph.
- * The realtime layer depends on and therefore finalizes before the retained database.
+ * Creates the production Dashboard runtime with ordered application and database scopes.
+ * Authentication and realtime finalize before the retained database, allowing claimed
+ * durable settlements to finish in the still-live database scope during shutdown.
  * @param options Explicit database, logger, and authentication composition inputs.
  * @returns One process runtime exposing only the owned ORM to Dashboard composition.
  */
 export function createDashboardApplicationRuntime(
     options: DashboardApplicationRuntimeOptions
 ): DashboardApplicationRuntime {
-    const databaseLayer = databaseRuntimeLayer(options.database);
-    const databaseAndRealtimeLayer = databaseBackedRealtimeEventPumpLayer().pipe(
-        Layer.provideMerge(databaseLayer)
+    const databaseRuntime = ManagedRuntime.make(databaseRuntimeLayer(options.database));
+    const databaseOrm = databaseRuntime.contextEffect.pipe(
+        Effect.map(Context.get(DatabaseRuntimeService)),
+        Effect.map((database) => database.orm)
     );
+    const databaseBackedRealtimeLayer = databaseBackedRealtimeEventPumpLayer(databaseOrm);
     const runtime = ManagedRuntime.make(
         Layer.mergeAll(
-            databaseAndRealtimeLayer,
+            databaseBackedRealtimeLayer,
             authenticationWorkLayer(options.authenticationWork),
             createEffectLoggerLayer(options.logger)
         )
@@ -441,13 +456,37 @@ export function createDashboardApplicationRuntime(
     );
     const database: DashboardDatabaseRuntimeService = Object.freeze({
         orm: () =>
-            runtime.runPromise(
+            databaseRuntime.runPromise(
                 DatabaseRuntimeService.pipe(Effect.map((service) => service.orm))
             ),
+        run<T>(
+            operation: (markTransactionStarted: MarkDatabaseTransactionStarted) => T
+        ): Promise<T> {
+            return databaseRuntime.runPromise(
+                DatabaseRuntimeService.pipe(
+                    Effect.flatMap((service) => service.runImmediateWrite(operation))
+                )
+            );
+        },
     });
+    let disposePromise: Promise<void> | undefined;
 
     return Object.freeze({
         ...applicationRuntime,
         database,
+        dispose() {
+            disposePromise ??= (async () => {
+                try {
+                    await applicationRuntime.dispose();
+                } finally {
+                    await databaseRuntime.dispose();
+                }
+            })();
+            return disposePromise;
+        },
+        async initialize() {
+            await databaseRuntime.context();
+            await applicationRuntime.initialize();
+        },
     });
 }

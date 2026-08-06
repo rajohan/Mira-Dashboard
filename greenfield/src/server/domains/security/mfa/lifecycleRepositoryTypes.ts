@@ -249,7 +249,7 @@ export interface MfaLifecycleUnitOfWork
 export interface MfaLifecycleRepository extends MfaLifecycleReader {
     withImmediateTransaction<T>(
         callback: (unit: MfaLifecycleUnitOfWork) => SynchronousResult<T>
-    ): T;
+    ): Promise<T>;
     withReadTransaction<T>(
         callback: (reader: MfaLifecycleReader) => SynchronousResult<T>
     ): T;

@@ -18,6 +18,7 @@ import {
     createTestAuthenticationWorkGate,
     createTestGatewayWorkRuntime,
 } from "../../../../test/support/authenticationWorkGate.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../../../test/support/freshDatabase.ts";
 import { testDashboardPasswordHash } from "../../../../test/support/securityPassword.ts";
 import { createAuthenticationLifecycleService } from "../../authenticationLifecycle.ts";
@@ -128,7 +129,10 @@ export interface MfaLoginHarnessOptions {
 
 export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}) {
     const database = await openFreshMigratedDatabase();
-    const repository = createMfaLifecycleRepository(database.orm);
+    const repository = createMfaLifecycleRepository(
+        database.orm,
+        testImmediateDatabaseWriteAdmission
+    );
     let beforeTotpDecrypt: (() => Promise<void> | void) | undefined;
     let passwordVerificationCalls = 0;
     const passwordCryptoTransactionStates: boolean[] = [];
@@ -151,7 +155,7 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
                 })
             )
             .run();
-        repository.withImmediateTransaction((unit) => {
+        await repository.withImmediateTransaction((unit) => {
             unit.insertTotpFactor({
                 ...validUserTotpFactorInsert,
                 confirmedAt: mfaLoginNow,
@@ -285,7 +289,10 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
             now: options.now ?? (() => mfaLoginNow),
             passwordWorkBudget,
             passwordWorkGate,
-            repository: createAuthenticationLifecycleRepository(database.orm),
+            repository: createAuthenticationLifecycleRepository(
+                database.orm,
+                testImmediateDatabaseWriteAdmission
+            ),
             verifyGatewayCredential: () => Promise.resolve(false),
             verifyPassword: (password) => {
                 passwordVerificationCalls += 1;
@@ -303,8 +310,8 @@ export async function createMfaLoginHarness(options: MfaLoginHarnessOptions = {}
             recoveryCryptoTransactionStates,
             repository,
             service,
-            insertUnavailableTotpFactor() {
-                repository.withImmediateTransaction((unit) =>
+            async insertUnavailableTotpFactor() {
+                await repository.withImmediateTransaction((unit) =>
                     unit.insertTotpFactor({
                         ...validUserTotpFactorInsert,
                         confirmedAt: mfaLoginNow,

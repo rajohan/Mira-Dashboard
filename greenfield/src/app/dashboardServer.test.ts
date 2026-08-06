@@ -16,8 +16,12 @@ import {
 import { createReadinessController } from "../server/platform/readiness/readinessState.ts";
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { dashboardSessionCookieName } from "../server/rawHttp/authenticationCredentials.ts";
+import { runTestImmediateDatabaseWrite } from "../server/test/support/databaseWriteAdmission.ts";
 import { migrationsDirectory } from "../server/test/support/freshDatabase.ts";
-import { createTestStructuredLogger } from "../server/test/support/requestContext.ts";
+import {
+    createTestApplicationRuntime,
+    createTestStructuredLogger,
+} from "../server/test/support/requestContext.ts";
 import {
     createDashboardServer,
     validateDashboardWebAuthnBrowserOrigin,
@@ -45,6 +49,42 @@ describe("Dashboard security composition", () => {
         ).toThrow(
             "Dashboard browser origin is absent from the WebAuthn origin allowlist"
         );
+    });
+
+    test("releases an already-initialized runtime when composition preflight fails", async () => {
+        let disposeCalls = 0;
+        let initializeCalls = 0;
+        const applicationRuntime = Object.freeze({
+            ...createTestApplicationRuntime({
+                dispose: () => {
+                    disposeCalls += 1;
+                    return Promise.resolve();
+                },
+                initialize: () => {
+                    initializeCalls += 1;
+                    return Promise.resolve();
+                },
+            }),
+            database: Object.freeze({
+                orm: () => Promise.reject(new Error("Database must not be reached")),
+                run: runTestImmediateDatabaseWrite,
+            }),
+        });
+        await applicationRuntime.initialize();
+
+        expect(
+            createDashboardServer({
+                applicationRuntime,
+                browserOrigin: "not-an-origin",
+                gatewayUrl: "ws://127.0.0.1:1",
+                port: 0,
+                readiness: createReadinessController(),
+                totpSecretCipher: testTotpSecretCipher,
+            })
+        ).rejects.toBeInstanceOf(TypeError);
+
+        expect(initializeCalls).toBe(1);
+        expect(disposeCalls).toBe(1);
     });
 
     test("wires the persisted automation lifecycle through the production server", async () => {

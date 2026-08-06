@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
+import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import { incidentObservations } from "../../database/schema/incidentObservations.ts";
 import { incidents } from "../../database/schema/incidents.ts";
 import { monitorRuns } from "../../database/schema/monitorRuns.ts";
@@ -77,7 +78,7 @@ export interface MonitoringUnitOfWork {
 export interface MonitoringRepository {
     withImmediateTransaction<T>(
         callback: (unit: MonitoringUnitOfWork) => SynchronousResult<T>
-    ): T;
+    ): Promise<T>;
 }
 
 function requiredRow<T>(row: T | undefined, operation: string): T {
@@ -235,10 +236,12 @@ class DrizzleMonitoringUnitOfWork implements MonitoringUnitOfWork {
 /**
  * Creates the SQLite-backed monitoring repository at the composition boundary.
  * @param database Typed Drizzle client backed by one Bun SQLite connection.
- * @returns Repository that owns immediate monitoring transactions and SQL.
+ * @param writeAdmission Process-owned bounded immediate-write admission.
+ * @returns Repository that owns admitted async monitoring writes and SQL.
  */
 export function createMonitoringRepository(
-    database: SQLiteBunDatabase
+    database: SQLiteBunDatabase,
+    writeAdmission: ImmediateDatabaseWriteAdmission
 ): MonitoringRepository {
     // SQLiteBunDatabase inherits a conditional async-driver signature even though the
     // concrete Bun session is synchronous. Preserve the public no-Promise callback type
@@ -251,11 +254,15 @@ export function createMonitoringRepository(
     return {
         withImmediateTransaction<T>(
             callback: (unit: MonitoringUnitOfWork) => SynchronousResult<T>
-        ): T {
-            return runTransaction(
-                (transaction): T =>
-                    callback(new DrizzleMonitoringUnitOfWork(transaction)) as T,
-                { behavior: "immediate" }
+        ): Promise<T> {
+            return writeAdmission.run((markTransactionStarted) =>
+                runTransaction(
+                    (transaction): T => {
+                        markTransactionStarted();
+                        return callback(new DrizzleMonitoringUnitOfWork(transaction));
+                    },
+                    { behavior: "immediate" }
+                )
             );
         },
     };

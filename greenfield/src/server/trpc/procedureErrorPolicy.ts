@@ -2,6 +2,11 @@ import { getTRPCErrorFromUnknown, StandardSchemaV1Error, TRPCError } from "@trpc
 
 import { procedureContracts } from "../../contracts/contractRegistry.ts";
 import type { ContractErrorCode, ProcedureContract } from "../../contracts/registry.ts";
+import {
+    isDatabaseRuntimeWriteUnavailableError,
+    type DatabaseRuntimeWriteUnavailableError,
+} from "../database/runtime/databaseErrors.ts";
+import { AuthenticationWorkSettlementError } from "../domains/security/authenticationWorkGate.ts";
 
 export type ProcedureExpectedErrorPolicy = Readonly<
     Record<string, readonly ContractErrorCode[]>
@@ -55,11 +60,13 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "accountSecurity.disableMfa": [
         "CONFLICT",
         "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
     "accountSecurity.reauthenticatePassword": [
         "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
@@ -67,23 +74,27 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "CONFLICT",
         "FORBIDDEN",
         "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
     "accountSecurity.removeWebAuthnCredential": [
         "CONFLICT",
         "FORBIDDEN",
         "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
     "accountSecurity.rotateRecoveryCodes": [
         "CONFLICT",
         "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
     "accountSecurity.stepUpRecovery": [
         "CONFLICT",
         "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
@@ -109,7 +120,13 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
-    "auth.changePassword": ["CONFLICT", "FORBIDDEN", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+    "auth.changePassword": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
+        "TOO_MANY_REQUESTS",
+        "UNAUTHORIZED",
+    ],
     "auth.login": [
         "CONFLICT",
         "SERVICE_UNAVAILABLE",
@@ -119,11 +136,11 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "auth.loginRecovery": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
     "auth.loginTotp": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
     "auth.loginWebAuthn": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
-    "auth.logout": [],
-    "auth.revokeSession": ["FORBIDDEN", "UNAUTHORIZED"],
+    "auth.logout": ["SERVICE_UNAVAILABLE"],
+    "auth.revokeSession": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "auth.sessions": ["FORBIDDEN", "UNAUTHORIZED"],
     "auth.status": [],
-    "auth.touch": ["FORBIDDEN", "UNAUTHORIZED"],
+    "auth.touch": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "automationSecurity.createCredential": [
         "CONFLICT",
         "FORBIDDEN",
@@ -143,6 +160,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "CONFLICT",
         "FORBIDDEN",
         "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
     "automationSecurity.listCredentials": ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
@@ -151,12 +169,14 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "CONFLICT",
         "FORBIDDEN",
         "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
     "automationSecurity.revokeCredential": [
         "CONFLICT",
         "FORBIDDEN",
         "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
     "automationSecurity.rotateCredential": [
@@ -228,6 +248,28 @@ function isImplicitInputValidationError(error: TRPCError): boolean {
     return error.code === "BAD_REQUEST" && error.cause instanceof StandardSchemaV1Error;
 }
 
+function databaseWriteUnavailableCause(
+    error: TRPCError
+): DatabaseRuntimeWriteUnavailableError | undefined {
+    if (error.code !== "INTERNAL_SERVER_ERROR") return undefined;
+    if (isDatabaseRuntimeWriteUnavailableError(error.cause)) return error.cause;
+    return error.cause instanceof AuthenticationWorkSettlementError &&
+        isDatabaseRuntimeWriteUnavailableError(error.cause.cause)
+        ? error.cause.cause
+        : undefined;
+}
+
+function mapDatabaseWriteUnavailableError(error: TRPCError): TRPCError {
+    const cause = databaseWriteUnavailableCause(error);
+    return cause === undefined
+        ? error
+        : new TRPCError({
+              cause,
+              code: "SERVICE_UNAVAILABLE",
+              message: "Database write capacity is temporarily unavailable",
+          });
+}
+
 /**
  * Converts undeclared errors from registered production routes into internal defects.
  * Framework-owned input-validation failures and existing internal defects remain implicit.
@@ -239,20 +281,21 @@ export function applyProcedureExpectedErrorPolicy(
     path: string,
     error: TRPCError
 ): TRPCError {
+    const mappedError = mapDatabaseWriteUnavailableError(error);
     const expectedErrors = Object.hasOwn(runtimeProcedureExpectedErrorPolicy, path)
         ? runtimeProcedureExpectedErrorPolicy[path]
         : undefined;
     if (
-        error.code === "INTERNAL_SERVER_ERROR" ||
-        isImplicitInputValidationError(error) ||
+        mappedError.code === "INTERNAL_SERVER_ERROR" ||
+        isImplicitInputValidationError(mappedError) ||
         (expectedErrors !== undefined &&
-            (expectedErrors as readonly string[]).includes(error.code))
+            (expectedErrors as readonly string[]).includes(mappedError.code))
     ) {
-        return error;
+        return mappedError;
     }
 
     return new TRPCError({
-        cause: new UndeclaredProcedureErrorCause(path, error.code),
+        cause: new UndeclaredProcedureErrorCause(path, mappedError.code),
         code: "INTERNAL_SERVER_ERROR",
         message: "Internal server error",
     });

@@ -65,7 +65,7 @@ export type BeginWebAuthnLoginLifecycleResult =
     | { readonly status: "state-changed" };
 
 export interface MfaLoginLifecycleService {
-    beginPendingLogin(input: BeginPendingLoginInput): BeginPendingLoginResult;
+    beginPendingLogin(input: BeginPendingLoginInput): Promise<BeginPendingLoginResult>;
     beginWebAuthnLogin(
         credential: ParsedOpaqueToken,
         metadata: AuthenticationRequestMetadata
@@ -89,7 +89,7 @@ export interface MfaLoginLifecycleService {
     revokePendingLogin(
         credential: ParsedOpaqueToken,
         metadata: AuthenticationRequestMetadata
-    ): boolean;
+    ): Promise<boolean>;
 }
 
 export interface MfaLoginWebAuthnDependencies {

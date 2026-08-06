@@ -44,9 +44,9 @@ export function createRemoveWebAuthnCredentialOperation(
     } = context;
 
     return Object.freeze({
-        removeWebAuthnCredential(identity, input, metadata) {
+        async removeWebAuthnCredential(identity, input, metadata) {
             const occurredAt = now();
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const account = activeAccount(
                     unit,
                     identity,

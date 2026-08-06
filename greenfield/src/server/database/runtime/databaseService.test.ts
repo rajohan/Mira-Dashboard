@@ -7,13 +7,18 @@ import path from "node:path";
 import { Effect, Fiber, ManagedRuntime } from "effect";
 import { TestClock } from "effect/testing";
 
+import { applyVerifiedMigrations } from "../migrations/applyVerifiedMigrations.ts";
+import { loadVerifiedMigrations } from "../migrations/loadVerifiedMigrations.ts";
 import {
     DatabaseRuntimeLockTimeoutError,
     DatabaseRuntimeStartupError,
+    DatabaseRuntimeWriteAdmissionTimeoutError,
+    DatabaseRuntimeWriteContentionError,
 } from "./databaseErrors.ts";
 import {
     databaseRuntimePolicy,
     retryDatabaseStartupOperation,
+    retryDatabaseWriteOperation,
 } from "./databasePolicy.ts";
 import {
     DatabaseRuntimeService,
@@ -131,6 +136,26 @@ describe("database runtime service", () => {
         ).toEqual({ count: 1 });
     });
 
+    test("validates an already-current database while another process owns the writer slot", async () => {
+        const stateDirectory = await privateTemporaryDirectory();
+        const initialized = await buildRuntime(options(stateDirectory));
+        const databasePath = initialized.service.orm.$client.filename;
+        await initialized.runtime.dispose();
+        const competingWriter = new Database(databasePath, { strict: true });
+        competingWriter.run("PRAGMA busy_timeout = 0");
+        competingWriter.run("BEGIN IMMEDIATE");
+
+        try {
+            const validated = await buildRuntime(
+                options(stateDirectory, "validate-only")
+            );
+            expect(validated.service.diagnostics.appliedMigrations).toBe(0);
+        } finally {
+            competingWriter.run("ROLLBACK");
+            competingWriter.close(true);
+        }
+    });
+
     test("serializes two concurrent empty-database startups through SQLite admission", async () => {
         const stateDirectory = await privateTemporaryDirectory();
         const [first, second] = await Promise.all([
@@ -154,6 +179,49 @@ describe("database runtime service", () => {
         expect(first.service.orm.$client.filename).toBe(
             second.service.orm.$client.filename
         );
+    });
+
+    test("validate-only waits for a concurrent empty-database initializer", async () => {
+        const stateDirectory = await privateTemporaryDirectory();
+        const databasePath = path.join(stateDirectory, "mira-dashboard.db");
+        await writeFile(databasePath, "", { mode: 0o600 });
+        const migrations = await loadVerifiedMigrations({
+            directory: migrationsDirectory,
+        });
+        const initializer = new Database(databasePath, { strict: true });
+        initializer.run("PRAGMA foreign_keys = ON");
+        initializer.run("PRAGMA ignore_check_constraints = OFF");
+        initializer.run("PRAGMA journal_mode = WAL");
+        initializer.run("PRAGMA busy_timeout = 0");
+        initializer.run("BEGIN IMMEDIATE");
+        let validationSettled = false;
+
+        try {
+            const validation = buildRuntime(options(stateDirectory, "validate-only"));
+            void validation.then(
+                () => {
+                    validationSettled = true;
+                    return true;
+                },
+                () => {
+                    validationSettled = true;
+                    return false;
+                }
+            );
+            await Bun.sleep(25);
+            expect(validationSettled).toBeFalse();
+            applyVerifiedMigrations(initializer, migrations, { releaseId });
+            await Bun.sleep(10);
+            expect(validationSettled).toBeFalse();
+            initializer.run("COMMIT");
+
+            const validated = await validation;
+            expect(validated.service.diagnostics.appliedMigrations).toBe(0);
+            expect(validated.service.diagnostics.startupMode).toBe("validate-only");
+        } finally {
+            if (initializer.inTransaction) initializer.run("ROLLBACK");
+            initializer.close(true);
+        }
     });
 
     test("validate-only rejects an absent database without creating it", async () => {
@@ -238,6 +306,45 @@ describe("database runtime service", () => {
         second.close(true);
     });
 
+    test("retries real cross-connection write admission before entering the callback", async () => {
+        const stateDirectory = await privateTemporaryDirectory();
+        const { runtime, service } = await buildRuntime(options(stateDirectory));
+        const competingWriter = new Database(service.orm.$client.filename, {
+            strict: true,
+        });
+        competingWriter.run("PRAGMA busy_timeout = 0");
+        competingWriter.run("BEGIN IMMEDIATE");
+        const firstAdmissionAttempt = Promise.withResolvers<void>();
+        let admissionAttempts = 0;
+        let callbackCalls = 0;
+        const admittedWrite = runtime.runPromise(
+            service.runImmediateWrite((markTransactionStarted) => {
+                admissionAttempts += 1;
+                firstAdmissionAttempt.resolve();
+                return service.orm.$client
+                    .transaction(() => {
+                        markTransactionStarted();
+                        callbackCalls += 1;
+                        return "committed" as const;
+                    })
+                    .immediate();
+            })
+        );
+
+        try {
+            await firstAdmissionAttempt.promise;
+            expect(admissionAttempts).toBeGreaterThanOrEqual(1);
+            expect(callbackCalls).toBe(0);
+            competingWriter.run("ROLLBACK");
+
+            expect(await admittedWrite).toBe("committed");
+            expect(callbackCalls).toBe(1);
+        } finally {
+            if (competingWriter.inTransaction) competingWriter.run("ROLLBACK");
+            competingWriter.close(true);
+        }
+    });
+
     test("checkpoints before strict close and makes the retained handle unusable", async () => {
         const stateDirectory = await privateTemporaryDirectory();
         const { runtime, service } = await buildRuntime(options(stateDirectory));
@@ -296,5 +403,107 @@ describe("database startup retry policy", () => {
         const attemptsBeforeInterruption = await Effect.runPromise(program);
         expect(attemptsBeforeInterruption).toBeGreaterThanOrEqual(1);
         expect(attempts).toBe(attemptsBeforeInterruption);
+    });
+});
+
+describe("database write admission policy", () => {
+    test("retries only pre-callback busy admission and runs the callback once", async () => {
+        let attempts = 0;
+        let callbackCalls = 0;
+
+        const value = await Effect.runPromise(
+            retryDatabaseWriteOperation((markTransactionStarted) => {
+                attempts += 1;
+                if (attempts === 1) {
+                    throw Object.assign(new Error("not exposed"), {
+                        code: "SQLITE_BUSY",
+                    });
+                }
+                markTransactionStarted();
+                callbackCalls += 1;
+                return 42;
+            })
+        );
+
+        expect(value).toBe(42);
+        expect(attempts).toBe(2);
+        expect(callbackCalls).toBe(1);
+    });
+
+    test("times out persistent pre-callback contention with the Effect clock", async () => {
+        let attempts = 0;
+        const program = Effect.gen(function* () {
+            yield* TestClock.setTime(0);
+            const fiber = yield* retryDatabaseWriteOperation(() => {
+                attempts += 1;
+                throw Object.assign(new Error("not exposed"), {
+                    code: "SQLITE_LOCKED_SHAREDCACHE",
+                });
+            }).pipe(Effect.forkChild);
+            yield* Effect.yieldNow;
+            yield* TestClock.adjust(databaseRuntimePolicy.writeAdmissionTimeoutMs);
+            return yield* Fiber.join(fiber).pipe(Effect.flip);
+        }).pipe(Effect.provide(TestClock.layer()));
+
+        const failure = await Effect.runPromise(program);
+        expect(failure).toBeInstanceOf(DatabaseRuntimeWriteAdmissionTimeoutError);
+        expect(attempts).toBeGreaterThan(1);
+    });
+
+    test("interrupts queued write admission without running another attempt", async () => {
+        let attempts = 0;
+        const program = Effect.gen(function* () {
+            yield* TestClock.setTime(0);
+            const fiber = yield* retryDatabaseWriteOperation(() => {
+                attempts += 1;
+                throw Object.assign(new Error("not exposed"), {
+                    code: "SQLITE_BUSY",
+                });
+            }).pipe(Effect.forkChild);
+            yield* Effect.yieldNow;
+            const attemptsBeforeInterruption = attempts;
+            yield* Fiber.interrupt(fiber);
+            yield* TestClock.adjust(databaseRuntimePolicy.writeAdmissionTimeoutMs * 2);
+            return attemptsBeforeInterruption;
+        }).pipe(Effect.provide(TestClock.layer()));
+
+        const attemptsBeforeInterruption = await Effect.runPromise(program);
+        expect(attemptsBeforeInterruption).toBeGreaterThanOrEqual(1);
+        expect(attempts).toBe(attemptsBeforeInterruption);
+    });
+
+    test("never replays contention after the transaction callback begins", async () => {
+        let attempts = 0;
+        const failure = await rejectionOf(
+            Effect.runPromise(
+                retryDatabaseWriteOperation((markTransactionStarted) => {
+                    attempts += 1;
+                    markTransactionStarted();
+                    throw Object.assign(new Error("not exposed"), {
+                        code: "SQLITE_BUSY_SNAPSHOT",
+                    });
+                })
+            )
+        );
+
+        expect(failure).toBeInstanceOf(DatabaseRuntimeWriteContentionError);
+        expect(attempts).toBe(1);
+    });
+
+    test("preserves non-contention callback failures without replay", async () => {
+        const sentinel = new Error("domain failure");
+        let attempts = 0;
+        const failure = await rejectionOf(
+            Effect.runPromise(
+                retryDatabaseWriteOperation((markTransactionStarted) => {
+                    attempts += 1;
+                    markTransactionStarted();
+                    throw sentinel;
+                })
+            )
+        );
+
+        expect(failure).toBe(sentinel);
+        expect(attempts).toBe(1);
     });
 });

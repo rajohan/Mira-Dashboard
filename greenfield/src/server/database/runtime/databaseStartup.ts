@@ -7,7 +7,10 @@ import {
     fullCommitShaSchema,
     lowercaseSha256Schema,
 } from "../../../shared/validation.ts";
-import { applyVerifiedMigrations } from "../migrations/applyVerifiedMigrations.ts";
+import {
+    applyVerifiedMigrations,
+    validateVerifiedMigrations,
+} from "../migrations/applyVerifiedMigrations.ts";
 import {
     loadVerifiedMigrations,
     type VerifiedMigration,
@@ -68,8 +71,12 @@ const migrationHistoryRowSchema = v.strictObject({
     id: migrationIdSchema("Database migration history is invalid"),
 });
 const migrationHistoryRowsSchema = v.array(migrationHistoryRowSchema);
-const schemaObjectRowSchema = v.strictObject({ name: v.string(), type: v.string() });
-const schemaObjectRowsSchema = v.array(schemaObjectRowSchema);
+const schemaObjectPresenceRowSchema = v.nullable(
+    v.strictObject({ present: v.literal(1) })
+);
+const migrationTableRowSchema = v.nullable(
+    v.strictObject({ name: v.literal("schema_migrations"), type: v.literal("table") })
+);
 
 type MigrationHistoryRow = v.InferOutput<typeof migrationHistoryRowSchema>;
 
@@ -125,34 +132,56 @@ export function loadDatabaseRuntimeMigrations(
     });
 }
 
-function readSchemaObjects(
-    database: Database
-): readonly { name: string; type: string }[] {
-    const rows: unknown = database
+function hasApplicationSchemaObjects(database: Database): boolean {
+    const row: unknown = database
+        .query(`
+            SELECT 1 AS present
+            FROM sqlite_schema
+            WHERE name NOT GLOB 'sqlite_*'
+            LIMIT 1
+        `)
+        .get();
+    const validation = v.safeParse(schemaObjectPresenceRowSchema, row, {
+        abortEarly: true,
+    });
+    if (!validation.success) throw invalidHistory();
+    return validation.output !== null;
+}
+
+function hasMigrationHistoryTable(database: Database): boolean {
+    const row: unknown = database
         .query(`
             SELECT name, type
             FROM sqlite_schema
-            WHERE name NOT GLOB 'sqlite_*'
-            ORDER BY type, name
+            WHERE name = 'schema_migrations'
+            LIMIT 1
         `)
-        .all();
-    const validation = v.safeParse(schemaObjectRowsSchema, rows, { abortEarly: true });
+        .get();
+    const validation = v.safeParse(migrationTableRowSchema, row, {
+        abortEarly: true,
+    });
     if (!validation.success) throw invalidHistory();
-    return validation.output;
+    return validation.output !== null;
 }
 
-function readMigrationHistory(database: Database): readonly MigrationHistoryRow[] {
+function readMigrationHistory(
+    database: Database,
+    maximumRows: number
+): readonly MigrationHistoryRow[] {
     const rows: unknown = database
         .query(`
             SELECT checksum, id
             FROM schema_migrations
             ORDER BY id
+            LIMIT ?
         `)
-        .all();
+        .all(maximumRows + 1);
     const validation = v.safeParse(migrationHistoryRowsSchema, rows, {
         abortEarly: true,
     });
-    if (!validation.success) throw invalidHistory();
+    if (!validation.success || validation.output.length > maximumRows) {
+        throw invalidHistory();
+    }
     return validation.output;
 }
 
@@ -174,17 +203,10 @@ function inspectMigrationState(
     database: Database,
     migrations: readonly VerifiedMigration[]
 ): "current" | "empty" | "pending" {
-    const schemaObjects = readSchemaObjects(database);
-    if (schemaObjects.length === 0) return "empty";
-    if (
-        !schemaObjects.some(
-            (object) => object.type === "table" && object.name === "schema_migrations"
-        )
-    ) {
-        throw invalidHistory();
-    }
+    if (!hasApplicationSchemaObjects(database)) return "empty";
+    if (!hasMigrationHistoryTable(database)) throw invalidHistory();
 
-    const history = readMigrationHistory(database);
+    const history = readMigrationHistory(database, migrations.length);
     if (
         history.length === 0 ||
         history.length > migrations.length ||
@@ -217,16 +239,16 @@ function startOrValidateDatabase(
         });
     }
 
-    const appliedMigrations = applyVerifiedMigrations(database, migrations, {
-        releaseId: options.releaseId,
-    });
-    if (state === "current" && appliedMigrations !== 0) throw invalidHistory();
-    if (
-        state === "empty" &&
-        appliedMigrations !== 0 &&
-        appliedMigrations !== migrations.length
-    ) {
-        throw invalidHistory();
+    let appliedMigrations = 0;
+    if (state === "current") {
+        validateVerifiedMigrations(database, migrations);
+    } else {
+        appliedMigrations = applyVerifiedMigrations(database, migrations, {
+            releaseId: options.releaseId,
+        });
+        if (appliedMigrations !== 0 && appliedMigrations !== migrations.length) {
+            throw invalidHistory();
+        }
     }
 
     return Object.freeze({

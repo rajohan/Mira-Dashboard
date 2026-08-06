@@ -80,11 +80,11 @@ export function createAccountPasswordReauthenticationOperation(
                 return { ...activeLimit, status: "rate-limited" };
             }
 
-            const completeVerification = (valid: boolean) => {
+            const completeVerification = async (valid: boolean) => {
                 const verifiedAt = now();
                 if (!valid) {
                     try {
-                        return repository.withImmediateTransaction((unit) => {
+                        return await repository.withImmediateTransaction((unit) => {
                             const activeLimit = activeRateLimitForTargets(
                                 unit,
                                 rateLimitTargets,
@@ -137,7 +137,7 @@ export function createAccountPasswordReauthenticationOperation(
 
                 const sessionToken = generateSessionToken();
                 try {
-                    return repository.withImmediateTransaction((unit) => {
+                    return await repository.withImmediateTransaction((unit) => {
                         const current = currentAccount(
                             unit,
                             identity,

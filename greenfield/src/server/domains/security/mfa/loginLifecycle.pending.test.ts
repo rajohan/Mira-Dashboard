@@ -58,7 +58,7 @@ describe("MFA pending-login lifecycle", () => {
             expect(harness.passwordCryptoTransactionStates).toEqual([false, false]);
 
             expect(
-                harness.service.revokePendingLogin(
+                await harness.service.revokePendingLogin(
                     pending.credential,
                     mfaLoginMetadata("request-revoke")
                 )
@@ -67,7 +67,7 @@ describe("MFA pending-login lifecycle", () => {
                 harness.service.pendingLoginSummary(pending.credential)
             ).toBeUndefined();
             expect(
-                harness.service.revokePendingLogin(
+                await harness.service.revokePendingLogin(
                     pending.credential,
                     mfaLoginMetadata("request-revoke-replay")
                 )

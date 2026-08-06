@@ -368,7 +368,7 @@ describe("authentication HTTP transport policy", () => {
             authenticationLifecycle: createTestAuthenticationLifecycleService({
                 logout: () => {
                     logoutCalls += 1;
-                    return true;
+                    return Promise.resolve(true);
                 },
             }),
             authenticateCredential: () => {

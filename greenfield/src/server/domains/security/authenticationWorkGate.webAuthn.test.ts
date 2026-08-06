@@ -9,6 +9,7 @@ import { createTestStructuredLogger } from "../../test/support/requestContext.ts
 import {
     type AuthenticationVerificationWorkOptions,
     AuthenticationUpstreamUnavailableError,
+    AuthenticationWorkSettlementError,
     AuthenticationWorkTimeoutError,
 } from "./authenticationWorkGate.ts";
 
@@ -24,8 +25,7 @@ const inertRealtimeLayer = Layer.succeed(
 const testStructuredLogger = createTestStructuredLogger();
 
 async function yieldToWorkService(): Promise<void> {
-    await Promise.resolve();
-    await Promise.resolve();
+    await Bun.sleep(0);
 }
 
 function webAuthnRunner(runtime: ReturnType<typeof createApplicationRuntime>) {
@@ -154,6 +154,161 @@ describe("process WebAuthn verification work service", () => {
         }
     });
 
+    test("returns the typed timeout when queued verification never starts", async () => {
+        const runtime = createApplicationRuntime({
+            authenticationWork: {
+                webAuthnMaximumConcurrent: 1,
+                webAuthnMaximumQueued: 1,
+            },
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        const activeStarted = Promise.withResolvers<void>();
+        const releaseActive = Promise.withResolvers<void>();
+        let queuedFailureSettlements = 0;
+        let queuedWorkCalls = 0;
+
+        try {
+            await runtime.initialize();
+            const webAuthn = webAuthnRunner(runtime);
+            const active = webAuthn(
+                async () => {
+                    activeStarted.resolve();
+                    await releaseActive.promise;
+                    return "active";
+                },
+                { timeoutMs: 5000 }
+            );
+            await activeStarted.promise;
+
+            const failure = await captureFailure(() =>
+                webAuthn(
+                    () => {
+                        queuedWorkCalls += 1;
+                        return Promise.resolve("unexpected");
+                    },
+                    {
+                        onFailureBeforeRelease: (timeoutFailure) => {
+                            expect(timeoutFailure).toBeInstanceOf(
+                                AuthenticationWorkTimeoutError
+                            );
+                            queuedFailureSettlements += 1;
+                        },
+                        timeoutMs: 20,
+                    }
+                )
+            );
+
+            expect(failure).toBeInstanceOf(AuthenticationWorkTimeoutError);
+            expect(failure).toMatchObject({ operation: "webauthn", timeoutMs: 20 });
+            expect(queuedFailureSettlements).toBe(1);
+            expect(queuedWorkCalls).toBe(0);
+
+            releaseActive.resolve();
+            expect(await active).toBe("active");
+        } finally {
+            releaseActive.resolve();
+            await runtime.dispose();
+        }
+    });
+
+    test("preserves a queued timeout settlement failure", async () => {
+        const runtime = createApplicationRuntime({
+            authenticationWork: {
+                webAuthnMaximumConcurrent: 1,
+                webAuthnMaximumQueued: 1,
+            },
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        const activeStarted = Promise.withResolvers<void>();
+        const releaseActive = Promise.withResolvers<void>();
+        const sentinel = new Error("private queued settlement failure");
+        let queuedWorkCalls = 0;
+
+        try {
+            await runtime.initialize();
+            const webAuthn = webAuthnRunner(runtime);
+            const active = webAuthn(
+                async () => {
+                    activeStarted.resolve();
+                    await releaseActive.promise;
+                    return "active";
+                },
+                { timeoutMs: 5000 }
+            );
+            await activeStarted.promise;
+
+            const failure = await captureFailure(() =>
+                webAuthn(
+                    () => {
+                        queuedWorkCalls += 1;
+                        return Promise.resolve("unexpected");
+                    },
+                    {
+                        onFailureBeforeRelease: () => Promise.reject(sentinel),
+                        timeoutMs: 20,
+                    }
+                )
+            );
+
+            expect(failure).toBeInstanceOf(AuthenticationWorkSettlementError);
+            expect(failure).toMatchObject({
+                cause: sentinel,
+                operation: "webauthn",
+            });
+            expect(queuedWorkCalls).toBe(0);
+
+            releaseActive.resolve();
+            expect(await active).toBe("active");
+        } finally {
+            releaseActive.resolve();
+            await runtime.dispose();
+        }
+    });
+
+    test("keeps a cooperative abort inside the timeout outcome", async () => {
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        let failureSettlements = 0;
+
+        try {
+            await runtime.initialize();
+            const failure = await captureFailure(() =>
+                webAuthnRunner(runtime)(
+                    (signal) =>
+                        new Promise<never>((_resolve, reject) => {
+                            signal.addEventListener(
+                                "abort",
+                                () => {
+                                    reject(new Error("verification aborted"));
+                                },
+                                { once: true }
+                            );
+                        }),
+                    {
+                        onFailureBeforeRelease: async (timeoutFailure) => {
+                            expect(timeoutFailure).toBeInstanceOf(
+                                AuthenticationWorkTimeoutError
+                            );
+                            failureSettlements += 1;
+                            await Bun.sleep(30);
+                        },
+                        timeoutMs: 20,
+                    }
+                )
+            );
+
+            expect(failure).toBeInstanceOf(AuthenticationWorkTimeoutError);
+            expect(failure).toMatchObject({ operation: "webauthn", timeoutMs: 20 });
+            expect(failureSettlements).toBe(1);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
     test("redacts defects and retains active capacity after timeout and abort", async () => {
         const runtime = createApplicationRuntime({
             authenticationWork: {
@@ -263,8 +418,12 @@ describe("process WebAuthn verification work service", () => {
         });
         const releaseResult = Promise.withResolvers<void>();
         const resultStarted = Promise.withResolvers<void>();
+        const releaseResultSettlement = Promise.withResolvers<void>();
+        const resultSettlementStarted = Promise.withResolvers<void>();
         const releaseFailure = Promise.withResolvers<void>();
         const failureStarted = Promise.withResolvers<void>();
+        const releaseFailureSettlement = Promise.withResolvers<void>();
+        const failureSettlementStarted = Promise.withResolvers<void>();
         const order: string[] = [];
         let skippedWorkCalls = 0;
 
@@ -279,7 +438,12 @@ describe("process WebAuthn verification work service", () => {
                     return "verified";
                 },
                 {
-                    onResultBeforeRelease: () => order.push("result-settled"),
+                    onResultBeforeRelease: async () => {
+                        order.push("result-settlement-started");
+                        resultSettlementStarted.resolve();
+                        await releaseResultSettlement.promise;
+                        order.push("result-settled");
+                    },
                     timeoutMs: 5000,
                 }
             );
@@ -294,7 +458,9 @@ describe("process WebAuthn verification work service", () => {
                         order.push("queued-recheck");
                         return { proceed: false, value: "stale" };
                     },
-                    onResultBeforeRelease: () => order.push("skipped-settled"),
+                    onResultBeforeRelease: () => {
+                        order.push("skipped-settled");
+                    },
                     timeoutMs: 5000,
                 }
             );
@@ -302,10 +468,19 @@ describe("process WebAuthn verification work service", () => {
             expect(order).toEqual(["result-work"]);
 
             releaseResult.resolve();
+            await resultSettlementStarted.promise;
+            await yieldToWorkService();
+            expect(order).toEqual(["result-work", "result-settlement-started"]);
+            releaseResultSettlement.resolve();
             expect(await result).toBe("verified");
             expect(await skipped).toBe("stale");
             expect(skippedWorkCalls).toBe(0);
-            expect(order).toEqual(["result-work", "result-settled", "queued-recheck"]);
+            expect(order).toEqual([
+                "result-work",
+                "result-settlement-started",
+                "result-settled",
+                "queued-recheck",
+            ]);
 
             const failed = webAuthn(
                 async () => {
@@ -315,7 +490,12 @@ describe("process WebAuthn verification work service", () => {
                     throw new Error("verifier detail");
                 },
                 {
-                    onFailureBeforeRelease: () => order.push("failure-settled"),
+                    onFailureBeforeRelease: async () => {
+                        order.push("failure-settlement-started");
+                        failureSettlementStarted.resolve();
+                        await releaseFailureSettlement.promise;
+                        order.push("failure-settled");
+                    },
                     timeoutMs: 5000,
                 }
             );
@@ -328,6 +508,10 @@ describe("process WebAuthn verification work service", () => {
                 { timeoutMs: 5000 }
             );
             releaseFailure.resolve();
+            await failureSettlementStarted.promise;
+            await yieldToWorkService();
+            expect(order).not.toContain("after-failure-start");
+            releaseFailureSettlement.resolve();
             expect(await captureFailure(() => failed)).toBeInstanceOf(
                 AuthenticationUpstreamUnavailableError
             );
@@ -337,7 +521,225 @@ describe("process WebAuthn verification work service", () => {
             );
         } finally {
             releaseResult.resolve();
+            releaseResultSettlement.resolve();
             releaseFailure.resolve();
+            releaseFailureSettlement.resolve();
+            await runtime.dispose();
+        }
+    });
+
+    test("stops the verification deadline before awaiting result settlement", async () => {
+        const runtime = createApplicationRuntime({
+            authenticationWork: {
+                webAuthnMaximumConcurrent: 1,
+                webAuthnMaximumQueued: 0,
+            },
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        const releaseSettlement = Promise.withResolvers<void>();
+        const settlementStarted = Promise.withResolvers<void>();
+        let callerSettled = false;
+        let failureSettlements = 0;
+
+        try {
+            await runtime.initialize();
+            const webAuthn = webAuthnRunner(runtime);
+            const verification = webAuthn(() => Promise.resolve("verified"), {
+                onFailureBeforeRelease: () => {
+                    failureSettlements += 1;
+                },
+                onResultBeforeRelease: async () => {
+                    settlementStarted.resolve();
+                    await releaseSettlement.promise;
+                },
+                timeoutMs: 20,
+            });
+            void verification.then(
+                () => {
+                    callerSettled = true;
+                    return true;
+                },
+                () => {
+                    callerSettled = true;
+                    return false;
+                }
+            );
+            await settlementStarted.promise;
+            await Bun.sleep(60);
+
+            expect(callerSettled).toBeFalse();
+            expect(failureSettlements).toBe(0);
+            expect(
+                await captureFailure(() =>
+                    webAuthn(() => Promise.resolve("overflow"), {
+                        timeoutMs: 500,
+                    })
+                )
+            ).toMatchObject({
+                _tag: "AuthenticationWorkCapacityError",
+                operation: "webauthn",
+            });
+
+            releaseSettlement.resolve();
+            expect(await verification).toBe("verified");
+            expect(failureSettlements).toBe(0);
+        } finally {
+            releaseSettlement.resolve();
+            await runtime.dispose();
+        }
+    });
+
+    test("does not run cancellation settlement after result settlement is claimed", async () => {
+        const runtime = createApplicationRuntime({
+            authenticationWork: {
+                webAuthnMaximumConcurrent: 1,
+                webAuthnMaximumQueued: 1,
+            },
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        const releaseSettlement = Promise.withResolvers<void>();
+        const replacementStarted = Promise.withResolvers<void>();
+        const settlementStarted = Promise.withResolvers<void>();
+        let cancellationSettlements = 0;
+        let resultSettlements = 0;
+
+        try {
+            await runtime.initialize();
+            const webAuthn = webAuthnRunner(runtime);
+            const controller = new AbortController();
+            const verification = webAuthn(() => Promise.resolve("verified"), {
+                onCancellationBeforeRelease: () => {
+                    cancellationSettlements += 1;
+                },
+                onResultBeforeRelease: async () => {
+                    resultSettlements += 1;
+                    settlementStarted.resolve();
+                    await releaseSettlement.promise;
+                },
+                signal: controller.signal,
+                timeoutMs: 5000,
+            });
+            await settlementStarted.promise;
+
+            const cancellation = new Error("request cancelled");
+            controller.abort(cancellation);
+            expect(await captureFailure(() => verification)).toBe(cancellation);
+
+            const replacement = webAuthn(
+                () => {
+                    replacementStarted.resolve();
+                    return Promise.resolve("replacement");
+                },
+                { timeoutMs: 5000 }
+            );
+            await yieldToWorkService();
+            expect(resultSettlements).toBe(1);
+            expect(cancellationSettlements).toBe(0);
+
+            releaseSettlement.resolve();
+            await replacementStarted.promise;
+            expect(await replacement).toBe("replacement");
+            expect(resultSettlements).toBe(1);
+            expect(cancellationSettlements).toBe(0);
+        } finally {
+            releaseSettlement.resolve();
+            await runtime.dispose();
+        }
+    });
+
+    test("keeps a claimed settlement owned during runtime disposal", async () => {
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        const releaseSettlement = Promise.withResolvers<void>();
+        const settlementStarted = Promise.withResolvers<void>();
+        let disposalCompleted = false;
+        let settlementCompleted = false;
+
+        try {
+            await runtime.initialize();
+            const verification = webAuthnRunner(runtime)(
+                () => Promise.resolve("verified"),
+                {
+                    onResultBeforeRelease: async () => {
+                        settlementStarted.resolve();
+                        await releaseSettlement.promise;
+                        settlementCompleted = true;
+                    },
+                    timeoutMs: 5000,
+                }
+            );
+            const observedVerification = verification.catch(() => null);
+            await settlementStarted.promise;
+            const disposal = runtime.dispose().then(() => {
+                disposalCompleted = true;
+                return true;
+            });
+            await Bun.sleep(0);
+
+            expect(disposalCompleted).toBeFalse();
+            expect(settlementCompleted).toBeFalse();
+
+            releaseSettlement.resolve();
+            await disposal;
+            await observedVerification;
+            expect(disposalCompleted).toBeTrue();
+            expect(settlementCompleted).toBeTrue();
+        } finally {
+            releaseSettlement.resolve();
+            await runtime.dispose();
+        }
+    });
+
+    test("surfaces an in-gate recheck defect before the verification deadline", async () => {
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        const sentinel = new Error("private recheck defect");
+
+        try {
+            await runtime.initialize();
+            const failure = await captureFailure(() =>
+                webAuthnRunner(runtime)(() => Promise.resolve("unused"), {
+                    onBeforeStart: () => {
+                        throw sentinel;
+                    },
+                    timeoutMs: 20,
+                })
+            );
+
+            expect(failure).toBe(sentinel);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
+    test("wraps a failed durable settlement with its private cause", async () => {
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: inertRealtimeLayer,
+        });
+        const sentinel = new Error("private database settlement failure");
+
+        try {
+            await runtime.initialize();
+            const failure = await captureFailure(() =>
+                webAuthnRunner(runtime)(() => Promise.resolve("verified"), {
+                    onResultBeforeRelease: () => Promise.reject(sentinel),
+                    timeoutMs: 5000,
+                })
+            );
+
+            expect(failure).toBeInstanceOf(AuthenticationWorkSettlementError);
+            expect(failure).toMatchObject({
+                cause: sentinel,
+                operation: "webauthn",
+            });
+        } finally {
             await runtime.dispose();
         }
     });

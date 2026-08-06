@@ -145,16 +145,16 @@ export function createConfirmTotpEnrollmentOperation(
             return { account, factor, status: "ready" as const };
         });
 
-    const recordInvalidProof = (
+    const recordInvalidProof = async (
         identity: AuthenticatedBrowserIdentity,
         input: ConfirmTotpEnrollmentInput,
         metadata: AuthenticationRequestMetadata,
         snapshot: ConfirmationSnapshot,
         rateLimitTargets: readonly AuthenticationRateLimitTarget[],
         failedAt: Date
-    ): ConfirmTotpEnrollmentResult => {
+    ): Promise<ConfirmTotpEnrollmentResult> => {
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const activeLimit = activeRateLimitForTargets(
                     unit,
                     rateLimitTargets,
@@ -218,7 +218,7 @@ export function createConfirmTotpEnrollmentOperation(
         }
     };
 
-    const commitConfirmation = (
+    const commitConfirmation = async (
         identity: AuthenticatedBrowserIdentity,
         input: ConfirmTotpEnrollmentInput,
         metadata: AuthenticationRequestMetadata,
@@ -228,9 +228,9 @@ export function createConfirmTotpEnrollmentOperation(
         confirmedAt: Date,
         preparedRecoveryCodes: PreparedRecoveryCodeSet | undefined,
         sessionToken: GeneratedOpaqueToken | undefined
-    ): ConfirmTotpEnrollmentResult => {
+    ): Promise<ConfirmTotpEnrollmentResult> => {
         try {
-            return repository.withImmediateTransaction((unit) => {
+            return await repository.withImmediateTransaction((unit) => {
                 const current = currentAccount(
                     unit,
                     identity,
@@ -421,7 +421,7 @@ export function createConfirmTotpEnrollmentOperation(
                 metadata.signal?.throwIfAborted();
                 if (verification === undefined) {
                     return {
-                        result: recordInvalidProof(
+                        result: await recordInvalidProof(
                             identity,
                             input,
                             metadata,
@@ -434,7 +434,7 @@ export function createConfirmTotpEnrollmentOperation(
                 }
                 if (snapshot.account.user.mfaEnabledAt !== null) {
                     return {
-                        result: commitConfirmation(
+                        result: await commitConfirmation(
                             identity,
                             input,
                             metadata,
@@ -475,7 +475,7 @@ export function createConfirmTotpEnrollmentOperation(
             }
             metadata.signal?.throwIfAborted();
 
-            return commitConfirmation(
+            return await commitConfirmation(
                 identity,
                 input,
                 metadata,
