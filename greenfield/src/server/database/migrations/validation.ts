@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
 const migrationIdPattern = /^\d{14}_[a-z\d][a-z\d_-]*$/u;
+export const migrationIdMaximumLength = 128;
 
 /**
  * Builds the canonical tracked migration-folder identifier schema.
@@ -8,7 +9,11 @@ const migrationIdPattern = /^\d{14}_[a-z\d][a-z\d_-]*$/u;
  * @returns Valibot schema for a canonical migration identifier.
  */
 export function migrationIdSchema(message: string) {
-    return v.pipe(v.string(message), v.regex(migrationIdPattern, message));
+    return v.pipe(
+        v.string(message),
+        v.maxLength(migrationIdMaximumLength, message),
+        v.regex(migrationIdPattern, message)
+    );
 }
 
 /**

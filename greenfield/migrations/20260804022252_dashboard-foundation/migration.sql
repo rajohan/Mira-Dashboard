@@ -265,7 +265,11 @@ CREATE TABLE `schema_migrations` (
 	`applied_at` integer NOT NULL,
 	`checksum` text NOT NULL,
 	`id` text PRIMARY KEY,
-	`release_id` text NOT NULL
+	`release_id` text NOT NULL,
+	CONSTRAINT "schema_migrations_applied_at_check" CHECK("applied_at" BETWEEN 0 AND 8640000000000000),
+	CONSTRAINT "schema_migrations_checksum_check" CHECK(length("checksum") = 64 AND instr("checksum", char(0)) = 0 AND "checksum" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "schema_migrations_id_check" CHECK(length("id") BETWEEN 16 AND 128 AND instr("id", char(0)) = 0 AND substr("id", 1, 14) NOT GLOB '*[^0-9]*' AND substr("id", 15, 1) = '_' AND substr("id", 16, 1) GLOB '[a-z0-9]' AND substr("id", 16) NOT GLOB '*[^a-z0-9_-]*'),
+	CONSTRAINT "schema_migrations_release_id_check" CHECK(length("release_id") = 40 AND instr("release_id", char(0)) = 0 AND "release_id" NOT GLOB '*[^0-9a-f]*')
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `user_recovery_codes` (
@@ -613,4 +617,23 @@ CREATE TRIGGER audit_events_reject_delete
 BEFORE DELETE ON audit_events
 BEGIN
 	SELECT RAISE(ABORT, 'audit_events is append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER schema_migrations_reject_replace
+BEFORE INSERT ON schema_migrations
+WHEN EXISTS (SELECT 1 FROM schema_migrations WHERE id = NEW.id)
+BEGIN
+	SELECT RAISE(ABORT, 'schema_migrations is append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER schema_migrations_reject_update
+BEFORE UPDATE ON schema_migrations
+BEGIN
+	SELECT RAISE(ABORT, 'schema_migrations is append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER schema_migrations_reject_delete
+BEFORE DELETE ON schema_migrations
+BEGIN
+	SELECT RAISE(ABORT, 'schema_migrations is append-only');
 END;

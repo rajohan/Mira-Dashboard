@@ -262,13 +262,15 @@ Every request, job, Gateway call, and domain transaction receives a correlation 
 logs use stable event names and include release identity, process role, duration, outcome, and
 safe identifiers. They do not serialize arbitrary request bodies or command environments.
 
-The current web factory contract requires one process logger, installs it as the only Effect
-logger on the existing `ManagedRuntime`, and reuses that exact instance at ordinary HTTP/tRPC
-boundaries. Its serializer emits bounded NDJSON from event-specific allowlisted fields and flushes
-the synchronous sink after runtime disposal; a sink failure emits one constant direct-stderr
-fallback without recursive logging. The future executable web/worker composition roots still own creation of
-the stdout/stderr sink, release/config identity, and startup/shutdown events; this slice does not
-claim that absent process entrypoint.
+The current production web runtime requires one process logger, installs it as the only Effect
+logger, and reuses that exact instance at ordinary HTTP/tRPC boundaries. The same `ManagedRuntime`
+owns the retained SQLite/Drizzle service and its database-backed realtime dependency. After the
+listener settles, realtime finalizes before passive checkpoint and strict database close; the
+synchronous log sink flushes last. Its serializer emits bounded NDJSON from event-specific
+allowlisted fields, and a sink failure emits one constant direct-stderr fallback without recursive
+logging. The future executable web/worker composition roots still own creation of the stdout/stderr
+sink, release/config identity, and startup/shutdown events; this slice does not claim that absent
+process entrypoint.
 
 Expose distinct probes:
 

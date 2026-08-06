@@ -21,6 +21,7 @@ import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredenti
 import type { AppRouter } from "../../trpc/appRouter.ts";
 import { CookieJar, postTrpcMutation, trpcData } from "./mfaHttpSystem.ts";
 import { withTestTimeout } from "./promise.ts";
+import { withTestDashboardDatabase } from "./requestContext.ts";
 
 export const automationHttpSystemBrowserOrigin = "https://dashboard.example";
 export const automationHttpSystemPrincipalId = "system-automation-reader";
@@ -134,7 +135,10 @@ export async function openAutomationHttpSystem(options: AutomationHttpSystemOpti
 
     try {
         server = await createDashboardServer({
-            applicationRuntime: options.applicationRuntime,
+            applicationRuntime: withTestDashboardDatabase(
+                options.applicationRuntime,
+                fixture.database.orm
+            ),
             ...(options.authenticationLeaseDurationMs === undefined
                 ? {}
                 : {
@@ -142,7 +146,6 @@ export async function openAutomationHttpSystem(options: AutomationHttpSystemOpti
                           options.authenticationLeaseDurationMs,
                   }),
             browserOrigin: automationHttpSystemBrowserOrigin,
-            database: fixture.database.orm,
             gatewayUrl: "ws://127.0.0.1:1",
             now: () => new Date(),
             port: 0,

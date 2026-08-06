@@ -6,12 +6,20 @@
 
 ### Core rules
 
-- Create `new Database(path, { create: true, strict: true })` through `bun:sqlite`, retain that
-  native client, and pass the same client into `drizzle({ client })`. Drizzle v1 RC's current
-  Bun driver no longer accepts the legacy `schema` option; add its explicit `relations` model
-  only for domains that use the relational query API.
-- Enable foreign keys, WAL, a measured busy timeout, and explicit synchronous/checkpoint
-  policy at process startup.
+- Resolve one fixed database filename beneath a canonical current-user-owned `0700` state
+  directory. Create a missing file with exclusive no-follow `0600` semantics, then call
+  `new Database(path, { create: false, readwrite: true, strict: true })` through `bun:sqlite`.
+  Retain that native client and pass the same client into `drizzle({ client })`. Drizzle v1 RC's
+  current Bun driver no longer accepts the legacy `schema` option; add its explicit `relations`
+  model only for domains that use the relational query API. Pin and revalidate the directory/file
+  identities during acquisition, and reject a rollback-journal, shared-memory, or WAL sidecar
+  unless it is a single-link current-user-owned `0600` regular file.
+- Enable and verify foreign keys and checks, disable `trusted_schema`, select WAL with
+  `synchronous=FULL` and a 1,000-page automatic checkpoint, and set `busy_timeout=0`. The zero
+  timeout is the measured non-blocking policy: a synchronous SQLite wait must not stall Bun's
+  event loop. Effect owns explicit bounded retry/deadline schedules at cross-process admission and
+  read boundaries; the future worker's write adapters must adopt the same explicit policy before
+  that process starts.
 - Use Drizzle's typed query builder for ordinary reads/writes and its parameterized `sql`
   tagged template for SQLite-specific queries, CTEs, queue claims, and expressions not
   represented cleanly by the builder.
@@ -59,9 +67,11 @@ domain repositories still own query intent; the application does not expose Driz
 objects through service or transport layers.
 
 Drizzle also does not own production migration safety. Drizzle Kit generates SQL from the
-reviewed TypeScript schema, and that SQL is reviewed and tracked. Dashboard's migration runner
-still verifies immutable checksums, snapshots the database, serializes web/worker startup,
-applies the SQL, and runs integrity checks. `drizzle-kit push` is forbidden in production.
+reviewed TypeScript schema, and that SQL is reviewed and tracked. Dashboard's current runtime
+verifies immutable artifact checksums, serializes empty-database initialization, applies only the
+unpublished baseline, validates exact schema/history, and runs integrity checks. A pending
+published migration fails closed until the release snapshot-and-promotion slice exists;
+`drizzle-kit push` is forbidden in production.
 
 Drizzle ORM/Kit `1.0.0-rc.4` does not model SQLite's table-level `STRICT` option in
 `sqliteTable`. Generated `CREATE TABLE` statements are therefore reviewed to add the `STRICT`
@@ -184,33 +194,45 @@ Drizzle Kit v1 stores the migration graph as timestamped directories containing
 `migration.sql` and `snapshot.json`. During the unpublished rewrite, `migrations/` contains exactly
 one evolving `*_dashboard-foundation` baseline generated from the complete current Drizzle schema.
 The generated SQL includes the security identity objects, SQLite `STRICT` table options, canonical
-NUL-free constraints, and deliberate `audit_events WITHOUT ROWID` hardening. The custom audit
-metadata, append-only, monitoring-JSON, and automation replacement-integrity triggers are reviewed
-additions because Drizzle does not model them.
+NUL-free constraints, bounded migration-ledger identity fields, and deliberate
+`audit_events WITHOUT ROWID` hardening. The custom audit metadata, append-only audit/migration
+ledger, monitoring-JSON, and automation replacement-integrity triggers are reviewed additions
+because Drizzle does not model them.
 There is no compatibility preflight or upgrade path for an intermediate rewrite database: every
 test and the final cutover start empty and apply this one baseline. Each schema slice regenerates
 the baseline, reviews the complete SQL/snapshot diff, and updates the explicit manifest checksums.
 At cutover those bytes become immutable; later production schema changes are generated as new,
 forward-only, checksummed nodes.
 
-The snapshot files form Drizzle Kit's conflict-analysis DAG. Dashboard's runtime loader applies
-the explicit manifest order after verifying valid 14-digit timestamp prefixes, unique full folder
-names, lexicographic ordering, SQL checksums, snapshot checksums, and the absence of unreviewed
-directories. After the raw bytes are verified, the runner trims only each statement's outer
-whitespace before execution so Bun SQLite cannot mask a trigger abort behind a trailing `;\n`;
-the checksummed source stays unchanged. `drizzle-kit check` must be green before release; stock
-Drizzle name-based pending detection is not accepted as the integrity boundary.
-Startup acquires a migration lock, creates and verifies a WAL-safe snapshot before a post-cutover
-schema change, and rejects unknown or checksum-mismatched history.
+The snapshot files form Drizzle Kit's conflict-analysis DAG. Before touching database state, the
+Linux runtime loader holds the complete release graph through descriptor-rooted `/proc/self/fd`
+paths. It verifies exact root/node inventories, stable single-link regular files, valid 14-digit
+timestamp prefixes, identifiers capped at 128 bytes, at most 64 ordered unique nodes, SQL and
+snapshot checksums, strict UTF-8 SQL, and 1 MiB SQL / 4 MiB snapshot / 32 MiB total byte ceilings.
+After the raw bytes are verified, the runner trims only each statement's outer whitespace before
+execution so Bun SQLite cannot mask a trigger abort behind a trailing `;\n`; the checksummed source
+stays unchanged. `drizzle-kit check` must be green before release; stock Drizzle name-based pending
+detection is not accepted as the integrity boundary.
 
-Web and worker may start concurrently, but only one migrates. The other waits with a bounded
-deadline and validates the final schema. Neither process contains table/column existence
-fallbacks.
+`initialize-empty` may exclusively create the fixed private database and applies the complete
+baseline inside one immediate transaction. `validate-only` never creates an absent database. Two
+concurrent runtime starts serialize through SQLite admission with an Effect-owned five-second
+busy/locked deadline, then the loser validates the winner's exact result. Current databases must
+match the reviewed schema, immutable checksum ledger, strictly increasing non-future application
+times, connection policy, and integrity checks. Unknown history fails closed. A reviewed pending
+prefix raises `DatabaseRuntimeSnapshotRequiredError`; it is not migrated in place.
 
-Retention is explicit per append-only table. A maintenance job removes bounded batches,
-performs passive checkpoints during normal operation, exposes WAL/checkpoint health, and runs
-expensive optimization only under a resource-scoped job. Backups include the database and its
-release/schema identity and are restore-tested.
+Post-cutover delivery must add the missing snapshot/promotion protocol before enabling forward
+migrations: quiesce writers, acquire the deployment lease, create and verify a WAL-safe snapshot,
+apply to a copy, and atomically promote the matching release/database pair. The future web and
+worker executable roots may start concurrently, but only one may own that protocol while the other
+waits with a bounded deadline and validates the final schema. Neither process may contain
+table/column existence fallbacks.
+
+Retention remains explicit per append-only table. The later maintenance job removes bounded
+batches, requests passive checkpoints during normal operation, exposes WAL/checkpoint health, and
+runs expensive optimization only under a resource-scoped job. Backups include database plus
+release/schema identity and remain restore-tested release artifacts.
 
 ## Worker and Privileged Operations
 

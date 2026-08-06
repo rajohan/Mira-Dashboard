@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 
-import { addMilliseconds, getTime } from "date-fns";
+import { getTime } from "date-fns";
 import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../../../shared/dateTime.ts";
@@ -28,6 +28,10 @@ export interface ApplyVerifiedMigrationsOptions {
 
 const migrationHistoryMismatchError =
     "Database migration history does not match the reviewed manifest";
+const futureMigrationHistoryError =
+    "Database migration history is newer than the application clock";
+const nonAdvancingMigrationClockError =
+    "Migration appliedAt must advance beyond stored migration history";
 const schemaHistoryMismatchError =
     "Database schema does not match reviewed migration history";
 const migrationAppliedAtSchema = timestampMillisecondsSchema(
@@ -156,6 +160,59 @@ function assertAppliedPrefix(
     }
 }
 
+function latestAppliedAt(applied: readonly AppliedMigrationRow[]): number | undefined {
+    let previousAppliedAt: number | undefined;
+
+    for (const migration of applied) {
+        if (previousAppliedAt !== undefined && migration.appliedAt <= previousAppliedAt) {
+            throw new Error(migrationHistoryMismatchError);
+        }
+        previousAppliedAt = migration.appliedAt;
+    }
+
+    return previousAppliedAt;
+}
+
+/**
+ * Plans strictly increasing ledger timestamps before any migration statement runs.
+ * @param checkedAt Application clock in epoch milliseconds.
+ * @param pendingCount Number of canonical migrations to apply.
+ * @param storedAppliedAt Latest validated ledger timestamp, when one exists.
+ * @returns One valid epoch-millisecond value per pending migration.
+ * @internal
+ */
+export function planMigrationAppliedAtValues(
+    checkedAt: number,
+    pendingCount: number,
+    storedAppliedAt?: number
+): readonly number[] {
+    const baseAppliedAt = parseSchemaWithRangeError(migrationAppliedAtSchema, checkedAt);
+
+    if (storedAppliedAt !== undefined && storedAppliedAt > baseAppliedAt) {
+        throw new Error(futureMigrationHistoryError);
+    }
+    if (pendingCount === 0) return Object.freeze([]);
+
+    // Right-align the sequence at the observed clock so same-millisecond migrations
+    // remain ordered without creating ledger rows dated in the future.
+    const firstAppliedAt = parseSchemaWithRangeError(
+        migrationAppliedAtSchema,
+        baseAppliedAt - pendingCount + 1
+    );
+    if (storedAppliedAt !== undefined && firstAppliedAt <= storedAppliedAt) {
+        throw new Error(nonAdvancingMigrationClockError);
+    }
+
+    return Object.freeze(
+        Array.from({ length: pendingCount }, (_, pendingIndex) =>
+            parseSchemaWithRangeError(
+                migrationAppliedAtSchema,
+                firstAppliedAt + pendingIndex
+            )
+        )
+    );
+}
+
 function assertCanonicalVerifiedGraph(migrations: readonly VerifiedMigration[]): void {
     if (
         migrations.length !== migrationManifest.length ||
@@ -216,18 +273,18 @@ export function applyVerifiedMigrations(
         assertSchemaMatchesReviewedHistory(database, migrations, applied.length);
 
         const pending = migrations.slice(applied.length);
-        const baseAppliedAt = parseSchemaWithRangeError(
-            migrationAppliedAtSchema,
-            getTime(options.appliedAt ?? new Date())
+        const appliedAtValues = planMigrationAppliedAtValues(
+            getTime(options.appliedAt ?? new Date()),
+            pending.length,
+            latestAppliedAt(applied)
         );
 
         for (const [pendingIndex, migration] of pending.entries()) {
+            const appliedAt = appliedAtValues[pendingIndex];
+            if (appliedAt === undefined) {
+                throw new Error("Migration timestamp plan is incomplete");
+            }
             runMigrationStatements(database, migration.statements);
-
-            const appliedAt = parseSchemaWithRangeError(
-                migrationAppliedAtSchema,
-                getTime(addMilliseconds(baseAppliedAt, pendingIndex))
-            );
             database.run(
                 `INSERT INTO schema_migrations (
                     applied_at,

@@ -2,6 +2,14 @@ import { expect, test } from "bun:test";
 
 import { Cause, Data } from "effect";
 
+import {
+    DatabaseRuntimeCheckpointError,
+    DatabaseRuntimeCloseError,
+    DatabaseRuntimeLockTimeoutError,
+    DatabaseRuntimePathError,
+    DatabaseRuntimeSnapshotRequiredError,
+    DatabaseRuntimeStartupError,
+} from "../../database/runtime/databaseErrors.ts";
 import { describeSafeFailure } from "./safeFailure.ts";
 
 class ExpectedFailure extends Data.TaggedError("ApplicationListenerStopError")<{
@@ -108,4 +116,33 @@ test("fails closed for hostile proxy traps", () => {
     expect(descriptor).toMatchObject({ kind: "unknown" });
     expect(JSON.stringify(descriptor)).not.toContain("trap secret");
     expect(trapCalls).toBe(0);
+});
+
+test("recognizes every redacted database-runtime failure tag", () => {
+    const failures = [
+        new DatabaseRuntimeCheckpointError({ message: "checkpoint failed" }),
+        new DatabaseRuntimeCloseError({ message: "close failed" }),
+        new DatabaseRuntimeLockTimeoutError({
+            message: "lock timed out",
+            timeoutMs: 5000,
+        }),
+        new DatabaseRuntimePathError({
+            message: "path invalid",
+            reason: "database-file-invalid",
+        }),
+        new DatabaseRuntimeSnapshotRequiredError({ message: "snapshot required" }),
+        new DatabaseRuntimeStartupError({
+            message: "startup failed",
+            reason: "database-startup-failed",
+        }),
+    ];
+
+    expect(failures.map((failure) => describeSafeFailure(failure).tag)).toEqual([
+        "DatabaseRuntimeCheckpointError",
+        "DatabaseRuntimeCloseError",
+        "DatabaseRuntimeLockTimeoutError",
+        "DatabaseRuntimePathError",
+        "DatabaseRuntimeSnapshotRequiredError",
+        "DatabaseRuntimeStartupError",
+    ]);
 });

@@ -6,7 +6,7 @@ import {
     fullCommitShaAction,
     lowercaseSha256Action,
 } from "../../../shared/validation.ts";
-import { migrationIdAction } from "../migrations/validation.ts";
+import { migrationIdAction, migrationIdMaximumLength } from "../migrations/validation.ts";
 import { schemaMigrations } from "../schema/schemaMigrations.ts";
 
 const migrationRefinements = {
@@ -18,7 +18,11 @@ const migrationRefinements = {
     checksum: (schema: v.StringSchema<undefined>) =>
         v.pipe(schema, lowercaseSha256Action()),
     id: (schema: v.StringSchema<undefined>) =>
-        v.pipe(schema, migrationIdAction("Expected a canonical migration id.")),
+        v.pipe(
+            schema,
+            v.maxLength(migrationIdMaximumLength, "Expected a canonical migration id."),
+            migrationIdAction("Expected a canonical migration id.")
+        ),
     releaseId: (schema: v.StringSchema<undefined>) =>
         v.pipe(schema, fullCommitShaAction()),
 };

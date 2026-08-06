@@ -267,7 +267,12 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             port: serverPort,
             stop(force = false) {
                 if (force) forceStopController.abort();
-                stopPromise ??= (async () => {
+                if (stopPromise !== undefined) return stopPromise;
+
+                // Withdraw readiness before listener drain begins so the proxy stops
+                // admitting new work while active HTTP and SSE requests settle.
+                options.readiness.markUnavailable();
+                stopPromise = (async () => {
                     try {
                         await options.applicationRuntime.shutdownListener({
                             forceSignal: forceStopController.signal,

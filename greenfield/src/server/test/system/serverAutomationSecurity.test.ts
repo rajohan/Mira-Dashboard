@@ -37,8 +37,9 @@ import {
 import { CookieJar, postTrpcMutation, trpcData } from "../support/mfaHttpSystem.ts";
 import { withTestTimeout } from "../support/promise.ts";
 import {
-    createTestApplicationRuntime,
+    createTestDashboardApplicationRuntime,
     createTestStructuredLogger,
+    withTestDashboardDatabase,
 } from "../support/requestContext.ts";
 
 const leaseInvalidationTimeoutMs = secondsToMilliseconds(5);
@@ -70,14 +71,16 @@ describe("real HTTP automation credential lifecycle", () => {
 
         try {
             server = await createDashboardServer({
-                applicationRuntime: createTestApplicationRuntime({
-                    stream: (options) =>
-                        Promise.resolve(
-                            oneAutomationDeliveryForRequestedTopic(options.topics)
-                        ),
-                }),
+                applicationRuntime: createTestDashboardApplicationRuntime(
+                    fixture.database.orm,
+                    {
+                        stream: (options) =>
+                            Promise.resolve(
+                                oneAutomationDeliveryForRequestedTopic(options.topics)
+                            ),
+                    }
+                ),
                 browserOrigin: automationHttpSystemBrowserOrigin,
-                database: fixture.database.orm,
                 gatewayUrl: "ws://127.0.0.1:1",
                 now: () => new Date(),
                 port: 0,
@@ -333,10 +336,12 @@ describe("real HTTP automation credential lifecycle", () => {
 
         try {
             server = await createDashboardServer({
-                applicationRuntime: runtime,
+                applicationRuntime: withTestDashboardDatabase(
+                    runtime,
+                    fixture.database.orm
+                ),
                 authenticationLeaseDurationMs: secondsToMilliseconds(1),
                 browserOrigin: automationHttpSystemBrowserOrigin,
-                database: fixture.database.orm,
                 gatewayUrl: "ws://127.0.0.1:1",
                 now: () => new Date(),
                 port: 0,

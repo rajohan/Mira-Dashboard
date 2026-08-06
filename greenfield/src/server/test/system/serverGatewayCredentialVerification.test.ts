@@ -19,7 +19,10 @@ import {
     postTrpcMutation,
 } from "../support/mfaHttpSystem.ts";
 import { captureFailure } from "../support/promise.ts";
-import { createTestStructuredLogger } from "../support/requestContext.ts";
+import {
+    createTestStructuredLogger,
+    withTestDashboardDatabase,
+} from "../support/requestContext.ts";
 
 const validGatewayCredential = "valid-gateway-token";
 
@@ -52,9 +55,11 @@ async function openGatewayVerificationSystem(
     let server: ApplicationServer | undefined;
     try {
         const startedServer = await createDashboardServer({
-            applicationRuntime: createGatewayVerificationRuntime(),
+            applicationRuntime: withTestDashboardDatabase(
+                createGatewayVerificationRuntime(),
+                database.orm
+            ),
             browserOrigin: mfaHttpSystemBrowserOrigin,
-            database: database.orm,
             gatewayUrl: gateway.url,
             gatewayVerificationTimeoutMs,
             port: 0,

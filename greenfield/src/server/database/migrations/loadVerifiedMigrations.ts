@@ -1,20 +1,27 @@
-import { readdir, readFile } from "node:fs/promises";
-
 import * as v from "valibot";
 
 import { lowercaseSha256Schema } from "../../../shared/validation.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import { migrationManifest, type MigrationManifestEntry } from "./manifest.ts";
-import { migrationIdSchema } from "./validation.ts";
+import {
+    type MigrationArtifactVerificationTestHooks,
+    readStableMigrationArtifactGraph,
+} from "./migrationArtifactFilesystem.ts";
+import { migrationIdMaximumLength, migrationIdSchema } from "./validation.ts";
+
+export {
+    migrationArtifactByteLimits,
+    type MigrationArtifactVerificationTestHooks,
+    type MigrationArtifactVerificationTestStage,
+} from "./migrationArtifactFilesystem.ts";
 
 export const drizzleStatementBreakpoint = "--> statement-breakpoint";
 
+const maximumMigrationCount = 64;
 const invalidManifestFolderError =
     "Migration manifest contains an invalid or duplicate folder name";
 const invalidManifestChecksumError =
     "Migration manifest contains an invalid SHA-256 checksum";
-const migrationDirectoryMismatchError =
-    "Migration directory does not match the reviewed manifest";
 const manifestMigrationIdSchema = migrationIdSchema(invalidManifestFolderError);
 const unverifiedMigrationManifestEntrySchema = v.strictObject(
     {
@@ -29,10 +36,6 @@ const unverifiedMigrationManifestSchema = v.array(
     invalidManifestFolderError
 );
 const manifestChecksumSchema = lowercaseSha256Schema(invalidManifestChecksumError);
-const migrationDirectoryNamesSchema = v.array(
-    migrationIdSchema(migrationDirectoryMismatchError),
-    migrationDirectoryMismatchError
-);
 
 export interface VerifiedMigration extends MigrationManifestEntry {
     statements: readonly string[];
@@ -41,11 +44,26 @@ export interface VerifiedMigration extends MigrationManifestEntry {
 export interface VerifyMigrationOptions {
     directory: string;
     manifest?: unknown;
+    /**
+     * Deterministic mutation boundary for loader security tests.
+     * @internal
+     */
+    testHooks?: MigrationArtifactVerificationTestHooks;
+}
+
+function invalidState(message: string): Error {
+    return new Error(message);
 }
 
 function parseAndAssertManifest(
     unverifiedManifest: unknown
 ): readonly MigrationManifestEntry[] {
+    if (
+        !Array.isArray(unverifiedManifest) ||
+        unverifiedManifest.length > maximumMigrationCount
+    ) {
+        throw invalidState(invalidManifestFolderError);
+    }
     const validation = v.safeParse(
         unverifiedMigrationManifestSchema,
         unverifiedManifest,
@@ -54,14 +72,17 @@ function parseAndAssertManifest(
         }
     );
     if (!validation.success) {
-        throw new Error(validation.issues[0]?.message ?? invalidManifestFolderError);
+        throw invalidState(validation.issues[0]?.message ?? invalidManifestFolderError);
     }
     const manifestWithValidatedIds = validation.output.map((entry) => {
+        if (typeof entry.id !== "string" || entry.id.length > migrationIdMaximumLength) {
+            throw invalidState(invalidManifestFolderError);
+        }
         const idValidation = v.safeParse(manifestMigrationIdSchema, entry.id, {
             abortEarly: true,
         });
         if (!idValidation.success) {
-            throw new Error(invalidManifestFolderError);
+            throw invalidState(invalidManifestFolderError);
         }
         return { ...entry, id: idValidation.output };
     });
@@ -69,10 +90,10 @@ function parseAndAssertManifest(
     const sortedIds = ids.toSorted();
 
     if (new Set(ids).size !== ids.length) {
-        throw new Error(invalidManifestFolderError);
+        throw invalidState(invalidManifestFolderError);
     }
     if (ids.some((id, index) => id !== sortedIds[index])) {
-        throw new Error("Migration manifest is not in runtime application order");
+        throw invalidState("Migration manifest is not in runtime application order");
     }
 
     return manifestWithValidatedIds.map((entry) => {
@@ -87,7 +108,7 @@ function parseAndAssertManifest(
             { abortEarly: true }
         );
         if (!migrationChecksum.success || !snapshotChecksum.success) {
-            throw new Error(invalidManifestChecksumError);
+            throw invalidState(invalidManifestChecksumError);
         }
         return {
             id: entry.id,
@@ -95,6 +116,14 @@ function parseAndAssertManifest(
             snapshotSha256: snapshotChecksum.output,
         };
     });
+}
+
+function decodeMigrationSql(bytes: Buffer, migrationId: string): string {
+    try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+        throw invalidState(`Migration SQL is not valid UTF-8: ${migrationId}`);
+    }
 }
 
 /**
@@ -106,47 +135,31 @@ export async function loadVerifiedMigrations(
     options: VerifyMigrationOptions
 ): Promise<readonly VerifiedMigration[]> {
     const manifest = parseAndAssertManifest(options.manifest ?? migrationManifest);
-
-    const directoryEntries = await readdir(options.directory, { withFileTypes: true });
-    const directoryValidation = v.safeParse(
-        migrationDirectoryNamesSchema,
-        directoryEntries
-            .filter((entry) => entry.isDirectory())
-            .map((entry) => entry.name),
-        { abortEarly: true }
+    const artifacts = await readStableMigrationArtifactGraph(
+        options.directory,
+        manifest.map((entry) => entry.id),
+        options.testHooks
     );
-    if (!directoryValidation.success) {
-        throw new Error(migrationDirectoryMismatchError);
-    }
-    const migrationDirectories = directoryValidation.output.toSorted();
-    const manifestIds = manifest.map((entry) => entry.id);
 
-    if (migrationDirectories.join("\n") !== manifestIds.join("\n")) {
-        throw new Error(migrationDirectoryMismatchError);
-    }
-
-    const verifiedMigrations: VerifiedMigration[] = [];
-    for (const entry of manifest) {
-        const migrationDirectory = `${options.directory}/${entry.id}`;
-        const [migrationSql, snapshot] = await Promise.all([
-            readFile(`${migrationDirectory}/migration.sql`),
-            readFile(`${migrationDirectory}/snapshot.json`),
-        ]);
-
-        if (sha256Hex(migrationSql) !== entry.migrationSha256) {
-            throw new Error(`Migration SQL checksum mismatch: ${entry.id}`);
+    const verifiedMigrations = manifest.map((entry, index) => {
+        const artifact = artifacts[index];
+        if (!artifact) {
+            throw invalidState(
+                "Migration directory does not match the reviewed manifest"
+            );
         }
-
-        if (sha256Hex(snapshot) !== entry.snapshotSha256) {
-            throw new Error(`Migration snapshot checksum mismatch: ${entry.id}`);
+        if (sha256Hex(artifact.migrationSql) !== entry.migrationSha256) {
+            throw invalidState(`Migration SQL checksum mismatch: ${entry.id}`);
         }
-
+        if (sha256Hex(artifact.snapshot) !== entry.snapshotSha256) {
+            throw invalidState(`Migration snapshot checksum mismatch: ${entry.id}`);
+        }
         const statements = Object.freeze(
-            migrationSql.toString().split(drizzleStatementBreakpoint)
+            decodeMigrationSql(artifact.migrationSql, entry.id).split(
+                drizzleStatementBreakpoint
+            )
         );
-        const verifiedMigration = Object.freeze({ ...entry, statements });
-        verifiedMigrations.push(verifiedMigration);
-    }
-
+        return Object.freeze({ ...entry, statements });
+    });
     return Object.freeze(verifiedMigrations);
 }

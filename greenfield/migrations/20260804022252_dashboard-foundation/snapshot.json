@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "e7bb3180-9946-4254-9b22-e00d9871a332",
+  "id": "7c296db8-4e4b-4ecd-a214-72e9e88165c3",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -3438,6 +3438,30 @@
       "name": "reports_metadata_json_check",
       "entityType": "checks",
       "table": "reports"
+    },
+    {
+      "value": "\"applied_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "schema_migrations_applied_at_check",
+      "entityType": "checks",
+      "table": "schema_migrations"
+    },
+    {
+      "value": "length(\"checksum\") = 64 AND instr(\"checksum\", char(0)) = 0 AND \"checksum\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "schema_migrations_checksum_check",
+      "entityType": "checks",
+      "table": "schema_migrations"
+    },
+    {
+      "value": "length(\"id\") BETWEEN 16 AND 128 AND instr(\"id\", char(0)) = 0 AND substr(\"id\", 1, 14) NOT GLOB '*[^0-9]*' AND substr(\"id\", 15, 1) = '_' AND substr(\"id\", 16, 1) GLOB '[a-z0-9]' AND substr(\"id\", 16) NOT GLOB '*[^a-z0-9_-]*'",
+      "name": "schema_migrations_id_check",
+      "entityType": "checks",
+      "table": "schema_migrations"
+    },
+    {
+      "value": "length(\"release_id\") = 40 AND instr(\"release_id\", char(0)) = 0 AND \"release_id\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "schema_migrations_release_id_check",
+      "entityType": "checks",
+      "table": "schema_migrations"
     },
     {
       "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",

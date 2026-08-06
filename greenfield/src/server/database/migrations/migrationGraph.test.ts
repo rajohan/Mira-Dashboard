@@ -74,6 +74,9 @@ describe("database migration graph", () => {
             "incidents_validate_details_update",
             "incident_observations_validate_details_insert",
             "incident_observations_validate_details_update",
+            "schema_migrations_reject_replace",
+            "schema_migrations_reject_update",
+            "schema_migrations_reject_delete",
         ]) {
             expect(foundationSql).toContain(`CREATE TRIGGER ${trigger}`);
         }
@@ -157,6 +160,7 @@ describe("database migration graph", () => {
         const database = await openFreshMigratedDatabase();
 
         try {
+            database.sqlite.run("DROP TRIGGER schema_migrations_reject_update");
             database.sqlite.run("UPDATE schema_migrations SET checksum = ?", [
                 "f".repeat(64),
             ]);
@@ -229,6 +233,7 @@ describe("database migration graph", () => {
         const database = await openFreshMigratedDatabase();
 
         try {
+            database.sqlite.run("DROP TRIGGER schema_migrations_reject_delete");
             database.sqlite.run("DELETE FROM schema_migrations");
 
             expect(() =>

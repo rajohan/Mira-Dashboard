@@ -10,7 +10,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                                |
-| 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP/realtime foundations, source-boundary enforcement, staged typed configuration, generated configuration reference, structured logging/request correlation, and procedure error policy exist; executable web/worker roots, database runtime, browser shell, complete generated references, and release/rollback closure remain. |
+| 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP/realtime foundations, process-owned database runtime, source-boundary enforcement, staged typed configuration, generated configuration reference, structured logging/request correlation, and procedure error policy exist; executable web/worker roots, browser shell, complete generated references, and release/rollback closure remain. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                               |
 | 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                                                                                         |
 | 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                                    |
@@ -711,5 +711,35 @@ closes a phase; dated entries below provide the evidence, not a second status so
   `ContractErrorCode` allowlist now match mechanically. Immediate and deferred subscription errors
   outside a route's declared set are internalized, as is any implemented procedure missing from
   the policy; framework routing and input/transport validation remain implicit. Phase 1 is still
-  in progress: executable web/worker roots, database runtime, worker lifecycle, browser shell, and
-  release/rollback delivery remain open.
+  in progress: executable web/worker roots, worker lifecycle, browser shell, and release/rollback
+  delivery remain open.
+
+### 2026-08-06 — Process-owned database runtime
+
+- The production `ManagedRuntime` now owns one strict native SQLite connection and the exact
+  Drizzle client built from it. Dashboard repositories and the database-backed realtime pump use
+  that same handle; request handling cannot create or dispose a database or runtime. The layer
+  graph finalizes realtime before a passive checkpoint and strict SQLite close, and the process
+  logger flushes only after runtime disposal. Listener drain still completes before this sequence,
+  with readiness withdrawn before drain begins.
+- Startup verifies the complete release-owned migration graph before database mutation. The Linux
+  artifact reader holds descriptor-rooted directories and regular files through `/proc/self/fd`,
+  rejects symlinks, hardlinks, special files, inventory drift, path replacement, invalid UTF-8,
+  and checksum mismatch, and enforces 1 MiB SQL, 4 MiB snapshot, and 32 MiB graph ceilings. The
+  manifest is ordered, unique, and capped at 64 nodes with 128-byte identifiers.
+- The database lives at one fixed filename beneath a canonical current-user-owned `0700` state
+  directory. Dashboard creates a missing file with exclusive no-follow `0600` semantics, opens it
+  through SQLite with `create: false`, pins and revalidates the directory and file device/inode
+  identities, and validates every rollback-journal, shared-memory, or WAL sidecar present during
+  acquisition as a single-link current-user-owned `0600` regular file.
+- Every connection verifies foreign keys and checks enabled, `trusted_schema` disabled, WAL,
+  `synchronous=FULL`, a 1,000-page automatic checkpoint, and `busy_timeout=0`. Zero is deliberate:
+  SQLite never blocks the Bun thread waiting for another process; bounded Effect schedules own
+  startup admission and realtime read retries instead. A five-second startup deadline covers
+  busy/locked variants without exposing native errors.
+- `initialize-empty` applies the single unpublished baseline atomically; `validate-only` never
+  creates an absent database. Already-current state is revalidated against the exact schema and
+  immutable ledger. The ledger enforces bounded canonical ids, exact checksums/release identities,
+  strictly increasing non-future timestamps, and append-only triggers. A reviewed pending graph
+  fails closed with `DatabaseRuntimeSnapshotRequiredError`: verified snapshot/promotion, worker
+  startup, backup/restore, and release-pair rollback remain later delivery slices.

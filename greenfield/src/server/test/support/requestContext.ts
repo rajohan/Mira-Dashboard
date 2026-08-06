@@ -1,4 +1,5 @@
 import { maxTime } from "date-fns/constants";
+import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
 import type {
     ApplicationCapability,
@@ -19,6 +20,7 @@ import {
 } from "../../platform/observability/structuredLogger.ts";
 import type {
     ApplicationRuntime,
+    DashboardApplicationRuntime,
     RealtimeEventRuntimeService,
 } from "../../platform/runtime/applicationRuntime.ts";
 import { readAuthenticationHttpCredentials } from "../../rawHttp/authenticationCredentials.ts";
@@ -403,6 +405,36 @@ export function createTestApplicationRuntime(
             overrides.shutdownListener ??
             ((options) => options.stop(options.forceSignal.aborted)),
     });
+}
+
+/**
+ * Attaches a test-owned migrated handle to an existing runtime stub or focused runtime.
+ * Production composition obtains the same shape from its scoped database Layer.
+ * @param applicationRuntime Runtime exercised by the test.
+ * @param database Migrated test database retained by the fixture.
+ * @returns A Dashboard runtime whose database accessor returns the exact supplied ORM.
+ */
+export function withTestDashboardDatabase(
+    applicationRuntime: ApplicationRuntime,
+    database: SQLiteBunDatabase
+): DashboardApplicationRuntime {
+    return Object.freeze({
+        ...applicationRuntime,
+        database: Object.freeze({ orm: () => Promise.resolve(database) }),
+    });
+}
+
+/**
+ * Creates an inert Dashboard runtime around a migrated test database.
+ * @param database Migrated test database retained by the fixture.
+ * @param overrides Runtime methods exercised by the current test.
+ * @returns A complete Dashboard runtime stub.
+ */
+export function createTestDashboardApplicationRuntime(
+    database: SQLiteBunDatabase,
+    overrides: TestApplicationRuntimeOverrides = {}
+): DashboardApplicationRuntime {
+    return withTestDashboardDatabase(createTestApplicationRuntime(overrides), database);
 }
 
 /**

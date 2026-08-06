@@ -398,15 +398,23 @@ the existing `ManagedRuntime` and exposed by `ApplicationRuntime` to ordinary Ty
 boundaries. Event-specific allowlists drop unknown fields and Effect messages/annotations; runtime
 disposal precedes the logger's idempotent flush.
 
-The web `ApplicationRuntime` merges the structured logger, realtime pump, and one process-scoped
-authentication-work service into the same `ManagedRuntime`. That authentication service owns separate bounded admission
-and active-work semaphores for Gateway verification, password/Argon2 work, TOTP AES/HMAC work, and
-WebAuthn parsing/signature verification, plus a scoped fiber set for work that outlives an
-interrupted caller. Queued cancellation releases admission immediately; active non-cooperative
-work retains its permit until settlement. Promise-facing adapters fold typed capacity into
-explicit domain throttling outcomes, while Gateway
-capacity, deadline, and unavailable tags are exhaustively translated before the tRPC procedure
-maps the resulting domain outcome. No request creates or disposes a runtime.
+The production web `ApplicationRuntime` merges the structured logger, process-owned SQLite layer,
+database-backed realtime pump, and one process-scoped authentication-work service into the same
+`ManagedRuntime`. The database layer loads and verifies the release migration graph before opening
+one fixed private state file, configures and verifies the connection policy, and constructs
+Drizzle from that retained native handle. The composition root obtains that one ORM for every
+domain repository, while the realtime layer depends on the same service and therefore finalizes
+before SQLite. The narrower generic runtime factory remains available for focused service and
+transport tests with an injected realtime layer.
+
+The authentication service owns separate bounded admission and active-work semaphores for Gateway
+verification, password/Argon2 work, TOTP AES/HMAC work, and WebAuthn parsing/signature
+verification, plus a scoped fiber set for work that outlives an interrupted caller. Queued
+cancellation releases admission immediately; active non-cooperative work retains its permit until
+settlement. Promise-facing adapters fold typed capacity into explicit domain throttling outcomes,
+while Gateway capacity, deadline, and unavailable tags are exhaustively translated before the
+tRPC procedure maps the resulting domain outcome. No request creates or disposes a database or
+runtime.
 
 The same `ManagedRuntime` coordinates listener shutdown. An external `stop(true)` request crosses
 the Promise-facing composition boundary as an abort signal; Effect owns the graceful-stop fiber,
@@ -414,6 +422,10 @@ deadline/force race, tagged stop and timeout failures, separately bounded force 
 settlement of the original graceful operation before the runtime scope is disposed. A rejected
 graceful stop receives one bounded best-effort force attempt while preserving the initiating
 failure. No second runtime or manual timer/`Promise.race` shutdown system is created.
+After listener settlement, runtime finalization closes realtime, passively checkpoints and strictly
+closes SQLite, and only then flushes the process logger. If listener escalation cannot prove
+settlement, the server keeps runtime resources alive for supervisor containment rather than
+closing a database beneath potentially active requests.
 
 ## Realtime Architecture
 

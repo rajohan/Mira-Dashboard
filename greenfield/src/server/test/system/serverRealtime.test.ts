@@ -23,6 +23,7 @@ import { withTestTimeout } from "../support/promise.ts";
 import {
     createTestApplicationRuntime,
     createTestAuthenticationResolution,
+    createTestDashboardApplicationRuntime,
     createTestServerSecurityServices,
     createTestSessionAuthentication,
 } from "../support/requestContext.ts";
@@ -232,7 +233,7 @@ describe("application server realtime transport", () => {
         let server: ApplicationServer | undefined;
 
         try {
-            const runtime = createTestApplicationRuntime({
+            const runtime = createTestDashboardApplicationRuntime(fixture.database.orm, {
                 stream: () =>
                     Promise.resolve(
                         (async function* () {
@@ -243,7 +244,6 @@ describe("application server realtime transport", () => {
             server = await createDashboardServer({
                 applicationRuntime: runtime,
                 browserOrigin: "https://dashboard.example",
-                database: fixture.database.orm,
                 gatewayUrl: "ws://127.0.0.1:1",
                 port: 0,
                 readiness: createReadinessController(),

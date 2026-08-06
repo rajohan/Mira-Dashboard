@@ -16,7 +16,7 @@ import { createReadinessController } from "../../platform/readiness/readinessSta
 import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredentials.ts";
 import { openFreshMigratedDatabase } from "./freshDatabase.ts";
 import { startGatewayCredentialVerifierFixture } from "./gatewayCredentialVerifier.ts";
-import { createTestApplicationRuntime } from "./requestContext.ts";
+import { createTestDashboardApplicationRuntime } from "./requestContext.ts";
 
 export const mfaHttpSystemBrowserOrigin = "https://dashboard.example";
 export const mfaHttpSystemPassword = "correct-horse-battery";
@@ -297,9 +297,8 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
 
     try {
         server = await createDashboardServer({
-            applicationRuntime: createTestApplicationRuntime(),
+            applicationRuntime: createTestDashboardApplicationRuntime(database.orm),
             browserOrigin: mfaHttpSystemBrowserOrigin,
-            database: database.orm,
             gatewayUrl: gateway.url,
             now: clock.now,
             port: 0,

@@ -1,5 +1,11 @@
+import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import { Data, Effect, Exit, Fiber, Layer, ManagedRuntime, Stream } from "effect";
 
+import {
+    databaseRuntimeLayer,
+    DatabaseRuntimeService,
+    type DatabaseRuntimeLayerOptions,
+} from "../../database/runtime/databaseService.ts";
 import {
     type AuthenticationWorkLayerOptions,
     type AuthenticationWorkRuntimeService,
@@ -10,9 +16,13 @@ import {
 } from "../../domains/security/authenticationWorkGate.ts";
 import { createEffectLoggerLayer } from "../observability/effectLogger.ts";
 import type { StructuredLogger } from "../observability/structuredLogger.ts";
-import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
-import type { RealtimeEventStreamOptions } from "../realtime/eventPumpService.ts";
-import { RealtimeEventPumpService } from "../realtime/eventPumpService.ts";
+import { RealtimeEventPump, type RealtimeEventDelivery } from "../realtime/eventPump.ts";
+import {
+    realtimeEventPumpLayer,
+    type RealtimeEventStreamOptions,
+    RealtimeEventPumpService,
+} from "../realtime/eventPumpService.ts";
+import { createRealtimeEventStore } from "../realtime/eventStore.ts";
 import {
     type RenewableStreamLease,
     withRenewableStreamLease,
@@ -76,11 +86,29 @@ export interface ApplicationRuntime {
     shutdownListener(options: ApplicationListenerShutdownOptions): Promise<void>;
 }
 
+/** Runtime-owned database access exposed only to the Dashboard composition root. */
+export interface DashboardDatabaseRuntimeService {
+    readonly orm: () => Promise<SQLiteBunDatabase>;
+}
+
+/** Application runtime whose database and realtime pump share one process scope. */
+export interface DashboardApplicationRuntime extends ApplicationRuntime {
+    readonly database: DashboardDatabaseRuntimeService;
+}
+
 /** Scoped layers owned by one composition root for the full process lifetime. */
 export interface ApplicationRuntimeOptions {
     readonly authenticationWork?: AuthenticationWorkLayerOptions;
     readonly logger: StructuredLogger;
     readonly realtimeEventPumpLayer: Layer.Layer<RealtimeEventPumpService>;
+}
+
+/** Production Dashboard runtime inputs with explicit state and release identity. */
+export interface DashboardApplicationRuntimeOptions extends Omit<
+    ApplicationRuntimeOptions,
+    "realtimeEventPumpLayer"
+> {
+    readonly database: DatabaseRuntimeLayerOptions;
 }
 
 function authenticationAbortReason(signal: AbortSignal): unknown {
@@ -203,19 +231,17 @@ function coordinatedListenerShutdown(
  * Creates one reusable Effect runtime whose scope is owned by the current process.
  * `initialize` eagerly prewarms the otherwise lazy layer before the listener opens;
  * `dispose` releases it after active HTTP and SSE requests have stopped.
- * @param options Scoped application layers.
+ * @param runtime Scoped process runtime.
+ * @param logger Exact process logger installed on the runtime.
  * @returns One reusable and explicitly disposable application runtime.
  */
-export function createApplicationRuntime(
-    options: ApplicationRuntimeOptions
+function createApplicationRuntimeFromManagedRuntime<RuntimeError>(
+    runtime: ManagedRuntime.ManagedRuntime<
+        AuthenticationWorkService | RealtimeEventPumpService,
+        RuntimeError
+    >,
+    logger: StructuredLogger
 ): ApplicationRuntime {
-    const runtime = ManagedRuntime.make(
-        Layer.mergeAll(
-            options.realtimeEventPumpLayer,
-            authenticationWorkLayer(options.authenticationWork),
-            createEffectLoggerLayer(options.logger)
-        )
-    );
     let disposePromise: Promise<void> | undefined;
     const runAuthenticationEffect = async <T, E>(
         effect: Effect.Effect<T, E, AuthenticationWorkService>,
@@ -343,10 +369,85 @@ export function createApplicationRuntime(
         async initialize() {
             await runtime.context();
         },
-        logger: options.logger,
+        logger,
         services,
         shutdownListener(options: ApplicationListenerShutdownOptions) {
             return runtime.runPromise(coordinatedListenerShutdown(options));
         },
+    });
+}
+
+function databaseBackedRealtimeEventPumpLayer(): Layer.Layer<
+    RealtimeEventPumpService,
+    never,
+    DatabaseRuntimeService
+> {
+    return Layer.unwrap(
+        DatabaseRuntimeService.pipe(
+            Effect.map((database) =>
+                realtimeEventPumpLayer({
+                    makePump: (pumpRuntime) =>
+                        new RealtimeEventPump({
+                            ...pumpRuntime,
+                            store: createRealtimeEventStore(database.orm),
+                        }),
+                })
+            )
+        )
+    );
+}
+
+/**
+ * Creates the generic process runtime used by focused transport and service tests.
+ * @param options Explicit logger, authentication policy, and realtime layer.
+ * @returns One reusable and explicitly disposable application runtime.
+ */
+export function createApplicationRuntime(
+    options: ApplicationRuntimeOptions
+): ApplicationRuntime {
+    const runtime = ManagedRuntime.make(
+        Layer.mergeAll(
+            options.realtimeEventPumpLayer,
+            authenticationWorkLayer(options.authenticationWork),
+            createEffectLoggerLayer(options.logger)
+        )
+    );
+    return createApplicationRuntimeFromManagedRuntime(runtime, options.logger);
+}
+
+/**
+ * Creates the production Dashboard runtime with SQLite and realtime in one Layer graph.
+ * The realtime layer depends on and therefore finalizes before the retained database.
+ * @param options Explicit database, logger, and authentication composition inputs.
+ * @returns One process runtime exposing only the owned ORM to Dashboard composition.
+ */
+export function createDashboardApplicationRuntime(
+    options: DashboardApplicationRuntimeOptions
+): DashboardApplicationRuntime {
+    const databaseLayer = databaseRuntimeLayer(options.database);
+    const databaseAndRealtimeLayer = databaseBackedRealtimeEventPumpLayer().pipe(
+        Layer.provideMerge(databaseLayer)
+    );
+    const runtime = ManagedRuntime.make(
+        Layer.mergeAll(
+            databaseAndRealtimeLayer,
+            authenticationWorkLayer(options.authenticationWork),
+            createEffectLoggerLayer(options.logger)
+        )
+    );
+    const applicationRuntime = createApplicationRuntimeFromManagedRuntime(
+        runtime,
+        options.logger
+    );
+    const database: DashboardDatabaseRuntimeService = Object.freeze({
+        orm: () =>
+            runtime.runPromise(
+                DatabaseRuntimeService.pipe(Effect.map((service) => service.orm))
+            ),
+    });
+
+    return Object.freeze({
+        ...applicationRuntime,
+        database,
     });
 }

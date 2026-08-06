@@ -1,5 +1,3 @@
-import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
-
 import { createAuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createAuthenticationLifecycleRepository } from "../server/domains/security/authenticationLifecycleRepository.ts";
 import {
@@ -22,6 +20,7 @@ import type { WebAuthnRelyingPartyConfiguration } from "../server/domains/securi
 import { createRequestAuthenticator } from "../server/domains/security/requestAuthentication.ts";
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
 import { createGatewayCredentialVerifier } from "../server/platform/gateway/gatewayCredentialVerifier.ts";
+import type { DashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { parseBrowserOrigin } from "../server/rawHttp/requestSecurity.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
 
@@ -29,6 +28,7 @@ import { createServer, type ApplicationServer, type ServerOptions } from "./serv
 export interface DashboardServerOptions extends Omit<
     ServerOptions,
     | "authenticateCredential"
+    | "applicationRuntime"
     | "authenticationLifecycle"
     | "automationSecurityLifecycle"
     | "browserOrigin"
@@ -36,10 +36,10 @@ export interface DashboardServerOptions extends Omit<
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
 > {
+    readonly applicationRuntime: DashboardApplicationRuntime;
     readonly authenticationLeaseDurationMs?: number;
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
-    readonly database: SQLiteBunDatabase;
     /** Explicit native WebSocket endpoint used only for one-shot bootstrap verification. */
     readonly gatewayUrl: string;
     readonly gatewayVerificationTimeoutMs?: number;
@@ -77,12 +77,11 @@ export function validateDashboardWebAuthnBrowserOrigin(
 }
 
 /**
- * Wires the migrated SQLite identity store into real request authentication.
- * The caller retains database and process-runtime lifecycle ownership.
- * @param options Server, database, and bounded authentication policy options.
+ * Wires the runtime-owned SQLite identity store into real request authentication.
+ * @param options Server and bounded authentication policy options.
  * @returns A started Bun server using persisted session and automation identities.
  */
-export function createDashboardServer(
+export async function createDashboardServer(
     options: DashboardServerOptions
 ): Promise<ApplicationServer> {
     const browserOrigin = validateDashboardWebAuthnBrowserOrigin(
@@ -120,79 +119,101 @@ export function createDashboardServer(
                   workBudget: webAuthnWorkBudget,
                   workRuntime: authenticationWork,
               });
-    const repository = createRequestAuthenticationRepository(options.database);
-    const authenticator = createRequestAuthenticator({
-        authenticationLeaseDurationMs: options.authenticationLeaseDurationMs,
-        ...(options.now !== undefined && { now: options.now }),
-        repository,
-        sessionIdleDurationMs: options.sessionIdleDurationMs,
-    });
-    const mfaRepository = createMfaLifecycleRepository(options.database);
-    const mfaLoginLifecycle = createMfaLoginLifecycleService({
-        ...(options.now !== undefined && { now: options.now }),
-        passwordWorkBudget,
-        passwordWorkGate,
-        repository: mfaRepository,
-        sessionIdleDurationMs: options.sessionIdleDurationMs,
-        totpSecretCipher: options.totpSecretCipher,
-        totpWorkBudget,
-        totpWorkGate: authenticationWork.totpWorkGate,
-        ...(webAuthn === undefined ? {} : { webAuthn }),
-    });
-    const mfaAccountLifecycle = createMfaAccountLifecycleService({
-        ...(options.now !== undefined && { now: options.now }),
-        passwordWorkBudget,
-        passwordWorkGate,
-        recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
-        repository: mfaRepository,
-        sessionIdleDurationMs: options.sessionIdleDurationMs,
-        totpSecretCipher: options.totpSecretCipher,
-        totpWorkBudget,
-        totpWorkGate: authenticationWork.totpWorkGate,
-        ...(webAuthn === undefined
-            ? {}
-            : {
-                  webAuthnAdapter: webAuthn.adapter,
-                  webAuthnRelyingParty: webAuthn.relyingParty,
-                  ...(webAuthn.verificationTimeoutMs === undefined
-                      ? {}
-                      : {
-                            webAuthnVerificationTimeoutMs: webAuthn.verificationTimeoutMs,
-                        }),
-                  webAuthnWorkBudget,
-                  webAuthnWorkRuntime: authenticationWork,
-              }),
-    });
-    const authenticationLifecycle = createAuthenticationLifecycleService({
-        gatewayVerificationTimeoutMs: options.gatewayVerificationTimeoutMs,
-        gatewayWorkRuntime: authenticationWork,
-        mfaLoginLifecycle,
-        ...(options.now !== undefined && { now: options.now }),
-        passwordWorkBudget,
-        passwordWorkGate,
-        recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
-        repository: createAuthenticationLifecycleRepository(options.database),
-        sessionIdleDurationMs: options.sessionIdleDurationMs,
-        verifyGatewayCredential,
-    });
-    const automationSecurityLifecycle = createAutomationSecurityLifecycleService({
-        ...(options.now !== undefined && { now: options.now }),
-        recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
-        repository: createAutomationLifecycleRepository(options.database),
-        sessionIdleDurationMs: options.sessionIdleDurationMs,
-    });
-    return createServer({
-        applicationRuntime: options.applicationRuntime,
-        authenticateCredential: (credential) => authenticator.authenticate(credential),
-        authenticationLifecycle,
-        automationSecurityLifecycle,
-        browserOrigin,
-        gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
-        hostname: "127.0.0.1",
-        mfaAccountLifecycle,
-        mfaLoginLifecycle,
-        port: options.port,
-        readiness: options.readiness,
-        trustedProxyAddresses: options.trustedProxyAddresses,
-    });
+    let serverOwnsRuntimeCleanup = false;
+    try {
+        await options.applicationRuntime.initialize();
+        const database = await options.applicationRuntime.database.orm();
+        const repository = createRequestAuthenticationRepository(database);
+        const authenticator = createRequestAuthenticator({
+            authenticationLeaseDurationMs: options.authenticationLeaseDurationMs,
+            ...(options.now !== undefined && { now: options.now }),
+            repository,
+            sessionIdleDurationMs: options.sessionIdleDurationMs,
+        });
+        const mfaRepository = createMfaLifecycleRepository(database);
+        const mfaLoginLifecycle = createMfaLoginLifecycleService({
+            ...(options.now !== undefined && { now: options.now }),
+            passwordWorkBudget,
+            passwordWorkGate,
+            repository: mfaRepository,
+            sessionIdleDurationMs: options.sessionIdleDurationMs,
+            totpSecretCipher: options.totpSecretCipher,
+            totpWorkBudget,
+            totpWorkGate: authenticationWork.totpWorkGate,
+            ...(webAuthn === undefined ? {} : { webAuthn }),
+        });
+        const mfaAccountLifecycle = createMfaAccountLifecycleService({
+            ...(options.now !== undefined && { now: options.now }),
+            passwordWorkBudget,
+            passwordWorkGate,
+            recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
+            repository: mfaRepository,
+            sessionIdleDurationMs: options.sessionIdleDurationMs,
+            totpSecretCipher: options.totpSecretCipher,
+            totpWorkBudget,
+            totpWorkGate: authenticationWork.totpWorkGate,
+            ...(webAuthn === undefined
+                ? {}
+                : {
+                      webAuthnAdapter: webAuthn.adapter,
+                      webAuthnRelyingParty: webAuthn.relyingParty,
+                      ...(webAuthn.verificationTimeoutMs === undefined
+                          ? {}
+                          : {
+                                webAuthnVerificationTimeoutMs:
+                                    webAuthn.verificationTimeoutMs,
+                            }),
+                      webAuthnWorkBudget,
+                      webAuthnWorkRuntime: authenticationWork,
+                  }),
+        });
+        const authenticationLifecycle = createAuthenticationLifecycleService({
+            gatewayVerificationTimeoutMs: options.gatewayVerificationTimeoutMs,
+            gatewayWorkRuntime: authenticationWork,
+            mfaLoginLifecycle,
+            ...(options.now !== undefined && { now: options.now }),
+            passwordWorkBudget,
+            passwordWorkGate,
+            recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
+            repository: createAuthenticationLifecycleRepository(database),
+            sessionIdleDurationMs: options.sessionIdleDurationMs,
+            verifyGatewayCredential,
+        });
+        const automationSecurityLifecycle = createAutomationSecurityLifecycleService({
+            ...(options.now !== undefined && { now: options.now }),
+            recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
+            repository: createAutomationLifecycleRepository(database),
+            sessionIdleDurationMs: options.sessionIdleDurationMs,
+        });
+        serverOwnsRuntimeCleanup = true;
+        return await createServer({
+            applicationRuntime: options.applicationRuntime,
+            authenticateCredential: (credential) =>
+                authenticator.authenticate(credential),
+            authenticationLifecycle,
+            automationSecurityLifecycle,
+            browserOrigin,
+            gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
+            hostname: "127.0.0.1",
+            mfaAccountLifecycle,
+            mfaLoginLifecycle,
+            port: options.port,
+            readiness: options.readiness,
+            trustedProxyAddresses: options.trustedProxyAddresses,
+        });
+    } catch (error) {
+        if (!serverOwnsRuntimeCleanup) {
+            try {
+                await options.applicationRuntime.dispose();
+            } catch {
+                // Preserve the initiating composition failure.
+            }
+            try {
+                options.applicationRuntime.logger.flush();
+            } catch {
+                // Structured logger fallback handling owns sink failures.
+            }
+        }
+        throw error;
+    }
 }

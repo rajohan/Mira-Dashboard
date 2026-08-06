@@ -320,5 +320,13 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 releaseId: "b".repeat(40),
             })
         ).toThrow();
+        expect(() =>
+            v.parse(schemaMigrationInsertSchema, {
+                appliedAt: observedAt,
+                checksum: "a".repeat(64),
+                id: `20260804022252_${"a".repeat(114)}`,
+                releaseId: "b".repeat(40),
+            })
+        ).toThrow();
     });
 });

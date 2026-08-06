@@ -1,4 +1,8 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, spyOn, test } from "bun:test";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { secondsToMilliseconds } from "date-fns";
 import { Effect, Layer, Stream } from "effect";
@@ -6,11 +10,14 @@ import { Effect, Layer, Stream } from "effect";
 import { createServer } from "../../../app/server.ts";
 import { createStructuredLogger } from "../../platform/observability/structuredLogger.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
+import { RealtimeEventPump } from "../../platform/realtime/eventPump.ts";
 import { RealtimeEventPumpService } from "../../platform/realtime/eventPumpService.ts";
 import {
     ApplicationListenerStopTimeoutError,
     createApplicationRuntime,
+    createDashboardApplicationRuntime,
 } from "../../platform/runtime/applicationRuntime.ts";
+import { migrationsDirectory } from "../support/freshDatabase.ts";
 import { captureFailure } from "../support/promise.ts";
 import {
     createTestApplicationRuntime,
@@ -60,6 +67,42 @@ function createShutdownTestRuntime(onDispose: () => void) {
 }
 
 describe("application server shutdown", () => {
+    test("withdraws readiness before listener drain begins", async () => {
+        const fake = createPendingBunServer();
+        const readiness = createReadinessController();
+        readiness.markReady();
+        const observedReadiness: boolean[] = [];
+        const originalStop = fake.server.stop.bind(fake.server);
+        const serverWithObservedStop = {
+            ...fake.server,
+            stop(force = false) {
+                observedReadiness.push(readiness.isReady());
+                return originalStop(force);
+            },
+        } as ReturnType<typeof Bun.serve>;
+        const serveSpy = spyOn(Bun, "serve").mockReturnValue(serverWithObservedStop);
+
+        try {
+            const server = await createServer({
+                ...createTestServerSecurityServices(),
+                applicationRuntime: createShutdownTestRuntime(() => {}),
+                port: 3100,
+                readiness,
+            });
+
+            const gracefulStop = server.stop();
+            await fake.gracefulStarted;
+
+            expect(readiness.isReady()).toBe(false);
+            expect(observedReadiness).toEqual([false]);
+
+            expect(server.stop(true)).toBe(gracefulStop);
+            await gracefulStop;
+        } finally {
+            serveSpy.mockRestore();
+        }
+    });
+
     test("flushes the process logger after runtime disposal", async () => {
         const fake = createPendingBunServer();
         const serveSpy = spyOn(Bun, "serve").mockReturnValue(fake.server);
@@ -99,6 +142,96 @@ describe("application server shutdown", () => {
             expect(order).toEqual(["runtime-dispose", "logger-flush"]);
         } finally {
             serveSpy.mockRestore();
+        }
+    });
+
+    test("closes listener, realtime, database, and logger in dependency order", async () => {
+        const stateDirectory = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-shutdown-order-")
+        );
+        await chmod(stateDirectory, 0o700);
+        const order: string[] = [];
+        const fake = createPendingBunServer();
+        const originalStop = fake.server.stop.bind(fake.server);
+        const serverWithObservedStop = {
+            ...fake.server,
+            stop(force = false) {
+                order.push("listener-stop");
+                return originalStop(force);
+            },
+        } as ReturnType<typeof Bun.serve>;
+        const serveSpy = spyOn(Bun, "serve").mockReturnValue(serverWithObservedStop);
+        const originalPumpClose = Object.getOwnPropertyDescriptor(
+            RealtimeEventPump.prototype,
+            "close"
+        )?.value as (this: RealtimeEventPump) => void;
+        const originalDatabaseClose = Object.getOwnPropertyDescriptor(
+            Database.prototype,
+            "close"
+        )?.value as (this: Database, throwOnError?: boolean) => void;
+        const databaseFilePath = path.join(stateDirectory, "mira-dashboard.db");
+        const pumpCloseSpy = spyOn(
+            RealtimeEventPump.prototype,
+            "close"
+        ).mockImplementation(function (this: RealtimeEventPump) {
+            order.push("realtime-close");
+            return originalPumpClose.call(this);
+        });
+        const databaseCloseSpy = spyOn(Database.prototype, "close").mockImplementation(
+            function (this: Database, throwOnError?: boolean) {
+                if (this.filename === databaseFilePath) order.push("database-close");
+                return originalDatabaseClose.call(this, throwOnError);
+            }
+        );
+        const logger = createStructuredLogger({
+            identity: {
+                bun: "1.4.0-test",
+                pid: 123,
+                processRole: "web",
+                release: "server-database-shutdown-test",
+                service: "mira-dashboard",
+            },
+            sink: {
+                flush() {
+                    order.push("logger-flush");
+                },
+                write() {},
+            },
+        });
+        const applicationRuntime = createDashboardApplicationRuntime({
+            database: {
+                migrationsDirectory,
+                releaseId: "0".repeat(40),
+                startupMode: "initialize-empty",
+                stateDirectory,
+            },
+            logger,
+        });
+
+        try {
+            const server = await createServer({
+                ...createTestServerSecurityServices(),
+                applicationRuntime,
+                port: 3100,
+                readiness: createReadinessController(),
+            });
+            await server.stop(true);
+
+            expect(order).toEqual([
+                "listener-stop",
+                "realtime-close",
+                "database-close",
+                "logger-flush",
+            ]);
+        } finally {
+            try {
+                await applicationRuntime.dispose();
+            } finally {
+                databaseCloseSpy.mockRestore();
+                pumpCloseSpy.mockRestore();
+                serveSpy.mockRestore();
+                await rm(stateDirectory, { force: true, recursive: true });
+            }
         }
     });
 
