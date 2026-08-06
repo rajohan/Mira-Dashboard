@@ -5,7 +5,10 @@ import * as v from "valibot";
 import { positiveSafeIntegerSchema } from "../../../shared/validation.ts";
 import { automationPrincipals } from "../schema/automationPrincipals.ts";
 import { nonnegativeDateSchema } from "./scalars.ts";
-import { automationPrincipalIdSchema, securityLabelSchema } from "./securityScalars.ts";
+import {
+    automationPrincipalIdSchema,
+    controlSafeSecurityLabelSchema,
+} from "./securityScalars.ts";
 
 function principalTimesAreOrdered(principal: {
     readonly createdAt: Date;
@@ -26,7 +29,7 @@ const principalRefinements = {
     createdAt: nonnegativeDateSchema,
     disabledAt: nonnegativeDateSchema,
     id: () => automationPrincipalIdSchema,
-    label: () => securityLabelSchema,
+    label: () => controlSafeSecurityLabelSchema,
     updatedAt: nonnegativeDateSchema,
 };
 

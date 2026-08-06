@@ -102,6 +102,61 @@ describe("security identity baseline", () => {
                     WHERE prefix = ?
                 `)
                 .all("c".repeat(32));
+            const credentialHistoryPlan = database.sqlite
+                .query<QueryPlanRow, [string]>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM automation_credentials
+                    WHERE principal_id = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 50
+                `)
+                .all("openclaw-task-tracking");
+            const principalHistoryPlan = database.sqlite
+                .query<QueryPlanRow, []>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM automation_principals
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 50
+                `)
+                .all();
+            const enabledPrincipalPlan = database.sqlite
+                .query<QueryPlanRow, []>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT count(*)
+                    FROM automation_principals
+                    WHERE disabled_at IS NULL
+                `)
+                .all();
+            const activeCredentialPlan = database.sqlite
+                .query<QueryPlanRow, [string, number, number]>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT count(*)
+                    FROM automation_credentials
+                    WHERE principal_id = ?
+                      AND revoked_at IS NULL
+                      AND created_at <= ?
+                      AND (expires_at IS NULL OR expires_at > ?)
+                `)
+                .all("openclaw-task-tracking", 2000, 2000);
+            const activeReplacementPlan = database.sqlite
+                .query<QueryPlanRow, [string, string]>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM automation_credentials
+                    WHERE principal_id = ?
+                      AND replaces_credential_id = ?
+                      AND revoked_at IS NULL
+                `)
+                .all("openclaw-task-tracking", "019fc968-1a9b-7771-9f1b-d5b863b0e7b4");
+            const predecessorDeletePlan = database.sqlite
+                .query<QueryPlanRow, [string]>(`
+                    EXPLAIN QUERY PLAN
+                    DELETE FROM automation_credentials
+                    WHERE id = ?
+                `)
+                .all("019fc968-1a9b-7771-9f1b-d5b863b0e7b4");
 
             expect(
                 sessionPlan.some((row) =>
@@ -111,6 +166,40 @@ describe("security identity baseline", () => {
             expect(
                 credentialPlan.some((row) =>
                     row.detail.includes("automation_credentials_prefix_unique")
+                )
+            ).toBeTrue();
+            expect(
+                credentialHistoryPlan.some((row) =>
+                    row.detail.includes("automation_credentials_principal_created_idx")
+                )
+            ).toBeTrue();
+            expect(
+                principalHistoryPlan.some((row) =>
+                    row.detail.includes("automation_principals_created_id_idx")
+                )
+            ).toBeTrue();
+            expect(
+                enabledPrincipalPlan.some((row) =>
+                    row.detail.includes("automation_principals_active_created_id_idx")
+                )
+            ).toBeTrue();
+            expect(
+                activeCredentialPlan.some((row) =>
+                    row.detail.includes(
+                        "automation_credentials_active_principal_created_idx"
+                    )
+                )
+            ).toBeTrue();
+            expect(
+                activeReplacementPlan.some((row) =>
+                    row.detail.includes(
+                        "automation_credentials_active_replacement_unique"
+                    )
+                )
+            ).toBeTrue();
+            expect(
+                predecessorDeletePlan.some((row) =>
+                    row.detail.includes("automation_credentials_replacement_idx")
                 )
             ).toBeTrue();
         } finally {

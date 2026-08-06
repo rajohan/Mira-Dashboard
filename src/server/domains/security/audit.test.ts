@@ -54,4 +54,26 @@ describe("security audit boundary", () => {
             reason: "webauthn_invalid",
         });
     });
+
+    test("retains only validated automation administration metadata", () => {
+        const metadata = parseUnknownJson(
+            serializeRedactedAuditMetadata({
+                addedCapabilities: ["reports:read", "notifications:read"],
+                predecessorCredentialId: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+                removedCapabilities: ["notifications:read"],
+                replacementCredentialId: "019fc968-1a9b-7771-8f1b-d5b863b0e7b4",
+                revokedCredentials: 2,
+                token: "never-persist",
+                validatorHash: "never-persist",
+            })
+        );
+
+        expect(metadata).toEqual({
+            addedCapabilities: ["notifications:read", "reports:read"],
+            predecessorCredentialId: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+            removedCapabilities: ["notifications:read"],
+            replacementCredentialId: "019fc968-1a9b-7771-8f1b-d5b863b0e7b4",
+            revokedCredentials: 2,
+        });
+    });
 });

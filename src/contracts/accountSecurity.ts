@@ -14,7 +14,12 @@ import {
     totpCodeInputSchema,
 } from "./auth.ts";
 import type { ProcedureContract } from "./registry.ts";
-import { securityRecordIdSchema } from "./security.ts";
+import {
+    isValidSecurityLabel,
+    securityLabelMaximumLength,
+    securityLabelSchema,
+    securityRecordIdSchema,
+} from "./security.ts";
 import { emptyInputSchema } from "./system.ts";
 import {
     webAuthnAuthenticationInputSchema,
@@ -30,7 +35,7 @@ const accountSecurityTimestampSchema = timestampMillisecondsSchema(
 );
 
 export { recoveryCodeCount } from "../shared/recoveryCodePolicy.ts";
-export const factorLabelMaximumLength = 128;
+export const factorLabelMaximumLength = securityLabelMaximumLength;
 export const possessionFactorMaximumPerUser = 4;
 export const totpFactorLabelMaximumLength = factorLabelMaximumLength;
 export const totpFactorMaximumPerUser = possessionFactorMaximumPerUser;
@@ -41,32 +46,11 @@ export const webAuthnCredentialMaximumPerUser = possessionFactorMaximumPerUser;
  * @param value Candidate factor label.
  * @returns Whether the label satisfies the account-security policy.
  */
-export function isValidFactorLabel(value: string): boolean {
-    let codePointLength = 0;
-    let hasNonWhitespaceCodePoint = false;
-    for (const codePoint of value) {
-        codePointLength += 1;
-        if (
-            codePointLength > factorLabelMaximumLength ||
-            /\p{Cc}|\p{Cf}/u.test(codePoint)
-        ) {
-            return false;
-        }
-        if (/\S/u.test(codePoint)) hasNonWhitespaceCodePoint = true;
-    }
-    return codePointLength > 0 && hasNonWhitespaceCodePoint;
-}
+export const isValidFactorLabel = isValidSecurityLabel;
 
 export const isValidTotpFactorLabel = isValidFactorLabel;
 
-export const factorLabelSchema = v.pipe(
-    v.string("Factor label is invalid"),
-    v.minLength(1, "Factor label is invalid"),
-    // Valibot counts UTF-16 code units; two units per allowed code point keeps
-    // the full astral-character budget reachable before the domain predicate.
-    v.maxLength(factorLabelMaximumLength * 2, "Factor label is invalid"),
-    v.check(isValidFactorLabel, "Factor label is invalid")
-);
+export const factorLabelSchema = securityLabelSchema;
 
 export const totpFactorLabelSchema = factorLabelSchema;
 

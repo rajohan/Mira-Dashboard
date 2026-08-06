@@ -10,6 +10,7 @@ import type {
     AuthenticationVerificationWorkOptions,
     AuthenticationWorkRuntimeService,
 } from "../../domains/security/authenticationWorkGate.ts";
+import type { AutomationSecurityLifecycleService } from "../../domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
 import type {
@@ -154,6 +155,34 @@ export function createTestAuthenticationLifecycleService(
 }
 
 /**
+ * Creates a fail-closed automation-security lifecycle for transport tests.
+ * @param overrides Lifecycle methods exercised by the current test.
+ * @returns A complete inert automation-security service.
+ */
+export function createTestAutomationSecurityLifecycleService(
+    overrides: Partial<AutomationSecurityLifecycleService> = {}
+): AutomationSecurityLifecycleService {
+    return Object.freeze({
+        createCredential:
+            overrides.createCredential ?? (() => ({ status: "session-changed" })),
+        createPrincipal:
+            overrides.createPrincipal ?? (() => ({ status: "session-changed" })),
+        disablePrincipal:
+            overrides.disablePrincipal ?? (() => ({ status: "session-changed" })),
+        listCredentials:
+            overrides.listCredentials ?? (() => ({ status: "session-changed" })),
+        listPrincipals:
+            overrides.listPrincipals ?? (() => ({ status: "session-changed" })),
+        replaceCapabilities:
+            overrides.replaceCapabilities ?? (() => ({ status: "session-changed" })),
+        revokeCredential:
+            overrides.revokeCredential ?? (() => ({ status: "session-changed" })),
+        rotateCredential:
+            overrides.rotateCredential ?? (() => ({ status: "session-changed" })),
+    });
+}
+
+/**
  * Creates an inert account-security lifecycle that individual tests can override.
  * @param overrides Account-security methods exercised by the current test.
  * @returns A complete lifecycle service with fail-closed defaults.
@@ -235,6 +264,7 @@ export function createTestMfaLoginLifecycleService(
 export interface TestServerSecurityServices {
     readonly authenticateCredential: AuthenticateCredential;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
+    readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
 }
@@ -254,6 +284,9 @@ export function createTestServerSecurityServices(
         authenticationLifecycle:
             overrides.authenticationLifecycle ??
             createTestAuthenticationLifecycleService(),
+        automationSecurityLifecycle:
+            overrides.automationSecurityLifecycle ??
+            createTestAutomationSecurityLifecycleService(),
         mfaAccountLifecycle:
             overrides.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:
@@ -298,6 +331,7 @@ export function createTestRequestContext(
     options: {
         readonly authenticationClientSourceId?: string;
         readonly authenticationLifecycle?: AuthenticationLifecycleService;
+        readonly automationSecurityLifecycle?: AutomationSecurityLifecycleService;
         readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
         readonly mfaLoginLifecycle?: MfaLoginLifecycleService;
         readonly request?: Request;
@@ -313,6 +347,9 @@ export function createTestRequestContext(
             options.authenticationClientSourceId ?? "test-client-source",
         authenticationLifecycle:
             options.authenticationLifecycle ?? createTestAuthenticationLifecycleService(),
+        automationSecurityLifecycle:
+            options.automationSecurityLifecycle ??
+            createTestAutomationSecurityLifecycleService(),
         authenticateCredential: () => createTestAuthenticationResolution(authentication),
         mfaAccountLifecycle:
             options.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),

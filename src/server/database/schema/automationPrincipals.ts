@@ -1,8 +1,8 @@
 import { sql } from "drizzle-orm";
-import { check, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import {
-    boundedNonBlankTextCheck,
+    boundedControlSafeTextCheck,
     nulFreeTextCheck,
     timestampMillisecondsCheck,
 } from "./checks.ts";
@@ -29,11 +29,15 @@ export const automationPrincipals = sqliteTable(
         ),
         check(
             "automation_principals_label_check",
-            boundedNonBlankTextCheck(table.label, 128)
+            boundedControlSafeTextCheck(table.label, 128)
         ),
         check(
             "automation_principals_time_check",
             sql`${timestampMillisecondsCheck(table.createdAt)} AND ${timestampMillisecondsCheck(table.updatedAt)} AND ${table.updatedAt} >= ${table.createdAt} AND (${table.disabledAt} IS NULL OR (${timestampMillisecondsCheck(table.disabledAt)} AND ${table.disabledAt} >= ${table.createdAt} AND ${table.disabledAt} <= ${table.updatedAt}))`
         ),
+        index("automation_principals_created_id_idx").on(table.createdAt, table.id),
+        index("automation_principals_active_created_id_idx")
+            .on(table.createdAt, table.id)
+            .where(sql`${table.disabledAt} IS NULL`),
     ]
 );

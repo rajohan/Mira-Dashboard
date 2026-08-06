@@ -30,7 +30,12 @@ describe("request authentication repository", () => {
             expect(
                 fixture.repository.findAutomationByPrefix(fixture.automation.prefix)
             ).toEqual({
-                capabilities: ["reports:read"],
+                capabilityGrants: [
+                    {
+                        capability: "reports:read",
+                        grantedAt: authenticationTestNow,
+                    },
+                ],
                 credentialCreatedAt: authenticationTestNow,
                 credentialExpiresAt: fixture.expiresAt,
                 credentialId: authenticationTestCredentialId,
@@ -62,8 +67,13 @@ describe("request authentication repository", () => {
         try {
             expect(
                 fixture.repository.findAutomationByPrefix(fixture.automation.prefix)
-                    ?.capabilities
-            ).toEqual(["reports:read"]);
+                    ?.capabilityGrants
+            ).toEqual([
+                {
+                    capability: "reports:read",
+                    grantedAt: authenticationTestNow,
+                },
+            ]);
 
             fixture.database.sqlite.run(
                 `DELETE FROM automation_principal_capabilities
@@ -73,7 +83,7 @@ describe("request authentication repository", () => {
 
             expect(
                 fixture.repository.findAutomationByPrefix(fixture.automation.prefix)
-                    ?.capabilities
+                    ?.capabilityGrants
             ).toEqual([]);
         } finally {
             fixture.database.sqlite.close(true);

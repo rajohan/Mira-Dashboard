@@ -134,6 +134,9 @@ describe("authentication HTTP transport policy", () => {
             "/trpc/accountSecurity.beginWebAuthnEnrollment?batch=1",
             "/trpc/accountSecurity.confirmWebAuthnEnrollment?batch=1",
             "/trpc/accountSecurity.removeWebAuthnCredential?batch=1",
+            "/trpc/automationSecurity.createPrincipal?batch=1",
+            "/trpc/automationSecurity%2ErotateCredential?batch=1",
+            "/trpc/automationSecurity.future?batch=1",
         ]) {
             const response = await fetch(new URL(path, server.url), {
                 body: "{}",

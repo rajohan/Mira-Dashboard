@@ -10,4 +10,21 @@ describe("application router", () => {
 
         expect(routerNames).toEqual(contractNames);
     });
+
+    test("exposes the exact automation-security namespace inventory", () => {
+        expect(
+            appRouterProcedureNames.filter((name) =>
+                name.startsWith("automationSecurity.")
+            )
+        ).toEqual([
+            "automationSecurity.listPrincipals",
+            "automationSecurity.listCredentials",
+            "automationSecurity.createPrincipal",
+            "automationSecurity.createCredential",
+            "automationSecurity.rotateCredential",
+            "automationSecurity.revokeCredential",
+            "automationSecurity.replaceCapabilities",
+            "automationSecurity.disablePrincipal",
+        ]);
+    });
 });
