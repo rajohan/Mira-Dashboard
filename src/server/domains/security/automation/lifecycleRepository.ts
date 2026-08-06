@@ -33,6 +33,8 @@ export function createAutomationLifecycleRepository(
         findReplacement: reader.findReplacement.bind(reader),
         findSession: reader.findSession.bind(reader),
         findUserById: reader.findUserById.bind(reader),
+        hasFutureCredentialHistory: reader.hasFutureCredentialHistory.bind(reader),
+        hasFuturePrincipalHistory: reader.hasFuturePrincipalHistory.bind(reader),
         listCapabilities: reader.listCapabilities.bind(reader),
         listCredentials: reader.listCredentials.bind(reader),
         listPrincipals: reader.listPrincipals.bind(reader),

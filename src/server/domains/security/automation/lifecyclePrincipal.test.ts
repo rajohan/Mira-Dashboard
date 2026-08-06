@@ -97,7 +97,7 @@ describe("automation principal lifecycle", () => {
         }
     });
 
-    test("fails closed when principal history is ahead of the process clock", async () => {
+    test("fails closed when principal update history is ahead of the process clock", async () => {
         const fixture = await openAutomationLifecycleFixture();
         const service = fixture.createService();
 
@@ -109,10 +109,90 @@ describe("automation principal lifecycle", () => {
                     fixture.metadata
                 ).status
             ).toBe("created");
-            fixture.setNow(subMilliseconds(automationLifecycleInitialNow, 1));
+            fixture.setNow(addMinutes(automationLifecycleInitialNow, 2));
+            expect(
+                service.replaceCapabilities(
+                    fixture.identity,
+                    {
+                        capabilities: ["notifications:read", "reports:read"],
+                        expectedAuthorizationVersion: 1,
+                        principalId: automationLifecyclePrincipalId,
+                    },
+                    fixture.metadata
+                ).status
+            ).toBe("replaced");
+            fixture.setNow(addMinutes(automationLifecycleInitialNow, 1));
             expect(service.listPrincipals(fixture.identity, { limit: 10 })).toEqual({
                 status: "session-changed",
             });
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("guards paginated inventory and creation against future principal history", async () => {
+        const fixture = await openAutomationLifecycleFixture();
+        const service = fixture.createService();
+        const futurePrincipalId = "future-principal";
+        const rollbackPrincipalId = "rollback-principal";
+
+        try {
+            expect(
+                service.createPrincipal(
+                    fixture.identity,
+                    principalInput,
+                    fixture.metadata
+                ).status
+            ).toBe("created");
+            const futureAt = addMinutes(automationLifecycleInitialNow, 2);
+            fixture.setNow(futureAt);
+            const future = service.createPrincipal(
+                fixture.identity,
+                {
+                    ...principalInput,
+                    id: futurePrincipalId,
+                    label: "Future principal",
+                },
+                fixture.metadata
+            );
+            expect(future.status).toBe("created");
+            if (future.status !== "created") return;
+
+            fixture.setNow(addMinutes(automationLifecycleInitialNow, 1));
+            expect(
+                service.listPrincipals(fixture.identity, {
+                    cursor: {
+                        createdAtMs: future.result.principal.createdAtMs,
+                        id: futurePrincipalId,
+                    },
+                    limit: 10,
+                })
+            ).toEqual({ status: "session-changed" });
+
+            const principalCount = fixture.repository.countPrincipals();
+            const credentialCount = readPersistedAutomationCredentials(
+                fixture.database.sqlite
+            ).length;
+            const auditCount = readAutomationAuditEvents(fixture.database.sqlite).length;
+            expect(
+                service.createPrincipal(
+                    fixture.identity,
+                    {
+                        ...principalInput,
+                        id: rollbackPrincipalId,
+                        label: "Rollback principal",
+                    },
+                    fixture.metadata
+                )
+            ).toEqual({ status: "conflict" });
+            expect(fixture.repository.findPrincipal(rollbackPrincipalId)).toBeUndefined();
+            expect(fixture.repository.countPrincipals()).toBe(principalCount);
+            expect(
+                readPersistedAutomationCredentials(fixture.database.sqlite)
+            ).toHaveLength(credentialCount);
+            expect(readAutomationAuditEvents(fixture.database.sqlite)).toHaveLength(
+                auditCount
+            );
         } finally {
             fixture.database.sqlite.close(true);
         }

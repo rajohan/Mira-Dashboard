@@ -170,6 +170,43 @@ export class DrizzleAutomationLifecycleReader implements AutomationLifecycleRead
         return this.#users.findUserById(userId);
     }
 
+    hasFutureCredentialHistory(principalId: string, checkedAt: Date): boolean {
+        const futureTimestamp = or(
+            gt(automationCredentials.createdAt, checkedAt),
+            gt(automationCredentials.revokedAt, checkedAt)
+        );
+        return (
+            this.database
+                .select({ id: automationCredentials.id })
+                .from(automationCredentials)
+                .where(
+                    and(
+                        eq(automationCredentials.principalId, principalId),
+                        futureTimestamp
+                    )
+                )
+                .limit(1)
+                .get() !== undefined
+        );
+    }
+
+    hasFuturePrincipalHistory(checkedAt: Date): boolean {
+        return (
+            this.database
+                .select({ id: automationPrincipals.id })
+                .from(automationPrincipals)
+                .where(
+                    or(
+                        gt(automationPrincipals.createdAt, checkedAt),
+                        gt(automationPrincipals.updatedAt, checkedAt),
+                        gt(automationPrincipals.disabledAt, checkedAt)
+                    )
+                )
+                .limit(1)
+                .get() !== undefined
+        );
+    }
+
     listCapabilities(principalId: string) {
         return this.database
             .select()

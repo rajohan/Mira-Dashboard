@@ -40,10 +40,9 @@ export function assertGrantsWithinPrincipalWindow(
 }
 
 /**
- * Rejects credential history that is not yet observable at the transaction clock.
- * `listCredentials` orders by creation time and ID descending, so limit one is newest.
+ * Rejects credential creation or revocation history ahead of the transaction clock.
  * @param reader Consistent lifecycle reader for the current transaction.
- * @param principalId Principal whose newest credential anchors the history check.
+ * @param principalId Principal whose complete credential history is checked.
  * @param checkedAt Transaction-owned policy time.
  */
 export function assertNoFutureCredentialHistory(
@@ -51,11 +50,21 @@ export function assertNoFutureCredentialHistory(
     principalId: string,
     checkedAt: Date
 ): void {
-    const newestCredential = reader.listCredentials({ limit: 1, principalId })[0];
-    if (
-        newestCredential !== undefined &&
-        getTime(newestCredential.createdAt) > getTime(checkedAt)
-    ) {
+    if (reader.hasFutureCredentialHistory(principalId, checkedAt)) {
+        throw new AutomationLifecycleStateChangedError();
+    }
+}
+
+/**
+ * Rejects any principal lifecycle history ahead of the transaction clock.
+ * @param reader Consistent lifecycle reader for the current transaction.
+ * @param checkedAt Transaction-owned policy time.
+ */
+export function assertNoFuturePrincipalHistory(
+    reader: AutomationLifecycleReader,
+    checkedAt: Date
+): void {
+    if (reader.hasFuturePrincipalHistory(checkedAt)) {
         throw new AutomationLifecycleStateChangedError();
     }
 }

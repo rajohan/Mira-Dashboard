@@ -22,6 +22,7 @@ import {
 import {
     AutomationLifecycleStateChangedError,
     assertNoFutureCredentialHistory,
+    assertNoFuturePrincipalHistory,
     principalSummary,
 } from "./lifecycleSummaries.ts";
 import type { AutomationSecurityLifecycleService } from "./lifecycleTypes.ts";
@@ -77,6 +78,7 @@ export function createAutomationPrincipalOperations(
                         createdAt
                     );
                     if (policy !== undefined) return policy;
+                    assertNoFuturePrincipalHistory(unit, createdAt);
                     if (generation.status === "unavailable") {
                         return { status: "unavailable" as const };
                     }
@@ -230,6 +232,7 @@ export function createAutomationPrincipalOperations(
                     const checkedAt = context.now();
                     const policy = context.authorizeSession(reader, identity, checkedAt);
                     if (policy !== undefined) return policy;
+                    assertNoFuturePrincipalHistory(reader, checkedAt);
                     const rows = reader.listPrincipals({
                         ...(input.cursor === undefined
                             ? {}

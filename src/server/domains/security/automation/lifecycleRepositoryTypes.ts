@@ -89,6 +89,8 @@ export interface AutomationLifecycleReader {
     ): AutomationCredentialRecord | undefined;
     findSession(userId: string, sessionId: string): BrowserSessionRecord | undefined;
     findUserById(userId: string): SecurityUserRecord | undefined;
+    hasFutureCredentialHistory(principalId: string, checkedAt: Date): boolean;
+    hasFuturePrincipalHistory(checkedAt: Date): boolean;
     listCapabilities(principalId: string): AutomationCapabilityRecord[];
     listCredentials(input: AutomationCredentialListInput): AutomationCredentialRecord[];
     listPrincipals(input: AutomationPrincipalListInput): AutomationPrincipalRecord[];

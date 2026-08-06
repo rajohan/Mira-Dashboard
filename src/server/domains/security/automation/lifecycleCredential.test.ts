@@ -572,4 +572,64 @@ describe("automation credential lifecycle", () => {
             fixture.database.sqlite.close(true);
         }
     });
+
+    test("fails closed when only credential revocation history is in the future", async () => {
+        const fixture = await openAutomationLifecycleFixture();
+        const service = fixture.createService();
+
+        try {
+            const created = service.createPrincipal(
+                fixture.identity,
+                initialPrincipalInput,
+                fixture.metadata
+            );
+            expect(created.status).toBe("created");
+            if (created.status !== "created") return;
+
+            const futureAt = addMinutes(automationLifecycleInitialNow, 2);
+            fixture.setNow(futureAt);
+            expect(
+                service.revokeCredential(
+                    fixture.identity,
+                    {
+                        credentialId: created.result.credential.id,
+                        expectedAuthorizationVersion: 1,
+                        principalId: automationLifecyclePrincipalId,
+                    },
+                    fixture.metadata
+                ).status
+            ).toBe("revoked");
+
+            fixture.setNow(addMinutes(automationLifecycleInitialNow, 1));
+            const credentialCount = readPersistedAutomationCredentials(
+                fixture.database.sqlite
+            ).length;
+            const auditCount = readAutomationAuditEvents(fixture.database.sqlite).length;
+            expect(
+                service.listCredentials(fixture.identity, {
+                    limit: 10,
+                    principalId: automationLifecyclePrincipalId,
+                })
+            ).toEqual({ status: "session-changed" });
+            expect(
+                service.createCredential(
+                    fixture.identity,
+                    {
+                        credential: { label: "Rollback credential" },
+                        expectedAuthorizationVersion: 1,
+                        principalId: automationLifecyclePrincipalId,
+                    },
+                    fixture.metadata
+                )
+            ).toEqual({ status: "conflict" });
+            expect(
+                readPersistedAutomationCredentials(fixture.database.sqlite)
+            ).toHaveLength(credentialCount);
+            expect(readAutomationAuditEvents(fixture.database.sqlite)).toHaveLength(
+                auditCount
+            );
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
 });
