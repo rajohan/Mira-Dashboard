@@ -5,8 +5,6 @@ import * as v from "valibot";
 const mebibyte = 1024 * 1024;
 const resourceBudgetUnitIdentifierPattern =
     /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
-const resourceBudgetUnitNamePattern =
-    /^mira-dashboard-resource-(?:frontend-build|representative-tests|sqlite-outbox|chat-batching|complete-shutdown|child-cancellation)-[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
 
 export const resourceBudgetScenarioIds = [
     "frontend-build",
@@ -16,6 +14,11 @@ export const resourceBudgetScenarioIds = [
     "complete-shutdown",
     "child-cancellation",
 ] as const;
+
+const resourceBudgetUnitNamePattern = new RegExp(
+    `^mira-dashboard-resource-(?:${resourceBudgetScenarioIds.join("|")})-[\\da-f]{8}(?:-[\\da-f]{4}){3}-[\\da-f]{12}$`,
+    "iu"
+);
 
 export type ResourceBudgetScenarioId = (typeof resourceBudgetScenarioIds)[number];
 
@@ -353,8 +356,11 @@ export function assessResourceBudgetEvidence(
     ) {
         throw new Error(`Resource-budget ${report.scenarioId} leaked processes`);
     }
-    if (!evidence.unitCollected || !evidence.cgroupRemoved) {
+    if (!evidence.unitCollected) {
         throw new Error(`Resource-budget ${report.scenarioId} unit was not collected`);
+    }
+    if (!evidence.cgroupRemoved) {
+        throw new Error(`Resource-budget ${report.scenarioId} cgroup was not removed`);
     }
 
     const initialEvents = report.cgroup.initial.memoryEvents;

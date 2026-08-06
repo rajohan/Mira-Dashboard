@@ -168,6 +168,12 @@
             "sha256": "fb7ab0badc2453c326edb76099a7324340251df46e7ec0b9b9ef7123b3b7e97b"
         },
         {
+            "bytes": 2419,
+            "path": "dist/task-summary-gsUnf0hI.js",
+            "role": "task-summary",
+            "sha256": "d0d13f8077a61d3e4d656f18306368360a991a7c6bfaf526be9d01b30f712ab9"
+        },
+        {
             "bytes": 4058,
             "path": "dist/tasks-Btru2I19.js",
             "role": "tasks-handlers",

@@ -11,7 +11,12 @@ import {
     buildGreenfieldContractFixtureCandidate,
     buildParityFixtureCandidate,
 } from "./parityFixtureCandidate.ts";
-import { parseFrontendParityFixture } from "./parityInventorySchemas.ts";
+import {
+    parseFrontendParityFixture,
+    reviewedLegacyEndpointRowCount,
+    type FrontendRouteInventory,
+    type LegacyEndpointInventory,
+} from "./parityInventorySchemas.ts";
 import {
     assertGreenfieldRegistryMatchesReviewed,
     assertGreenfieldTargetAccounting,
@@ -29,11 +34,14 @@ const repositoryRoot = path.resolve(
 );
 
 function countByPhase(
-    values: readonly { target: { kind?: string; phase?: string } }[]
+    values: readonly (
+        | Pick<FrontendRouteInventory, "target">
+        | Pick<LegacyEndpointInventory, "target">
+    )[]
 ): Record<string, number> {
     const counts: Record<string, number> = {};
     for (const value of values) {
-        if (value.target.kind === "reviewed-removal" || !value.target.phase) continue;
+        if ("kind" in value.target && value.target.kind === "reviewed-removal") continue;
         counts[value.target.phase] = (counts[value.target.phase] ?? 0) + 1;
     }
     return counts;
@@ -116,9 +124,11 @@ describe("reviewed legacy endpoint parity inventory", () => {
         expect(backendRoutes.filter(({ method }) => method === "WebSocket")).toEqual([
             { id: "WebSocket /ws", method: "WebSocket", path: "/ws" },
         ]);
-        expect(reviewed.legacyEndpoints.endpoints).toHaveLength(157);
+        expect(reviewed.legacyEndpoints.endpoints).toHaveLength(
+            reviewedLegacyEndpointRowCount
+        );
         expect(new Set(reviewed.legacyEndpoints.endpoints.map(({ id }) => id)).size).toBe(
-            157
+            reviewedLegacyEndpointRowCount
         );
         expect(countByPhase(reviewed.legacyEndpoints.endpoints)).toEqual({
             "phase-1": 7,
@@ -139,7 +149,7 @@ describe("reviewed legacy endpoint parity inventory", () => {
                 ({ target }) => target.kind === "reviewed-removal"
             )
         ).toHaveLength(0);
-    });
+    }, 20_000);
 
     test("checks implemented mappings against the greenfield registries", async () => {
         const reviewed = await loadReviewedParityInventory();

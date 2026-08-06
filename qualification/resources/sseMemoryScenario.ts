@@ -12,10 +12,7 @@ import {
     type CgroupV2AncestorSnapshot,
     readCgroupV2AncestorSnapshots,
 } from "./cgroupV2Hierarchy.ts";
-import {
-    pausedTlsSseClientResource,
-    type PausedTlsSseClient,
-} from "./pausedTlsSseClient.ts";
+import { pausedTlsSseClientResource } from "./pausedTlsSseClient.ts";
 import {
     maximumProcessMemory,
     readProcessMemorySnapshot,
@@ -51,21 +48,6 @@ function qualificationPayload(sequence: number, size: number): string {
         String.fromCodePoint(33 + ((sequence * 31 + index * 17) % 90))
     ).join("");
     return `${prefix}${seed.repeat(Math.ceil(size / seed.length))}`.slice(0, size);
-}
-
-async function closeConsumers(consumers: readonly PausedTlsSseClient[]): Promise<void> {
-    const results = await Promise.allSettled(
-        consumers.map((consumer) => consumer.close())
-    );
-    const failures: unknown[] = [];
-    for (const result of results) {
-        if (result.status === "rejected") {
-            failures.push(result.reason as unknown);
-        }
-    }
-    if (failures.length > 0) {
-        throw new AggregateError(failures, "Could not close SSE slow consumers");
-    }
 }
 
 async function settleMemory(): Promise<void> {
@@ -171,11 +153,6 @@ export async function runSseMemoryScenario(
             target: new URL(`http://127.0.0.1:${release.port}`),
         });
         cleanup.defer("SSE memory qualification proxy", () => proxy.stop(true));
-        const consumerScope = await Effect.runPromise(Scope.make("parallel"));
-        cleanup.defer("SSE memory slow-consumer scope", () =>
-            Effect.runPromise(Scope.close(consumerScope, Exit.void))
-        );
-
         await settleMemory();
         baselineCgroup = await readCurrentCgroupV2Snapshot();
         baselineCgroupAncestors = await readCgroupV2AncestorSnapshots(
@@ -204,72 +181,79 @@ export async function runSseMemoryScenario(
             const roundDeadline =
                 roundStartedAt +
                 sseMemoryQualificationPolicy.scenario.roundDisconnectTimeoutMs;
-            const roundConsumers: PausedTlsSseClient[] = [];
+            const roundScope = await Effect.runPromise(Scope.make("parallel"));
+            let roundScopeClosed = false;
+            const closeRoundScope = async (): Promise<void> => {
+                if (roundScopeClosed) return;
+                roundScopeClosed = true;
+                await Effect.runPromise(Scope.close(roundScope, Exit.void));
+            };
             const expectedDrops =
                 (roundIndex + 1) * sseMemoryQualificationPolicy.scenario.consumerCount;
 
-            for (
-                let consumerIndex = 0;
-                consumerIndex < sseMemoryQualificationPolicy.scenario.consumerCount;
-                consumerIndex += 1
-            ) {
-                const timeoutMs = remainingRoundTime(roundDeadline);
-                const consumerResource = pausedTlsSseClientResource(
-                    proxy.url,
-                    tlsIdentity.certificate,
-                    qualificationCookie,
-                    timeoutMs
-                );
-                const consumer = await Effect.runPromise(
-                    Scope.provide(consumerScope)(consumerResource)
-                );
-                roundConsumers.push(consumer);
-            }
-            traceScenario(`round-${roundIndex + 1}-clients-paused`, startedAt);
-            await waitFor(
-                () =>
-                    eventFeed.activeSubscriberCount ===
-                    sseMemoryQualificationPolicy.scenario.consumerCount,
-                remainingRoundTime(roundDeadline)
-            );
-
             let roundPublishedEvents = 0;
-            while (
-                roundPublishedEvents <
-                    sseMemoryQualificationPolicy.scenario.maximumEventsPerRound &&
-                eventFeed.metricsSnapshot().droppedSlowSubscribers < expectedDrops
-            ) {
-                const remaining =
-                    sseMemoryQualificationPolicy.scenario.maximumEventsPerRound -
-                    roundPublishedEvents;
-                const batchSize = Math.min(
-                    remaining,
-                    sseMemoryQualificationPolicy.scenario.publishBatchSize
-                );
-                for (let index = 0; index < batchSize; index += 1) {
-                    publishedEvents += 1;
-                    roundPublishedEvents += 1;
-                    eventFeed.publish({
-                        kind: "qualification.changed",
-                        payload: qualificationPayload(
-                            publishedEvents,
-                            sseMemoryQualificationPolicy.scenario.payloadBytes
-                        ),
-                        value: publishedEvents,
-                    });
+            try {
+                for (
+                    let consumerIndex = 0;
+                    consumerIndex < sseMemoryQualificationPolicy.scenario.consumerCount;
+                    consumerIndex += 1
+                ) {
+                    const timeoutMs = remainingRoundTime(roundDeadline);
+                    const consumerResource = pausedTlsSseClientResource(
+                        proxy.url,
+                        tlsIdentity.certificate,
+                        qualificationCookie,
+                        timeoutMs
+                    );
+                    await Effect.runPromise(Scope.provide(roundScope)(consumerResource));
                 }
-                await Bun.sleep(0);
-                sampledPeak = activeProcessSampler.sample();
-                remainingRoundTime(roundDeadline);
-            }
+                traceScenario(`round-${roundIndex + 1}-clients-paused`, startedAt);
+                await waitFor(
+                    () =>
+                        eventFeed.activeSubscriberCount ===
+                        sseMemoryQualificationPolicy.scenario.consumerCount,
+                    remainingRoundTime(roundDeadline)
+                );
 
-            await waitForApplicationDisconnect(
-                eventFeed,
-                expectedDrops,
-                remainingRoundTime(roundDeadline)
-            );
-            traceScenario(`round-${roundIndex + 1}-queues-detached`, startedAt);
-            await closeConsumers(roundConsumers);
+                while (
+                    roundPublishedEvents <
+                        sseMemoryQualificationPolicy.scenario.maximumEventsPerRound &&
+                    eventFeed.metricsSnapshot().droppedSlowSubscribers < expectedDrops
+                ) {
+                    const remaining =
+                        sseMemoryQualificationPolicy.scenario.maximumEventsPerRound -
+                        roundPublishedEvents;
+                    const batchSize = Math.min(
+                        remaining,
+                        sseMemoryQualificationPolicy.scenario.publishBatchSize
+                    );
+                    for (let index = 0; index < batchSize; index += 1) {
+                        publishedEvents += 1;
+                        roundPublishedEvents += 1;
+                        eventFeed.publish({
+                            kind: "qualification.changed",
+                            payload: qualificationPayload(
+                                publishedEvents,
+                                sseMemoryQualificationPolicy.scenario.payloadBytes
+                            ),
+                            value: publishedEvents,
+                        });
+                    }
+                    await Bun.sleep(0);
+                    sampledPeak = activeProcessSampler.sample();
+                    remainingRoundTime(roundDeadline);
+                }
+
+                await waitForApplicationDisconnect(
+                    eventFeed,
+                    expectedDrops,
+                    remainingRoundTime(roundDeadline)
+                );
+                traceScenario(`round-${roundIndex + 1}-queues-detached`, startedAt);
+                await closeRoundScope();
+            } finally {
+                await closeRoundScope();
+            }
             traceScenario(`round-${roundIndex + 1}-clients-closed`, startedAt);
             await waitForTransportCleanup(
                 release,

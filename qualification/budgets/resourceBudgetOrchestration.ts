@@ -76,12 +76,27 @@ export interface ResourceBudgetQualificationReport {
     readonly scenarioEvidence: readonly ResourceBudgetScenarioEvidence[];
 }
 
-function requiredExecutable(name: string): string {
-    const executable = Bun.which(name);
-    if (executable === null || !path.isAbsolute(executable)) {
-        throw new Error(`${name} is required for resource-budget qualification`);
-    }
-    return executable;
+function requiredExecutable(
+    name: string
+): Effect.Effect<string, ResourceBudgetOrchestrationError> {
+    return Effect.try({
+        catch: (cause) =>
+            new ResourceBudgetOrchestrationError({
+                cause,
+                operation: `resolve-${name}-executable`,
+            }),
+        try: () => Bun.which(name),
+    }).pipe(
+        Effect.flatMap((executable) =>
+            executable !== null && path.isAbsolute(executable)
+                ? Effect.succeed(executable)
+                : Effect.fail(
+                      new ResourceBudgetOrchestrationError({
+                          operation: `resolve-${name}-executable`,
+                      })
+                  )
+        )
+    );
 }
 
 function temporaryWorkspace() {
@@ -415,6 +430,19 @@ function runScenario(
                     "run-transient-unit",
                     scenarioId
                 );
+                if (launcher.exitCode !== 0) {
+                    const diagnostic = [launcher.stderr.trim(), launcher.stdout.trim()]
+                        .filter((value) => value.length > 0)
+                        .join("\n")
+                        .slice(0, 16 * 1024);
+                    return yield* Effect.fail(
+                        new ResourceBudgetOrchestrationError({
+                            cause: diagnostic,
+                            operation: "transient-unit-exit",
+                            scenarioId,
+                        })
+                    );
+                }
                 const report = yield* readResult(command);
                 return { launcher, report };
             })
@@ -423,29 +451,12 @@ function runScenario(
             [unitIsCollected(command), cgroupIsRemoved(cgroupPath)] as const,
             { concurrency: "unbounded" }
         );
-        const evidence: ResourceBudgetScenarioEvidence = {
+        return {
             cgroupRemoved,
             launcherExitCode: completed.launcher.exitCode,
             report: completed.report,
             unitCollected,
-        };
-        if (completed.launcher.exitCode !== 0) {
-            const diagnostic = [
-                completed.launcher.stderr.trim(),
-                completed.launcher.stdout.trim(),
-            ]
-                .filter((value) => value.length > 0)
-                .join("\n")
-                .slice(0, 16 * 1024);
-            return yield* Effect.fail(
-                new ResourceBudgetOrchestrationError({
-                    cause: diagnostic,
-                    operation: "transient-unit-exit",
-                    scenarioId,
-                })
-            );
-        }
-        return evidence;
+        } satisfies ResourceBudgetScenarioEvidence;
     });
 }
 
@@ -463,11 +474,19 @@ export const resourceBudgetQualification: Effect.Effect<
             );
         }
         const workspace = yield* temporaryWorkspace();
+        const [env, systemctl, systemdRun] = yield* Effect.all(
+            [
+                requiredExecutable("env"),
+                requiredExecutable("systemctl"),
+                requiredExecutable("systemd-run"),
+            ] as const,
+            { concurrency: "unbounded" }
+        );
         const executables: ResourceBudgetExecutables = {
             bun: process.execPath,
-            env: requiredExecutable("env"),
-            systemctl: requiredExecutable("systemctl"),
-            systemdRun: requiredExecutable("systemd-run"),
+            env,
+            systemctl,
+            systemdRun,
         };
         const userId = process.getuid();
         const scenarioEvidence = yield* Effect.forEach(

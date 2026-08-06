@@ -1,6 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import type {
     FrontendRouteInventory,
     LegacyEndpointInventory,
@@ -56,6 +56,12 @@ interface RouteDeclaration {
     block: string;
     identifier: string;
     sourceRouteName: string;
+}
+
+interface RouteTreeToken {
+    kind: "identifier" | "punctuation";
+    offset: number;
+    value: string;
 }
 
 const reviewedPathlessRoutes = {
@@ -227,6 +233,83 @@ function assertReviewedPathlessRoute(declaration: RouteDeclaration): void {
     }
 }
 
+function tokenizeRouteTree(routeTree: string): RouteTreeToken[] {
+    const tokens: RouteTreeToken[] = [];
+    let offset = 0;
+    while (offset < routeTree.length) {
+        const character = routeTree[offset]!;
+        if (/\s/u.test(character)) {
+            offset += 1;
+            continue;
+        }
+        const identifier = routeTree
+            .slice(offset)
+            .match(/^[A-Za-z_$][A-Za-z0-9_$]*/u)?.[0];
+        if (identifier) {
+            tokens.push({ kind: "identifier", offset, value: identifier });
+            offset += identifier.length;
+            continue;
+        }
+        if (".()[],;".includes(character)) {
+            tokens.push({ kind: "punctuation", offset, value: character });
+            offset += 1;
+            continue;
+        }
+        throw new Error(
+            `Reviewed route tree contains unrecognized syntax at offset ${offset}`
+        );
+    }
+    return tokens;
+}
+
+function parseRouteTreeIdentifiers(routeTree: string): string[] {
+    const tokens = tokenizeRouteTree(routeTree);
+    const identifiers: string[] = [];
+    let position = 0;
+
+    function syntaxError(): Error {
+        const token = tokens[position];
+        const context = token
+            ? `${JSON.stringify(token.value)} at offset ${token.offset}`
+            : "the end of the route tree";
+        return new Error(
+            `Reviewed route tree contains unrecognized syntax near ${context}`
+        );
+    }
+
+    function consume(value: string): void {
+        if (tokens[position]?.value !== value) throw syntaxError();
+        position += 1;
+    }
+
+    function consumeIdentifier(): string {
+        const token = tokens[position];
+        if (token?.kind !== "identifier") throw syntaxError();
+        position += 1;
+        return token.value;
+    }
+
+    function parseNode(): void {
+        identifiers.push(consumeIdentifier());
+        if (tokens[position]?.value !== ".") return;
+        consume(".");
+        if (consumeIdentifier() !== "addChildren") throw syntaxError();
+        consume("(");
+        consume("[");
+        while (tokens[position]?.value !== "]") {
+            parseNode();
+            consume(",");
+        }
+        consume("]");
+        consume(")");
+    }
+
+    parseNode();
+    consume(";");
+    if (position !== tokens.length) throw syntaxError();
+    return identifiers;
+}
+
 function assertExactRouteTreeIdentifiers(
     source: string,
     declarations: readonly RouteDeclaration[]
@@ -236,9 +319,8 @@ function assertExactRouteTreeIdentifiers(
         /^const routeTree = ([\s\S]*?)^\/\*\* Defines router\. \*\/$/mu,
         "route tree"
     );
-    const observedIdentifiers = [...routeTree.matchAll(/\b([a-z][A-Za-z0-9]*Route)\b/gu)]
-        .map((match) => match[1]!)
-        .toSorted(compareStrings);
+    const observedIdentifiers =
+        parseRouteTreeIdentifiers(routeTree).toSorted(compareStrings);
     const expectedIdentifiers = [
         "rootRoute",
         ...declarations.map((declaration) => declaration.identifier),
@@ -432,15 +514,14 @@ async function readBoundedUtf8(
     if (relative.startsWith("..") || path.isAbsolute(relative)) {
         throw new Error("Parity source path escaped the repository root");
     }
-    const sourceStat = await stat(absolutePath);
-    if (
-        !sourceStat.isFile() ||
-        sourceStat.size <= 0 ||
-        sourceStat.size > maximumSourceBytes
-    ) {
-        throw new Error(`Parity source ${relativePath} has an invalid size`);
-    }
-    return readFile(absolutePath, "utf8");
+    const source = await readBoundedUtf8RegularFile(
+        absolutePath,
+        repositoryRoot,
+        maximumSourceBytes,
+        `Parity source ${relativePath} has invalid file state`,
+        `Parity source ${relativePath} is not valid UTF-8`
+    );
+    return source.text;
 }
 
 /**

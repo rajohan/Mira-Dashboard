@@ -163,6 +163,51 @@ describe("application Effect runtime", () => {
         }
     });
 
+    test("gives forced stop a fresh budget after graceful draining expires", async () => {
+        const runtime = createInertApplicationRuntime();
+        const gracefulStop = Promise.withResolvers<void>();
+        const stopCalls: boolean[] = [];
+
+        try {
+            await runtime.shutdownListener({
+                forceSignal: new AbortController().signal,
+                gracefulShutdownTimeoutMs: 30,
+                stop(force) {
+                    stopCalls.push(force);
+                    if (!force) return gracefulStop.promise;
+                    return Bun.sleep(5).then(() => gracefulStop.resolve());
+                },
+            });
+
+            expect(stopCalls).toEqual([false, true]);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
+    test("gives graceful settlement a fresh budget after forced stop", async () => {
+        const runtime = createInertApplicationRuntime();
+        const gracefulStop = Promise.withResolvers<void>();
+        const stopCalls: boolean[] = [];
+
+        try {
+            await runtime.shutdownListener({
+                forceSignal: new AbortController().signal,
+                gracefulShutdownTimeoutMs: 30,
+                stop(force) {
+                    stopCalls.push(force);
+                    if (!force) return gracefulStop.promise;
+                    void Bun.sleep(5).then(() => gracefulStop.resolve());
+                    return Promise.resolve();
+                },
+            });
+
+            expect(stopCalls).toEqual([false, true]);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
     test("tags missing graceful settlement after a successful force stop", async () => {
         const runtime = createInertApplicationRuntime();
         const controller = new AbortController();

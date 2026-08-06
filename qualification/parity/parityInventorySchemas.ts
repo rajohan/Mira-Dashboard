@@ -16,7 +16,7 @@ const routePathSchema = v.pipe(
 );
 const rawHttpPathSchema = v.pipe(
     v.string(),
-    v.regex(/^\/api\/[A-Za-z0-9._~!$&'()*+,;=:@%*/-]+$/u)
+    v.regex(/^\/api\/[A-Za-z0-9._~!$&'()+,;=:@%*/-]+$/u)
 );
 const phaseSchema = v.picklist([
     "phase-1",
@@ -37,6 +37,8 @@ const sourceMethodSchema = v.picklist([
     "WebSocket",
 ]);
 const rawHttpMethodSchema = v.picklist(["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"]);
+
+export const reviewedLegacyEndpointRowCount = 157;
 
 function valuesAreSortedAndUnique(values: string[]): boolean {
     return values.every((value, index) => index === 0 || values[index - 1]! < value);
@@ -189,8 +191,8 @@ export const legacyEndpointParityFixtureSchema = v.pipe(
         }),
     }),
     v.check(
-        (fixture) => fixture.endpoints.length === 157,
-        "The reviewed legacy endpoint inventory must contain exactly 157 rows"
+        (fixture) => fixture.endpoints.length === reviewedLegacyEndpointRowCount,
+        `The reviewed legacy endpoint inventory must contain exactly ${reviewedLegacyEndpointRowCount} rows`
     )
 );
 

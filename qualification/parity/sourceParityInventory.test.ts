@@ -19,12 +19,13 @@ function replaceExactly(source: string, target: string, replacement: string): st
     return `${parts[0]}${replacement}${parts[1]}`;
 }
 
-async function withModifiedRouter(
-    modifyRouter: (source: string) => string,
+async function withModifiedSource(
+    relativeSourcePath: (typeof paritySourcePaths)[keyof typeof paritySourcePaths],
+    modifySource: (source: string) => string,
     verify: (temporaryRepositoryRoot: string) => Promise<void>
 ): Promise<void> {
     const temporaryRepositoryRoot = await mkdtemp(
-        path.join(tmpdir(), "mira-parity-router-")
+        path.join(tmpdir(), "mira-parity-source-")
     );
     try {
         await Promise.all(
@@ -34,9 +35,9 @@ async function withModifiedRouter(
                 await copyFile(path.join(repositoryRoot, relativePath), destination);
             })
         );
-        const routerPath = path.join(temporaryRepositoryRoot, paritySourcePaths.router);
-        const routerSource = await readFile(routerPath, "utf8");
-        await writeFile(routerPath, modifyRouter(routerSource), "utf8");
+        const sourcePath = path.join(temporaryRepositoryRoot, relativeSourcePath);
+        const source = await readFile(sourcePath, "utf8");
+        await writeFile(sourcePath, modifySource(source), "utf8");
         await verify(temporaryRepositoryRoot);
     } finally {
         await rm(temporaryRepositoryRoot, { force: true, recursive: true });
@@ -68,7 +69,8 @@ test("allows the explicitly reviewed authenticated pathless layout", async () =>
 });
 
 test("rejects a pathless layout whose authentication guard is weakened", async () => {
-    await withModifiedRouter(
+    await withModifiedSource(
+        paritySourcePaths.router,
         (source) =>
             replaceExactly(
                 source,
@@ -84,7 +86,8 @@ test("rejects a pathless layout whose authentication guard is weakened", async (
 });
 
 test("rejects an unreviewed pathless createRoute declaration", async () => {
-    await withModifiedRouter(
+    await withModifiedSource(
+        paritySourcePaths.router,
         (source) =>
             replaceExactly(
                 source,
@@ -106,7 +109,8 @@ const routeTree = rootRoute.addChildren([`
 });
 
 test("rejects a createRoute path that is no longer a reviewed literal", async () => {
-    await withModifiedRouter(
+    await withModifiedSource(
+        paritySourcePaths.router,
         (source) => replaceExactly(source, '    path: "/login",', "    path: loginPath,"),
         (temporaryRepositoryRoot) =>
             expectInventoryLoadFailure(
@@ -117,7 +121,8 @@ test("rejects a createRoute path that is no longer a reviewed literal", async ()
 });
 
 test("rejects a createRoute declaration outside the reviewed block shape", async () => {
-    await withModifiedRouter(
+    await withModifiedSource(
+        paritySourcePaths.router,
         (source) =>
             replaceExactly(
                 source,
@@ -133,13 +138,99 @@ test("rejects a createRoute declaration outside the reviewed block shape", async
 });
 
 test("rejects routeTree identifiers that do not exactly match declarations", async () => {
-    await withModifiedRouter(
+    await withModifiedSource(
+        paritySourcePaths.router,
         (source) =>
             replaceExactly(source, "        settingsRoute,", "        loginRoute,"),
         (temporaryRepositoryRoot) =>
             expectInventoryLoadFailure(
                 temporaryRepositoryRoot,
                 "Reviewed route tree identifiers differ"
+            )
+    );
+});
+
+test("rejects a routeTree child identifier without the Route suffix", async () => {
+    await withModifiedSource(
+        paritySourcePaths.router,
+        (source) =>
+            replaceExactly(
+                source,
+                "        settingsRoute,",
+                "        settingsRoute,\n        settingsPage,"
+            ),
+        (temporaryRepositoryRoot) =>
+            expectInventoryLoadFailure(
+                temporaryRepositoryRoot,
+                "Reviewed route tree identifiers differ"
+            )
+    );
+});
+
+test("rejects unrecognized routeTree syntax", async () => {
+    await withModifiedSource(
+        paritySourcePaths.router,
+        (source) =>
+            replaceExactly(
+                source,
+                "    loginRoute,",
+                "    loginRoute,\n    ...conditionallyIncludedRoutes,"
+            ),
+        (temporaryRepositoryRoot) =>
+            expectInventoryLoadFailure(
+                temporaryRepositoryRoot,
+                "Reviewed route tree contains unrecognized syntax"
+            )
+    );
+});
+
+test("rejects navigation entries outside the reviewed literal shape", async () => {
+    await withModifiedSource(
+        paritySourcePaths.navigation,
+        (source) =>
+            replaceExactly(
+                source,
+                '    { to: "/", icon: Home, label: "Dashboard" },',
+                '    { to: "/", icon: Home, label: "Dashboard", unreviewed: true },'
+            ),
+        (temporaryRepositoryRoot) =>
+            expectInventoryLoadFailure(
+                temporaryRepositoryRoot,
+                "Reviewed navigation contains an unrecognized item shape"
+            )
+    );
+});
+
+test("rejects route modules outside the reviewed literal shape", async () => {
+    await withModifiedSource(
+        paritySourcePaths.routeModules,
+        (source) =>
+            replaceExactly(
+                source,
+                '    agents: () => import("../pages/Agents"),',
+                '    agents: () => import("../pages/Agents") ,'
+            ),
+        (temporaryRepositoryRoot) =>
+            expectInventoryLoadFailure(
+                temporaryRepositoryRoot,
+                "Reviewed route module registry changed outside the literal shape"
+            )
+    );
+});
+
+test("rejects preload entries outside the reviewed literal shape", async () => {
+    await withModifiedSource(
+        paritySourcePaths.routeModules,
+        (source) =>
+            replaceExactly(
+                source,
+                '    "/agents": routeModules.agents,',
+                '    "/agents": routeModules.agents ,'
+            ),
+        (temporaryRepositoryRoot) =>
+            expectInventoryLoadFailure(
+                temporaryRepositoryRoot,
+                "Reviewed route preload registry changed outside the literal shape"
             )
     );
 });

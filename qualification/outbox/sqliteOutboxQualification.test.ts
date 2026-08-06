@@ -73,16 +73,27 @@ describe("file-backed Bun SQLite qualification", () => {
 
                     const contention = yield* Effect.sync(() => {
                         writer.run("BEGIN IMMEDIATE");
+                        let competingWriterAcquired = false;
+                        let classifiedError: ReturnType<
+                            typeof classifyQualificationSqliteError
+                        >;
                         try {
                             competingWriter.run("BEGIN IMMEDIATE");
+                            competingWriterAcquired = true;
+                        } catch (error) {
+                            classifiedError = classifyQualificationSqliteError(error);
+                        } finally {
+                            if (competingWriterAcquired) {
+                                competingWriter.run("ROLLBACK");
+                            }
+                            writer.run("ROLLBACK");
+                        }
+                        if (competingWriterAcquired) {
                             throw new Error(
                                 "Competing writer unexpectedly acquired WAL lock"
                             );
-                        } catch (error) {
-                            return classifyQualificationSqliteError(error);
-                        } finally {
-                            writer.run("ROLLBACK");
                         }
+                        return classifiedError;
                     });
 
                     return {

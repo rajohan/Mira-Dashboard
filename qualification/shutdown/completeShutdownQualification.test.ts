@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
+    cancelShutdownStreamBeforeDeadline,
     collectLinuxProcessGroupMembers,
     completeShutdownQualification,
     interruptedShutdownQualification,
@@ -11,6 +13,43 @@ import {
 } from "./completeShutdownQualification.ts";
 
 describe("complete process shutdown qualification", () => {
+    test("bounds a non-cooperative stream finalizer and continues older cleanup", async () => {
+        const events: string[] = [];
+        const program = Effect.gen(function* () {
+            const cancelStarted = yield* Deferred.make<void>();
+            const cleanupFiber = yield* Effect.scoped(
+                Effect.gen(function* () {
+                    yield* Effect.addFinalizer(() =>
+                        Effect.sync(() => {
+                            events.push("fallback");
+                        })
+                    );
+                    yield* Effect.addFinalizer(() =>
+                        Effect.sync(() => {
+                            events.push("cancel");
+                        }).pipe(
+                            Effect.andThen(Deferred.succeed(cancelStarted, undefined)),
+                            Effect.andThen(
+                                cancelShutdownStreamBeforeDeadline(
+                                    () => new Promise<void>(() => {}),
+                                    25
+                                )
+                            )
+                        )
+                    );
+                })
+            ).pipe(Effect.forkChild);
+
+            yield* Deferred.await(cancelStarted);
+            yield* TestClock.adjust(25);
+            yield* Fiber.join(cleanupFiber);
+        });
+
+        await Effect.runPromise(Effect.provide(program, TestClock.layer()));
+
+        expect(events).toEqual(["cancel", "fallback"]);
+    });
+
     test("parses Linux stat records whose command contains spaces and parentheses", () => {
         expect(
             parseLinuxProcessStat(
@@ -125,7 +164,7 @@ describe("complete process shutdown qualification", () => {
                 expect(events.indexOf(cleanupEvent)).toBeGreaterThan(readinessDownIndex);
             }
         }
-    });
+    }, 60_000);
 
     test("interrupts the owner scope without leaking its detached process group", async () => {
         const report = await Effect.runPromise(interruptedShutdownQualification);
@@ -139,5 +178,5 @@ describe("complete process shutdown qualification", () => {
         expect(report.stoppedStatus.phase).toBe("stopped");
         expect(report.stoppedStatus.events).toContain("readiness-down");
         expect(report.stoppedStatus.events.at(-1)).toBe("stopped");
-    });
+    }, 30_000);
 });

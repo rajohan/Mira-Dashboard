@@ -6,7 +6,7 @@ import type { AuthenticationLifecycleService } from "../server/domains/security/
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
-import type { ReadinessState } from "../server/platform/readiness/readinessState.ts";
+import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
 import {
@@ -67,7 +67,7 @@ export interface ServerOptions {
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly port: number;
-    readonly readiness: ReadinessState;
+    readonly readiness: ReadinessController;
     /** Exact proxy peers allowed to supply one overwritten client address. */
     readonly trustedProxyAddresses?: readonly string[];
 }
@@ -155,9 +155,12 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                             stop: (forceListener) => server.stop(forceListener),
                         });
                     } catch (error) {
-                        throw await primaryErrorAfterCleanup(error, () =>
-                            options.applicationRuntime.dispose()
-                        );
+                        // A listener-stop rejection cannot prove that no request can still enter
+                        // the runtime. Withdraw readiness and preserve process services for the
+                        // supervisor's terminal containment instead of disposing them underneath
+                        // a potentially live listener.
+                        options.readiness.markUnavailable();
+                        throw error;
                     }
                     await options.applicationRuntime.dispose();
                 })();

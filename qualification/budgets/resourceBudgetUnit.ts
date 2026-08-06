@@ -418,6 +418,20 @@ function runUnit(arguments_: ResourceBudgetUnitArguments) {
                 new ResourceBudgetUnitError({ operation: "parse-pids-peak" })
             );
         }
+        if (
+            finalCgroup.cpuQuotaMicros === "max" ||
+            finalCgroup.memoryHighBytes === "max" ||
+            finalCgroup.memoryMaxBytes === "max" ||
+            finalCgroup.memorySwapMaxBytes === "max" ||
+            finalCgroup.pidsMax === "max" ||
+            !finalCgroup.oomGroup
+        ) {
+            return yield* Effect.fail(
+                new ResourceBudgetUnitError({
+                    operation: "verify-final-cgroup-policy",
+                })
+            );
+        }
         const report: ResourceBudgetUnitReport = {
             cgroup: {
                 final,
@@ -430,12 +444,12 @@ function runUnit(arguments_: ResourceBudgetUnitArguments) {
             formatVersion: resourceBudgetPolicy.formatVersion,
             limits: {
                 cpuPeriodMicros: finalCgroup.cpuPeriodMicros,
-                cpuQuotaMicros: finalCgroup.cpuQuotaMicros as number,
-                memoryHighBytes: finalCgroup.memoryHighBytes as number,
-                memoryMaxBytes: finalCgroup.memoryMaxBytes as number,
-                memorySwapMaxBytes: finalCgroup.memorySwapMaxBytes as number,
-                oomGroup: true,
-                pidsMax: finalCgroup.pidsMax as number,
+                cpuQuotaMicros: finalCgroup.cpuQuotaMicros,
+                memoryHighBytes: finalCgroup.memoryHighBytes,
+                memoryMaxBytes: finalCgroup.memoryMaxBytes,
+                memorySwapMaxBytes: finalCgroup.memorySwapMaxBytes,
+                oomGroup: finalCgroup.oomGroup,
+                pidsMax: finalCgroup.pidsMax,
             },
             runtime: {
                 bunRevision: Bun.revision,

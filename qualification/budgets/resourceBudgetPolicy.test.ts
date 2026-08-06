@@ -214,9 +214,15 @@ describe("resource-budget policy", () => {
                 },
             ],
             [
-                "unit was not collected",
+                "cgroup was not removed",
                 (candidate) => {
                     candidate.cgroupRemoved = false;
+                },
+            ],
+            [
+                "unit was not collected",
+                (candidate) => {
+                    candidate.unitCollected = false;
                 },
             ],
         ];

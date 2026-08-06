@@ -1,12 +1,25 @@
 import * as v from "valibot";
 
 const identifierSchema = v.pipe(v.string(), v.regex(/^[a-z][a-z0-9-]{0,63}$/u));
-const countSchema = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(10_000));
+export const sqliteOutboxMaximumBatchSize = 1000;
+export const sqliteOutboxMaximumDrainNonemptyPolls = 1000;
+const batchCountSchema = v.pipe(
+    v.number(),
+    v.integer(),
+    v.minValue(0),
+    v.maxValue(sqliteOutboxMaximumBatchSize)
+);
+const drainCountSchema = v.pipe(
+    v.number(),
+    v.integer(),
+    v.minValue(0),
+    v.maxValue(sqliteOutboxMaximumBatchSize * sqliteOutboxMaximumDrainNonemptyPolls)
+);
 const eventIdSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
 
 export const sqliteOutboxChildStatusSchema = v.variant("kind", [
     v.strictObject({
-        count: countSchema,
+        count: batchCountSchema,
         eventIds: v.array(eventIdSchema),
         kind: v.literal("produced"),
         producerId: identifierSchema,
@@ -17,8 +30,8 @@ export const sqliteOutboxChildStatusSchema = v.variant("kind", [
         workerId: identifierSchema,
     }),
     v.strictObject({
-        claimedCount: countSchema,
-        deliveredCount: countSchema,
+        claimedCount: drainCountSchema,
+        deliveredCount: drainCountSchema,
         kind: v.literal("drained"),
         workerId: identifierSchema,
     }),

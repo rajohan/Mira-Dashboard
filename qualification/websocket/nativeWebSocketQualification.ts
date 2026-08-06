@@ -309,6 +309,8 @@ export function observeNativeWebSocket(
 
 /**
  * Reserves and releases one loopback TCP port before a native refusal test.
+ * The unavoidable release-to-connect port-reuse window is deliberately kept local
+ * to the refusal test; the caller still verifies exactly one native connection attempt.
  * @returns A WebSocket URL with no listener remaining on its port.
  */
 export function closedLoopbackWebSocketUrl(): Effect.Effect<

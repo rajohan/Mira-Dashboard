@@ -4,6 +4,7 @@ import { interruptedShutdownQualification } from "../shutdown/completeShutdownQu
 
 const report = await Effect.runPromise(interruptedShutdownQualification);
 if (
+    report.processGroupMembersWhileReady.length === 0 ||
     report.processGroupMembersAfterInterruption.length > 0 ||
     report.stoppedStatus.phase !== "stopped"
 ) {

@@ -57,6 +57,7 @@ export type ApplicationListenerShutdownError =
 export interface ApplicationListenerShutdownOptions {
     /** Synchronous escalation bridge used by repeated `ApplicationServer.stop(true)`. */
     readonly forceSignal: AbortSignal;
+    /** Independent budget applied to each graceful, forced, and settlement phase. */
     readonly gracefulShutdownTimeoutMs: number;
     readonly stop: (force: boolean) => Promise<void>;
 }

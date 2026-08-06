@@ -1,7 +1,12 @@
-import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
+import {
+    projectGreenfieldContractIdentities,
+    type ProcedureContractIdentity,
+    type RawHttpContractIdentity,
+} from "./parityFixtureCandidate.ts";
 import {
     parseFrontendParityFixture,
     parseGreenfieldContractParityFixture,
@@ -24,39 +29,39 @@ export interface ReviewedParityInventory {
     legacyEndpoints: LegacyEndpointParityFixture;
 }
 
-interface ProcedureContractIdentity {
-    kind: "mutation" | "query" | "subscription";
-    name: string;
-}
-
-interface RawHttpContractIdentity {
-    method: string;
-    path: string;
-}
-
-function canonicalJson(value: unknown): string {
-    return `${JSON.stringify(value, undefined, 2)}\n`;
-}
-
 function compareStrings(left: string, right: string): number {
     if (left < right) return -1;
     if (left > right) return 1;
     return 0;
 }
 
+function withCanonicalObjectKeyOrder(value: unknown): unknown {
+    if (Array.isArray(value)) {
+        return value.map((nested) => withCanonicalObjectKeyOrder(nested));
+    }
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+        Object.entries(value)
+            .toSorted(([left], [right]) => compareStrings(left, right))
+            .map(([key, nested]) => [key, withCanonicalObjectKeyOrder(nested)])
+    );
+}
+
+function canonicalJson(value: unknown): string {
+    return `${JSON.stringify(withCanonicalObjectKeyOrder(value), undefined, 2)}\n`;
+}
+
 async function loadJsonFixture(fileName: string): Promise<unknown> {
     const fixturePath = path.join(fixtureDirectory, fileName);
-    const fixtureStat = await stat(fixturePath);
-    if (
-        !fixtureStat.isFile() ||
-        fixtureStat.size <= 0 ||
-        fixtureStat.size > maximumFixtureBytes
-    ) {
-        throw new Error(`Parity fixture ${fileName} has an invalid size`);
-    }
-    const serialized = await readFile(fixturePath, "utf8");
+    const fixture = await readBoundedUtf8RegularFile(
+        fixturePath,
+        fixtureDirectory,
+        maximumFixtureBytes,
+        `Parity fixture ${fileName} has invalid file state`,
+        `Parity fixture ${fileName} is not valid UTF-8`
+    );
     try {
-        return JSON.parse(serialized) as unknown;
+        return JSON.parse(fixture.text) as unknown;
     } catch {
         throw new Error(`Parity fixture ${fileName} is not valid JSON`);
     }
@@ -138,18 +143,10 @@ export function assertGreenfieldRegistryMatchesReviewed(
     procedureContracts: readonly ProcedureContractIdentity[],
     rawHttpContracts: readonly RawHttpContractIdentity[]
 ): void {
-    const observed = {
-        procedures: procedureContracts
-            .map(({ kind, name }) => ({ kind, name }))
-            .toSorted((left, right) => compareStrings(left.name, right.name)),
-        rawHttp: rawHttpContracts
-            .map(({ method, path: routePath }) => ({
-                id: contractKey(method, routePath),
-                method,
-                path: routePath,
-            }))
-            .toSorted((left, right) => compareStrings(left.id, right.id)),
-    };
+    const observed = projectGreenfieldContractIdentities(
+        procedureContracts,
+        rawHttpContracts
+    );
     const expected = {
         procedures: reviewed.greenfieldContracts.procedures,
         rawHttp: reviewed.greenfieldContracts.rawHttp,

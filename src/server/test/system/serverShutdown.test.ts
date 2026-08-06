@@ -6,7 +6,10 @@ import { Effect, Layer, Stream } from "effect";
 import { createServer } from "../../../app/server.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import { RealtimeEventPumpService } from "../../platform/realtime/eventPumpService.ts";
-import { createApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
+import {
+    ApplicationListenerStopTimeoutError,
+    createApplicationRuntime,
+} from "../../platform/runtime/applicationRuntime.ts";
 import { captureFailure } from "../support/promise.ts";
 import {
     createTestApplicationRuntime,
@@ -14,7 +17,7 @@ import {
     createTestServerSecurityServices,
 } from "../support/requestContext.ts";
 
-function createPendingBunServer(): {
+function createPendingBunServer(resolveWhenForced = true): {
     readonly gracefulStarted: Promise<void>;
     readonly server: ReturnType<typeof Bun.serve>;
     readonly stopCalls: boolean[];
@@ -26,9 +29,9 @@ function createPendingBunServer(): {
         port: 3100,
         stop(force = false) {
             stopCalls.push(force);
-            if (force) {
+            if (force && resolveWhenForced) {
                 gracefulStop.resolve();
-            } else {
+            } else if (!force) {
                 gracefulStarted.resolve();
             }
             return gracefulStop.promise;
@@ -129,6 +132,42 @@ describe("application server shutdown", () => {
         } finally {
             serveSpy.mockRestore();
         }
+    });
+
+    test("preserves runtime services when listener escalation remains unsettled", async () => {
+        const fake = createPendingBunServer(false);
+        const serveSpy = spyOn(Bun, "serve").mockReturnValue(fake.server);
+        const readiness = createReadinessController();
+        readiness.markReady();
+        let disposals = 0;
+        const applicationRuntime = createShutdownTestRuntime(() => {
+            disposals += 1;
+        });
+
+        try {
+            const server = await createServer({
+                ...createTestServerSecurityServices(),
+                applicationRuntime,
+                authenticationLifecycle: createTestAuthenticationLifecycleService(),
+                authenticateCredential: () => ({
+                    authentication: { kind: "anonymous" },
+                }),
+                gracefulShutdownTimeoutMs: 1,
+                port: 3100,
+                readiness,
+            });
+
+            const failure = await captureFailure(() => server.stop());
+
+            expect(failure).toBeInstanceOf(ApplicationListenerStopTimeoutError);
+            expect(readiness.isReady()).toBe(false);
+            expect(fake.stopCalls).toEqual([false, true]);
+            expect(disposals).toBe(0);
+        } finally {
+            await applicationRuntime.dispose();
+            serveSpy.mockRestore();
+        }
+        expect(disposals).toBe(1);
     });
 
     test("preserves a startup failure when runtime disposal also fails", async () => {

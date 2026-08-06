@@ -99,7 +99,7 @@ outcomes remain normative unless a later runtime or dependency qualification dis
 2. **Passed — tRPC SSE on exact Bun:** credentials, cancellation, tracked resume, typed errors,
    proxy/TLS streaming, rolling reconnect, and bounded slow-consumer behavior pass.
 3. **Passed — SQLite outbox latency:** separate web and worker processes deliver a WAL-backed
-   durable outbox without gaps or duplicates, classify real busy/locked outcomes, and recover an
+   durable outbox without gaps or duplicates, classify observed busy/locked outcomes, and recover an
    expired claim after hard worker termination.
 4. **Passed — chat batching:** use ordered 150 ms token/thinking batches. One, four, and eight
    concurrent runs meet the selected write/delay policy, while tool/item, terminal, cancel, and

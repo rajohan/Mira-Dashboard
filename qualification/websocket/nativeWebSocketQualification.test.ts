@@ -16,6 +16,7 @@ import { rawWebSocketFixtureResource } from "./rawWebSocketFixture.ts";
 import {
     createFragmentedUtf8Evidence,
     fragmentedUtf8Message,
+    maximumRawWebSocketFixtureOutboundBytes,
     oversizedQualificationMessageBytes,
     type RawWebSocketScenario,
 } from "./rawWebSocketProtocol.ts";
@@ -182,7 +183,7 @@ describe("Bun native WebSocket RFC 6455 qualification", () => {
         expect(evidence.runtime.revision).toMatch(/^[a-f\d]{40}$/u);
         expect(evidence.runtime.version).toMatch(/^1\.4\.0/u);
         expect(evidence.sentBytes).toBeGreaterThan(split.completeBytes.byteLength);
-        expect(evidence.sentBytes).toBeLessThan(128 * 1024);
+        expect(evidence.sentBytes).toBeLessThan(maximumRawWebSocketFixtureOutboundBytes);
         expect(evidence.writeAttempts).toBeGreaterThanOrEqual(1);
     });
 
@@ -372,7 +373,7 @@ describe("Bun native WebSocket RFC 6455 qualification", () => {
                     attempts += 1;
                     return new WebSocket(target);
                 }).pipe(Effect.result);
-                yield* Effect.sleep("1200 millis");
+                yield* Effect.yieldNow;
                 if (Result.isSuccess(outcome)) {
                     return yield* Effect.die(
                         new Error("Connection refusal unexpectedly delivered a message")

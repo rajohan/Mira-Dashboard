@@ -123,7 +123,7 @@ function serializedBytes(value: unknown): number {
 function percentile95(values: readonly number[]): number {
     if (values.length === 0) return 0;
     const sorted = values.toSorted((left, right) => left - right);
-    return sorted[Math.ceil(sorted.length * 0.95) - 1] ?? 0;
+    return sorted[Math.ceil((sorted.length * 95) / 100) - 1] ?? 0;
 }
 
 function peakTransactionsPerSecond(commitTimes: readonly number[]): number {
@@ -210,6 +210,10 @@ export function simulateChatBatching(
         }
     }
     if (pendingDeadlineMs !== undefined) flush(pendingDeadlineMs, "interval");
+    let maximumCommitDelayMs = 0;
+    for (const delay of commitDelays) {
+        maximumCommitDelayMs = Math.max(maximumCommitDelayMs, delay);
+    }
 
     return Object.freeze({
         batches: Object.freeze(batches),
@@ -222,7 +226,7 @@ export function simulateChatBatching(
         inputBytes: events.reduce((total, event) => total + event.payloadBytes, 0),
         inputEvents: events.length,
         intervalMs,
-        maximumCommitDelayMs: Math.max(0, ...commitDelays),
+        maximumCommitDelayMs,
         maximumPendingBytes,
         p95CommitDelayMs: percentile95(commitDelays),
         peakScheduledTransactionsPerSecond:

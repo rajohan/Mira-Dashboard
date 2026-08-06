@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Data, Deferred, Effect, Fiber, Schedule, Scope } from "effect";
+import { Data, Deferred, Duration, Effect, Fiber, Schedule, Scope } from "effect";
 import * as v from "valibot";
 
 import {
@@ -23,6 +23,7 @@ const serviceModulePath = path.join(
 );
 const statusMaximumBytes = 64 * 1024;
 const operationDeadline = "10 seconds";
+const streamCancellationDeadline = "250 millis";
 export const linuxProcessStatReadConcurrency = 16;
 const statusPollingSchedule = Schedule.spaced("5 millis").pipe(
     Schedule.upTo({ times: 2000 })
@@ -101,6 +102,31 @@ function withDeadline<A, E>(
     );
 }
 
+/**
+ * Attempts one stream cancellation without allowing a non-cooperative promise to
+ * block the owning scope's remaining finalizers.
+ * @param cancel Promise-returning Web Stream cancellation operation.
+ * @param deadline Maximum time to wait before continuing cleanup.
+ * @returns Best-effort, Effect-owned cancellation.
+ */
+export function cancelShutdownStreamBeforeDeadline(
+    cancel: () => Promise<void>,
+    deadline: Duration.Input = streamCancellationDeadline
+): Effect.Effect<void> {
+    return Effect.tryPromise(cancel).pipe(
+        // Scope finalizers are uninterruptible. Restore interruptibility only for
+        // the promise bridge so timeoutOrElse can detach a cancel promise that
+        // never settles and let older finalizers continue.
+        Effect.interruptible,
+        Effect.timeoutOrElse({
+            duration: deadline,
+            orElse: () => Effect.void,
+        }),
+        Effect.ignore,
+        Effect.asVoid
+    );
+}
+
 function temporaryWorkspace() {
     return Effect.acquireRelease(
         Effect.tryPromise({
@@ -160,7 +186,9 @@ function stopServiceProcess(
     child: QualificationServiceProcess,
     acknowledgePath: string
 ): Effect.Effect<void> {
-    if (child.exitCode !== null || child.signalCode !== null) return Effect.void;
+    if (child.exitCode !== null || child.signalCode !== null) {
+        return Effect.sync(() => killProcessGroup(child.pid));
+    }
     const graceful = writeMarker(acknowledgePath).pipe(
         Effect.andThen(Effect.sync(() => child.kill("SIGTERM"))),
         Effect.andThen(awaitServiceExit(child, "release-service-process"))
@@ -261,7 +289,7 @@ function fetchResponse(
 > {
     return Effect.gen(function* () {
         const signal = yield* Effect.abortSignal;
-        return yield* withDeadline(
+        const response = yield* withDeadline(
             Effect.tryPromise({
                 catch: (cause) =>
                     new CompleteShutdownQualificationError({ cause, operation }),
@@ -269,6 +297,13 @@ function fetchResponse(
             }),
             operation
         );
+        const body = response.body;
+        if (body !== null) {
+            yield* Effect.addFinalizer(() =>
+                cancelShutdownStreamBeforeDeadline(() => body.cancel())
+            );
+        }
+        return response;
     });
 }
 
@@ -332,6 +367,9 @@ function sseConnectionResource(
                 );
             }
             const reader = response.body.getReader();
+            const cancelReader = cancelShutdownStreamBeforeDeadline(() =>
+                reader.cancel()
+            );
             const first = yield* withDeadline(
                 Effect.tryPromise({
                     catch: (cause) =>
@@ -342,12 +380,13 @@ function sseConnectionResource(
                     try: () => reader.read(),
                 }),
                 "read-sse-opening-event"
-            );
+            ).pipe(Effect.onError(() => cancelReader));
             if (
                 first.done ||
                 first.value === undefined ||
                 !new TextDecoder().decode(first.value).includes("event: ready")
             ) {
+                yield* cancelReader;
                 return yield* Effect.fail(
                     new CompleteShutdownQualificationError({
                         operation: "validate-sse-opening-event",
@@ -356,11 +395,7 @@ function sseConnectionResource(
             }
             return Object.freeze({ reader });
         }),
-        ({ reader }) =>
-            Effect.tryPromise({
-                catch: () => null,
-                try: () => reader.cancel(),
-            }).pipe(Effect.ignore, Effect.asVoid)
+        ({ reader }) => cancelShutdownStreamBeforeDeadline(() => reader.cancel())
     );
 }
 

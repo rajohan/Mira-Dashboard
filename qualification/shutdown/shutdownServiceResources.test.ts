@@ -3,6 +3,10 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { Effect } from "effect";
 
 import {
+    createGatewayConnectRequest,
+    parseGatewayConnectRequest,
+} from "./shutdownProtocol.ts";
+import {
     applicationServerResource,
     ShutdownQualificationDeadlineError,
     ShutdownQualificationResourceError,
@@ -10,6 +14,15 @@ import {
 } from "./shutdownServiceResources.ts";
 
 describe("shutdown application listener policy", () => {
+    test("binds the Gateway connect request to its challenge nonce", () => {
+        const nonce = "qualification-challenge";
+        const request = parseGatewayConnectRequest(
+            JSON.stringify(createGatewayConnectRequest(nonce))
+        );
+
+        expect(request.params.nonce).toBe(nonce);
+    });
+
     test("reports a graceful stop without escalation", async () => {
         const stopCalls: boolean[] = [];
 
@@ -123,5 +136,45 @@ describe("shutdown application listener policy", () => {
         } finally {
             serveSpy.mockRestore();
         }
+    });
+
+    test("closes every registered SSE controller on a real listener", async () => {
+        const evidence = await Effect.runPromise(
+            Effect.scoped(
+                Effect.gen(function* () {
+                    const server = yield* applicationServerResource({
+                        gatewaySocketOpen: false,
+                        leaseActive: false,
+                        readiness: true,
+                    });
+                    const response = yield* Effect.tryPromise(() =>
+                        fetch(`http://127.0.0.1:${server.port}/api/events`)
+                    );
+                    if (response.body === null) {
+                        return yield* Effect.die("SSE response body is unavailable");
+                    }
+                    const reader = response.body.getReader();
+                    yield* Effect.addFinalizer(() =>
+                        Effect.tryPromise(() => reader.cancel()).pipe(
+                            Effect.ignore,
+                            Effect.asVoid
+                        )
+                    );
+                    const openingEvent = yield* Effect.tryPromise(() => reader.read());
+                    if (openingEvent.done || openingEvent.value === undefined) {
+                        return yield* Effect.die("SSE opening event is unavailable");
+                    }
+                    const registeredBeforeClose = server.sseConnectionCount;
+                    yield* server.close();
+                    return {
+                        registeredAfterClose: server.sseConnectionCount,
+                        registeredBeforeClose,
+                    };
+                })
+            )
+        );
+
+        expect(evidence.registeredBeforeClose).toBe(1);
+        expect(evidence.registeredAfterClose).toBe(0);
     });
 });

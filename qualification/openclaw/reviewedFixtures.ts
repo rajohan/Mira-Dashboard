@@ -1,17 +1,9 @@
 import { createHash } from "node:crypto";
-import {
-    mkdir,
-    mkdtemp,
-    readFile,
-    readdir,
-    rename,
-    rm,
-    stat,
-    writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import {
     agentsFixtureSchema,
     chatFixtureSchema,
@@ -69,18 +61,14 @@ async function readBoundedFixture(
     if (!target.startsWith(`${fixtureRoot}${path.sep}`)) {
         throw new Error("Reviewed OpenClaw fixture escaped its version directory");
     }
-    const fileStat = await stat(target);
-    if (!fileStat.isFile() || fileStat.size <= 0 || fileStat.size > maximumFixtureBytes) {
-        throw new Error(`Reviewed OpenClaw fixture ${fileName} has an invalid size`);
-    }
-    const bytes = await readFile(target);
-    let serialized: string;
-    try {
-        serialized = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-        throw new Error(`Reviewed OpenClaw fixture ${fileName} is not valid UTF-8`);
-    }
-    return { bytes, serialized };
+    const fixture = await readBoundedUtf8RegularFile(
+        target,
+        fixtureRoot,
+        maximumFixtureBytes,
+        `Reviewed OpenClaw fixture ${fileName} has invalid file state`,
+        `Reviewed OpenClaw fixture ${fileName} is not valid UTF-8`
+    );
+    return { bytes: fixture.bytes, serialized: fixture.text };
 }
 
 /**
@@ -206,26 +194,23 @@ export async function writeOpenClawAuditCandidate(
             "OpenClaw audit output directory must be named after the source version"
         );
     }
+    let outputDirectoryExists = true;
     try {
         await stat(outputDirectory);
-        throw new Error("OpenClaw audit output directory already exists");
     } catch (error) {
         if (
-            error instanceof Error &&
-            error.message === "OpenClaw audit output directory already exists"
+            error &&
+            typeof error === "object" &&
+            "code" in error &&
+            error.code === "ENOENT"
         ) {
+            outputDirectoryExists = false;
+        } else {
             throw error;
         }
-        if (
-            !(
-                error &&
-                typeof error === "object" &&
-                "code" in error &&
-                error.code === "ENOENT"
-            )
-        ) {
-            throw error;
-        }
+    }
+    if (outputDirectoryExists) {
+        throw new Error("OpenClaw audit output directory already exists");
     }
 
     const parentDirectory = path.dirname(outputDirectory);

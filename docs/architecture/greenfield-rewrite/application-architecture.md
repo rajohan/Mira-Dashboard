@@ -285,7 +285,7 @@ not protocol authority. The consolidated controls and executable evidence are in
 
 ### Current-protocol Control UI projections
 
-The 2026-08-06 OpenClaw audit separates protocol authority from Control UI projection through 22
+The 2026-08-06 OpenClaw audit separates protocol authority from Control UI projection through 23
 hash-pinned, redacted distribution artifacts. The current behavior informs Phase 4, but Dashboard
 must re-audit the installed source and use a typed protocol adapter rather than scrape, import, or
 mirror Control UI implementation details:

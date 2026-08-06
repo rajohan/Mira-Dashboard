@@ -60,11 +60,12 @@ environment against the exact candidate binary:
 
 The 2026-08-06 qualification round passes on exact revision
 `17d6843606d76620cb55d31424d7fb0aed51c367`: qualification typecheck passes, and the full suite
-reports 133 tests, 682 assertions, and zero failures across 30 files. Its executable evidence
+reports 151 tests, 756 assertions, and zero failures across 31 files. Its executable evidence
 includes:
 
-- compiler-first Bun HTML AOT output with Tailwind, lazy chunks, CSP-compatible assets, hashes,
-  precompression, no production source maps, and enforced bundle budgets;
+- compiler-first Bun HTML AOT output with Tailwind, lazy chunks, fail-closed inline-code and
+  URL-bearing-attribute CSP checks, hashes, precompression, no production source maps, and
+  enforced bundle budgets;
 - Fetch/tRPC/SSE cancellation, resume, proxy, rolling-restart, and slow-consumer behavior;
 - raw RFC 6455 continuation reassembly with a UTF-8 code point split across frames, protocol-close
   `1002`, application-bound `1009`, a 64 KiB limit, deterministic close, and exactly one connection
@@ -76,9 +77,9 @@ includes:
 - 150 ms chat-delta batching for one, four, and eight concurrent runs with immediate boundary and
   terminal flushes;
 - a two-generation shutdown with readiness withdrawal, SSE and Gateway closure, statement and
-  database disposal, worker-lease recovery, child-process-group cleanup, WAL recovery, and no
-  leaked process; and
-- source-derived parity for 156 current HTTP operations plus `/ws`, together with 22 hash-pinned,
+  database disposal, bounded non-cooperative stream cancellation, worker-lease recovery,
+  child-process-group cleanup, WAL recovery, and no leaked process; and
+- source-derived parity for 156 current HTTP operations plus `/ws`, together with 23 hash-pinned,
   redacted OpenClaw protocol and Control UI audit artifacts.
 
 The candidate intentionally makes `server.stop(false)` wait for idle keep-alive connections. The
@@ -87,17 +88,10 @@ a separately bounded `server.stop(true)` escalation. The exact candidate records
 `listener-force-stopped`, then closes SSE and every owned resource without a leak; the event model
 permits exactly one graceful or forced terminal outcome.
 
-The candidate resource matrix also passes without `high`, `max`, `oom`, or `oom_kill` memory
-events, memory pressure, or leaked process, unit, or temporary state:
-
-| Scenario              | Peak memory (bytes) | Elapsed (ms) | Peak tasks |
-| --------------------- | ------------------: | -----------: | ---------: |
-| Frontend build        |         650,104,832 |       14,793 |         19 |
-| Representative tests  |         248,758,272 |        2,222 |         18 |
-| SQLite outbox/restore |         101,896,192 |        1,218 |         20 |
-| Chat batching         |          42,676,224 |           97 |         12 |
-| Complete shutdown     |         128,774,144 |        3,133 |         25 |
-| Child-process cancel  |         117,194,752 |        1,531 |         24 |
+The candidate resource checks also pass without `high`, `max`, `oom`, or `oom_kill` memory
+events, memory pressure, or leaked process, unit, or temporary state. The dated
+[Phase 0 progress record](progress.md#2026-08-06--phase-0-evidence-and-qualification-closed)
+owns the authoritative resource measurements.
 
 These measurements qualify the mechanisms and current limits; Phase 6 still owns final
 production-shaped load, restore, and cutover evidence.

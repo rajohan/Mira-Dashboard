@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 import * as v from "valibot";
 
+import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import {
     parseSourceAuditResult,
     type SourceArtifact,
@@ -168,6 +169,14 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "task-registry",
     },
     {
+        fileNamePattern: /^task-summary-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const TASK_PROMPT_MAX_CHARS = 4e3",
+            "sanitizeTaskPromptText(task.task, TASK_PROMPT_MAX_CHARS)",
+        ],
+        role: "task-summary",
+    },
+    {
         fileNamePattern: /^tasks-[A-Za-z0-9_-]+\.js$/u,
         markers: ["LEDGER_STATUS_TO_TASK_STATUSES", '"tasks.list"', '"tasks.cancel"'],
         role: "tasks-handlers",
@@ -212,25 +221,19 @@ async function loadSourceArtifact(
 ): Promise<LoadedSourceArtifact> {
     const requestedPath = path.resolve(sourceRoot, relativePath);
     assertContainedPath(sourceRoot, requestedPath);
-    const absolutePath = await realpath(requestedPath);
-    assertContainedPath(sourceRoot, absolutePath);
-    const fileStat = await stat(absolutePath);
-    if (!fileStat.isFile() || fileStat.size <= 0 || fileStat.size > maximumBytes) {
-        throw new Error(`OpenClaw ${role} artifact has an invalid size`);
-    }
-    const bytes = await readFile(absolutePath);
-    let contents: string;
-    try {
-        contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-        throw new Error(`OpenClaw ${role} artifact is not valid UTF-8`);
-    }
+    const artifact = await readBoundedUtf8RegularFile(
+        requestedPath,
+        sourceRoot,
+        maximumBytes,
+        `OpenClaw ${role} artifact has invalid file state`,
+        `OpenClaw ${role} artifact is not valid UTF-8`
+    );
     return {
-        bytes: bytes.byteLength,
-        contents,
+        bytes: artifact.bytes.byteLength,
+        contents: artifact.text,
         path: relativePath,
         role,
-        sha256: sha256(bytes),
+        sha256: sha256(artifact.bytes),
     };
 }
 
@@ -276,14 +279,36 @@ function artifactByRole(
     return artifact;
 }
 
-function parseIntegerConstant(source: string, name: string): number {
-    const match = source.match(new RegExp(`const ${name} = ([^;]+);`, "u"));
-    if (!match?.[1]) throw new Error(`OpenClaw source is missing ${name}`);
-    const factors = match[1]
+const reviewedIntegerConstantNames = [
+    "MAX_PAYLOAD_BYTES",
+    "MAX_PREAUTH_PAYLOAD_BYTES",
+    "MIN_CLIENT_PROTOCOL_VERSION",
+    "MIN_NODE_PROTOCOL_VERSION",
+    "MIN_PROBE_PROTOCOL_VERSION",
+    "PROTOCOL_VERSION",
+    "TASK_PROMPT_MAX_CHARS",
+] as const;
+
+type ReviewedIntegerConstantName = (typeof reviewedIntegerConstantNames)[number];
+
+function parseIntegerConstant(source: string, name: ReviewedIntegerConstantName): number {
+    const prefix = `const ${name} = `;
+    const expressions = source
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith(prefix) && line.endsWith(";"))
+        .map((line) => line.slice(prefix.length, -1));
+    if (expressions.length !== 1) {
+        throw new Error(`OpenClaw source must define ${name} exactly once`);
+    }
+    const factors = expressions[0]!
         .trim()
         .split("*")
         .map((factor) => factor.trim());
-    if (factors.length === 0 || factors.some((factor) => !/^\d+$/u.test(factor))) {
+    if (
+        factors.length === 0 ||
+        factors.some((factor) => !/^\d+(?:e\d+)?$/u.test(factor))
+    ) {
         throw new Error(`OpenClaw ${name} is not a reviewed integer product`);
     }
     const result = factors.reduce((product, factor) => product * Number(factor), 1);
@@ -368,7 +393,7 @@ function assertMethodPermission(
     }
 }
 
-function assertPlanCompanionAndTasks(artifacts: readonly LoadedSourceArtifact[]): void {
+function assertPlanCompanionAndTasks(artifacts: readonly LoadedSourceArtifact[]): number {
     const planTool = artifactByRole(artifacts, "plan-tool").contents;
     assertRequiredMarkers(planTool, "plan producer", [
         '"pending"',
@@ -504,6 +529,11 @@ function assertPlanCompanionAndTasks(artifacts: readonly LoadedSourceArtifact[])
             "respond(true, {",
         ]
     );
+    const taskSummary = artifactByRole(artifacts, "task-summary").contents;
+    assertRequiredMarkers(taskSummary, "task prompt projection", [
+        "const TASK_PROMPT_MAX_CHARS = 4e3",
+        "sanitizeTaskPromptText(task.task, TASK_PROMPT_MAX_CHARS)",
+    ]);
     assertRequiredMarkers(
         artifactByRole(artifacts, "task-registry").contents,
         "task cancellation",
@@ -533,6 +563,7 @@ function assertPlanCompanionAndTasks(artifacts: readonly LoadedSourceArtifact[])
             "tasks.cancel",
         ]
     );
+    return parseIntegerConstant(taskSummary, "TASK_PROMPT_MAX_CHARS");
 }
 
 function extractGatewayEvents(source: string): string[] {
@@ -732,7 +763,7 @@ export async function auditInstalledOpenClaw(
         artifactByRole(artifacts, "gateway-websocket").contents,
         declarations
     );
-    assertPlanCompanionAndTasks(artifacts);
+    const taskPromptChars = assertPlanCompanionAndTasks(artifacts);
 
     return parseSourceAuditResult({
         agents: {
@@ -1016,7 +1047,7 @@ export async function auditInstalledOpenClaw(
             promptVisibility: {
                 getIncludesBoundedPrompt: true,
                 listAndEventsOmitPrompt: true,
-                promptChars: 4000,
+                promptChars: taskPromptChars,
             },
             runtimeMappings: [
                 { internal: "cancelled", wire: "cancelled" },

@@ -24,13 +24,28 @@ export interface QualificationFrontendBuildEvidence {
 }
 
 const qualificationFrontendEntrypoint = path.resolve(
-    "qualification/build/fixtures/frontend/index.html"
+    import.meta.dir,
+    "fixtures/frontend/index.html"
 );
 
 export const qualificationFrontendPluginOrder = [
     reactCompilerPlugin.name,
     tailwindPlugin.name,
 ] as const;
+
+const frontendHtmlResourceAttributes = new Set([
+    "action",
+    "background",
+    "cite",
+    "data",
+    "formaction",
+    "href",
+    "manifest",
+    "poster",
+    "src",
+    "xlink:href",
+]);
+const frontendHtmlSourceSetAttributes = new Set(["imagesrcset", "srcset"]);
 
 /**
  * Builds a minimal HTML-entry frontend with the target compiler-first pipeline.
@@ -114,31 +129,131 @@ export async function buildQualificationFrontend(
  */
 export async function assertSelfHostedFrontendHtml(indexPath: string): Promise<void> {
     const html = await readFile(indexPath, "utf8");
-    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/giu)];
-    const styles = [...html.matchAll(/<style\b[^>]*>[\s\S]*?<\/style>/giu)];
-    if (scripts.length !== 1 || styles.length > 0) {
+    const scripts: Array<{ body: string; source: string | null; type: string | null }> =
+        [];
+    let styleCount = 0;
+    let hasInlineEventHandler = false;
+    let hasInlineSourceDocument = false;
+    let hasInlineStyle = false;
+    let hasNonSelfHostedResource = false;
+    let hasBaseElement = false;
+    const rewriter = new HTMLRewriter()
+        .on("*", {
+            element(element) {
+                for (const [name, value] of element.attributes) {
+                    const normalizedName = name.toLowerCase();
+                    if (normalizedName.startsWith("on")) {
+                        hasInlineEventHandler = true;
+                    } else if (normalizedName === "srcdoc") {
+                        hasInlineSourceDocument = true;
+                    } else if (normalizedName === "style") {
+                        hasInlineStyle = true;
+                    } else if (
+                        frontendHtmlResourceAttributes.has(normalizedName) &&
+                        !isSelfHostedResourceReference(value)
+                    ) {
+                        hasNonSelfHostedResource = true;
+                    } else if (
+                        frontendHtmlSourceSetAttributes.has(normalizedName) &&
+                        !isSelfHostedSourceSet(value)
+                    ) {
+                        hasNonSelfHostedResource = true;
+                    }
+                }
+            },
+        })
+        .on("base", {
+            element() {
+                hasBaseElement = true;
+            },
+        })
+        .on("script", {
+            element(element) {
+                scripts.push({
+                    body: "",
+                    source: element.getAttribute("src"),
+                    type: element.getAttribute("type"),
+                });
+            },
+            text(text) {
+                const script = scripts.at(-1);
+                if (script) script.body += text.text;
+            },
+        })
+        .on("style", {
+            element() {
+                styleCount += 1;
+            },
+        });
+    rewriter.transform(html);
+
+    if (
+        scripts.length !== 1 ||
+        styleCount > 0 ||
+        hasInlineEventHandler ||
+        hasInlineSourceDocument ||
+        hasInlineStyle ||
+        hasBaseElement
+    ) {
         throw new Error(
-            "Frontend HTML must contain one external script and no inline styles"
+            "Frontend HTML must contain one external script and no inline code"
         );
     }
 
-    const scriptAttributes = scripts[0]?.[1] ?? "";
-    const scriptBody = scripts[0]?.[2] ?? "";
-    const source = scriptAttributes.match(/\bsrc=(['"])([^'"]+)\1/iu)?.[2];
+    const script = scripts[0]!;
     if (
-        !/\btype=(['"])module\1/iu.test(scriptAttributes) ||
-        !source?.startsWith("/assets/") ||
-        scriptBody.trim().length > 0
+        script.type !== "module" ||
+        !script.source?.startsWith("/assets/") ||
+        script.body.trim().length > 0
     ) {
         throw new Error("Frontend HTML module script must be external and self-hosted");
     }
 
-    const nonSelfHostedResource = html.match(
-        /\b(?:href|src)=(['"])(?:[a-z][a-z\d+.-]*:|\/\/)[^'"]*\1/iu
-    );
-    if (nonSelfHostedResource) {
+    if (hasNonSelfHostedResource) {
         throw new Error("Frontend HTML cannot depend on a third-party CSP origin");
     }
+}
+
+function isSelfHostedResourceReference(value: string): boolean {
+    const reference = value.trim();
+    if (reference.length === 0 || reference.includes("&") || reference.includes("\\")) {
+        return false;
+    }
+    if (/^[a-z][a-z\d+.-]*:/iu.test(reference) || reference.startsWith("//")) {
+        return false;
+    }
+    try {
+        const base = new URL("https://qualification.invalid/");
+        const resolved = new URL(reference, base);
+        return (
+            resolved.origin === base.origin && resolved.pathname.startsWith("/assets/")
+        );
+    } catch {
+        return false;
+    }
+}
+
+function isSelfHostedSourceSet(value: string): boolean {
+    const candidates = value.split(",");
+    return (
+        candidates.length > 0 &&
+        candidates.every((candidate) => {
+            const tokens = candidate.trim().split(/\s+/u);
+            if (
+                tokens.length === 0 ||
+                tokens.length > 2 ||
+                !isSelfHostedResourceReference(tokens[0] ?? "")
+            ) {
+                return false;
+            }
+            const descriptor = tokens[1];
+            return (
+                descriptor === undefined ||
+                /^\d+w$/u.test(descriptor) ||
+                /^(?:\d+|\d*\.\d+)x$/u.test(descriptor)
+            );
+        })
+    );
 }
 
 function normalizedOutputPath(outputPath: string, outdir: string): string {

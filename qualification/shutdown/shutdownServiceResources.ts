@@ -365,11 +365,19 @@ export function gatewayFixtureResource(): Effect.Effect<
                     websocket: {
                         message(socket, message) {
                             try {
-                                parseGatewayConnectRequest(
+                                const request = parseGatewayConnectRequest(
                                     typeof message === "string"
                                         ? message
                                         : message.toString("utf8")
                                 );
+                                if (
+                                    request.params.nonce !==
+                                    "shutdown-qualification-nonce"
+                                ) {
+                                    throw new Error(
+                                        "Gateway connect request did not echo its challenge"
+                                    );
+                                }
                                 socket.send(JSON.stringify(createGatewayHelloResponse()));
                             } catch {
                                 socket.close(1008, "invalid connect request");
@@ -427,10 +435,19 @@ function openGatewaySocket(
                 socket.removeEventListener("error", onError);
                 socket.removeEventListener("message", onMessage);
             };
+            const closeSocket = (reason: string) => {
+                if (
+                    socket.readyState === WebSocket.CONNECTING ||
+                    socket.readyState === WebSocket.OPEN
+                ) {
+                    socket.close(1000, reason);
+                }
+            };
             const fail = (operation: string, cause?: unknown) => {
                 if (settled) return;
                 settled = true;
                 removeListeners();
+                closeSocket("qualification handshake failed");
                 resume(
                     Effect.fail(
                         new ShutdownQualificationResourceError({ cause, operation })
@@ -468,12 +485,7 @@ function openGatewaySocket(
             socket.addEventListener("message", onMessage);
             return Effect.sync(() => {
                 removeListeners();
-                if (
-                    socket.readyState === WebSocket.CONNECTING ||
-                    socket.readyState === WebSocket.OPEN
-                ) {
-                    socket.close(1000, "qualification interrupted");
-                }
+                closeSocket("qualification interrupted");
             });
         }
     );

@@ -65,14 +65,16 @@ export function buildChatBatchingTrace(
         throw new RangeError("Chat batching concurrency is outside qualification bounds");
     }
     const throttleMs = fixture.streamingPolicy.deltaThrottleMs;
-    const thinking = fixtureEvent(fixture, "completed-tool-run", "agent-delta");
-    const assistant = fixture.syntheticScenarios
-        .flatMap(({ events }) => events)
-        .find(
-            (event): event is Extract<SyntheticChatEvent, { kind: "agent-delta" }> =>
-                event.kind === "agent-delta" && event.stream === "assistant"
-        );
-    if (thinking.kind !== "agent-delta" || assistant === undefined) {
+    const agentDeltaForStream = (stream: "assistant" | "thinking") =>
+        fixture.syntheticScenarios
+            .flatMap(({ events }) => events)
+            .find(
+                (event): event is Extract<SyntheticChatEvent, { kind: "agent-delta" }> =>
+                    event.kind === "agent-delta" && event.stream === stream
+            );
+    const thinking = agentDeltaForStream("thinking");
+    const assistant = agentDeltaForStream("assistant");
+    if (thinking === undefined || assistant === undefined) {
         throw new Error("Reviewed chat fixture lacks both coalesced agent streams");
     }
     const toolStart = fixtureEvent(fixture, "completed-tool-run", "tool-start");
@@ -137,12 +139,14 @@ function candidateRejectionReasons(
     fixture: ChatFixture
 ): readonly string[] {
     const throttleMs = fixture.streamingPolicy.deltaThrottleMs;
+    const maximumAdditionalVisualDelayMs = throttleMs;
+    const maximumCrashWindowMs = throttleMs;
     const maximumScheduledTransactionsPerSecond = Math.ceil(1000 / throttleMs);
     return Object.freeze([
-        ...(metrics.maximumCommitDelayMs > throttleMs
+        ...(metrics.maximumCommitDelayMs > maximumAdditionalVisualDelayMs
             ? ["visual-delay-exceeds-one-source-tick"]
             : []),
-        ...(metrics.maximumCommitDelayMs > throttleMs
+        ...(metrics.maximumCommitDelayMs > maximumCrashWindowMs
             ? ["crash-window-exceeds-one-source-tick"]
             : []),
         ...(metrics.peakScheduledTransactionsPerSecond >

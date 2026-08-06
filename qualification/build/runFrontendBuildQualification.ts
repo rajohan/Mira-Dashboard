@@ -34,6 +34,12 @@ export async function runActualFrontendBuildQualification(
         path.join(outdir, "frontend-bundle-metrics.json"),
         "utf8"
     );
+    let parsedMetrics: unknown;
+    try {
+        parsedMetrics = JSON.parse(metrics) as unknown;
+    } catch {
+        parsedMetrics = undefined;
+    }
 
     if (hashedAssetCount < 10) {
         throw new Error("Existing frontend build did not emit hashed route assets");
@@ -44,7 +50,12 @@ export async function runActualFrontendBuildQualification(
     if (sourceMapsIncluded) {
         throw new Error("Production frontend build emitted source maps");
     }
-    if (!metrics.includes('"formatVersion": 1')) {
+    if (
+        typeof parsedMetrics !== "object" ||
+        parsedMetrics === null ||
+        !("formatVersion" in parsedMetrics) ||
+        parsedMetrics.formatVersion !== 1
+    ) {
         throw new Error("Existing frontend build emitted an unknown metrics format");
     }
     await assertSelfHostedFrontendHtml(path.join(outdir, "index.html"));

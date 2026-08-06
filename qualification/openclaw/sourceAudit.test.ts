@@ -141,6 +141,10 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             killSubagentRunAdmin();
             "Subagent completed while cancellation was in progress.";
         `,
+        "task-summary-fixture.js": `
+            const TASK_PROMPT_MAX_CHARS = 4e3;
+            const prompt = sanitizeTaskPromptText(task.task, TASK_PROMPT_MAX_CHARS);
+        `,
         "subagent-control-fixture.js": `
             // Admin kill path for a subagent session key, bypassing caller ownership checks.
             cascadeKillChildren();
@@ -287,7 +291,7 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(22);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(23);
         expect(reviewed.audit.sessions.plan.authority).toMatchObject({
             dedicatedGatewayEvent: false,
             gatewayEvent: "agent",
@@ -358,13 +362,9 @@ describe("reviewed OpenClaw protocol fixtures", () => {
                 "utf8"
             );
 
-            try {
-                await loadReviewedOpenClawFixtures(fixtureRoot);
-                throw new Error("Expected fixture hash validation to fail");
-            } catch (error) {
-                expect(error).toBeInstanceOf(Error);
-                expect((error as Error).message).toContain("hash mismatch for chat.json");
-            }
+            expect(loadReviewedOpenClawFixtures(fixtureRoot)).rejects.toThrow(
+                "hash mismatch for chat.json"
+            );
         });
     });
 });
@@ -403,7 +403,7 @@ describe("explicit OpenClaw source audit", () => {
                 "tasks.get",
                 "tasks.list",
             ]);
-            expect(audit.sourceArtifacts).toHaveLength(22);
+            expect(audit.sourceArtifacts).toHaveLength(23);
         });
     });
 
@@ -422,11 +422,24 @@ describe("explicit OpenClaw source audit", () => {
                 expect(() =>
                     assertOpenClawAuditMatchesReviewed(audit, loaded.audit)
                 ).not.toThrow();
+                expect(
+                    writeOpenClawAuditCandidate(audit, outputDirectory)
+                ).rejects.toThrow("output directory already exists");
             }
         );
     });
 
     test("requires explicit absolute host paths and one operation", () => {
+        expect(
+            parseSourceAuditCliArguments([
+                "--source-root=/opt/openclaw",
+                "--output=/tmp/openclaw-audit/2026.7.2-beta.7",
+            ])
+        ).toEqual({
+            mode: "write",
+            outputDirectory: "/tmp/openclaw-audit/2026.7.2-beta.7",
+            sourceRoot: "/opt/openclaw",
+        });
         expect(
             parseSourceAuditCliArguments([
                 "--check-reviewed",

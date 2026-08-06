@@ -89,10 +89,11 @@ function acquireIdleHttpConnection(
                     );
                     const headerEnd = state.response.indexOf("\r\n\r\n");
                     if (headerEnd === -1) return;
-                    const statusLine = state.response
+                    const headerLines = state.response
                         .subarray(0, headerEnd)
                         .toString("utf8")
-                        .split("\r\n", 1)[0];
+                        .split("\r\n");
+                    const statusLine = headerLines[0];
                     if (statusLine !== "HTTP/1.1 200 OK") {
                         fail(
                             "validate-idle-http-response",
@@ -100,6 +101,30 @@ function acquireIdleHttpConnection(
                         );
                         return;
                     }
+                    const contentLengthHeaders = headerLines
+                        .slice(1)
+                        .filter((line) => /^content-length\s*:/iu.test(line));
+                    const contentLengthText = contentLengthHeaders[0]
+                        ?.slice(contentLengthHeaders[0].indexOf(":") + 1)
+                        .trim();
+                    if (
+                        contentLengthHeaders.length !== 1 ||
+                        contentLengthText === undefined ||
+                        !/^(?:0|[1-9][0-9]*)$/u.test(contentLengthText)
+                    ) {
+                        fail("validate-idle-http-content-length");
+                        return;
+                    }
+                    const contentLength = Number(contentLengthText);
+                    const completeResponseBytes = headerEnd + 4 + contentLength;
+                    if (
+                        !Number.isSafeInteger(contentLength) ||
+                        completeResponseBytes > responseMaximumBytes
+                    ) {
+                        fail("validate-idle-http-content-length");
+                        return;
+                    }
+                    if (state.response.length < completeResponseBytes) return;
                     state.settled = true;
                     socket.pause();
                     resume(Effect.succeed(socket));

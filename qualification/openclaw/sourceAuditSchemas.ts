@@ -442,6 +442,7 @@ export const sourceArtifactSchema = v.strictObject({
         "session-companion-runtime",
         "subagent-control",
         "task-registry",
+        "task-summary",
         "tasks-handlers",
     ]),
     sha256: sha256Schema,
@@ -449,7 +450,7 @@ export const sourceArtifactSchema = v.strictObject({
 
 const sourceArtifactsSchema = v.pipe(
     v.array(sourceArtifactSchema),
-    v.length(22),
+    v.length(23),
     v.check(
         (artifacts) => isSortedAndUnique(artifacts.map((artifact) => artifact.role)),
         "Source artifact roles must be sorted and unique"

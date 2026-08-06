@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 const webSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const headerTerminator = Buffer.from("\r\n\r\n", "ascii");
-const maximumFixtureOutboundBytes = 128 * 1024;
+export const maximumRawWebSocketFixtureOutboundBytes = 128 * 1024;
 
 export const maximumRawWebSocketHandshakeBytes = 16 * 1024;
 export const maximumRawWebSocketPeerBytes = 128 * 1024;
@@ -48,7 +48,7 @@ function asBoundedPayload(payload: string | Uint8Array): Buffer {
         typeof payload === "string"
             ? Buffer.from(payload, "utf8")
             : Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
-    if (bytes.byteLength > maximumFixtureOutboundBytes) {
+    if (bytes.byteLength > maximumRawWebSocketFixtureOutboundBytes) {
         throw new RangeError("WebSocket fixture payload exceeded its byte budget");
     }
     return bytes;
@@ -140,7 +140,9 @@ function hasHeaderToken(value: string | undefined, expected: string): boolean {
 }
 
 function createUpgradeResponse(key: string): Buffer {
-    const accept = createHash("sha1")
+    // RFC 6455 section 4.2.2 mandates SHA-1 for Sec-WebSocket-Accept; this is
+    // protocol framing, not a cryptographic integrity or credential decision.
+    const accept = createHash("sha1") // lgtm[js/weak-cryptographic-algorithm]
         .update(`${key}${webSocketGuid}`, "ascii")
         .digest("base64");
     return Buffer.from(
@@ -336,7 +338,7 @@ export function createScenarioBytes(scenario: RawWebSocketScenario): Buffer {
         }
     }
     const bytes = Buffer.concat(frames);
-    if (bytes.byteLength > maximumFixtureOutboundBytes) {
+    if (bytes.byteLength > maximumRawWebSocketFixtureOutboundBytes) {
         throw new Error("WebSocket fixture scenario exceeded its byte budget");
     }
     return bytes;

@@ -43,7 +43,6 @@ export const shutdownServiceStatusSchema = v.strictObject({
     phase: v.picklist(["starting", "ready", "draining", "stopped"]),
     pid: positiveIntegerSchema,
     port: portSchema,
-    processGroupId: positiveIntegerSchema,
     readiness: v.boolean(),
     recoveredGenerationCount: nonnegativeIntegerSchema,
     schemaVersion: v.literal(1),
@@ -77,6 +76,7 @@ const gatewayConnectParametersSchema = v.strictObject({
     client: gatewayConnectClientSchema,
     maxProtocol: v.literal(4),
     minProtocol: v.literal(4),
+    nonce: gatewayNonceSchema,
     role: v.literal("operator"),
     scopes: gatewayOperatorReadScopesSchema,
 });
@@ -149,6 +149,7 @@ export function createGatewayConnectRequest(nonce: string) {
             },
             maxProtocol: 4 as const,
             minProtocol: 4 as const,
+            nonce,
             role: "operator" as const,
             scopes: ["operator.read" as const] as const,
         },

@@ -237,11 +237,11 @@ async function readInstalledVersions(): Promise<Record<string, string>> {
     ] as const;
     const versions: Record<string, string> = {};
     for (const packageName of packageNames) {
-        const packageJsonUrl = new URL(
-            `../../node_modules/${packageName}/package.json`,
-            import.meta.url
+        const packageJsonPath = Bun.resolveSync(
+            `${packageName}/package.json`,
+            import.meta.dir
         );
-        const parsed: unknown = JSON.parse(await Bun.file(packageJsonUrl).text());
+        const parsed: unknown = JSON.parse(await Bun.file(packageJsonPath).text());
         if (
             typeof parsed !== "object" ||
             parsed === null ||

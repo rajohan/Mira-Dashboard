@@ -1,8 +1,10 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import * as v from "valibot";
+
+import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 
 const maximumServerSourceBytes = 256 * 1024;
 const maximumProbeOutputBytes = 64 * 1024;
@@ -50,22 +52,20 @@ function assertSingleSourceMatch(
 
 async function assertWebSocketRouteSource(repositoryRoot: string): Promise<void> {
     const sourcePath = path.join(repositoryRoot, "backend/src/server/app.ts");
-    const sourceStat = await stat(sourcePath);
-    if (
-        !sourceStat.isFile() ||
-        sourceStat.size <= 0 ||
-        sourceStat.size > maximumServerSourceBytes
-    ) {
-        throw new Error("Legacy WebSocket server source has an invalid size");
-    }
-    const source = await readFile(sourcePath, "utf8");
+    const source = await readBoundedUtf8RegularFile(
+        sourcePath,
+        repositoryRoot,
+        maximumServerSourceBytes,
+        "Legacy WebSocket server source has invalid file state",
+        "Legacy WebSocket server source is not valid UTF-8"
+    );
     assertSingleSourceMatch(
-        source,
+        source.text,
         /if \(url\.pathname === "\/ws"\) \{/gu,
         "WebSocket route branch"
     );
     assertSingleSourceMatch(
-        source,
+        source.text,
         /server\.upgrade\(request, \{/gu,
         "WebSocket upgrade call"
     );

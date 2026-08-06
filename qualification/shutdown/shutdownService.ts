@@ -165,7 +165,6 @@ function statusSnapshot(options: {
         phase: options.phase,
         pid: process.pid,
         port: options.application.port,
-        processGroupId: process.pid,
         readiness: options.readiness,
         recoveredGenerationCount: options.recoveredGenerationCount,
         schemaVersion: 1,
@@ -305,7 +304,13 @@ function runService(command: ServiceCommand) {
 try {
     const command = parseCommand(process.argv.slice(2));
     await Effect.runPromise(runService(command));
-} catch {
-    process.stderr.write("Complete-shutdown qualification service failed\n");
+} catch (error) {
+    const diagnostic = Bun.inspect(error, { colors: false, depth: 6 }).slice(
+        0,
+        16 * 1024
+    );
+    process.stderr.write(
+        `Complete-shutdown qualification service failed\n${diagnostic}\n`
+    );
     process.exitCode = 1;
 }

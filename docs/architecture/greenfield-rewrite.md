@@ -2,7 +2,7 @@
 
 > **Status:** implementation active. Phase 0 evidence is complete and Phase 2 is complete for its
 > stated server scope; the remaining foundation, browser, domain, Gateway/chat, privileged,
-> hardening, and cutover phases are not complete. The rewrite is built beside the current
+> hardening, and cutover phases are incomplete. The rewrite is built beside the current
 > production implementation and targets a fresh database with no compatibility layer.
 >
 > **Audit date:** 2026-08-06. Package versions and the Bun canary snapshot in this document

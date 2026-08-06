@@ -1,7 +1,11 @@
 import { Data, Effect } from "effect";
 import * as v from "valibot";
 
-import type { SqliteOutboxChildStatus } from "./sqliteOutboxProtocol.ts";
+import {
+    sqliteOutboxMaximumBatchSize,
+    sqliteOutboxMaximumDrainNonemptyPolls,
+    type SqliteOutboxChildStatus,
+} from "./sqliteOutboxProtocol.ts";
 import {
     appendQualificationOutboxBatch,
     claimQualificationOutboxBatch,
@@ -18,7 +22,7 @@ const boundedBatchSchema = v.pipe(
     v.number(),
     v.integer(),
     v.minValue(1),
-    v.maxValue(1000)
+    v.maxValue(sqliteOutboxMaximumBatchSize)
 );
 
 const produceCommandSchema = v.strictObject({
@@ -141,7 +145,7 @@ function runDrainCommand(
     database: ReturnType<typeof openQualificationOutboxDatabase>,
     command: Extract<ChildCommand, { kind: "drain" }>
 ) {
-    const maximumPolls = 1001;
+    const maximumPolls = sqliteOutboxMaximumDrainNonemptyPolls + 1;
     return Effect.gen(function* () {
         let claimedCount = 0;
         let deliveredCount = 0;

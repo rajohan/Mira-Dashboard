@@ -60,7 +60,7 @@ export interface OutboxLatencySummary {
 
 export interface SqliteOutboxQualificationReport {
     readonly crashedClaimEventIds: readonly number[];
-    readonly crashedWorkerSignal: NodeJS.Signals | null;
+    readonly crashedWorkerSignal: NodeJS.Signals;
     readonly finalSnapshot: QualificationOutboxSnapshot;
     readonly integrityCheck: string;
     readonly journalMode: string;
@@ -215,7 +215,7 @@ function claimAndTerminateChild(
     statusPath: string
 ): Effect.Effect<
     {
-        readonly child: QualificationChildProcess;
+        readonly signal: NodeJS.Signals;
         readonly status: SqliteOutboxChildStatus;
     },
     QualificationChildProcessError | QualificationDeadlineError
@@ -235,7 +235,16 @@ function claimAndTerminateChild(
             const status = yield* readStatus(statusPath, operation);
             yield* Effect.sync(() => child.kill("SIGKILL"));
             yield* awaitChildExit(child, `${operation}:crash`);
-            return { child, status };
+            const signal = child.signalCode;
+            if (signal === null) {
+                return yield* Effect.fail(
+                    new QualificationChildProcessError({
+                        exitCode: child.exitCode ?? undefined,
+                        operation: `${operation}:missing-signal`,
+                    })
+                );
+            }
+            return { signal, status };
         })
     );
 }
@@ -364,7 +373,7 @@ export const sqliteOutboxQualification = Effect.scoped(
 
         return Object.freeze({
             crashedClaimEventIds: Object.freeze([...terminated.status.eventIds]),
-            crashedWorkerSignal: terminated.child.signalCode,
+            crashedWorkerSignal: terminated.signal,
             finalSnapshot,
             integrityCheck,
             journalMode,
