@@ -244,10 +244,10 @@ describe("application server realtime transport", () => {
                 applicationRuntime: runtime,
                 browserOrigin: "https://dashboard.example",
                 database: fixture.database.orm,
+                gatewayUrl: "ws://127.0.0.1:1",
                 port: 0,
                 readiness: createReadinessController(),
                 totpSecretCipher: testTotpSecretCipher,
-                verifyGatewayCredential: () => Promise.resolve(false),
             });
             servers.push(server);
             const client = createEventsClient(

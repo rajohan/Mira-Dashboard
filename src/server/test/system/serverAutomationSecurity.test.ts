@@ -75,11 +75,11 @@ describe("real HTTP automation credential lifecycle", () => {
                 }),
                 browserOrigin: automationHttpSystemBrowserOrigin,
                 database: fixture.database.orm,
+                gatewayUrl: "ws://127.0.0.1:1",
                 now: () => new Date(),
                 port: 0,
                 readiness: createReadinessController(),
                 totpSecretCipher: testTotpSecretCipher,
-                verifyGatewayCredential: () => Promise.resolve(false),
             });
             const created = await createSystemPrincipal(server, jar);
 
@@ -333,11 +333,11 @@ describe("real HTTP automation credential lifecycle", () => {
                 authenticationLeaseDurationMs: secondsToMilliseconds(1),
                 browserOrigin: automationHttpSystemBrowserOrigin,
                 database: fixture.database.orm,
+                gatewayUrl: "ws://127.0.0.1:1",
                 now: () => new Date(),
                 port: 0,
                 readiness: createReadinessController(),
                 totpSecretCipher: testTotpSecretCipher,
-                verifyGatewayCredential: () => Promise.resolve(false),
             });
             const created = await createSystemPrincipal(
                 server,

@@ -15,6 +15,7 @@ import { createWebAuthnRelyingPartyConfiguration } from "../../domains/security/
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredentials.ts";
 import { openFreshMigratedDatabase } from "./freshDatabase.ts";
+import { startGatewayCredentialVerifierFixture } from "./gatewayCredentialVerifier.ts";
 import { createTestApplicationRuntime } from "./requestContext.ts";
 
 export const mfaHttpSystemBrowserOrigin = "https://dashboard.example";
@@ -289,7 +290,9 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
     const database = await openFreshMigratedDatabase();
     const clock = new MutableClock(new Date("2026-08-05T12:00:00.000Z"));
     const jar = new CookieJar();
-    let observedGatewayCredential: string | undefined;
+    const gateway = startGatewayCredentialVerifierFixture({
+        validCredential: "gateway-token",
+    });
     let server: ApplicationServer | undefined;
 
     try {
@@ -297,14 +300,11 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
             applicationRuntime: createTestApplicationRuntime(),
             browserOrigin: mfaHttpSystemBrowserOrigin,
             database: database.orm,
+            gatewayUrl: gateway.url,
             now: clock.now,
             port: 0,
             readiness: createReadinessController(),
             totpSecretCipher: await createDeterministicTotpSecretCipher(),
-            verifyGatewayCredential: (credential) => {
-                observedGatewayCredential = credential;
-                return Promise.resolve(credential === "gateway-token");
-            },
             webAuthnRelyingParty: mfaHttpSystemWebAuthnRelyingParty,
         });
         const bootstrapResponse = await postTrpcMutation(
@@ -325,6 +325,7 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
         if (bootstrapCookie === undefined) {
             throw new Error("Bootstrap did not issue a session cookie");
         }
+        const observedGatewayCredential = gateway.observedCredentials.at(-1);
         if (observedGatewayCredential === undefined) {
             throw new Error("Bootstrap did not verify the Gateway credential");
         }
@@ -374,7 +375,11 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
                 try {
                     await enrolledServer.stop(true);
                 } finally {
-                    database.sqlite.close(true);
+                    try {
+                        await gateway.stop();
+                    } finally {
+                        database.sqlite.close(true);
+                    }
                 }
             },
         };
@@ -382,7 +387,11 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
         try {
             if (server !== undefined) await server.stop(true);
         } finally {
-            database.sqlite.close(true);
+            try {
+                await gateway.stop();
+            } finally {
+                database.sqlite.close(true);
+            }
         }
         throw error;
     }

@@ -4,6 +4,19 @@
 
 ## Implementation Progress
 
+This matrix is the living phase status. Update it in the same change that materially advances or
+closes a phase; dated entries below provide the evidence, not a second status source.
+
+| Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Evidence and qualification      | In progress                          | Bun/SQLite/tRPC/SSE and production-shaped realtime evidence passes; frontend build, TanStack DB, full shutdown, chat batching, and measured resource-budget spikes remain.                                                                                                                                          |
+| 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP policy, realtime outbox, and the current generated-doc subset exist; browser/worker roots, complete import enforcement, complete generated references, and release/rollback closure remain.                                                                     |
+| 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates. |
+| 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                           |
+| 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                      |
+| 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                         |
+| 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                    |
+
 ### 2026-08-03 — Phase 0 started
 
 - Dashboard task [#396](/tasks/396) tracks the rewrite foundation.
@@ -539,3 +552,45 @@
   bounded synchronous work. The deterministic generator now emits all eight procedure rows and 16
   input/output JSON Schemas; 13/13 documentation tests and `docs:check` pass at this checkpoint.
   Full repository CI parity remains a delivery gate rather than a claim of this progress entry.
+
+### 2026-08-06 — Phase 2 trust-and-transport evidence closed
+
+- The first-user production composition now owns a one-shot Bun-native Gateway credential
+  verifier. Its handshake was checked against the OpenClaw version installed on the target host,
+  `2026.7.2-beta.7 (dabe191)`, using the installed v4 protocol document and compiled
+  client/server protocol exports. Legacy Dashboard Gateway, chat, session, agent, and cron code is
+  parity input, not protocol authority.
+- Composition accepts only literal IPv4/IPv6 direct-loopback `ws://` root endpoints. The verifier
+  accepts exactly one text challenge capped at 4 KiB, sends one device-less local-backend v4
+  `connect`, and accepts exactly one matching text response up to the installed current 25 MiB
+  hello limit. Binary, unknown, duplicate, out-of-order, wrong-ID, contradictory, auth-disabled,
+  malformed, oversized, incompatible, closed, timeout, and transport flows fail immediately as one
+  redacted unavailable result. Only structured `AUTH_TOKEN_MISMATCH` is an invalid credential.
+  `operator.admin`, requested only for this handshake, exposes the required operator role,
+  negotiated scope, and token auth mode; no post-connect RPC is sent.
+- The native upgrade carries no Origin, authorization, forwarding, or subprotocol header and no
+  token-bearing URL. There is no internal reconnect or retry, including for `startup-sidecars`;
+  the operator/client retries the entire HTTP bootstrap request under durable cooldown. Candidate
+  credentials are neither persisted nor logged, and no user or session is published before
+  successful verification.
+- Effect remains selective. The existing process `ManagedRuntime` owns the separate Gateway
+  admission/active permits, deadline, cancellation, typed failure mapping, and settlement
+  lifetime. Success, failure, setup error, transport error, and abort initiate native close; once a
+  socket exists, the Promise and permit settle only after close is observed. The adapter stays
+  Promise-facing, while Valibot parsing, pure policy, hashing, and synchronous SQLite transactions
+  remain ordinary TypeScript. Bun allocates an inbound WebSocket wire frame before the 4 KiB/25 MiB
+  application check, so loopback, Gateway-side limits, and bounded concurrency remain part of the
+  allocation defense.
+- Twenty-three focused protocol/parser, real loopback WebSocket, and real-server tests cover valid and
+  invalid credentials, text-only enforcement, both size caps, unknown/duplicate/out-of-order/
+  wrong-ID/contradictory frames, exact mismatch classification, header and URL secrecy,
+  deterministic absence of retry after `startup-sidecars`, native connection refusal,
+  close-confirmed terminal races, redaction, timeout, and real HTTP-to-Effect-to-socket
+  cancellation with zero user/session/audit/rate-limit publication. Raw continuation-frame
+  qualification remains an explicit Phase 0 gate. The consolidated
+  [Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md) maps the complete
+  authentication, MFA, WebAuthn, automation, SSE, migration, and Gateway evidence to misuse cases
+  and residual risks.
+- This closes Phase 2 only for its documented server-side scope. It does not claim full native
+  persistent Gateway qualification. Phase 4 must re-audit the then-installed OpenClaw source and
+  protocol before implementing persistent connection, event recovery, sessions, chat, or cron.
