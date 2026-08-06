@@ -4,7 +4,11 @@ import { addMilliseconds, secondsToMilliseconds } from "date-fns";
 import { maxTime } from "date-fns/constants";
 import { Effect, Layer, Stream } from "effect";
 
-import { rejectOnAbort, withTestTimeout } from "../../test/support/promise.ts";
+import {
+    captureFailure,
+    rejectOnAbort,
+    withTestTimeout,
+} from "../../test/support/promise.ts";
 import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
 import {
     isRealtimeEventStreamError,
@@ -12,7 +16,11 @@ import {
     RealtimeEventStoreStreamError,
 } from "../realtime/eventPumpService.ts";
 import type { RenewableStreamLease } from "../realtime/renewableStreamLease.ts";
-import { createApplicationRuntime } from "./applicationRuntime.ts";
+import {
+    ApplicationListenerStopError,
+    ApplicationListenerStopTimeoutError,
+    createApplicationRuntime,
+} from "./applicationRuntime.ts";
 
 const delivery: RealtimeEventDelivery = {
     event: {
@@ -32,7 +40,160 @@ const stableLease: RenewableStreamLease = {
     renew: () => Promise.resolve(stableLease),
 };
 
+function createInertApplicationRuntime() {
+    const service = RealtimeEventPumpService.of({
+        metricsSnapshot: Effect.die("Realtime metrics are not used"),
+        stream: () => Stream.empty,
+        wake: Effect.void,
+    });
+    return createApplicationRuntime({
+        realtimeEventPumpLayer: Layer.succeed(RealtimeEventPumpService, service),
+    });
+}
+
 describe("application Effect runtime", () => {
+    test("coordinates graceful listener completion on the shared runtime", async () => {
+        const runtime = createInertApplicationRuntime();
+        const stopCalls: boolean[] = [];
+
+        try {
+            await runtime.initialize();
+            await runtime.shutdownListener({
+                forceSignal: new AbortController().signal,
+                gracefulShutdownTimeoutMs: 100,
+                stop(force) {
+                    stopCalls.push(force);
+                    return Promise.resolve();
+                },
+            });
+
+            expect(stopCalls).toEqual([false]);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
+    test("escalates an active graceful listener stop when force is requested", async () => {
+        const runtime = createInertApplicationRuntime();
+        const controller = new AbortController();
+        const gracefulStarted = Promise.withResolvers<void>();
+        const gracefulStop = Promise.withResolvers<void>();
+        const forceCompleted = Promise.withResolvers<void>();
+        const stopCalls: boolean[] = [];
+        let shutdownSettled = false;
+
+        try {
+            const shutdown = runtime.shutdownListener({
+                forceSignal: controller.signal,
+                gracefulShutdownTimeoutMs: 100,
+                stop(force) {
+                    stopCalls.push(force);
+                    if (force) {
+                        forceCompleted.resolve();
+                        return Promise.resolve();
+                    } else {
+                        gracefulStarted.resolve();
+                        return gracefulStop.promise;
+                    }
+                },
+            });
+            void shutdown.then(() => (shutdownSettled = true));
+            await gracefulStarted.promise;
+            controller.abort();
+            await forceCompleted.promise;
+            await Promise.resolve();
+
+            expect(shutdownSettled).toBe(false);
+            gracefulStop.resolve();
+            await shutdown;
+
+            expect(stopCalls).toEqual([false, true]);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
+    test("preserves a graceful listener failure after best-effort force", async () => {
+        const runtime = createInertApplicationRuntime();
+        const gracefulFailure = new Error("simulated graceful listener failure");
+        const forceFailure = new Error("simulated force listener failure");
+        const stopCalls: boolean[] = [];
+
+        try {
+            const failure = await captureFailure(() =>
+                runtime.shutdownListener({
+                    forceSignal: new AbortController().signal,
+                    gracefulShutdownTimeoutMs: 100,
+                    stop(force) {
+                        stopCalls.push(force);
+                        return Promise.reject(force ? forceFailure : gracefulFailure);
+                    },
+                })
+            );
+
+            expect(failure).toBeInstanceOf(ApplicationListenerStopError);
+            expect(failure).toMatchObject({
+                cause: gracefulFailure,
+                operation: "graceful",
+            });
+            expect(stopCalls).toEqual([false, true]);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
+    test("tags a forced listener stop that exceeds its deadline", async () => {
+        const runtime = createInertApplicationRuntime();
+        const controller = new AbortController();
+        controller.abort();
+
+        try {
+            const failure = await captureFailure(() =>
+                runtime.shutdownListener({
+                    forceSignal: controller.signal,
+                    gracefulShutdownTimeoutMs: 1,
+                    stop: () => new Promise<void>(() => {}),
+                })
+            );
+
+            expect(failure).toBeInstanceOf(ApplicationListenerStopTimeoutError);
+            expect(failure).toMatchObject({ operation: "force", timeoutMs: 1 });
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
+    test("tags missing graceful settlement after a successful force stop", async () => {
+        const runtime = createInertApplicationRuntime();
+        const controller = new AbortController();
+        const gracefulStarted = Promise.withResolvers<void>();
+        const stopCalls: boolean[] = [];
+
+        try {
+            const shutdown = runtime.shutdownListener({
+                forceSignal: controller.signal,
+                gracefulShutdownTimeoutMs: 1,
+                stop(force) {
+                    stopCalls.push(force);
+                    if (!force) gracefulStarted.resolve();
+                    return force ? Promise.resolve() : new Promise<void>(() => {});
+                },
+            });
+            await gracefulStarted.promise;
+            controller.abort();
+            const failure = await captureFailure(() => shutdown);
+
+            expect(failure).toBeInstanceOf(ApplicationListenerStopTimeoutError);
+            expect(failure).toMatchObject({
+                operation: "graceful-settlement",
+                timeoutMs: 1,
+            });
+            expect(stopCalls).toEqual([false, true]);
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
     test("builds one shared layer and disposes its scope exactly once", async () => {
         let acquisitions = 0;
         let releases = 0;

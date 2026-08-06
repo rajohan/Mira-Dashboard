@@ -1,27 +1,82 @@
+import { Data, Effect } from "effect";
+
 /** One asynchronous cleanup registered by a qualification test. */
 interface AsyncCleanupOperation {
     label: string;
-    operation: () => Promise<void> | void;
+    operation: (signal: AbortSignal) => Promise<void> | void;
 }
 
-async function completeBeforeDeadline(
+export class AsyncCleanupDeadlineError extends Data.TaggedError(
+    "AsyncCleanupDeadlineError"
+)<{
+    readonly label: string;
+    readonly message: string;
+    readonly timeoutMs: number;
+}> {}
+
+export class AsyncCleanupOperationError extends Data.TaggedError(
+    "AsyncCleanupOperationError"
+)<{
+    readonly cause: unknown;
+    readonly label: string;
+    readonly message: string;
+}> {}
+
+function completeBeforeDeadline(
     cleanup: AsyncCleanupOperation,
     timeoutMs: number
-): Promise<void> {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(
-            () =>
-                reject(new Error(`${cleanup.label} did not stop within ${timeoutMs} ms`)),
-            timeoutMs
-        );
-    });
+): Effect.Effect<void, AsyncCleanupDeadlineError | AsyncCleanupOperationError> {
+    return Effect.tryPromise({
+        catch: (cause) =>
+            new AsyncCleanupOperationError({
+                cause,
+                label: cleanup.label,
+                message: `${cleanup.label} cleanup failed`,
+            }),
+        try: async (signal) => {
+            await cleanup.operation(signal);
+        },
+    }).pipe(
+        Effect.timeoutOrElse({
+            duration: timeoutMs,
+            orElse: () =>
+                Effect.fail(
+                    new AsyncCleanupDeadlineError({
+                        label: cleanup.label,
+                        message: `${cleanup.label} did not stop within ${timeoutMs} ms`,
+                        timeoutMs,
+                    })
+                ),
+        })
+    );
+}
 
-    try {
-        await Promise.race([Promise.resolve().then(() => cleanup.operation()), deadline]);
-    } finally {
-        clearTimeout(timeout);
-    }
+function drainCleanupOperations(
+    operations: readonly AsyncCleanupOperation[],
+    timeoutMs: number
+): Effect.Effect<void, AggregateError> {
+    return Effect.uninterruptible(
+        Effect.gen(function* () {
+            const failures: (AsyncCleanupDeadlineError | AsyncCleanupOperationError)[] =
+                [];
+
+            for (const cleanup of operations) {
+                yield* completeBeforeDeadline(cleanup, timeoutMs).pipe(
+                    Effect.catch((error) =>
+                        Effect.sync(() => {
+                            failures.push(error);
+                        })
+                    )
+                );
+            }
+
+            if (failures.length > 0) {
+                return yield* Effect.fail(
+                    new AggregateError(failures, "Qualification resource cleanup failed")
+                );
+            }
+        })
+    );
 }
 
 /** Failure-safe last-in-first-out cleanup for qualification resources. */
@@ -33,24 +88,26 @@ export class AsyncCleanupStack {
      * @param label Diagnostic resource label.
      * @param operation Cleanup callback.
      */
-    defer(label: string, operation: () => Promise<void> | void): void {
+    defer(label: string, operation: (signal: AbortSignal) => Promise<void> | void): void {
         this.#operations.push({ label, operation });
     }
 
-    /** Runs every registered cleanup even when an earlier cleanup fails. */
-    async dispose(): Promise<void> {
-        const failures: unknown[] = [];
+    /**
+     * Creates an Effect-native disposal for scoped qualification orchestration.
+     * @param timeoutMs Per-resource cleanup deadline in milliseconds.
+     * @returns Uninterruptible LIFO drain with individually bounded operations.
+     */
+    disposeEffect(timeoutMs = 2000): Effect.Effect<void, AggregateError> {
+        return Effect.suspend(() =>
+            drainCleanupOperations(this.#operations.splice(0).toReversed(), timeoutMs)
+        );
+    }
 
-        for (const cleanup of this.#operations.splice(0).toReversed()) {
-            try {
-                await completeBeforeDeadline(cleanup, 2000);
-            } catch (error) {
-                failures.push(error);
-            }
-        }
-
-        if (failures.length > 0) {
-            throw new AggregateError(failures, "Qualification resource cleanup failed");
-        }
+    /**
+     * Runs every registered cleanup even when an earlier cleanup fails.
+     * @returns Promise that settles after the complete LIFO drain.
+     */
+    dispose(): Promise<void> {
+        return Effect.runPromise(this.disposeEffect());
     }
 }

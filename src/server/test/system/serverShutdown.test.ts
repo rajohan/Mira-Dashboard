@@ -1,9 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
 
 import { secondsToMilliseconds } from "date-fns";
+import { Effect, Layer, Stream } from "effect";
 
 import { createServer } from "../../../app/server.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
+import { RealtimeEventPumpService } from "../../platform/realtime/eventPumpService.ts";
+import { createApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
 import { captureFailure } from "../support/promise.ts";
 import {
     createTestApplicationRuntime,
@@ -12,24 +15,73 @@ import {
 } from "../support/requestContext.ts";
 
 function createPendingBunServer(): {
+    readonly gracefulStarted: Promise<void>;
     readonly server: ReturnType<typeof Bun.serve>;
     readonly stopCalls: boolean[];
 } {
     const gracefulStop = Promise.withResolvers<void>();
+    const gracefulStarted = Promise.withResolvers<void>();
     const stopCalls: boolean[] = [];
     const server = {
         port: 3100,
         stop(force = false) {
             stopCalls.push(force);
-            if (force) gracefulStop.resolve();
+            if (force) {
+                gracefulStop.resolve();
+            } else {
+                gracefulStarted.resolve();
+            }
             return gracefulStop.promise;
         },
         url: new URL("http://127.0.0.1:3100"),
     } as unknown as ReturnType<typeof Bun.serve>;
-    return { server, stopCalls };
+    return { gracefulStarted: gracefulStarted.promise, server, stopCalls };
+}
+
+function createShutdownTestRuntime(onDispose: () => void) {
+    const service = RealtimeEventPumpService.of({
+        metricsSnapshot: Effect.die("Shutdown tests do not use realtime metrics"),
+        stream: () => Stream.empty,
+        wake: Effect.void,
+    });
+    const scopedService = Effect.acquireRelease(Effect.succeed(service), () =>
+        Effect.sync(onDispose)
+    );
+    const layer = Layer.effect(RealtimeEventPumpService, scopedService);
+    return createApplicationRuntime({ realtimeEventPumpLayer: layer });
 }
 
 describe("application server shutdown", () => {
+    test("forces immediately when the first stop request is forced", async () => {
+        const fake = createPendingBunServer();
+        const serveSpy = spyOn(Bun, "serve").mockReturnValue(fake.server);
+        let disposals = 0;
+
+        try {
+            const server = await createServer({
+                ...createTestServerSecurityServices(),
+                applicationRuntime: createShutdownTestRuntime(() => {
+                    disposals += 1;
+                }),
+                authenticationLifecycle: createTestAuthenticationLifecycleService(),
+                authenticateCredential: () => ({
+                    authentication: { kind: "anonymous" },
+                }),
+                port: 3100,
+                readiness: createReadinessController(),
+            });
+            const forcedStop = server.stop(true);
+
+            expect(server.stop()).toBe(forcedStop);
+            await forcedStop;
+            expect(server.stop(true)).toBe(forcedStop);
+            expect(fake.stopCalls).toEqual([true]);
+            expect(disposals).toBe(1);
+        } finally {
+            serveSpy.mockRestore();
+        }
+    });
+
     test.each([
         {
             forceAfterGracefulStart: false,
@@ -45,15 +97,14 @@ describe("application server shutdown", () => {
         const fake = createPendingBunServer();
         const serveSpy = spyOn(Bun, "serve").mockReturnValue(fake.server);
         let disposals = 0;
+        let stopCallsAtDisposal: readonly boolean[] = [];
 
         try {
             const server = await createServer({
                 ...createTestServerSecurityServices(),
-                applicationRuntime: createTestApplicationRuntime({
-                    dispose: () => {
-                        disposals += 1;
-                        return Promise.resolve();
-                    },
+                applicationRuntime: createShutdownTestRuntime(() => {
+                    disposals += 1;
+                    stopCallsAtDisposal = [...fake.stopCalls];
                 }),
                 authenticationLifecycle: createTestAuthenticationLifecycleService(),
                 authenticateCredential: () => ({
@@ -65,13 +116,16 @@ describe("application server shutdown", () => {
             });
             const gracefulStop = server.stop();
             if (scenario.forceAfterGracefulStart) {
+                await fake.gracefulStarted;
                 expect(server.stop(true)).toBe(gracefulStop);
             }
 
             await gracefulStop;
 
+            expect(server.stop(true)).toBe(gracefulStop);
             expect(fake.stopCalls).toEqual([false, true]);
             expect(disposals).toBe(1);
+            expect(stopCallsAtDisposal).toEqual([false, true]);
         } finally {
             serveSpy.mockRestore();
         }

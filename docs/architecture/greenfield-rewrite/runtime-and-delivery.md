@@ -11,9 +11,9 @@
 | Repository channel                 | `canary`                                   |
 | Required runtime version           | `1.4.0`                                    |
 | Running production release runtime | `1.4.0-canary.1+e82022145`                 |
-| Audited qualification candidate    | `1.4.0-canary.1+43783cedd`                 |
-| Audited full revision              | `43783cedd5653fa29bb9ac83df34633eae10fe75` |
-| Audited commit date                | 2026-08-03 22:02:12 UTC                    |
+| Audited qualification candidate    | `1.4.0-canary.1+17d684360`                 |
+| Audited full revision              | `17d6843606d76620cb55d31424d7fb0aed51c367` |
+| Audited commit date                | 2026-08-06 00:27:30 UTC                    |
 
 The audited revision is evidence for this qualification round, not a repository-wide pin.
 Normal CI resolves the `canary` channel and runs the complete gate set. Release creation then
@@ -42,7 +42,7 @@ the Bun HTML pipeline, but workspace files and media retain explicit, policy-che
 
 ### Mandatory canary qualification
 
-Before the new repository baseline is locked, run the following in an isolated, memory-capped
+Before promoting a new repository baseline, run the following in an isolated, memory-capped
 environment against the exact candidate binary:
 
 1. Fetch-adapter query and mutation tests, including cookies, aborts, response headers, and
@@ -58,10 +58,49 @@ environment against the exact candidate binary:
 6. `bun test --isolate` tests for fake timers, leaked handles, deterministic shutdown, and
    bounded concurrency.
 
-The current one-shot Phase 2 verifier qualifies complete text `MessageEvent` delivery only. Raw
-continuation-frame reassembly and fragmented-message behavior remain an explicit open Phase 0
-native-WebSocket gate and must be qualified against the then-current Bun candidate before the
-repository baseline is locked.
+The 2026-08-06 qualification round passes on exact revision
+`17d6843606d76620cb55d31424d7fb0aed51c367`: qualification typecheck passes, and the full suite
+reports 133 tests, 682 assertions, and zero failures across 30 files. Its executable evidence
+includes:
+
+- compiler-first Bun HTML AOT output with Tailwind, lazy chunks, CSP-compatible assets, hashes,
+  precompression, no production source maps, and enforced bundle budgets;
+- Fetch/tRPC/SSE cancellation, resume, proxy, rolling-restart, and slow-consumer behavior;
+- raw RFC 6455 continuation reassembly with a UTF-8 code point split across frames, protocol-close
+  `1002`, application-bound `1009`, a 64 KiB limit, deterministic close, and exactly one connection
+  attempt without reconnect;
+- WAL SQLite with separate web and worker processes, actual busy/locked behavior, durable outbox
+  delivery and lease recovery, statement disposal, checkpoint, backup, restore, and integrity;
+- the exact-pinned TanStack DB adapter, snapshot/cache synchronization, batch writes, optimistic
+  conflict handling, cancellation, and route-subscription teardown;
+- 150 ms chat-delta batching for one, four, and eight concurrent runs with immediate boundary and
+  terminal flushes;
+- a two-generation shutdown with readiness withdrawal, SSE and Gateway closure, statement and
+  database disposal, worker-lease recovery, child-process-group cleanup, WAL recovery, and no
+  leaked process; and
+- source-derived parity for 156 current HTTP operations plus `/ws`, together with 22 hash-pinned,
+  redacted OpenClaw protocol and Control UI audit artifacts.
+
+The candidate intentionally makes `server.stop(false)` wait for idle keep-alive connections. The
+shutdown qualification therefore uses an Effect-scoped graceful-stop fiber with a bounded wait and
+a separately bounded `server.stop(true)` escalation. The exact candidate records
+`listener-force-stopped`, then closes SSE and every owned resource without a leak; the event model
+permits exactly one graceful or forced terminal outcome.
+
+The candidate resource matrix also passes without `high`, `max`, `oom`, or `oom_kill` memory
+events, memory pressure, or leaked process, unit, or temporary state:
+
+| Scenario              | Peak memory (bytes) | Elapsed (ms) | Peak tasks |
+| --------------------- | ------------------: | -----------: | ---------: |
+| Frontend build        |         650,104,832 |       14,793 |         19 |
+| Representative tests  |         248,758,272 |        2,222 |         18 |
+| SQLite outbox/restore |         101,896,192 |        1,218 |         20 |
+| Chat batching         |          42,676,224 |           97 |         12 |
+| Complete shutdown     |         128,774,144 |        3,133 |         25 |
+| Child-process cancel  |         117,194,752 |        1,531 |         24 |
+
+These measurements qualify the mechanisms and current limits; Phase 6 still owns final
+production-shaped load, restore, and cutover evidence.
 
 `.bun-version` selects the `canary` channel through the official `setup-bun` action. The serving
 process enforces Bun `1.4.0`, while the runtime revision remains diagnostic until release creation
@@ -100,17 +139,12 @@ const server = Bun.serve({
 });
 ```
 
-The preferred frontend build uses Bun's HTML entrypoint and ahead-of-time production build.
-The React Compiler plugin must run before other Babel transforms, followed by Bun and the
-Tailwind plugin. Because Bun still labels the full-stack development server as work in
-progress, phase 0 must choose one proven build mode:
-
-- preferred: Bun HTML import/full-stack entry with an AOT production build; or
-- if the qualification fails: explicit browser and server `Bun.build` entrypoints.
-
-Only the selected mode is implemented. There is no production fallback or duplicate build
-path. In either case, the release contains prebuilt assets, hashes, compressed variants,
-source-map policy, and a manifest; production never compiles the frontend on request.
+Phase 0 selects Bun's HTML entrypoint with an ahead-of-time production build. The production
+devtools stub runs first when present, React Compiler then runs before Tailwind, and no runtime
+full-stack development server is part of delivery. The executable fixture and actual frontend
+build prove lazy chunks, CSP-compatible external assets, content hashes, absent production source
+maps, precompressed variants, and bundle budgets. There is no production fallback or duplicate
+build path: releases contain prebuilt assets and production never compiles the frontend on request.
 
 ## Configuration From Scratch
 

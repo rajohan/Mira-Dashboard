@@ -17,6 +17,10 @@ compatibility migration inside it.
 
 **Exit gate:** every architecture risk marked mandatory below has a passing executable spike.
 
+**Status (2026-08-06): complete.** Exact-candidate qualification, source-derived parity, and the
+eight executable spikes below pass. This closes evidence selection only; Phase 1 foundation and
+the remaining rewrite phases are still incomplete.
+
 ### Phase 1: foundation
 
 - create source boundaries, configuration, logging, errors, contract registry, Drizzle/native
@@ -84,30 +88,37 @@ Given the current chat, auth, worker, delivery, and host-integration surface, th
 **50–80 focused engineer-days**, not a small transport refactor. Automation can reduce elapsed
 time, but it cannot remove the qualification, security, restore, and parity gates.
 
-## Mandatory Spikes and Open Decisions
+## Mandatory Spikes and Decisions
 
-The target choices are fixed unless one of these tests disproves the underlying assumption:
+All eight Phase 0 spikes have executable evidence on the audited Bun candidate. Their selected
+outcomes remain normative unless a later runtime or dependency qualification disproves them:
 
-1. **Bun full-stack build:** verify React Compiler-first transforms, Tailwind, lazy chunks,
-   source maps, CSP, asset hashes, precompression, and bundle budgets. Then select exactly one
-   production build path.
-2. **tRPC SSE on exact Bun:** verify credentials, aborts, tracked resume, error shapes,
-   reverse-proxy behavior, deploy reconnect, and slow-consumer memory.
-3. **SQLite outbox latency:** measure adaptive polling with web/worker processes under chat and
-   job load. Keep the database authoritative; change only the wakeup mechanism if latency or
-   I/O misses the target.
-4. **Chat batching:** determine the smallest durable delta interval that preserves current
-   visual streaming while bounding SQLite writes and restart loss.
-5. **TanStack DB adapter:** prove snapshot replacement, direct batch writes, query-cache
-   synchronization, optimistic-conflict handling, and route teardown without duplicate rows.
-6. **Drizzle on Bun SQLite:** verify sync transactions, prepared statements, the `sql` tagged
-   template, partial/unique indexes, generated migrations, Valibot row schemas, native-client
-   access, and query plans on the exact pinned Drizzle version and resolved Bun qualification
-   candidate.
-7. **Bun canary shutdown:** verify graceful SSE, Gateway, prepared-statement, worker lease, and
-   child-process cleanup under systemd stop/restart.
-8. **Resource budgets:** measure build/test and representative privileged jobs in cgroups before
-   finalizing service/job limits.
+1. **Passed — Bun full-stack build:** use one compiler-first Bun HTML ahead-of-time production
+   build. Tailwind, lazy chunks, CSP, hashes, precompression, source-map policy, and bundle budgets
+   pass in the mechanism fixture and actual frontend build; there is no fallback build path.
+2. **Passed — tRPC SSE on exact Bun:** credentials, cancellation, tracked resume, typed errors,
+   proxy/TLS streaming, rolling reconnect, and bounded slow-consumer behavior pass.
+3. **Passed — SQLite outbox latency:** separate web and worker processes deliver a WAL-backed
+   durable outbox without gaps or duplicates, classify real busy/locked outcomes, and recover an
+   expired claim after hard worker termination.
+4. **Passed — chat batching:** use ordered 150 ms token/thinking batches. One, four, and eight
+   concurrent runs meet the selected write/delay policy, while tool/item, terminal, cancel, and
+   completion boundaries flush immediately.
+5. **Passed — TanStack DB adapter:** the exact-pinned local adapter proves snapshot replacement,
+   direct batch writes, query-cache synchronization, optimistic-conflict resolution, forwarded
+   cancellation, and subscription teardown without duplicate rows.
+6. **Passed — Drizzle on Bun SQLite:** synchronous transactions, prepared-statement lifetime,
+   native access, constraints/indexes/query plans, schema validation, migrations, checkpoint,
+   backup, restore, and integrity pass on the exact candidate.
+7. **Passed — Bun canary shutdown:** two service generations prove readiness withdrawal, SSE and
+   Gateway closure, prepared-statement/database disposal, worker-lease recovery, process-group
+   cleanup, WAL recovery, and bounded Effect-owned graceful-to-force listener shutdown.
+8. **Passed — resource budgets:** capped sequential build, test, SQLite, chat, shutdown, and child
+   cancellation runs complete without high/max/OOM events, memory pressure, or leaked resources.
+
+The exact candidate qualification additionally covers raw RFC 6455 continuation and fragmented
+UTF-8 reassembly, protocol/application size closes, deterministic cancellation, and explicit
+absence of reconnect. The source-derived inventory accounts for 156 HTTP operations plus `/ws`.
 
 The OpenClaw audit is deliberately point-in-time. The Phase 2 one-shot verifier records the
 installed `2026.7.2-beta.7 (dabe191)` protocol-v4 behavior, but it does not qualify persistent
@@ -163,7 +174,7 @@ not package memory alone:
 - [`bun test`](https://bun.com/docs/test)
 - [Full-stack development server and HTML imports](https://bun.com/docs/bundler/fullstack)
 - [Official canary release asset](https://github.com/oven-sh/bun/releases/tag/canary)
-- [Latest audited Bun commit](https://github.com/oven-sh/bun/commit/43783cedd5653fa29bb9ac83df34633eae10fe75)
+- [Latest audited Bun commit](https://github.com/oven-sh/bun/commit/17d6843606d76620cb55d31424d7fb0aed51c367)
 
 ### tRPC and validation
 
@@ -195,6 +206,14 @@ not package memory alone:
 - [TanStack Form validation](https://tanstack.com/form/latest/docs/framework/react/guides/validation)
 - [TanStack Store React quick start](https://tanstack.com/store/latest/docs/framework/react/quick-start)
 - [TanStack Virtual](https://tanstack.com/virtual/latest/docs/introduction)
+- [TanStack Pacer](https://tanstack.com/pacer/latest/docs/overview)
+- [TanStack Markdown](https://tanstack.com/markdown/latest/docs/overview)
+- [TanStack Highlight](https://tanstack.com/highlight/latest/docs/overview)
+- [TanStack Charts](https://tanstack.com/charts/latest/docs/overview)
+- [Recharts](https://www.npmjs.com/package/recharts)
+- [React Resizable Panels](https://www.npmjs.com/package/react-resizable-panels)
+- [Motion for React](https://motion.dev/docs/react)
+- [SWR](https://swr.vercel.app/)
 
 ### Database, security, and tooling
 

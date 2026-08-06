@@ -283,6 +283,29 @@ protocol again. Current-production Gateway/chat/session/agent/cron code supplies
 not protocol authority. The consolidated controls and executable evidence are in the
 [Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md).
 
+### Current-protocol Control UI projections
+
+The 2026-08-06 OpenClaw audit separates protocol authority from Control UI projection through 22
+hash-pinned, redacted distribution artifacts. The current behavior informs Phase 4, but Dashboard
+must re-audit the installed source and use a typed protocol adapter rather than scrape, import, or
+mirror Control UI implementation details:
+
+- plan/checklist state is projected from generic `agent` events and retained only on the active
+  in-flight run; it is not a durable plan record or a dedicated plan RPC;
+- companion ask is labeled with `operator.read` upstream but starts new compute and is constrained
+  by process-local TTL and concurrency caps. Dashboard treats it as an explicit compute action,
+  preserves those bounded semantics, and does not cache it as read-only state;
+- the background-task ledger supports list, detail, and cancellation. Cancellation is a write/admin
+  operation, can lose a race to normal completion, and must expose that result instead of claiming
+  a task was stopped; and
+- `cancelled` and `timed_out` remain distinct protocol states even when a presentation groups both
+  with failures.
+
+The Phase 4 browser surface exposes the active plan/checklist, companion ask, and background-task
+details/cancellation through that adapter, with authorization and race behavior covered by recorded
+fixtures. These projections complement the persistent Dashboard chat journal; they do not make
+ephemeral OpenClaw in-flight state durable by inference.
+
 ### Raw HTTP exists only for protocol edges
 
 The explicit raw-route registry owns requests whose semantics are HTTP rather than domain RPC:
@@ -343,11 +366,19 @@ constant failure markers.
 The web `ApplicationRuntime` merges the realtime pump and one process-scoped authentication-work
 service into the same `ManagedRuntime`. That authentication service owns separate bounded admission
 and active-work semaphores for Gateway verification, password/Argon2 work, TOTP AES/HMAC work, and
-WebAuthn parsing/signature verification, plus a scoped fiber set for work that outlives an interrupted caller. Queued cancellation releases
-admission immediately; active non-cooperative work retains its permit until settlement. Promise-
-facing adapters fold typed capacity into explicit domain throttling outcomes, while Gateway
+WebAuthn parsing/signature verification, plus a scoped fiber set for work that outlives an
+interrupted caller. Queued cancellation releases admission immediately; active non-cooperative
+work retains its permit until settlement. Promise-facing adapters fold typed capacity into
+explicit domain throttling outcomes, while Gateway
 capacity, deadline, and unavailable tags are exhaustively translated before the tRPC procedure
 maps the resulting domain outcome. No request creates or disposes a runtime.
+
+The same `ManagedRuntime` coordinates listener shutdown. An external `stop(true)` request crosses
+the Promise-facing composition boundary as an abort signal; Effect owns the graceful-stop fiber,
+deadline/force race, tagged stop and timeout failures, separately bounded force attempt, and
+settlement of the original graceful operation before the runtime scope is disposed. A rejected
+graceful stop receives one bounded best-effort force attempt while preserving the initiating
+failure. No second runtime or manual timer/`Promise.race` shutdown system is created.
 
 ## Realtime Architecture
 
@@ -417,11 +448,14 @@ an explicit local runtime state machine for active work:
 - `chat_runtime_snapshots` stores the latest compact projection needed for fast restart
   recovery.
 
-Gateway token/thinking/tool deltas are coalesced into small ordered batches before a SQLite
-transaction and SSE emission. The design never performs one durable commit per token. A final
-Gateway history fetch reconciles the runtime projection without duplicating messages. On
-restart, Dashboard restores the snapshot and remaining journal, reconnects to Gateway, and
-reconciles again.
+Gateway token and thinking deltas are coalesced into ordered 150 ms batches before a SQLite
+transaction and SSE emission. The interval matches the audited OpenClaw source throttle and is the
+smallest candidate that meets the measured write-rate, visual-delay, and crash-window policy for
+one, four, and eight concurrent runs. Tool/item boundaries, terminal deltas, cancellation, and
+completion flush immediately; the design never performs one durable commit per token. A final
+Gateway history fetch reconciles the runtime projection without duplicating messages. On restart,
+Dashboard restores the snapshot and remaining journal, reconnects to Gateway, and reconciles
+again.
 
 This state machine must retain all current behavior: token streaming, thinking and tool row
 ordering, tool failure scoping, final-message reconciliation, cancel/retry, concurrent sends,
@@ -447,6 +481,41 @@ small connection store may expose SSE/Gateway health without owning domain data.
 own reducer/state-machine store because its ordered transient events must survive route changes
 and reconnects. It is not combined with general server cache state.
 
+### Browser Effect boundary
+
+Effect is available in the browser, but the same selective boundary applies as on the server.
+TanStack and React continue to own rendering, server-state caches, normalized collections,
+forms, URL state, and ordinary component state. Effect owns browser work only when asynchronous
+lifetimes are themselves part of the correctness contract: scoped subscriptions or streams,
+coordinated cancellation, bounded queues/concurrency, explicit retry/backoff, multi-step uploads,
+and tagged operational failures.
+
+The first browser feature that needs such orchestration creates one browser-composition runtime
+and disposes it during application/test teardown. Hooks and renders never create runtimes, fibers,
+or duplicate retry loops. An Effect service publishes stable snapshots into the owning TanStack
+Store, Query, or collection boundary; it does not become a second domain-state cache. Simple tRPC
+query functions, Valibot parsing, reducers, deterministic state transitions, and individual event
+handlers remain ordinary TypeScript. Existing tRPC/TanStack cancellation and retry behavior is
+reused rather than wrapped merely because a function is asynchronous.
+
+### Evaluated browser dependency candidates
+
+The following registry/documentation review was performed on 2026-08-06. It records candidates,
+not blanket installation approval. Every adopted pre-1.0 package is exact-pinned and requalified in
+the vertical slice that first needs it; competing libraries are not shipped together.
+
+| Candidate                                      | Current decision                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `react-resizable-panels` `4.12.2`              | Likely adoption for accessible chat, file, log, and terminal split panes. Add it only with the first real pane layout, keyboard/focus tests, bounded persisted sizes, responsive fallback, and teardown evidence.                                                                                             |
+| TanStack Markdown `0.0.13`                     | Alpha replacement candidate for the current `react-markdown`/remark/rehype chain. Before adoption, replay the complete chat/report/file corpus and verify the required GFM subset, accumulated AI streaming, unsafe HTML/URL handling, deterministic rendering, and bundle delta.                             |
+| TanStack Highlight `0.0.10`                    | Alpha companion candidate for Markdown and code/file previews. Qualify the explicit language registry, embedded-language fidelity, line/range annotations, escaping, themes, and bundle delta against the current `react-syntax-highlighter`/`refractor` surface. Adopt Markdown and Highlight independently. |
+| TanStack Charts + React adapter `0.6.5`        | Preferred typed/accessibility candidate for Phase 3 metrics, but still pre-alpha. Compare representative time-series, categorical, tooltip, resize, keyboard, theme, export, and high-point-count cases against Recharts before selecting exactly one renderer.                                               |
+| Recharts `3.10.1`                              | Mature fallback if the TanStack Charts spike fails. Its larger dependency surface, including Redux infrastructure, must be justified by concrete parity or stability evidence; it is not installed alongside TanStack Charts.                                                                                 |
+| TanStack Pacer / React Pacer `0.21.1`/`0.22.1` | Beta candidate only for repeated browser timing needs such as observable debounce, throttle, and UI batching. Server/process concurrency remains Effect-owned. The transitive `@tanstack/pacer-lite` used by TanStack DB is not an application API or reason to add the full package.                         |
+| Motion `13.0.0`                                | Optional later dependency for complex gesture, shared-layout, or interruptible animation parity. CSS/Tailwind remains the default; any adoption uses the current `motion` entry point, route-level code splitting, and reduced-motion tests rather than a direct legacy `framer-motion` import.               |
+| `react-refresh` `0.18.0`                       | Not an application/runtime dependency. A future qualified custom HMR development path may own it as build tooling; the selected production AOT build does not ship it.                                                                                                                                        |
+| SWR `2.5.0`                                    | Rejected. It duplicates tRPC/TanStack Query remote-state ownership and would introduce a second cache, retry policy, and invalidation model.                                                                                                                                                                  |
+
 ### What Query Collections are for
 
 A TanStack DB Query Collection is the bridge from a TanStack Query snapshot to a normalized,
@@ -463,9 +532,12 @@ It is not used merely because data came from the server:
 - form drafts stay in TanStack Form; and
 - chat runtime events stay in the dedicated chat store/state machine.
 
-Collections are created once per `QueryClient` and hidden behind a small Dashboard adapter
-because TanStack DB is still pre-1.0. The package is exact-pinned. A server snapshot always
-wins over conflicting speculative collection state.
+Collections are created once per `QueryClient` and cache key and hidden behind a small Dashboard
+adapter because TanStack DB is still pre-1.0. The exact-qualified package set is
+`@tanstack/db@0.6.17`, `@tanstack/query-db-collection@1.2.1`,
+`@tanstack/react-db@0.1.95`, and `@tanstack/query-core@5.101.4`. Route teardown disposes only the
+route subscription; it does not destroy and recreate an asynchronous collection under the same
+cache key. A server snapshot always wins over conflicting speculative collection state.
 
 ### Component and route rules
 

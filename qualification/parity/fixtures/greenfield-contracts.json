@@ -1,0 +1,178 @@
+{
+    "contentPolicy": {
+        "containsHostConfiguration": false,
+        "containsRuntimeState": false,
+        "containsSecrets": false,
+        "sourceBacked": true
+    },
+    "procedures": [
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.beginTotpEnrollment"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.beginWebAuthnEnrollment"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.beginWebAuthnStepUp"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.confirmTotpEnrollment"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.confirmWebAuthnEnrollment"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.disableMfa"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.reauthenticatePassword"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.removeTotpFactor"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.removeWebAuthnCredential"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.rotateRecoveryCodes"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.stepUpRecovery"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.stepUpTotp"
+        },
+        {
+            "kind": "mutation",
+            "name": "accountSecurity.stepUpWebAuthn"
+        },
+        {
+            "kind": "query",
+            "name": "accountSecurity.summary"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.beginWebAuthnLogin"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.bootstrap"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.changePassword"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.login"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.loginRecovery"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.loginTotp"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.loginWebAuthn"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.logout"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.revokeSession"
+        },
+        {
+            "kind": "query",
+            "name": "auth.sessions"
+        },
+        {
+            "kind": "query",
+            "name": "auth.status"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.touch"
+        },
+        {
+            "kind": "mutation",
+            "name": "automationSecurity.createCredential"
+        },
+        {
+            "kind": "mutation",
+            "name": "automationSecurity.createPrincipal"
+        },
+        {
+            "kind": "mutation",
+            "name": "automationSecurity.disablePrincipal"
+        },
+        {
+            "kind": "query",
+            "name": "automationSecurity.listCredentials"
+        },
+        {
+            "kind": "query",
+            "name": "automationSecurity.listPrincipals"
+        },
+        {
+            "kind": "mutation",
+            "name": "automationSecurity.replaceCapabilities"
+        },
+        {
+            "kind": "mutation",
+            "name": "automationSecurity.revokeCredential"
+        },
+        {
+            "kind": "mutation",
+            "name": "automationSecurity.rotateCredential"
+        },
+        {
+            "kind": "subscription",
+            "name": "events.stream"
+        },
+        {
+            "kind": "query",
+            "name": "system.runtimeIdentity"
+        }
+    ],
+    "rawHttp": [
+        {
+            "id": "GET /api/health/live",
+            "method": "GET",
+            "path": "/api/health/live"
+        },
+        {
+            "id": "GET /api/health/ready",
+            "method": "GET",
+            "path": "/api/health/ready"
+        },
+        {
+            "id": "HEAD /api/health/live",
+            "method": "HEAD",
+            "path": "/api/health/live"
+        },
+        {
+            "id": "HEAD /api/health/ready",
+            "method": "HEAD",
+            "path": "/api/health/ready"
+        }
+    ],
+    "schemaVersion": 1,
+    "source": "src/contracts/contractRegistry.ts"
+}

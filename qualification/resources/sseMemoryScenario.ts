@@ -1,3 +1,5 @@
+import { Effect, Exit, Scope } from "effect";
+
 import { QualificationEventFeed } from "../realtime/eventFeed.ts";
 import { readRuntimeIdentity } from "../runtimeCandidate.ts";
 import { AsyncCleanupStack } from "../test/asyncCleanupStack.ts";
@@ -10,7 +12,10 @@ import {
     type CgroupV2AncestorSnapshot,
     readCgroupV2AncestorSnapshots,
 } from "./cgroupV2Hierarchy.ts";
-import { openPausedTlsSseClient, type PausedTlsSseClient } from "./pausedTlsSseClient.ts";
+import {
+    pausedTlsSseClientResource,
+    type PausedTlsSseClient,
+} from "./pausedTlsSseClient.ts";
 import {
     maximumProcessMemory,
     readProcessMemorySnapshot,
@@ -134,7 +139,6 @@ export async function runSseMemoryScenario(
     assertCgroupResourcePolicy(initialCgroup, expectedCgroupPath);
     const startedAt = performance.now();
     const cleanup = new AsyncCleanupStack();
-    const allConsumers: PausedTlsSseClient[] = [];
     const eventFeed = new QualificationEventFeed();
     const roundEvidence: SseMemoryRoundEvidence[] = [];
     let sampledPeak: ProcessMemorySnapshot | undefined;
@@ -167,7 +171,10 @@ export async function runSseMemoryScenario(
             target: new URL(`http://127.0.0.1:${release.port}`),
         });
         cleanup.defer("SSE memory qualification proxy", () => proxy.stop(true));
-        cleanup.defer("SSE memory slow consumers", () => closeConsumers(allConsumers));
+        const consumerScope = await Effect.runPromise(Scope.make("parallel"));
+        cleanup.defer("SSE memory slow-consumer scope", () =>
+            Effect.runPromise(Scope.close(consumerScope, Exit.void))
+        );
 
         await settleMemory();
         baselineCgroup = await readCurrentCgroupV2Snapshot();
@@ -206,13 +213,16 @@ export async function runSseMemoryScenario(
                 consumerIndex < sseMemoryQualificationPolicy.scenario.consumerCount;
                 consumerIndex += 1
             ) {
-                const consumer = await openPausedTlsSseClient(
+                const timeoutMs = remainingRoundTime(roundDeadline);
+                const consumerResource = pausedTlsSseClientResource(
                     proxy.url,
                     tlsIdentity.certificate,
                     qualificationCookie,
-                    remainingRoundTime(roundDeadline)
+                    timeoutMs
                 );
-                allConsumers.push(consumer);
+                const consumer = await Effect.runPromise(
+                    Scope.provide(consumerScope)(consumerResource)
+                );
                 roundConsumers.push(consumer);
             }
             traceScenario(`round-${roundIndex + 1}-clients-paused`, startedAt);

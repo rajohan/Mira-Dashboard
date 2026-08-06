@@ -9,7 +9,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 
 | Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                 |
 | ----------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — Evidence and qualification      | In progress                          | Bun/SQLite/tRPC/SSE and production-shaped realtime evidence passes; frontend build, TanStack DB, full shutdown, chat batching, and measured resource-budget spikes remain.                                                                                                                                          |
+| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`, including build, transport, database/outbox, browser data, chat batching, shutdown, parity, OpenClaw source audit, and capped resource evidence.                                                                  |
 | 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP policy, realtime outbox, and the current generated-doc subset exist; browser/worker roots, complete import enforcement, complete generated references, and release/rollback closure remain.                                                                     |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates. |
 | 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                           |
@@ -586,11 +586,61 @@ closes a phase; dated entries below provide the evidence, not a second status so
   wrong-ID/contradictory frames, exact mismatch classification, header and URL secrecy,
   deterministic absence of retry after `startup-sidecars`, native connection refusal,
   close-confirmed terminal races, redaction, timeout, and real HTTP-to-Effect-to-socket
-  cancellation with zero user/session/audit/rate-limit publication. Raw continuation-frame
-  qualification remains an explicit Phase 0 gate. The consolidated
+  cancellation with zero user/session/audit/rate-limit publication. Phase 0 now separately
+  qualifies raw continuation frames and fragmented-message behavior. The consolidated
   [Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md) maps the complete
   authentication, MFA, WebAuthn, automation, SSE, migration, and Gateway evidence to misuse cases
   and residual risks.
 - This closes Phase 2 only for its documented server-side scope. It does not claim full native
   persistent Gateway qualification. Phase 4 must re-audit the then-installed OpenClaw source and
   protocol before implementing persistent connection, event recovery, sessions, chat, or cron.
+
+### 2026-08-06 — Phase 0 evidence and qualification closed
+
+- Bun `1.4.0-canary.1+17d684360`, full revision
+  `17d6843606d76620cb55d31424d7fb0aed51c367`, passes qualification typecheck and the complete
+  qualification suite: 133 tests, 682 assertions, zero failures, and 30 files. This is the exact
+  audited candidate for the round, not a repository-wide source-revision pin.
+- The selected frontend path is one compiler-first Bun HTML AOT build. Executable fixture and
+  actual-build evidence cover Tailwind, lazy chunks, CSP-compatible assets, hashes,
+  precompression, absent production source maps, and bundle budgets. The exact-pinned TanStack DB
+  adapter covers snapshot replacement, direct batch writes, query-cache synchronization,
+  optimistic conflicts, cancellation, and route-subscription teardown.
+- File-backed WAL evidence uses separate web and worker processes and covers reader/writer and
+  writer/writer behavior, real busy/locked classification, no-gap/no-duplicate outbox delivery,
+  hard-kill claim recovery, savepoints, prepared-statement disposal, checkpoint, backup, restore,
+  and integrity. Chat qualification selects 150 ms ordered token/thinking batches for one, four,
+  and eight concurrent runs, with immediate tool/item, terminal, cancel, and completion flushes.
+- Raw RFC 6455 tests cover continuation reassembly, a UTF-8 code point split across three frames,
+  orphan/interleaved-fragment `1002` closes, invalid-length and 64 KiB application-bound `1009`
+  closes, deterministic cancellation/close, partial writes, native refusal, and exactly one
+  connection attempt without reconnect.
+- The two-generation shutdown test withdraws readiness before cleanup, closes SSE and the local
+  Gateway connection, disposes the statement and WAL database, recovers the worker lease, ends the
+  detached process group, and restarts on the same database without a leak. The candidate's
+  intentional keep-alive behavior requires a scoped Effect graceful-stop fiber followed by a
+  separately bounded force escalation; the candidate records `listener-force-stopped` and closes
+  every owned resource. The production listener now uses the same process `ManagedRuntime` for its
+  tagged graceful/deadline/force orchestration, including explicit force requests, original-fiber
+  settlement, and best-effort containment after graceful rejection.
+- Source-derived parity now accounts for all 156 current HTTP operations plus `/ws`. The OpenClaw
+  audit pins 22 redacted source/protocol/UI artifacts for installed `2026.7.2-beta.7 (dabe191)`,
+  including the generic-event, ephemeral plan/checklist projection, compute-starting companion ask,
+  and background-task list/detail/cancel semantics. These are Phase 4 adapter requirements, not an
+  invitation to scrape the Control UI.
+- The exact-candidate capped resource matrix passes without `high`, `max`, `oom`, or `oom_kill`
+  memory events, memory pressure, or leaked process, unit, or temporary state:
+
+    | Scenario              | Peak memory (bytes) | Elapsed (ms) | Peak tasks |
+    | --------------------- | ------------------: | -----------: | ---------: |
+    | Frontend build        |         650,104,832 |       14,793 |         19 |
+    | Representative tests  |         248,758,272 |        2,222 |         18 |
+    | SQLite outbox/restore |         101,896,192 |        1,218 |         20 |
+    | Chat batching         |          42,676,224 |           97 |         12 |
+    | Complete shutdown     |         128,774,144 |        3,133 |         25 |
+    | Child cancellation    |         117,194,752 |        1,531 |         24 |
+
+- Phase 0 is complete, but the rewrite is not: Phase 1 remains in progress with browser/worker
+  roots, complete import enforcement, complete generated references, immutable release/rollback,
+  and end-to-end empty-database web/worker delivery still open. Final production load, restore,
+  cutover, and legacy-removal evidence remains in Phase 6.

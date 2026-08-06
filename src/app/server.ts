@@ -33,18 +33,6 @@ const serverGracefulShutdownTimeoutSchema = v.pipe(
     )
 );
 
-function createShutdownDeadline(timeoutMs: number): {
-    cancel(): void;
-    readonly outcome: Promise<"timed-out">;
-} {
-    const deadline = Promise.withResolvers<"timed-out">();
-    const timeout = setTimeout(() => deadline.resolve("timed-out"), timeoutMs);
-    return {
-        cancel: () => clearTimeout(timeout),
-        outcome: deadline.promise,
-    };
-}
-
 async function primaryErrorAfterCleanup(
     primaryError: unknown,
     cleanup: () => Promise<void>
@@ -53,7 +41,7 @@ async function primaryErrorAfterCleanup(
         await cleanup();
     } catch {
         // The process boundary cannot recover from a cleanup double-fault.
-        // Preserve the initiating failure, which identifies the startup defect.
+        // Preserve the initiating failure, which identifies the original defect.
     }
     return primaryError;
 }
@@ -152,43 +140,26 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
         } catch (error) {
             throw await primaryErrorAfterCleanup(error, () => server.stop(true));
         }
-        const forceStopRequest = Promise.withResolvers<"forced">();
-        let forceStopRequested = false;
+        const forceStopController = new AbortController();
         let stopPromise: Promise<void> | undefined;
 
         return Object.freeze({
             port: serverPort,
             stop(force = false) {
-                if (force && !forceStopRequested) {
-                    forceStopRequested = true;
-                    forceStopRequest.resolve("forced");
-                }
+                if (force) forceStopController.abort();
                 stopPromise ??= (async () => {
                     try {
-                        if (forceStopRequested) {
-                            await server.stop(true);
-                            return;
-                        }
-
-                        const gracefulStop = server.stop(false);
-                        const deadline = createShutdownDeadline(
-                            gracefulShutdownTimeoutMs
+                        await options.applicationRuntime.shutdownListener({
+                            forceSignal: forceStopController.signal,
+                            gracefulShutdownTimeoutMs,
+                            stop: (forceListener) => server.stop(forceListener),
+                        });
+                    } catch (error) {
+                        throw await primaryErrorAfterCleanup(error, () =>
+                            options.applicationRuntime.dispose()
                         );
-                        try {
-                            const outcome = await Promise.race([
-                                gracefulStop.then(() => "drained" as const),
-                                forceStopRequest.promise,
-                                deadline.outcome,
-                            ]);
-                            if (outcome !== "drained") {
-                                await server.stop(true);
-                            }
-                        } finally {
-                            deadline.cancel();
-                        }
-                    } finally {
-                        await options.applicationRuntime.dispose();
                     }
+                    await options.applicationRuntime.dispose();
                 })();
                 return stopPromise;
             },

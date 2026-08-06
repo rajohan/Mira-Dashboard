@@ -1,0 +1,2069 @@
+{
+    "contentPolicy": {
+        "containsHostConfiguration": false,
+        "containsRuntimeState": false,
+        "containsSecrets": false,
+        "sourceBacked": true
+    },
+    "endpoints": [
+        {
+            "id": "DELETE /api/account/security/sessions/:sessionId",
+            "method": "DELETE",
+            "path": "/api/account/security/sessions/:sessionId",
+            "purpose": "Revokes one browser session.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.revokeSession"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "DELETE /api/account/security/totp/:factorId",
+            "method": "DELETE",
+            "path": "/api/account/security/totp/:factorId",
+            "purpose": "Removes a TOTP factor, but never the final factor.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.removeTotpFactor"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "DELETE /api/account/security/webauthn/:credentialId",
+            "method": "DELETE",
+            "path": "/api/account/security/webauthn/:credentialId",
+            "purpose": "Removes a security key, but never the final factor.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.removeWebAuthnCredential"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "DELETE /api/docker/images/:imageId",
+            "method": "DELETE",
+            "path": "/api/docker/images/:imageId",
+            "purpose": "Queues image deletion.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.deleteImage"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "DELETE /api/docker/volumes/:volumeName",
+            "method": "DELETE",
+            "path": "/api/docker/volumes/:volumeName",
+            "purpose": "Queues volume deletion.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.deleteVolume"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "DELETE /api/notifications/:id",
+            "method": "DELETE",
+            "path": "/api/notifications/:id",
+            "purpose": "Deletes one notification.",
+            "section": "Notifications",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["notifications.delete"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "DELETE /api/reports/:id",
+            "method": "DELETE",
+            "path": "/api/reports/:id",
+            "purpose": "Deletes a report and linked notifications.",
+            "section": "Reports",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["reports.delete"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "DELETE /api/sessions/:id",
+            "method": "DELETE",
+            "path": "/api/sessions/:id",
+            "purpose": "Deletes/removes a session.",
+            "section": "Sessions And Chat",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["gatewaySessions.delete"],
+                "phase": "phase-4"
+            }
+        },
+        {
+            "id": "DELETE /api/tasks/:id",
+            "method": "DELETE",
+            "path": "/api/tasks/:id",
+            "purpose": "Deletes a task and its updates/events.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.delete"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "DELETE /api/tasks/:id/updates/:updateId",
+            "method": "DELETE",
+            "path": "/api/tasks/:id/updates/:updateId",
+            "purpose": "Deletes a task update.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.deleteProgress"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/account/security",
+            "method": "GET",
+            "path": "/api/account/security",
+            "purpose": "Lists MFA state, factors, configuration, and browser sessions.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.summary", "auth.sessions"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "GET /api/agents/:id/status",
+            "method": "GET",
+            "path": "/api/agents/:id/status",
+            "purpose": "Reads one agent status.",
+            "section": "Agents",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["agents.getStatus"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/agents/config",
+            "method": "GET",
+            "path": "/api/agents/config",
+            "purpose": "Reads agent config.",
+            "section": "Agents",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["agents.getConfiguration"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/agents/status",
+            "method": "GET",
+            "path": "/api/agents/status",
+            "purpose": "Reads all agent statuses.",
+            "section": "Agents",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["agents.listStatuses"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/agents/tasks/history",
+            "method": "GET",
+            "path": "/api/agents/tasks/history",
+            "purpose": "Reads agent task history.",
+            "section": "Agents",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["agents.listTaskHistory"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/audit-events",
+            "method": "GET",
+            "path": "/api/audit-events",
+            "purpose": "Pages append-only redacted events newest-first (`limit`, `before` cursor).",
+            "section": "Audit",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["securityAudit.listEvents"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "GET /api/auth/bootstrap",
+            "method": "GET",
+            "path": "/api/auth/bootstrap",
+            "purpose": "Returns first-user/bootstrap state.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.status"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "GET /api/auth/session",
+            "method": "GET",
+            "path": "/api/auth/session",
+            "purpose": "Returns current auth/session state.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.status"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "GET /api/backups/kopia",
+            "method": "GET",
+            "path": "/api/backups/kopia",
+            "purpose": "Reads Kopia backup state.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["backups.getKopiaStatus"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/backups/walg",
+            "method": "GET",
+            "path": "/api/backups/walg",
+            "purpose": "Reads WAL-G backup state.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["backups.getWalgStatus"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/cache/:key",
+            "method": "GET",
+            "path": "/api/cache/:key",
+            "purpose": "Reads one cache entry.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["cache.getEntry"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/cache/heartbeat",
+            "method": "GET",
+            "path": "/api/cache/heartbeat",
+            "purpose": "Reads schema v3 cache envelopes plus compact task, OpenClaw cron, and Dashboard-job projections.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["cache.getHeartbeat"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/cache/status",
+            "method": "GET",
+            "path": "/api/cache/status",
+            "purpose": "Reads cache envelopes without payload data for lightweight UI polling.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["cache.getStatus"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/chat/media/outgoing/*",
+            "method": "GET",
+            "path": "/api/chat/media/outgoing/*",
+            "purpose": "Proxies an exact managed Gateway media path with backend-held auth.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/chat/media/*",
+                "phase": "phase-4"
+            }
+        },
+        {
+            "id": "GET /api/config",
+            "method": "GET",
+            "path": "/api/config",
+            "purpose": "Reads recursively masked OpenClaw config plus hash.",
+            "section": "OpenClaw Config",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.getConfiguration"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/config-files",
+            "method": "GET",
+            "path": "/api/config-files",
+            "purpose": "Lists OpenClaw config files.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.listConfigFiles"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/config-files/*",
+            "method": "GET",
+            "path": "/api/config-files/*",
+            "purpose": "Reads a config file under OpenClaw root.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.getConfigFile"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/cron/jobs",
+            "method": "GET",
+            "path": "/api/cron/jobs",
+            "purpose": "Lists OpenClaw cron jobs and open linked tasks.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawCron.list"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/database/overview",
+            "method": "GET",
+            "path": "/api/database/overview",
+            "purpose": "Reads Postgres/PgBouncer plus Dashboard SQLite lifecycle overview.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["database.overview"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/containers",
+            "method": "GET",
+            "path": "/api/docker/containers",
+            "purpose": "Lists containers.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.listContainers"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/containers/:containerId",
+            "method": "GET",
+            "path": "/api/docker/containers/:containerId",
+            "purpose": "Reads container details.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.getContainer"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/containers/:containerId/logs",
+            "method": "GET",
+            "path": "/api/docker/containers/:containerId/logs",
+            "purpose": "Reads container logs.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.listContainerLogs"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/containers/stats",
+            "method": "GET",
+            "path": "/api/docker/containers/stats",
+            "purpose": "Reads the current container stats snapshot.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.getContainerStats"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/exec/:jobId",
+            "method": "GET",
+            "path": "/api/docker/exec/:jobId",
+            "purpose": "Reads persisted exec output/state.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.getExec"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/images",
+            "method": "GET",
+            "path": "/api/docker/images",
+            "purpose": "Lists images.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.listImages"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/updater/events",
+            "method": "GET",
+            "path": "/api/docker/updater/events",
+            "purpose": "Lists update events.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.listUpdateEvents"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/updater/services",
+            "method": "GET",
+            "path": "/api/docker/updater/services",
+            "purpose": "Lists managed update services.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.listManagedServices"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/docker/volumes",
+            "method": "GET",
+            "path": "/api/docker/volumes",
+            "purpose": "Lists volumes.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.listVolumes"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/exec/:jobId",
+            "method": "GET",
+            "path": "/api/exec/:jobId",
+            "purpose": "Reads persisted exec output/state.",
+            "section": "Exec And Terminal",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["terminal.getExecution"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/files",
+            "method": "GET",
+            "path": "/api/files",
+            "purpose": "Lists workspace files.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["files.list"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/files/*",
+            "method": "GET",
+            "path": "/api/files/*",
+            "purpose": "Reads workspace file/media metadata/content.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/files/content/*",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/health/diagnostics",
+            "method": "GET",
+            "path": "/api/health/diagnostics",
+            "purpose": "Authenticated readiness details and dependency status.",
+            "section": "Health",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["system.healthDiagnostics"],
+                "phase": "phase-1"
+            }
+        },
+        {
+            "id": "GET /api/health/live",
+            "method": "GET",
+            "path": "/api/health/live",
+            "purpose": "Public web-process liveness.",
+            "section": "Health",
+            "target": {
+                "delivery": "implemented",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/health/live",
+                "phase": "phase-1"
+            }
+        },
+        {
+            "id": "GET /api/health/ready",
+            "method": "GET",
+            "path": "/api/health/ready",
+            "purpose": "Public activation readiness; `503` when not ready.",
+            "section": "Health",
+            "target": {
+                "delivery": "implemented",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/health/ready",
+                "phase": "phase-1"
+            }
+        },
+        {
+            "id": "GET /api/job-executions",
+            "method": "GET",
+            "path": "/api/job-executions",
+            "purpose": "Lists recent executions plus queue/worker summary; `?include=claims` adds pause state.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["jobs.listRuns"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/job-executions/:id",
+            "method": "GET",
+            "path": "/api/job-executions/:id",
+            "purpose": "Reads one execution, including its persisted progress/result output snapshot.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["jobs.getRun"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/jobs",
+            "method": "GET",
+            "path": "/api/jobs",
+            "purpose": "Lists Dashboard scheduled jobs.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["schedules.list"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/jobs/:id",
+            "method": "GET",
+            "path": "/api/jobs/:id",
+            "purpose": "Reads a scheduled job.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["schedules.get"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/jobs/:id/runs",
+            "method": "GET",
+            "path": "/api/jobs/:id/runs",
+            "purpose": "Lists job run history.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["schedules.listRuns"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/logs/dashboard",
+            "method": "GET",
+            "path": "/api/logs/dashboard",
+            "purpose": "Reads the bounded Dashboard service log tail.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/logs/dashboard",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/logs/openclaw/content",
+            "method": "GET",
+            "path": "/api/logs/openclaw/content",
+            "purpose": "Reads a bounded tail from one allowlisted OpenClaw log file.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/logs/openclaw/content/*",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/logs/openclaw/files",
+            "method": "GET",
+            "path": "/api/logs/openclaw/files",
+            "purpose": "Lists readable OpenClaw log files and metadata.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["logs.listOpenClawFiles"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/media",
+            "method": "GET",
+            "path": "/api/media",
+            "purpose": "Serves or safely previews media bytes from OpenClaw media roots.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "GET",
+                "path": "/api/media/*",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/metrics",
+            "method": "GET",
+            "path": "/api/metrics",
+            "purpose": "Reads host metrics.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["system.metrics"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/moltbook/feed",
+            "method": "GET",
+            "path": "/api/moltbook/feed",
+            "purpose": "Reads feed with query params.",
+            "section": "Moltbook And Voice",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["moltbook.feed"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/moltbook/home",
+            "method": "GET",
+            "path": "/api/moltbook/home",
+            "purpose": "Reads Moltbook home cache/API.",
+            "section": "Moltbook And Voice",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["moltbook.home"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/moltbook/my-posts",
+            "method": "GET",
+            "path": "/api/moltbook/my-posts",
+            "purpose": "Reads own content.",
+            "section": "Moltbook And Voice",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["moltbook.listMyPosts"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/moltbook/profile",
+            "method": "GET",
+            "path": "/api/moltbook/profile",
+            "purpose": "Reads profile.",
+            "section": "Moltbook And Voice",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["moltbook.profile"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/notifications",
+            "method": "GET",
+            "path": "/api/notifications",
+            "purpose": "Lists notifications with filters/limit.",
+            "section": "Notifications",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["notifications.list"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/ops/log-rotation/status",
+            "method": "GET",
+            "path": "/api/ops/log-rotation/status",
+            "purpose": "Reads log rotation status.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["logMaintenance.status"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/pull-requests",
+            "method": "GET",
+            "path": "/api/pull-requests",
+            "purpose": "Lists Dashboard PRs.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.listPullRequests"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/pull-requests/deployments",
+            "method": "GET",
+            "path": "/api/pull-requests/deployments",
+            "purpose": "Lists deploy and rollback jobs.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.listDeployments"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/pull-requests/preview",
+            "method": "GET",
+            "path": "/api/pull-requests/preview",
+            "purpose": "Reads the single managed PR-dev slot.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.getPreview"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/pull-requests/production-checkout",
+            "method": "GET",
+            "path": "/api/pull-requests/production-checkout",
+            "purpose": "Reads production checkout status.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.getProductionCheckout"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/pull-requests/releases",
+            "method": "GET",
+            "path": "/api/pull-requests/releases",
+            "purpose": "Reads immutable `current`/`previous` release status.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.getReleases"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/reports",
+            "method": "GET",
+            "path": "/api/reports",
+            "purpose": "Lists reports, default limit `100`, max `200`. Supports `type` and `status`.",
+            "section": "Reports",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["reports.list"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/reports/:id",
+            "method": "GET",
+            "path": "/api/reports/:id",
+            "purpose": "Reads one report with full Markdown body.",
+            "section": "Reports",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["reports.get"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/sessions",
+            "method": "GET",
+            "path": "/api/sessions",
+            "purpose": "Normalized session snapshot from Gateway.",
+            "section": "Health",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["gatewaySessions.list"],
+                "phase": "phase-4"
+            }
+        },
+        {
+            "id": "GET /api/sessions/list",
+            "method": "GET",
+            "path": "/api/sessions/list",
+            "purpose": "Lists Gateway sessions with optional filters.",
+            "section": "Sessions And Chat",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["gatewaySessions.list"],
+                "phase": "phase-4"
+            }
+        },
+        {
+            "id": "GET /api/sessions/stats",
+            "method": "GET",
+            "path": "/api/sessions/stats",
+            "purpose": "Returns session stats.",
+            "section": "Sessions And Chat",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["gatewaySessions.stats"],
+                "phase": "phase-4"
+            }
+        },
+        {
+            "id": "GET /api/settings",
+            "method": "GET",
+            "path": "/api/settings",
+            "purpose": "Reads Dashboard preferences plus current Gateway connection.",
+            "section": "Dashboard Settings",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["settings.get"],
+                "phase": "phase-1"
+            }
+        },
+        {
+            "id": "GET /api/skills",
+            "method": "GET",
+            "path": "/api/skills",
+            "purpose": "Lists OpenClaw skills.",
+            "section": "OpenClaw Config",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.listSkills"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "GET /api/tasks",
+            "method": "GET",
+            "path": "/api/tasks",
+            "purpose": "Lists local tasks.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.list"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/tasks/:id",
+            "method": "GET",
+            "path": "/api/tasks/:id",
+            "purpose": "Reads one task.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.get"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "GET /api/tasks/:id/updates",
+            "method": "GET",
+            "path": "/api/tasks/:id/updates",
+            "purpose": "Lists task progress updates.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.listUpdates"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "HEAD /api/health/live",
+            "method": "HEAD",
+            "path": "/api/health/live",
+            "purpose": "Bodyless public web-process liveness probe.",
+            "section": "Health",
+            "target": {
+                "delivery": "implemented",
+                "kind": "raw-http",
+                "method": "HEAD",
+                "path": "/api/health/live",
+                "phase": "phase-1"
+            }
+        },
+        {
+            "id": "HEAD /api/health/ready",
+            "method": "HEAD",
+            "path": "/api/health/ready",
+            "purpose": "Bodyless readiness probe with the same status as GET.",
+            "section": "Health",
+            "target": {
+                "delivery": "implemented",
+                "kind": "raw-http",
+                "method": "HEAD",
+                "path": "/api/health/ready",
+                "phase": "phase-1"
+            }
+        },
+        {
+            "id": "PATCH /api/job-executions/claims",
+            "method": "PATCH",
+            "path": "/api/job-executions/claims",
+            "purpose": "Pauses/resumes new worker claims; running work is not cancelled.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["jobs.setClaimingPaused"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "PATCH /api/jobs/:id",
+            "method": "PATCH",
+            "path": "/api/jobs/:id",
+            "purpose": "Updates scheduled job settings and intentional-disable metadata.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["schedules.update"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "PATCH /api/tasks/:id",
+            "method": "PATCH",
+            "path": "/api/tasks/:id",
+            "purpose": "Updates title/body/labels/automation.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.update"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "PATCH /api/tasks/:id/updates/:updateId",
+            "method": "PATCH",
+            "path": "/api/tasks/:id/updates/:updateId",
+            "purpose": "Edits a task update.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.updateProgress"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/account/security/mfa/disable",
+            "method": "POST",
+            "path": "/api/account/security/mfa/disable",
+            "purpose": "Disables MFA after password plus recent second factor.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.disableMfa"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/password/change",
+            "method": "POST",
+            "path": "/api/account/security/password/change",
+            "purpose": "Changes password, rotates current session, revokes the rest.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.changePassword"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/reauth/password",
+            "method": "POST",
+            "path": "/api/account/security/reauth/password",
+            "purpose": "Refreshes recent password verification.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.reauthenticatePassword"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/recovery-codes/rotate",
+            "method": "POST",
+            "path": "/api/account/security/recovery-codes/rotate",
+            "purpose": "Invalidates and replaces all recovery codes.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.rotateRecoveryCodes"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/sessions/revoke-all",
+            "method": "POST",
+            "path": "/api/account/security/sessions/revoke-all",
+            "purpose": "Revokes every session, including the current one.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["auth.revokeAllSessions"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/sessions/revoke-others",
+            "method": "POST",
+            "path": "/api/account/security/sessions/revoke-others",
+            "purpose": "Revokes every other browser session.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["auth.revokeOtherSessions"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/step-up/recovery",
+            "method": "POST",
+            "path": "/api/account/security/step-up/recovery",
+            "purpose": "Refreshes recent MFA and consumes a recovery code.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.stepUpRecovery"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/step-up/totp",
+            "method": "POST",
+            "path": "/api/account/security/step-up/totp",
+            "purpose": "Refreshes recent MFA with TOTP.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.stepUpTotp"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/step-up/webauthn/options",
+            "method": "POST",
+            "path": "/api/account/security/step-up/webauthn/options",
+            "purpose": "Creates security-key step-up options.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.beginWebAuthnStepUp"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/step-up/webauthn/verify",
+            "method": "POST",
+            "path": "/api/account/security/step-up/webauthn/verify",
+            "purpose": "Verifies security-key step-up.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.stepUpWebAuthn"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/totp/confirm",
+            "method": "POST",
+            "path": "/api/account/security/totp/confirm",
+            "purpose": "Confirms and activates a TOTP factor.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.confirmTotpEnrollment"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/totp/setup",
+            "method": "POST",
+            "path": "/api/account/security/totp/setup",
+            "purpose": "Starts encrypted TOTP enrollment.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.beginTotpEnrollment"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/webauthn/register/options",
+            "method": "POST",
+            "path": "/api/account/security/webauthn/register/options",
+            "purpose": "Starts registration for a named security key.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.beginWebAuthnEnrollment"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/account/security/webauthn/register/verify",
+            "method": "POST",
+            "path": "/api/account/security/webauthn/register/verify",
+            "purpose": "Verifies and stores a security-key public credential.",
+            "section": "Account Security",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["accountSecurity.confirmWebAuthnEnrollment"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/auth/login",
+            "method": "POST",
+            "path": "/api/auth/login",
+            "purpose": "Verifies password; returns a session or a pending MFA login with `202`.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.login"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/auth/login/recovery",
+            "method": "POST",
+            "path": "/api/auth/login/recovery",
+            "purpose": "Completes pending login and consumes a one-time recovery code.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.loginRecovery"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/auth/login/totp",
+            "method": "POST",
+            "path": "/api/auth/login/totp",
+            "purpose": "Completes pending login with an authenticator-app code.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.loginTotp"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/auth/login/webauthn/options",
+            "method": "POST",
+            "path": "/api/auth/login/webauthn/options",
+            "purpose": "Creates options for pending security-key login.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.beginWebAuthnLogin"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/auth/login/webauthn/verify",
+            "method": "POST",
+            "path": "/api/auth/login/webauthn/verify",
+            "purpose": "Verifies a pending security-key assertion and creates the session.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.loginWebAuthn"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/auth/logout",
+            "method": "POST",
+            "path": "/api/auth/logout",
+            "purpose": "Deletes the current auth session and cookies.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.logout"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/auth/register-first-user",
+            "method": "POST",
+            "path": "/api/auth/register-first-user",
+            "purpose": "Validates Gateway token and creates the first user/session.",
+            "section": "Auth",
+            "target": {
+                "delivery": "implemented",
+                "kind": "procedure",
+                "names": ["auth.bootstrap"],
+                "phase": "phase-2"
+            }
+        },
+        {
+            "id": "POST /api/backup",
+            "method": "POST",
+            "path": "/api/backup",
+            "purpose": "Creates config backup.",
+            "section": "OpenClaw Config",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.createConfigurationBackup"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/backups/kopia/clear-needs-attention",
+            "method": "POST",
+            "path": "/api/backups/kopia/clear-needs-attention",
+            "purpose": "Queues clearing Kopia attention state.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["backups.clearKopiaAttention"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/backups/kopia/run",
+            "method": "POST",
+            "path": "/api/backups/kopia/run",
+            "purpose": "Queues Kopia backup.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["backups.runKopia"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/backups/walg/clear-needs-attention",
+            "method": "POST",
+            "path": "/api/backups/walg/clear-needs-attention",
+            "purpose": "Queues clearing WAL-G attention state.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["backups.clearWalgAttention"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/backups/walg/run",
+            "method": "POST",
+            "path": "/api/backups/walg/run",
+            "purpose": "Queues WAL-G backup.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["backups.runWalg"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/cache/:key/refresh",
+            "method": "POST",
+            "path": "/api/cache/:key/refresh",
+            "purpose": "Queues and observes one cache refresh.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["cache.refreshEntry"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/cron/jobs/:id/delete",
+            "method": "POST",
+            "path": "/api/cron/jobs/:id/delete",
+            "purpose": "Deletes an OpenClaw cron job.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawCron.delete"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/cron/jobs/:id/run",
+            "method": "POST",
+            "path": "/api/cron/jobs/:id/run",
+            "purpose": "Runs an OpenClaw cron job.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawCron.run"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/cron/jobs/:id/toggle",
+            "method": "POST",
+            "path": "/api/cron/jobs/:id/toggle",
+            "purpose": "Enables/disables an OpenClaw cron job and updates its Dashboard-owned disable intent.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawCron.setEnabled"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/cron/jobs/:id/update",
+            "method": "POST",
+            "path": "/api/cron/jobs/:id/update",
+            "purpose": "Updates an OpenClaw cron job patch.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawCron.update"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/docker/containers/:containerId/action",
+            "method": "POST",
+            "path": "/api/docker/containers/:containerId/action",
+            "purpose": "Queues a container start/stop/restart.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.performContainerAction"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/docker/exec/:jobId/stop",
+            "method": "POST",
+            "path": "/api/docker/exec/:jobId/stop",
+            "purpose": "Requests exec cancellation.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.stopExec"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/docker/exec/start",
+            "method": "POST",
+            "path": "/api/docker/exec/start",
+            "purpose": "Queues a worker-owned container exec job.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.startExec"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/docker/prune",
+            "method": "POST",
+            "path": "/api/docker/prune",
+            "purpose": "Queues a Docker prune target.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.prune"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/docker/stack/action",
+            "method": "POST",
+            "path": "/api/docker/stack/action",
+            "purpose": "Queues a Compose stack action.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.performStackAction"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/docker/updater/run",
+            "method": "POST",
+            "path": "/api/docker/updater/run",
+            "purpose": "Queues an updater scan.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.runUpdater"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/docker/updater/services/:serviceId/update",
+            "method": "POST",
+            "path": "/api/docker/updater/services/:serviceId/update",
+            "purpose": "Queues one managed service update.",
+            "section": "Docker",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["docker.updateService"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/exec",
+            "method": "POST",
+            "path": "/api/exec",
+            "purpose": "Queues one command and observes its persisted result.",
+            "section": "Exec And Terminal",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["terminal.startExecution"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/exec/:jobId/stop",
+            "method": "POST",
+            "path": "/api/exec/:jobId/stop",
+            "purpose": "Requests exec cancellation.",
+            "section": "Exec And Terminal",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["terminal.stopExecution"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/exec/start",
+            "method": "POST",
+            "path": "/api/exec/start",
+            "purpose": "Queues a worker-owned long-running exec job.",
+            "section": "Exec And Terminal",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["terminal.startExecution"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/job-executions/:id/cancel",
+            "method": "POST",
+            "path": "/api/job-executions/:id/cancel",
+            "purpose": "Cancels queued work or requests cooperative cancellation of a running execution.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["jobs.cancelRun"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/jobs/:id/run",
+            "method": "POST",
+            "path": "/api/jobs/:id/run",
+            "purpose": "Queues a scheduled job and returns `202`.",
+            "section": "Jobs And Cron",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["schedules.run"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/notifications",
+            "method": "POST",
+            "path": "/api/notifications",
+            "purpose": "Creates/upserts a notification.",
+            "section": "Notifications",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["notifications.upsert"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/notifications/:id/read",
+            "method": "POST",
+            "path": "/api/notifications/:id/read",
+            "purpose": "Marks one notification read.",
+            "section": "Notifications",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["notifications.markRead"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/notifications/clear-read",
+            "method": "POST",
+            "path": "/api/notifications/clear-read",
+            "purpose": "Deletes read notifications, optionally by source.",
+            "section": "Notifications",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["notifications.clearRead"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/notifications/mark-all-read",
+            "method": "POST",
+            "path": "/api/notifications/mark-all-read",
+            "purpose": "Marks notifications read.",
+            "section": "Notifications",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["notifications.markAllRead"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/ops/log-rotation/dry-run",
+            "method": "POST",
+            "path": "/api/ops/log-rotation/dry-run",
+            "purpose": "Queues and observes log rotation dry-run.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["logMaintenance.dryRun"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/ops/log-rotation/run",
+            "method": "POST",
+            "path": "/api/ops/log-rotation/run",
+            "purpose": "Queues and observes log rotation.",
+            "section": "Backups, Cache, Metrics, Ops",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["logMaintenance.run"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/:number/approve",
+            "method": "POST",
+            "path": "/api/pull-requests/:number/approve",
+            "purpose": "Queues merge, optionally followed by deploy.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.approvePullRequest"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/:number/preview/start",
+            "method": "POST",
+            "path": "/api/pull-requests/:number/preview/start",
+            "purpose": "Validates and queues trusted PR dev (`202 Starting`).",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.startPreview"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/:number/preview/stop",
+            "method": "POST",
+            "path": "/api/pull-requests/:number/preview/stop",
+            "purpose": "Stops PR dev while retaining isolated state.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.stopPreview"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/:number/reject",
+            "method": "POST",
+            "path": "/api/pull-requests/:number/reject",
+            "purpose": "Queues reject/close.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.rejectPullRequest"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/:number/review-approval",
+            "method": "POST",
+            "path": "/api/pull-requests/:number/review-approval",
+            "purpose": "Queues review approval.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.approveReview"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/:number/update-branch",
+            "method": "POST",
+            "path": "/api/pull-requests/:number/update-branch",
+            "purpose": "Queues branch update.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.updateBranch"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/deploy",
+            "method": "POST",
+            "path": "/api/pull-requests/deploy",
+            "purpose": "Queues an atomic deploy of latest `main`.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.deploy"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/releases/rollback",
+            "method": "POST",
+            "path": "/api/pull-requests/releases/rollback",
+            "purpose": "Queues atomic rollback to the confirmed previous full SHA.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.rollbackRelease"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/pull-requests/stacks",
+            "method": "POST",
+            "path": "/api/pull-requests/stacks",
+            "purpose": "Creates one reviewed native GitHub PR stack.",
+            "section": "Pull Requests And Deployments",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["delivery.createPullRequestStack"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/reports",
+            "method": "POST",
+            "path": "/api/reports",
+            "purpose": "Creates or upserts a report.",
+            "section": "Reports",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["reports.upsert"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/restart",
+            "method": "POST",
+            "path": "/api/restart",
+            "purpose": "Queues an OpenClaw Gateway restart and waits for its persisted result.",
+            "section": "OpenClaw Config",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.restartGateway"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/sessions/:id/action",
+            "method": "POST",
+            "path": "/api/sessions/:id/action",
+            "purpose": "Sends a session action.",
+            "section": "Sessions And Chat",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["gatewaySessions.performAction"],
+                "phase": "phase-4"
+            }
+        },
+        {
+            "id": "POST /api/skills/:name",
+            "method": "POST",
+            "path": "/api/skills/:name",
+            "purpose": "Toggles a skill.",
+            "section": "OpenClaw Config",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.setSkillEnabled"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/stt/transcribe",
+            "method": "POST",
+            "path": "/api/stt/transcribe",
+            "purpose": "Transcribes audio through ElevenLabs.",
+            "section": "Moltbook And Voice",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "POST",
+                "path": "/api/stt/transcriptions",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/tasks",
+            "method": "POST",
+            "path": "/api/tasks",
+            "purpose": "Creates a task.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.create"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/tasks/:id/assign",
+            "method": "POST",
+            "path": "/api/tasks/:id/assign",
+            "purpose": "Assigns or unassigns a task.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.assign"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/tasks/:id/move",
+            "method": "POST",
+            "path": "/api/tasks/:id/move",
+            "purpose": "Moves a task between status columns.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.move"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/tasks/:id/updates",
+            "method": "POST",
+            "path": "/api/tasks/:id/updates",
+            "purpose": "Adds a Markdown progress update.",
+            "section": "Tasks",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["tasks.addUpdate"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "POST /api/terminal/cd",
+            "method": "POST",
+            "path": "/api/terminal/cd",
+            "purpose": "Resolves validated directory changes.",
+            "section": "Exec And Terminal",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["terminal.resolveDirectory"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/terminal/complete",
+            "method": "POST",
+            "path": "/api/terminal/complete",
+            "purpose": "Returns shell/path completions.",
+            "section": "Exec And Terminal",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["terminal.complete"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "POST /api/tts/speak",
+            "method": "POST",
+            "path": "/api/tts/speak",
+            "purpose": "Streams ElevenLabs TTS audio.",
+            "section": "Moltbook And Voice",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "POST",
+                "path": "/api/tts/speech",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "PUT /api/agents/:id/metadata",
+            "method": "PUT",
+            "path": "/api/agents/:id/metadata",
+            "purpose": "Updates agent metadata, including current task.",
+            "section": "Agents",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["agents.updateMetadata"],
+                "phase": "phase-3"
+            }
+        },
+        {
+            "id": "PUT /api/config",
+            "method": "PUT",
+            "path": "/api/config",
+            "purpose": "Writes config with hash check and preserves valid masked placeholders.",
+            "section": "OpenClaw Config",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.updateConfiguration"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "PUT /api/config-files/*",
+            "method": "PUT",
+            "path": "/api/config-files/*",
+            "purpose": "Writes a config file under OpenClaw root.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["openClawSettings.updateConfigFile"],
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "PUT /api/files/*",
+            "method": "PUT",
+            "path": "/api/files/*",
+            "purpose": "Writes workspace file content.",
+            "section": "Files, Config Files, Logs, Media",
+            "target": {
+                "delivery": "planned",
+                "kind": "raw-http",
+                "method": "PUT",
+                "path": "/api/files/content/*",
+                "phase": "phase-5"
+            }
+        },
+        {
+            "id": "PUT /api/settings",
+            "method": "PUT",
+            "path": "/api/settings",
+            "purpose": "Updates the validated Dashboard preference subset atomically.",
+            "section": "Dashboard Settings",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["settings.update"],
+                "phase": "phase-1"
+            }
+        },
+        {
+            "id": "WebSocket /ws",
+            "method": "WebSocket",
+            "path": "/ws",
+            "purpose": "Browser Dashboard socket for Gateway-backed live updates.",
+            "section": "Sessions And Chat",
+            "target": {
+                "delivery": "planned",
+                "kind": "procedure",
+                "names": ["events.stream"],
+                "phase": "phase-4"
+            }
+        }
+    ],
+    "schemaVersion": 1,
+    "sources": {
+        "documentation": "docs/api/endpoints.md",
+        "httpRegistry": "backend/src/routes/registry.ts",
+        "websocket": "backend/src/server/app.ts"
+    }
+}
