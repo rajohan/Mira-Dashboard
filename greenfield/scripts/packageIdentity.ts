@@ -37,5 +37,5 @@ export function resolveDirectPackageVersions(
         resolvedVersions[name] = resolutionVersion(name, packageEntry[0]);
     }
 
-    return resolvedVersions;
+    return Object.freeze(resolvedVersions);
 }

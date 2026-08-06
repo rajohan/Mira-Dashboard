@@ -127,6 +127,49 @@ describe("system foundation", () => {
         expect(await unavailable.json()).toEqual({ status: "not-ready" });
     });
 
+    test("dispatches frontend paths after tRPC and health ownership", async () => {
+        const frontendPaths: string[] = [];
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime(),
+            frontendAssets(_request, requestUrl) {
+                frontendPaths.push(requestUrl.pathname);
+                let response: Response | undefined;
+                if (requestUrl.pathname === "/") {
+                    response = new Response("dashboard-browser");
+                } else if (requestUrl.pathname === "/immutable-a1b2c3d4.js") {
+                    response = new Response("immutable-browser-asset", {
+                        headers: {
+                            "cache-control": "public, max-age=31536000, immutable",
+                        },
+                    });
+                }
+                return Promise.resolve(response);
+            },
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+
+        const browser = await fetch(server.url);
+        const immutable = await fetch(new URL("/immutable-a1b2c3d4.js", server.url));
+        const health = await fetch(new URL("/api/health/live", server.url));
+        const trpc = await fetch(new URL("/trpc/system.runtimeIdentity", server.url));
+        const missing = await fetch(new URL("/unowned", server.url));
+
+        expect(browser.status).toBe(200);
+        expect(browser.headers.get("x-request-id")).toMatch(requestIdPattern);
+        expect(await browser.text()).toBe("dashboard-browser");
+        expect(immutable.status).toBe(200);
+        expect(immutable.headers.get("x-request-id")).toBeNull();
+        expect(await immutable.text()).toBe("immutable-browser-asset");
+        expect(health.status).toBe(200);
+        expect(trpc.status).toBe(200);
+        expect(missing.status).toBe(404);
+        expect(frontendPaths).toEqual(["/", "/immutable-a1b2c3d4.js", "/unowned"]);
+    });
+
     test("correlates request bodies rejected by the application transport budget", async () => {
         const { server } = await startServer();
         const response = await fetch(new URL("/trpc/auth.status", server.url), {

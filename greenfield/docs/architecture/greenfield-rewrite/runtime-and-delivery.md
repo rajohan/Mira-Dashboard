@@ -230,10 +230,10 @@ that representation is absent. OpenAPI 3.1 documents only true raw HTTP endpoint
 pretend the tRPC wire format is a conventional REST API. The tRPC `AppRouter` type remains the
 client contract.
 
-The new `/docs` frontend route renders the checked-in generated artifacts with navigation and
-search. Rendering uses the existing Markdown/sanitization boundary and never reads source files
-or secrets from production. A release may add its non-secret build identity at runtime without
-rewriting deterministic documentation.
+A later `/docs` frontend slice will render the checked-in generated artifacts with navigation and
+search. Rendering must use the Markdown/sanitization boundary and never read source files or
+secrets from production. The current immutable release already carries the generated artifacts;
+adding their browser route remains part of full UI parity rather than the delivery foundation.
 
 ### Generation commands and checks
 
@@ -262,7 +262,7 @@ Every request, job, Gateway call, and domain transaction receives a correlation 
 logs use stable event names and include release identity, process role, duration, outcome, and
 safe identifiers. They do not serialize arbitrary request bodies or command environments.
 
-The current production web runtime requires one process logger, installs it as the only Effect
+The production web runtime requires one process logger, installs it as the only Effect
 logger in the application scope, and reuses that exact instance at ordinary HTTP/tRPC boundaries.
 The Dashboard composition root coordinates that application `ManagedRuntime` with a separate,
 retained database `ManagedRuntime`. The database-backed realtime layer and all repositories receive
@@ -270,10 +270,9 @@ the same SQLite/Drizzle service through narrow ports. After the listener settles
 scope finalizes realtime and authentication work before the database scope performs its passive
 checkpoint and strict close; the synchronous log sink flushes last. Its serializer emits bounded
 NDJSON from event-specific allowlisted fields, and a sink failure emits one constant direct-stderr
-fallback without recursive logging. The future executable web/worker composition roots still own
-creation of the stdout/stderr sink, release/config identity, and startup/shutdown events; this slice
-does not claim that absent process entrypoint. Replacement production units must bind both streams,
-including the direct-stderr fallback, to project-derived files beneath
+fallback without recursive logging. The executable web and worker composition roots own creation
+of the project-file sink, release/config identity, and startup/shutdown events. Their production
+units bind both stdout and stderr, including the direct-stderr fallback, to files beneath
 `<project-root>/production/state/logs`; default journald persistence, `LogsDirectory=`, and a
 configurable external log root are forbidden. Transient job units route their streams beneath
 `<project-root>/production/state/job-output` instead.
@@ -405,31 +404,32 @@ Keep the host-native deployment. Dashboard needs controlled access to systemd, l
 Docker, OpenClaw, Git worktrees, and host databases; putting the application itself in a
 container would add mounts and privilege plumbing without isolating the important child jobs.
 
-The future repository root must ship new `systemd/` web and worker units as part of the delivery
-slice. The legacy units are deliberately not copied into `greenfield/`: they change into a
-`backend` working directory, execute legacy `dist/*Start.js` entrypoints through the legacy
-release wrapper, and retain pre-measurement multi-gigabyte limits. Add the replacement units only
-after the rewritten executable roots and immutable release wrapper exist, then validate every
-referenced path and the measured resource limits in CI. Until then, the absence of
-`greenfield/systemd/` is an explicit incomplete delivery item rather than a compatibility link.
+The future repository root ships new `systemd/` web and worker units as part of the immutable
+release. The legacy units were deliberately not copied: they change into a `backend` working
+directory, execute retired `dist/*Start.js` entrypoints, and retain pre-measurement multi-gigabyte
+limits. The replacement units invoke the exact project-local Bun runtime and release pointers,
+bind logs beneath project state, and enforce the measured web/worker resource ceilings.
 
 Persistent state remains inside the existing Dashboard project layout at
 `<project-root>/production/state`, but outside every immutable release directory. Production
 composition derives that path from `MIRA_DASHBOARD_PROJECT_ROOT`; neither configuration nor a
-systemd `StateDirectory=` may select a separate state root. The future greenfield bootstrap/release
-boundary must create that directory as current-user-owned `0700` and protect its existing ancestor
+systemd `StateDirectory=` may select a separate state root. The greenfield bootstrap/release
+boundary creates that directory as current-user-owned `0700` and protects its existing ancestor
 chain before activation. For a non-sticky ancestor owned by the managed UID, preparation may only
 clear group/other write bits through a no-follow directory descriptor, preserve every other
 permission, verify device/inode before and after, and then revalidate the whole chain. It must fail
 closed for symlinks, ownership drift, or a writable foreign-owned ancestor; application runtime
 startup never repairs permissions. On the current host, first cutover therefore requires
 `chmod go-w /home/ubuntu/projects` (currently `0775` to `0755`) without moving any project data.
-The real bootstrap/release caller, the production-path composition tests, and the replacement-unit
-assertions remain blocking Phase 1 delivery items. Unit source remains under
-`<project-root>/production/checkout/systemd` or the active development worktree. Only installed
-copies of systemd unit files may live outside `<project-root>/development` or
-`<project-root>/production`; all Dashboard state, logs, backups, runtime binaries, checkouts, and
-release artifacts remain inside those project directories.
+Unit source remains under `<project-root>/production/checkout/systemd` or the active development
+worktree, and the exact two unit files are copied into and hashed by every immutable release. The
+installer accepts only those manifest artifacts, atomically replaces current-user-owned regular
+unit files, and performs only `systemctl --user daemon-reload`; enabling or service control is a
+separate activation action. Activation prepares and reloads the verified units for the currently
+running release—or the candidate on an empty host—before its first stop, so first deployment does
+not depend on pre-existing unit files. Only installed copies of systemd unit files may live outside
+`<project-root>/development` or `<project-root>/production`; all Dashboard state, logs, backups,
+runtime binaries, checkouts, and release artifacts remain inside those project directories.
 
 Recommended layout:
 
@@ -442,7 +442,8 @@ Recommended layout:
       browser/
       migrations/
       docs/generated/
-      scripts/
+      metadata/
+      systemd/
       release-manifest.json
     releases/current -> <release-id>
     releases/previous -> <release-id>
@@ -470,13 +471,15 @@ Deployment flow:
 2. Transfer or materialize it into a new immutable release directory and verify every hash.
 3. Prepare and verify `<project-root>/production/state` plus its protected ancestor chain before
    changing the active release pointer.
-4. Acquire the deployment lease, drain active jobs, enter maintenance mode, and quiesce all
-   database writers.
+4. Acquire the deployment lease, install/reload the verified stop-owner units, drain active jobs,
+   enter maintenance mode, and quiesce all database writers.
 5. Snapshot and verify the current database while writers remain stopped.
 6. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
    database state.
-7. Let one deployment-held initializer create or promote the database, then start worker in
-   `validate-only` mode and web against the candidate, with readiness deadlines.
+7. Reinstall the candidate release's manifest-verified user units, reload user systemd, then let
+   the deployment-held activation start worker in `validate-only` mode before web, with readiness
+   deadlines. A rollback reinstalls the previous release's units before restarting its paired
+   release/database state.
 8. Run authenticated smoke checks, including tRPC, SSE, Gateway, docs, and one safe queued job.
 9. Atomically record current/previous and prune only releases whose manifests verify.
 

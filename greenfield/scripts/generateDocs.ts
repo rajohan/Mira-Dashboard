@@ -3,11 +3,11 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { buildDocumentationArtifacts } from "./documentation/artifacts.ts";
-import { resolveDirectPackageVersions } from "./documentation/bunLock.ts";
 import {
     checkDocumentationArtifacts,
     writeDocumentationArtifacts,
 } from "./documentation/files.ts";
+import { resolveDirectPackageVersions } from "./packageIdentity.ts";
 
 const packageManifestSchema = v.object({
     dependencies: v.record(v.string(), v.string()),

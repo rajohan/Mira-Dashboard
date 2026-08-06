@@ -5,6 +5,7 @@ export type SourceRole =
     | "browser"
     | "contracts"
     | "environment-source"
+    | "maintenance-app"
     | "scripts"
     | "server"
     | "shared"
@@ -24,8 +25,37 @@ const webApplicationFiles = new Set([
 
 const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
     "src/app/dashboardServer.test.ts",
+    "src/app/dashboardServerProcess.test.ts",
+    "src/app/databaseMaintenance.test.ts",
     "src/app/trpcHttpHandler.test.ts",
     "src/app/trpcRequestPolicy.test.ts",
+    "src/app/worker.test.ts",
+]);
+
+const reviewedApplicationServerTargets: ReadonlyMap<
+    string,
+    ReadonlySet<string>
+> = new Map([
+    [
+        "src/app/worker.ts",
+        new Set([
+            "src/server/platform/configuration/workerConfiguration.ts",
+            "src/server/database/runtime/databaseRuntimeOwner.ts",
+            "src/server/platform/filesystem/projectLayout.ts",
+            "src/server/platform/observability/projectFileLogSink.ts",
+            "src/server/platform/observability/structuredLogger.ts",
+            "src/server/platform/release/runtimeRelease.ts",
+            "src/server/platform/runtime/processSignals.ts",
+        ]),
+    ],
+    [
+        "src/app/databaseMaintenance.ts",
+        new Set([
+            "src/server/database/runtime/databaseCandidateMigrationOwner.ts",
+            "src/server/database/runtime/databaseService.ts",
+            "src/server/database/runtime/databaseSnapshot.ts",
+        ]),
+    ],
 ]);
 
 /** Composition-owned runtime environment source. */
@@ -37,11 +67,25 @@ export const environmentSourceConsumers: ReadonlySet<string> = new Set([
     "src/app/worker.ts",
 ]);
 
+/**
+ * Whether an application composition edge names one exact reviewed server primitive.
+ * @param importer Normalized application composition-root path.
+ * @param target Normalized server target path.
+ * @returns Whether the exact edge was reviewed.
+ */
+export function isReviewedApplicationServerTarget(
+    importer: string,
+    target: string
+): boolean {
+    return reviewedApplicationServerTargets.get(importer)?.has(target) === true;
+}
+
 /** Reviewed dependency-direction matrix for every source role. */
 export const allowedTargets: Readonly<Record<SourceRole, ReadonlySet<SourceRole>>> = {
     browser: new Set(["browser", "contracts", "shared"]),
     contracts: new Set(["contracts", "shared"]),
     "environment-source": new Set(["shared"]),
+    "maintenance-app": new Set(["maintenance-app", "shared"]),
     scripts: new Set(["contracts", "scripts", "shared"]),
     server: new Set(["contracts", "server", "shared"]),
     shared: new Set(["shared"]),
@@ -49,6 +93,7 @@ export const allowedTargets: Readonly<Record<SourceRole, ReadonlySet<SourceRole>
         "browser",
         "contracts",
         "environment-source",
+        "maintenance-app",
         "scripts",
         "server",
         "shared",
@@ -109,6 +154,7 @@ export function sourceRole(filePath: string): SourceRole {
     }
     if (isTestPath(filePath)) return "test";
     if (filePath === environmentSourceFile) return "environment-source";
+    if (filePath === "src/app/databaseMaintenance.ts") return "maintenance-app";
     if (webApplicationFiles.has(filePath)) return "web-app";
     if (filePath === "src/app/worker.ts") return "worker-app";
     if (filePath.startsWith("src/app/")) return "unclassified-app";

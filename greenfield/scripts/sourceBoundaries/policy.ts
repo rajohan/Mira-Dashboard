@@ -8,6 +8,7 @@ import {
     environmentSourceConsumers,
     environmentSourceFile,
     isTestPath,
+    isReviewedApplicationServerTarget,
     normalizeRepositoryPath,
     relativeImportTarget,
     sourceRole,
@@ -316,6 +317,12 @@ export function validateSourceImport(
             sourceImport,
             "Imports may not target an unclassified src/app file"
         );
+    }
+    if (
+        targetRole === "server" &&
+        isReviewedApplicationServerTarget(normalizedImporter, target)
+    ) {
+        return undefined;
     }
     if (!allowedTargets[importerRole].has(targetRole)) {
         return violation(

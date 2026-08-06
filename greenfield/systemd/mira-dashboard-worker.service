@@ -1,0 +1,30 @@
+[Unit]
+Description=Mira Dashboard worker coordinator
+After=network-online.target openclaw-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+UMask=0077
+WorkingDirectory=%h/projects/mira-dashboard/production/releases/current
+Environment=NODE_ENV=production
+Environment=MIRA_DASHBOARD_PROJECT_ROOT=%h/projects/mira-dashboard
+ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- %h/projects/mira-dashboard/production/runtimes/bun/current/bun %h/projects/mira-dashboard/production/releases/current/server/worker.js
+StandardOutput=append:%h/projects/mira-dashboard/production/state/logs/worker-stdout.log
+StandardError=append:%h/projects/mira-dashboard/production/state/logs/worker-stderr.log
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+Nice=10
+CPUWeight=20
+IOWeight=20
+CPUQuota=150%
+MemoryHigh=768M
+MemoryMax=1536M
+TasksMax=128
+
+[Install]
+WantedBy=default.target

@@ -18,10 +18,12 @@ import {
 } from "./databasePath.ts";
 import {
     checkpointDatabasePassive,
+    checkpointDatabaseTruncate,
     type DatabaseCheckpointDiagnostics,
     retryDatabaseWriteOperation,
 } from "./databasePolicy.ts";
 import {
+    initializeDatabaseCandidateMigration,
     initializeDatabaseRuntime,
     loadDatabaseRuntimeMigrations,
     normalizeDatabaseRuntimeOptions,
@@ -42,6 +44,11 @@ export type {
 } from "./databaseStartup.ts";
 
 export type RuntimeOwnedDatabase = SQLiteBunDatabase & { readonly $client: Database };
+
+/** Delivery-only inputs for migrating one isolated copied database candidate. */
+export type DatabaseCandidateMigrationLayerOptions = Readonly<
+    Omit<DatabaseRuntimeLayerOptions, "startupMode">
+>;
 
 export interface DatabaseRuntimeDiagnostics extends DatabaseStartupDiagnostics {
     readonly databaseFileName: typeof dashboardDatabaseFileName;
@@ -73,7 +80,8 @@ function emptyDatabaseFailure(): DatabaseRuntimeStartupError {
 }
 
 function prepareRuntimeDatabasePath(
-    options: NormalizedDatabaseRuntimeOptions
+    options: NormalizedDatabaseRuntimeOptions,
+    createIfMissing = options.startupMode === "initialize-empty"
 ): Effect.Effect<
     PreparedDatabasePath,
     DatabaseRuntimePathError | DatabaseRuntimeStartupError
@@ -86,11 +94,7 @@ function prepareRuntimeDatabasePath(
                       message: "Database path validation failed",
                       reason: "database-file-invalid",
                   }),
-        try: () =>
-            prepareDatabasePath(
-                options.stateDirectory,
-                options.startupMode === "initialize-empty"
-            ),
+        try: () => prepareDatabasePath(options.stateDirectory, createIfMissing),
     }).pipe(
         Effect.flatMap((prepared) =>
             prepared === undefined
@@ -176,6 +180,25 @@ function releaseRuntimeDatabase(
     });
 }
 
+function releaseCandidateDatabase(
+    database: Database,
+    checkpointBeforeClose: boolean
+): Effect.Effect<void> {
+    if (!checkpointBeforeClose) return closeRuntimeDatabase(database).pipe(Effect.ignore);
+
+    return Effect.gen(function* () {
+        const checkpointResult = yield* Effect.result(
+            checkpointDatabaseTruncate(database)
+        );
+        const closeResult = yield* Effect.result(closeRuntimeDatabase(database));
+
+        if (Result.isFailure(closeResult)) return yield* Effect.die(closeResult.failure);
+        if (Result.isFailure(checkpointResult)) {
+            return yield* Effect.die(checkpointResult.failure);
+        }
+    });
+}
+
 function acquireDatabaseRuntime(unverifiedOptions: DatabaseRuntimeLayerOptions) {
     return Effect.gen(function* () {
         const options = yield* Effect.try({
@@ -228,4 +251,55 @@ export function databaseRuntimeLayer(
     options: DatabaseRuntimeLayerOptions
 ): Layer.Layer<DatabaseRuntimeService, DatabaseRuntimeAcquisitionError> {
     return Layer.effect(DatabaseRuntimeService, acquireDatabaseRuntime(options));
+}
+
+function acquireDatabaseCandidateMigration(
+    candidate: DatabaseCandidateMigrationLayerOptions
+) {
+    return Effect.gen(function* () {
+        const options = yield* Effect.try({
+            catch: (error) =>
+                error instanceof DatabaseRuntimeStartupError
+                    ? error
+                    : new DatabaseRuntimeStartupError({
+                          message: "Database candidate options are invalid",
+                          reason: "options-invalid",
+                      }),
+            try: () =>
+                normalizeDatabaseRuntimeOptions({
+                    ...candidate,
+                    startupMode: "initialize-empty",
+                }),
+        });
+        const migrations = yield* loadDatabaseRuntimeMigrations(
+            options.migrationsDirectory
+        );
+        const prepared = yield* prepareRuntimeDatabasePath(options, true);
+        let checkpointOnRelease = false;
+        const database = yield* Effect.acquireRelease(
+            openRuntimeDatabase(prepared),
+            (openedDatabase) =>
+                releaseCandidateDatabase(openedDatabase, checkpointOnRelease)
+        );
+        yield* verifyOpenDatabasePath(prepared);
+        yield* initializeDatabaseCandidateMigration(
+            database,
+            migrations,
+            options.releaseId
+        );
+        yield* verifyOpenDatabasePath(prepared);
+        checkpointOnRelease = true;
+    });
+}
+
+/**
+ * Creates a scoped delivery-only layer that migrates an isolated database candidate.
+ * It intentionally provides no ORM service to the caller.
+ * @param options Exact candidate state, migration graph, and release identity.
+ * @returns Scoped no-service candidate migration layer.
+ */
+export function databaseCandidateMigrationLayer(
+    options: DatabaseCandidateMigrationLayerOptions
+): Layer.Layer<never, DatabaseRuntimeAcquisitionError> {
+    return Layer.effectDiscard(acquireDatabaseCandidateMigration(options));
 }

@@ -22,6 +22,7 @@ const reviewedRootDirectories: ReadonlySet<string> = new Set([
     "node_modules",
     "scripts",
     "src",
+    "systemd",
 ]);
 
 /** Discovered executable sources plus fail-closed repository-layout findings. */

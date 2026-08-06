@@ -1,0 +1,60 @@
+import * as v from "valibot";
+
+import { configurationEnvironmentNamesForRole } from "../../../shared/configuration/applicationConfigurationRegistry.ts";
+import {
+    configurationChoice,
+    configurationProjectRoot,
+    pickApplicationEnvironment,
+    type ApplicationLogLevel,
+    type ApplicationNodeEnvironment,
+} from "./processConfiguration.ts";
+
+/** Immutable, validated configuration consumed by the greenfield worker process. */
+export interface WorkerConfiguration {
+    readonly logLevel: ApplicationLogLevel;
+    readonly nodeEnvironment: ApplicationNodeEnvironment;
+    readonly projectRoot: string;
+}
+
+const optionalEnvironmentValueSchema = v.optional(v.unknown());
+
+/** Valibot projection for the complete accepted worker-process environment surface. */
+export const workerConfigurationEnvironmentSchema = v.object({
+    MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
+    NODE_ENV: optionalEnvironmentValueSchema,
+});
+
+/** Registered environment names consumed by the worker-process parser. */
+export const workerConfigurationEnvironmentNames =
+    configurationEnvironmentNamesForRole("worker");
+
+/**
+ * Parses an injected untrusted environment record into immutable worker configuration.
+ * @param source Untrusted injected environment-like record.
+ * @returns Frozen worker configuration containing no web-only or secret fields.
+ */
+export function parseWorkerConfiguration(
+    source: Readonly<Record<string, unknown>>
+): WorkerConfiguration {
+    const input = pickApplicationEnvironment(
+        "worker",
+        workerConfigurationEnvironmentNames,
+        source,
+        (projection) => v.parse(workerConfigurationEnvironmentSchema, projection)
+    );
+    return Object.freeze({
+        logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [
+            "debug",
+            "error",
+            "info",
+            "warn",
+        ] as const),
+        nodeEnvironment: configurationChoice(input, "NODE_ENV", [
+            "development",
+            "production",
+            "test",
+        ] as const),
+        projectRoot: configurationProjectRoot(input),
+    });
+}
