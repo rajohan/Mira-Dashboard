@@ -327,7 +327,9 @@ Authentication and lease renewal reject every grant whose timestamp precedes pri
 follows the principal's current `updated_at`, or lies in the future relative to the validation
 clock. Administration also scans persisted lifecycle history before applying inventory cursors,
 active counts, or new-principal inserts: any principal creation/update/disable timestamp or
-credential creation/revocation timestamp ahead of the transaction clock fails closed.
+credential creation/revocation timestamp ahead of the transaction clock fails closed. Credential
+inventory performs the complete scan even for a terminally disabled principal, before a cursor can
+page around the future row.
 
 Credential rotation is deliberately staged. `rotateCredential` creates one linked replacement,
 returns its token once, and leaves the predecessor usable while the operator installs and verifies

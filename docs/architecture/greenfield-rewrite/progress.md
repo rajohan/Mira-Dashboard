@@ -529,10 +529,11 @@
   follows the principal's current update timestamp, or lies in the future. Real capability changes
   preserve unchanged grant times and increment the authorization version once; terminal disable
   increments it and revokes every then-usable credential atomically, while the disabled principal
-  invalidates all historical tokens. Principal inventory/creation and enabled-principal credential
-  operations reject future principal creation/update/disable history and future credential
-  creation/revocation history before cursors or active counts can hide it. Clock rollback does not
-  block terminal containment; a future-created row can remain physically unrevoked while principal
+  invalidates all historical tokens. Principal inventory/creation, every credential inventory, and
+  enabled-principal credential mutations reject future principal creation/update/disable history
+  and future credential creation/revocation history before cursors or active counts can hide it.
+  This inventory scan also applies after terminal disablement. Clock rollback does not block
+  terminal containment; a future-created row can remain physically unrevoked while principal
   disablement keeps it invalid after the clock catches up.
 - This slice adds no Effect service: generation, hashing, policy, and SQLite transactions are
   bounded synchronous work. The deterministic generator now emits all eight procedure rows and 16

@@ -138,6 +138,11 @@ export function createAutomationCredentialOperations(
                     // Guard-only: validates principal, grants, and history against the
                     // transaction clock before exposing credential inventory.
                     principalSummary(reader, principal, checkedAt);
+                    // Disabled principals intentionally skip this scan in their summary
+                    // because terminal disablement contains even future-dated tokens.
+                    // Inventory still has to validate the complete credential history
+                    // before a cursor can page around a future-created or future-revoked row.
+                    assertNoFutureCredentialHistory(reader, principal.id, checkedAt);
                     const rows = reader.listCredentials({
                         ...(input.cursor === undefined
                             ? {}

@@ -749,6 +749,16 @@ describe("automation principal lifecycle", () => {
                 persisted.find(({ id }) => id === futureCredential.result.credential.id)
                     ?.revokedAt
             ).toBeNull();
+            expect(
+                service.listCredentials(fixture.identity, {
+                    cursor: {
+                        createdAtMs: futureCredential.result.credential.createdAtMs,
+                        id: futureCredential.result.credential.id,
+                    },
+                    limit: 10,
+                    principalId: automationLifecyclePrincipalId,
+                })
+            ).toEqual({ status: "session-changed" });
 
             const authenticationAt = addMinutes(futureCredentialAt, 1);
             const authenticator = createRequestAuthenticator({
