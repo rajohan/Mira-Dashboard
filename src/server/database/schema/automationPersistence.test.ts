@@ -1,9 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
 import { getTableConfig } from "drizzle-orm/sqlite-core";
+import { npmVersion as drizzleOrmVersion } from "drizzle-orm/version";
 
 import { automationCredentials } from "./automationCredentials.ts";
 import { automationPrincipals } from "./automationPrincipals.ts";
+
+const supportedDrizzleMetadataVersion = "1.0.0-rc.4";
+
+function assertSupportedDrizzleMetadataVersion(): void {
+    if (drizzleOrmVersion !== supportedDrizzleMetadataVersion) {
+        throw new Error(
+            `Automation schema metadata assertions require Drizzle ${supportedDrizzleMetadataVersion}; review the adapter for ${drizzleOrmVersion}`
+        );
+    }
+}
 
 function indexShape(index: ReturnType<typeof getTableConfig>["indexes"][number]) {
     return {
@@ -18,6 +29,7 @@ function indexShape(index: ReturnType<typeof getTableConfig>["indexes"][number])
 
 describe("automation identity Drizzle persistence schema", () => {
     test("declares control-safe principals with active and stable pagination indexes", () => {
+        assertSupportedDrizzleMetadataVersion();
         const config = getTableConfig(automationPrincipals);
 
         expect(config.columns.map((column) => column.name)).toEqual([
@@ -51,6 +63,7 @@ describe("automation identity Drizzle persistence schema", () => {
     });
 
     test("declares staged credential rotation, bounded active lookup, and stable history", () => {
+        assertSupportedDrizzleMetadataVersion();
         const config = getTableConfig(automationCredentials);
 
         expect(config.columns.map((column) => column.name)).toEqual([

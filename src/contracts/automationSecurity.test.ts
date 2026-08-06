@@ -186,6 +186,10 @@ describe("automation-security contracts", () => {
             { ...principal, updatedAtMs: createdAtMs - 1 },
             { ...disabledPrincipal, activeCredentialCount: 1 },
             { ...disabledPrincipal, disabledAtMs: createdAtMs - 1 },
+            {
+                ...disabledPrincipal,
+                disabledAtMs: disabledPrincipal.updatedAtMs + 1,
+            },
         ]) {
             expect(() =>
                 v.parse(listAutomationPrincipalsResultSchema, {
@@ -442,21 +446,23 @@ describe("automation-security contracts", () => {
             }).changed
         ).toBe(false);
 
-        for (const schema of [
-            createAutomationCredentialInputSchema,
-            rotateAutomationCredentialInputSchema,
-            disableAutomationPrincipalInputSchema,
-            replaceAutomationCapabilitiesInputSchema,
-        ]) {
-            expect(() =>
-                v.parse(schema, {
-                    capabilities: [],
-                    credential: { label: "Credential" },
+        for (const [schema, input] of [
+            [
+                createAutomationCredentialInputSchema,
+                { credential: { label: "Credential" }, principalId },
+            ],
+            [
+                rotateAutomationCredentialInputSchema,
+                {
                     credentialId,
                     principalId,
                     replacement: { label: "Replacement" },
-                })
-            ).toThrow();
+                },
+            ],
+            [disableAutomationPrincipalInputSchema, { principalId }],
+            [replaceAutomationCapabilitiesInputSchema, { capabilities: [], principalId }],
+        ] as const) {
+            expect(() => v.parse(schema, input)).toThrow();
         }
     });
 

@@ -70,6 +70,20 @@ export function createAutomationCredentialOperations(
                     if (expiresAt === undefined) {
                         return { status: "invalid-expiry" as const };
                     }
+                    const principal = currentPrincipal(unit, {
+                        checkedAt: createdAt,
+                        expectedAuthorizationVersion: input.expectedAuthorizationVersion,
+                        principalId: input.principalId,
+                    });
+                    if (principal === undefined) return { status: "not-found" as const };
+                    validatedCapabilities(unit, principal, createdAt);
+                    assertNoFutureCredentialHistory(unit, principal.id, createdAt);
+                    if (
+                        unit.countActiveCredentials(principal.id, createdAt) >=
+                        activeAutomationCredentialMaximumPerPrincipal
+                    ) {
+                        return { status: "conflict" as const };
+                    }
                     const candidates = buildCredentialCandidates(generation.materials, {
                         createdAt,
                         expiresAt,
@@ -85,20 +99,6 @@ export function createAutomationCredentialOperations(
                             }),
                         })
                     );
-                    const principal = currentPrincipal(unit, {
-                        checkedAt: createdAt,
-                        expectedAuthorizationVersion: input.expectedAuthorizationVersion,
-                        principalId: input.principalId,
-                    });
-                    if (principal === undefined) return { status: "not-found" as const };
-                    validatedCapabilities(unit, principal, createdAt);
-                    assertNoFutureCredentialHistory(unit, principal.id, createdAt);
-                    if (
-                        unit.countActiveCredentials(principal.id, createdAt) >=
-                        activeAutomationCredentialMaximumPerPrincipal
-                    ) {
-                        return { status: "conflict" as const };
-                    }
                     for (const candidate of candidates) {
                         const inserted = unit.insertCredentialIfAvailable(
                             candidate.insert
@@ -135,6 +135,8 @@ export function createAutomationCredentialOperations(
                     if (principal === undefined) {
                         return { status: "not-found" as const };
                     }
+                    // Guard-only: validates principal, grants, and history against the
+                    // transaction clock before exposing credential inventory.
                     principalSummary(reader, principal, checkedAt);
                     const rows = reader.listCredentials({
                         ...(input.cursor === undefined
@@ -252,26 +254,6 @@ export function createAutomationCredentialOperations(
                     if (expiresAt === undefined) {
                         return { status: "invalid-expiry" as const };
                     }
-                    const candidates = buildCredentialCandidates(
-                        generation.materials.filter(
-                            ({ id }) => id !== input.credentialId
-                        ),
-                        {
-                            createdAt,
-                            expiresAt,
-                            label: input.replacement.label,
-                            principalId: input.principalId,
-                            replacesCredentialId: input.credentialId,
-                        }
-                    ).map((candidate) =>
-                        Object.freeze({
-                            ...candidate,
-                            result: v.parse(rotateAutomationCredentialResultSchema, {
-                                credential: candidate.summary,
-                                token: candidate.token.token,
-                            }),
-                        })
-                    );
                     const principal = currentPrincipal(unit, {
                         checkedAt: createdAt,
                         expectedAuthorizationVersion: input.expectedAuthorizationVersion,
@@ -299,6 +281,26 @@ export function createAutomationCredentialOperations(
                     ) {
                         return { status: "conflict" as const };
                     }
+                    const candidates = buildCredentialCandidates(
+                        generation.materials.filter(
+                            ({ id }) => id !== input.credentialId
+                        ),
+                        {
+                            createdAt,
+                            expiresAt,
+                            label: input.replacement.label,
+                            principalId: input.principalId,
+                            replacesCredentialId: input.credentialId,
+                        }
+                    ).map((candidate) =>
+                        Object.freeze({
+                            ...candidate,
+                            result: v.parse(rotateAutomationCredentialResultSchema, {
+                                credential: candidate.summary,
+                                token: candidate.token.token,
+                            }),
+                        })
+                    );
                     for (const candidate of candidates) {
                         const replacement = unit.insertCredentialIfAvailable(
                             candidate.insert

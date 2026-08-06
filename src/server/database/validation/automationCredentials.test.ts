@@ -44,7 +44,6 @@ describe("automation credential row schemas", () => {
         { label: "Primary\u200Bcredential" },
         { label: "\u3000" },
         { expiresAt: securityCreatedAt },
-        { lastUsedAt: null },
         { replacesCredentialId: "not-a-credential-id" },
         { replacesCredentialId: validAutomationCredentialInsert.id },
         { revokedAt: subMilliseconds(securityCreatedAt, 1) },
@@ -53,6 +52,15 @@ describe("automation credential row schemas", () => {
             v.parse(automationCredentialInsertSchema, {
                 ...validAutomationCredentialInsert,
                 ...replacement,
+            })
+        ).toThrow();
+    });
+
+    test("rejects the removed lastUsedAt column", () => {
+        expect(() =>
+            v.parse(automationCredentialInsertSchema, {
+                ...validAutomationCredentialInsert,
+                lastUsedAt: null,
             })
         ).toThrow();
     });

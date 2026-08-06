@@ -13,18 +13,20 @@ describe("application router", () => {
 
     test("exposes the exact automation-security namespace inventory", () => {
         expect(
-            appRouterProcedureNames.filter((name) =>
-                name.startsWith("automationSecurity.")
-            )
-        ).toEqual([
-            "automationSecurity.listPrincipals",
-            "automationSecurity.listCredentials",
-            "automationSecurity.createPrincipal",
-            "automationSecurity.createCredential",
-            "automationSecurity.rotateCredential",
-            "automationSecurity.revokeCredential",
-            "automationSecurity.replaceCapabilities",
-            "automationSecurity.disablePrincipal",
-        ]);
+            appRouterProcedureNames
+                .filter((name) => name.startsWith("automationSecurity."))
+                .toSorted()
+        ).toEqual(
+            [
+                "automationSecurity.createCredential",
+                "automationSecurity.createPrincipal",
+                "automationSecurity.disablePrincipal",
+                "automationSecurity.listCredentials",
+                "automationSecurity.listPrincipals",
+                "automationSecurity.replaceCapabilities",
+                "automationSecurity.revokeCredential",
+                "automationSecurity.rotateCredential",
+            ].toSorted()
+        );
     });
 });

@@ -6,7 +6,10 @@ import type {
     AutomationLifecycleReader,
     AutomationPrincipalRecord,
 } from "./lifecycleRepositoryTypes.ts";
-import { AutomationLifecycleStateChangedError } from "./lifecycleSummaries.ts";
+import {
+    AutomationLifecycleStateChangedError,
+    assertGrantsWithinPrincipalWindow,
+} from "./lifecycleSummaries.ts";
 
 export function currentPrincipal(
     reader: AutomationLifecycleReader,
@@ -35,16 +38,7 @@ export function validatedCapabilities(
     checkedAt: Date
 ): readonly AutomationCapabilityRecord[] {
     const capabilities = reader.listCapabilities(principal.id);
-    if (
-        capabilities.some(
-            ({ grantedAt }) =>
-                getTime(grantedAt) < getTime(principal.createdAt) ||
-                getTime(grantedAt) > getTime(principal.updatedAt) ||
-                getTime(grantedAt) > getTime(checkedAt)
-        )
-    ) {
-        throw new AutomationLifecycleStateChangedError();
-    }
+    assertGrantsWithinPrincipalWindow(capabilities, principal, checkedAt);
     return capabilities;
 }
 

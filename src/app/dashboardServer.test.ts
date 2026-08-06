@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
+import * as v from "valibot";
+
+import { listAutomationPrincipalsResultSchema } from "../contracts/automationSecurity.ts";
 import { createWebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import {
     authenticationTestNow,
@@ -65,11 +68,26 @@ describe("Dashboard security composition", () => {
                     },
                 }
             );
-            const body = await response.text();
+            const body = (await response.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
 
             expect(response.status).toBe(200);
             expect(response.headers.get("cache-control")).toBe("no-store");
-            expect(body).toContain(authenticationTestPrincipalId);
+            expect(body.error).toBeUndefined();
+            const result = v.parse(
+                listAutomationPrincipalsResultSchema,
+                body.result?.data?.json
+            );
+            expect(
+                result.principals.find(({ id }) => id === authenticationTestPrincipalId)
+            ).toMatchObject({
+                activeCredentialCount: 1,
+                capabilities: ["reports:read"],
+                disabled: false,
+                id: authenticationTestPrincipalId,
+            });
         } finally {
             await server.stop(true);
             fixture.database.sqlite.close(true);

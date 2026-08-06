@@ -1,6 +1,9 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
-import type { SecurityTransaction } from "../securityPersistenceTypes.ts";
+import type {
+    SecurityTransaction,
+    SynchronousResult,
+} from "../securityPersistenceTypes.ts";
 import { DrizzleAutomationLifecycleReader } from "./lifecycleRepositoryReader.ts";
 import type {
     AutomationLifecycleReader,
@@ -9,6 +12,8 @@ import type {
 } from "./lifecycleRepositoryTypes.ts";
 import { DrizzleAutomationLifecycleUnitOfWork } from "./lifecycleRepositoryUnitOfWork.ts";
 
+type DrizzleTransactionCallback = Parameters<SQLiteBunDatabase["transaction"]>[0];
+
 /**
  * Creates synchronous deferred/immediate automation-security transactions.
  * @returns A validated repository bound to the supplied process database.
@@ -16,17 +21,13 @@ import { DrizzleAutomationLifecycleUnitOfWork } from "./lifecycleRepositoryUnitO
 export function createAutomationLifecycleRepository(
     database: SQLiteBunDatabase
 ): AutomationLifecycleRepository {
-    const runTransaction = database.transaction.bind(database) as unknown as <T>(
-        callback: (transaction: SecurityTransaction) => T,
-        config: { behavior: "deferred" | "immediate" }
-    ) => T;
     const reader = new DrizzleAutomationLifecycleReader(database);
 
     return Object.freeze({
+        countActiveCredentials: reader.countActiveCredentials.bind(reader),
         countCredentials: reader.countCredentials.bind(reader),
         countEnabledPrincipals: reader.countEnabledPrincipals.bind(reader),
         countPrincipals: reader.countPrincipals.bind(reader),
-        countActiveCredentials: reader.countActiveCredentials.bind(reader),
         findCredential: reader.findCredential.bind(reader),
         findPrincipal: reader.findPrincipal.bind(reader),
         findReplacement: reader.findReplacement.bind(reader),
@@ -36,20 +37,30 @@ export function createAutomationLifecycleRepository(
         listCredentials: reader.listCredentials.bind(reader),
         listPrincipals: reader.listPrincipals.bind(reader),
         withImmediateTransaction<T>(
-            callback: (unit: AutomationLifecycleUnitOfWork) => T
+            callback: (
+                unit: AutomationLifecycleUnitOfWork
+            ) => SynchronousResult<T> | never
         ): T {
-            return runTransaction(
-                (transaction) =>
-                    callback(new DrizzleAutomationLifecycleUnitOfWork(transaction)),
-                { behavior: "immediate" }
-            );
+            const transactionCallback = ((transaction: SecurityTransaction) =>
+                callback(
+                    new DrizzleAutomationLifecycleUnitOfWork(transaction)
+                )) as DrizzleTransactionCallback;
+            return database.transaction(transactionCallback, {
+                behavior: "immediate",
+            }) as T;
         },
-        withReadTransaction<T>(callback: (reader: AutomationLifecycleReader) => T): T {
-            return runTransaction(
-                (transaction) =>
-                    callback(new DrizzleAutomationLifecycleReader(transaction)),
-                { behavior: "deferred" }
-            );
+        withReadTransaction<T>(
+            callback: (
+                transactionReader: AutomationLifecycleReader
+            ) => SynchronousResult<T> | never
+        ): T {
+            const transactionCallback = ((transaction: SecurityTransaction) =>
+                callback(
+                    new DrizzleAutomationLifecycleReader(transaction)
+                )) as DrizzleTransactionCallback;
+            return database.transaction(transactionCallback, {
+                behavior: "deferred",
+            }) as T;
         },
     });
 }

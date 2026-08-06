@@ -315,6 +315,7 @@ describe("automation-security procedures", () => {
             appRouter.createCaller(context).automationSecurity.listPrincipals({})
         );
 
-        expect(failure).toBeInstanceOf(Error);
+        expect(failure).toBeInstanceOf(TRPCError);
+        expect((failure as TRPCError).code).toBe("INTERNAL_SERVER_ERROR");
     });
 });

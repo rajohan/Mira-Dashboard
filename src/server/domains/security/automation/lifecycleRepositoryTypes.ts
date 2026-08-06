@@ -74,10 +74,10 @@ export interface RevokeAutomationCredentialInput {
 
 /** Consistent read surface for automation-security administration. */
 export interface AutomationLifecycleReader {
+    countActiveCredentials(principalId: string, checkedAt: Date): number;
     countCredentials(principalId: string): number;
     countEnabledPrincipals(): number;
     countPrincipals(): number;
-    countActiveCredentials(principalId: string, checkedAt: Date): number;
     findCredential(
         principalId: string,
         credentialId: string

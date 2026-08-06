@@ -8,6 +8,7 @@ import {
     type AutomationPrincipalSummary,
 } from "../../../../contracts/automationSecurity.ts";
 import type {
+    AutomationCapabilityRecord,
     AutomationCredentialRecord,
     AutomationLifecycleReader,
     AutomationPrincipalRecord,
@@ -16,7 +17,31 @@ import type {
 export class AutomationLifecycleStateChangedError extends Error {}
 
 /**
+ * Rejects capability grants outside the principal and transaction clock window.
+ * @param grants Persisted grants owned by the principal.
+ * @param principal Principal creation/update bounds.
+ * @param checkedAt Transaction-owned policy time.
+ */
+export function assertGrantsWithinPrincipalWindow(
+    grants: readonly AutomationCapabilityRecord[],
+    principal: AutomationPrincipalRecord,
+    checkedAt: Date
+): void {
+    if (
+        grants.some(
+            ({ grantedAt }) =>
+                getTime(grantedAt) < getTime(principal.createdAt) ||
+                getTime(grantedAt) > getTime(principal.updatedAt) ||
+                getTime(grantedAt) > getTime(checkedAt)
+        )
+    ) {
+        throw new AutomationLifecycleStateChangedError();
+    }
+}
+
+/**
  * Rejects credential history that is not yet observable at the transaction clock.
+ * `listCredentials` orders by creation time and ID descending, so limit one is newest.
  * @param reader Consistent lifecycle reader for the current transaction.
  * @param principalId Principal whose newest credential anchors the history check.
  * @param checkedAt Transaction-owned policy time.
@@ -87,16 +112,9 @@ export function principalSummary(
         assertNoFutureCredentialHistory(reader, principal.id, checkedAt);
     }
     const grants = reader.listCapabilities(principal.id);
-    if (
-        grants.some(
-            (grant) =>
-                getTime(grant.grantedAt) < getTime(principal.createdAt) ||
-                getTime(grant.grantedAt) > getTime(principal.updatedAt) ||
-                getTime(grant.grantedAt) > getTime(checkedAt)
-        )
-    ) {
-        throw new AutomationLifecycleStateChangedError();
-    }
+    assertGrantsWithinPrincipalWindow(grants, principal, checkedAt);
+    // Disablement is terminal, so credentials remain unusable even when an expired
+    // row does not receive a redundant physical revocation timestamp.
     const activeCredentialCount =
         principal.disabledAt === null
             ? reader.countActiveCredentials(principal.id, checkedAt)
