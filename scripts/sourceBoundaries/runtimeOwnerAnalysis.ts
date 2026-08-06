@@ -30,6 +30,12 @@ const runtimeGlobalRootNames: ReadonlySet<string> = new Set([
     "window",
 ]);
 
+const runtimeEnvironmentOwnerNames: ReadonlySet<string> = new Set([
+    "Bun",
+    "Deno",
+    "process",
+]);
+
 /** Names whose unbound, runtime references carry process or loader authority. */
 export const runtimeAuthorityIdentifierNames: ReadonlySet<string> = new Set([
     ...runtimeGlobalRootNames,
@@ -90,7 +96,7 @@ export function isRuntimeEnvironmentOwner(
 ): boolean {
     if (!isRecord(node)) return false;
     if (
-        ["Bun", "Deno", "process"].includes(identifierName(node) ?? "") &&
+        runtimeEnvironmentOwnerNames.has(identifierName(node) ?? "") &&
         runtimeIdentifierReferences.has(node)
     ) {
         return true;
@@ -104,7 +110,7 @@ export function isRuntimeEnvironmentOwner(
         return false;
     }
     if (
-        !["Bun", "Deno", "process"].includes(
+        !runtimeEnvironmentOwnerNames.has(
             memberPropertyName(node, staticStringValues) ?? ""
         )
     ) {

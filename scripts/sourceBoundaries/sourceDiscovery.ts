@@ -43,7 +43,19 @@ async function discoverDirectory(
     violations: SourceBoundaryViolation[]
 ): Promise<void> {
     const absoluteDirectory = path.join(lexicalProjectRoot, relativeDirectory);
-    const directoryStatus = await lstat(absoluteDirectory);
+    let directoryStatus;
+    try {
+        directoryStatus = await lstat(absoluteDirectory);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        violations.push(
+            boundaryPathViolation(
+                relativeDirectory,
+                "Reviewed source directory is missing from the repository layout"
+            )
+        );
+        return;
+    }
     if (directoryStatus.isSymbolicLink()) {
         violations.push(
             boundaryPathViolation(

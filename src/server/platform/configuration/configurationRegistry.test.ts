@@ -27,6 +27,11 @@ describe("application configuration registry", () => {
         ]);
         expect(applicationConfigurationRegistry).toHaveLength(13);
         expect(
+            applicationConfigurationRegistry
+                .map((entry) => entry.environmentName)
+                .toSorted()
+        ).toEqual([...applicationConfigurationEnvironmentNames].toSorted());
+        expect(
             new Set(
                 applicationConfigurationRegistry.map((entry) => entry.environmentName)
             ).size

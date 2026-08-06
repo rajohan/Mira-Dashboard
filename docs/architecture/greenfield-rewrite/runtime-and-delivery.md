@@ -167,14 +167,16 @@ field is only a lexically normalized absolute staging value: the future process 
 resolve its real path and enforce the managed-filesystem containment policy before opening host
 paths. Startup wiring and that filesystem validation are not claimed by this slice.
 
-The target repository uses a base TypeScript configuration plus strict browser, server/worker, and
-script project references so browser libraries are unavailable to server code and Bun/filesystem
-types are unavailable to browser code. The rewrite now has strict contracts/shared, browser,
-server, worker, and script graphs plus an authoritative path-aware source-boundary check. Oxlint
-also rejects supported import/global patterns as a fast feedback layer. Browser and worker
-composition roots remain unimplemented, but adding an unclassified `src/app` root or a forbidden
-edge fails the boundary gate. `bunfig.toml` contains only shared Bun test and selected serve-plugin
-configuration; operational policy lives in typed source, not hidden shell environment.
+The target repository uses a base TypeScript configuration plus separate strict browser,
+contracts/shared, server, worker, and script configurations so browser libraries are unavailable
+to server code and Bun/filesystem types are unavailable to browser code. These are independently
+checked with `tsc -p`; they are deliberately not advertised as declaration-emitting composite
+project references. The root configuration is a broad compatibility graph for repository-wide
+type-aware Oxlint only, while the separate graphs and authoritative path-aware boundary check own
+ambient authority and import policy. Browser and worker composition roots remain unimplemented,
+but adding an unclassified `src/app` root or a forbidden edge fails the boundary gate.
+`bunfig.toml` contains only shared Bun test and selected serve-plugin configuration; operational
+policy lives in typed source, not hidden shell environment.
 
 ## Generated Documentation
 

@@ -10,7 +10,6 @@ import {
     serverRequestBodyMaximumBytes,
 } from "../../../app/server.ts";
 import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
-import { createStructuredLogger } from "../../platform/observability/structuredLogger.ts";
 import {
     createReadinessController,
     type ReadinessController,
@@ -19,9 +18,11 @@ import * as runtimeIdentityModule from "../../platform/runtime/readRuntimeIdenti
 import type { AppRouter } from "../../trpc/appRouter.ts";
 import { rejectOnAbort, withTestTimeout } from "../support/promise.ts";
 import {
+    createCapturingTestStructuredLogger,
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
     createTestServerSecurityServices,
+    waitForTestLogQuiescence,
 } from "../support/requestContext.ts";
 
 const servers: ApplicationServer[] = [];
@@ -153,21 +154,7 @@ describe("system foundation", () => {
     });
 
     test("emits one correlated response-created event for every response class", async () => {
-        const logLines: string[] = [];
-        const logger = createStructuredLogger({
-            identity: {
-                bun: "1.4.0-test",
-                pid: 123,
-                processRole: "web",
-                release: "server-foundation-test",
-                service: "mira-dashboard",
-            },
-            sink: {
-                write(line) {
-                    logLines.push(line);
-                },
-            },
-        });
+        const { logger, logLines } = createCapturingTestStructuredLogger();
         const server = await createServer({
             ...createTestServerSecurityServices(),
             applicationRuntime: createTestApplicationRuntime({ logger }),
@@ -183,6 +170,7 @@ describe("system foundation", () => {
             fetch(new URL("/trpc/system.runtimeIdentity", server.url)),
         ]);
         await Promise.all(responses.map((response) => response.text()));
+        await waitForTestLogQuiescence(logLines, 3);
         const records = logLines.map(
             (line) => JSON.parse(line) as Record<string, unknown>
         );
@@ -210,21 +198,7 @@ describe("system foundation", () => {
     });
 
     test("classifies an aborted streaming upload without a server-error event", async () => {
-        const logLines: string[] = [];
-        const logger = createStructuredLogger({
-            identity: {
-                bun: "1.4.0-test",
-                pid: 123,
-                processRole: "web",
-                release: "server-foundation-test",
-                service: "mira-dashboard",
-            },
-            sink: {
-                write(line) {
-                    logLines.push(line);
-                },
-            },
-        });
+        const { logger, logLines } = createCapturingTestStructuredLogger();
         const server = await createServer({
             ...createTestServerSecurityServices(),
             applicationRuntime: createTestApplicationRuntime({ logger }),
@@ -249,9 +223,7 @@ describe("system foundation", () => {
         await Bun.sleep(50);
         abortController.abort();
         expect(await pendingRequest).toBeInstanceOf(Error);
-        for (let attempt = 0; attempt < 100 && logLines.length === 0; attempt += 1) {
-            await Bun.sleep(5);
-        }
+        await waitForTestLogQuiescence(logLines, 1);
 
         const records = logLines.map(
             (line) => JSON.parse(line) as Record<string, unknown>
@@ -268,21 +240,7 @@ describe("system foundation", () => {
     });
 
     test("classifies resolver cancellation after dispatch as one cancellation event", async () => {
-        const logLines: string[] = [];
-        const logger = createStructuredLogger({
-            identity: {
-                bun: "1.4.0-test",
-                pid: 123,
-                processRole: "web",
-                release: "server-foundation-test",
-                service: "mira-dashboard",
-            },
-            sink: {
-                write(line) {
-                    logLines.push(line);
-                },
-            },
-        });
+        const { logger, logLines } = createCapturingTestStructuredLogger();
         const resolverStarted = Promise.withResolvers<void>();
         const server = await createServer({
             ...createTestServerSecurityServices(),
@@ -326,9 +284,7 @@ describe("system foundation", () => {
         );
         abortController.abort();
         expect(await pendingRequest).toBeInstanceOf(Error);
-        for (let attempt = 0; attempt < 100 && logLines.length === 0; attempt += 1) {
-            await Bun.sleep(5);
-        }
+        await waitForTestLogQuiescence(logLines, 1);
 
         const records = logLines.map(
             (line) => JSON.parse(line) as Record<string, unknown>
@@ -349,21 +305,7 @@ describe("system foundation", () => {
 
     test("returns a correlated sanitized 500 when a raw handler defects", async () => {
         const sentinel = "readiness-defect-secret";
-        const logLines: string[] = [];
-        const logger = createStructuredLogger({
-            identity: {
-                bun: "1.4.0-test",
-                pid: 123,
-                processRole: "web",
-                release: "server-foundation-test",
-                service: "mira-dashboard",
-            },
-            sink: {
-                write(line) {
-                    logLines.push(line);
-                },
-            },
-        });
+        const { logger, logLines } = createCapturingTestStructuredLogger();
         const server = await createServer({
             ...createTestServerSecurityServices(),
             applicationRuntime: createTestApplicationRuntime({ logger }),
@@ -382,6 +324,7 @@ describe("system foundation", () => {
         const response = await fetch(new URL("/api/health/ready", server.url));
         const body = await response.text();
         const requestId = response.headers.get("x-request-id");
+        await waitForTestLogQuiescence(logLines, 1);
 
         expect(response.status).toBe(500);
         expect(response.headers.get("cache-control")).toBe("no-store");

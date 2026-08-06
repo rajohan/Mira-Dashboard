@@ -17,6 +17,7 @@ export interface StructuredLogLimits {
 const defaultStructuredLogLimits: StructuredLogLimits = Object.freeze({
     maximumSerializedBytes: 16 * 1024,
 });
+const structuredLogEncoder = new TextEncoder();
 
 export type StructuredLogLevel = "debug" | "error" | "fatal" | "info" | "warn";
 
@@ -304,7 +305,8 @@ function serializeRecord(
 ): string {
     const serialized = `${JSON.stringify(record)}\n`;
     if (
-        new TextEncoder().encode(serialized).byteLength <= limits.maximumSerializedBytes
+        structuredLogEncoder.encode(serialized).byteLength <=
+        limits.maximumSerializedBytes
     ) {
         return serialized;
     }
@@ -313,7 +315,9 @@ function serializeRecord(
         fields: { truncated: true },
     };
     const bounded = `${JSON.stringify(boundedRecord)}\n`;
-    if (new TextEncoder().encode(bounded).byteLength <= limits.maximumSerializedBytes) {
+    if (
+        structuredLogEncoder.encode(bounded).byteLength <= limits.maximumSerializedBytes
+    ) {
         return bounded;
     }
     throw new RangeError("Structured log envelope exceeds its byte budget");

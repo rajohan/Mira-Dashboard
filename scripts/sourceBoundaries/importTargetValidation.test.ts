@@ -4,14 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { checkSourceBoundaries } from "../checkSourceBoundaries.ts";
-
-async function temporaryProject(): Promise<string> {
-    const projectRoot = await mkdtemp(path.join(tmpdir(), "mira-source-boundary-"));
-    await mkdir(path.join(projectRoot, "scripts"));
-    await mkdir(path.join(projectRoot, "src", "browser"), { recursive: true });
-    await writeFile(path.join(projectRoot, "package.json"), "{}");
-    return projectRoot;
-}
+import { legacyScriptImportAllowlist, legacyScriptImportKey } from "./policy.ts";
+import { temporaryProject } from "./testSupport.ts";
 
 describe("source-boundary import target validation", () => {
     test("rejects encoded path input before the runtime resolver normalizes it", async () => {
@@ -234,9 +228,18 @@ describe("source-boundary import target validation", () => {
         const projectRoot = await temporaryProject();
         const externalRoot = await mkdtemp(path.join(tmpdir(), "mira-legacy-external-"));
         try {
+            const importer = "scripts/buildBackend.ts";
+            const specifier = "../backend/src/services/releases/runtime.ts";
+            const allowlistKey = legacyScriptImportKey(importer, {
+                kind: "import",
+                line: 1,
+                specifier,
+            });
+            expect(allowlistKey).toBeDefined();
+            expect(legacyScriptImportAllowlist.has(allowlistKey ?? "")).toBe(true);
             await writeFile(
                 path.join(projectRoot, "scripts", "buildBackend.ts"),
-                'import "../backend/src/services/releases/runtime.ts";'
+                `import "${specifier}";`
             );
             await mkdir(
                 path.join(projectRoot, "backend", "src", "services", "releases"),

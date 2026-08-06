@@ -569,7 +569,32 @@ describe("source-boundary policy", () => {
     });
 
     test("freezes the exact legacy script coexistence allowlist", () => {
-        expect(legacyScriptImportAllowlist.size).toBe(18);
+        expect(
+            [...legacyScriptImportAllowlist]
+                .map((entry) => entry.replace("\0", " -> "))
+                .toSorted()
+        ).toMatchInlineSnapshot(`
+          [
+            "scripts/buildBackend.ts -> backend/src/services/releases/runtime.ts",
+            "scripts/developmentFrontend.ts -> frontend/index.html",
+            "scripts/developmentFrontend.ts -> frontend/src/lib/developmentProxyHeaders.ts",
+            "scripts/developmentStack.ts -> backend/src/development/developmentEnvironment.ts",
+            "scripts/developmentStack.ts -> backend/src/development/developmentRuntime.ts",
+            "scripts/developmentStack.ts -> backend/src/development/developmentStackConfig.ts",
+            "scripts/developmentStack.ts -> backend/src/development/developmentState.ts",
+            "scripts/frontendBuild.ts -> backend/src/services/releases/runtime.ts",
+            "scripts/productionBootstrap.ts -> backend/src/database/connection.ts",
+            "scripts/productionBootstrap.ts -> backend/src/lib/dashboardPaths.ts",
+            "scripts/productionBootstrap.ts -> backend/src/lib/processes.ts",
+            "scripts/productionBootstrap.ts -> backend/src/lib/systemdProperties.ts",
+            "scripts/productionBootstrap.ts -> backend/src/releaseLifecycle.ts",
+            "scripts/productionBootstrap.ts -> backend/src/services/releases/deployment.ts",
+            "scripts/productionBootstrap.ts -> backend/src/services/releases/releaseActivation.ts",
+            "scripts/productionBootstrap.ts -> backend/src/services/releases/systemdPolicy.ts",
+            "scripts/qualification/legacyBackendRouteProbe.ts -> backend/src/routes/registry.ts",
+            "scripts/writeReleaseManifest.ts -> backend/src/services/releases/manifestArtifacts.ts",
+          ]
+        `);
         expect(
             validateSourceImport(
                 "scripts/buildBackend.ts",

@@ -4,16 +4,31 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { checkSourceBoundaries } from "../checkSourceBoundaries.ts";
-
-async function temporaryProject(): Promise<string> {
-    const projectRoot = await mkdtemp(path.join(tmpdir(), "mira-source-boundary-"));
-    await mkdir(path.join(projectRoot, "scripts"));
-    await mkdir(path.join(projectRoot, "src", "browser"), { recursive: true });
-    await writeFile(path.join(projectRoot, "package.json"), "{}");
-    return projectRoot;
-}
+import { temporaryProject } from "./testSupport.ts";
 
 describe("source-boundary repository discovery", () => {
+    test("reports missing reviewed source roots as layout violations", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            await rm(path.join(projectRoot, "scripts"), { recursive: true });
+            await rm(path.join(projectRoot, "src"), { recursive: true });
+
+            const violations = await checkSourceBoundaries(projectRoot);
+
+            for (const importer of ["scripts", "src"] as const) {
+                expect(
+                    violations.some(
+                        (violation) =>
+                            violation.importer === importer &&
+                            violation.message.includes("source directory is missing")
+                    )
+                ).toBe(true);
+            }
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
     test("discovers and fails closed outside strict TS and TSX graphs", async () => {
         const projectRoot = await temporaryProject();
         try {
@@ -161,6 +176,9 @@ describe("source-boundary repository discovery", () => {
                         violation.message.includes("exact reviewed project layout")
                 )
             ).toBe(true);
+            expect(
+                violations.some((violation) => violation.importer === "tools/evil.ts")
+            ).toBe(false);
         } finally {
             await rm(projectRoot, { force: true, recursive: true });
         }

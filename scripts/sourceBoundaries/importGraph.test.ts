@@ -3,6 +3,16 @@ import { describe, expect, test } from "bun:test";
 import { parseSourceAnalysis, parseSourceImports } from "./importGraph.ts";
 
 describe("source-boundary import parsing", () => {
+    test("fails closed when production source cannot be parsed", async () => {
+        let caught: unknown;
+        try {
+            await parseSourceAnalysis("const broken: = ;", "src/server/broken.ts");
+        } catch (error) {
+            caught = error;
+        }
+        expect(caught).toBeInstanceOf(Error);
+    });
+
     test("finds value, type-only, side-effect, re-export, and dynamic edges", async () => {
         const imports = await parseSourceImports(
             `

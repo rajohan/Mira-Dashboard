@@ -316,6 +316,12 @@ describe("web application configuration", () => {
                 "invalid",
             ],
             [
+                "MIRA_DASHBOARD_WEBAUTHN_RP_NAME",
+                "Mira Cafe\u0301",
+                "MIRA_DASHBOARD_WEBAUTHN_RP_NAME",
+                "invalid",
+            ],
+            [
                 "MIRA_DASHBOARD_LOG_LEVEL",
                 "verbose",
                 "MIRA_DASHBOARD_LOG_LEVEL",
@@ -348,6 +354,14 @@ describe("web application configuration", () => {
         const keyringCases = [
             serializedKeyring({ extra: true }),
             serializedKeyring({ activeKeyId: "missing" }),
+            serializedKeyring({
+                keys: [
+                    {
+                        id: "primary",
+                        keyBase64: Buffer.alloc(31, 1).toString("base64"),
+                    },
+                ],
+            }),
             serializedKeyring({
                 keys: [
                     { id: "primary", keyBase64: encodedKey(1) },

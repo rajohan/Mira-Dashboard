@@ -69,12 +69,17 @@ export interface ProcedureContract {
 }
 
 /**
- * Fails closed when contract error metadata is unregistered, duplicated, or unstable.
+ * Fails closed for duplicate procedure names or error metadata that is
+ * unregistered, duplicated, or unstable.
  * @param contracts Procedure names and their declared expected error codes.
  */
 export function assertProcedureContractErrors(
     contracts: readonly Pick<ProcedureContract, "errors" | "name">[]
 ): void {
+    const names = contracts.map(({ name }) => name);
+    if (new Set(names).size !== names.length) {
+        throw new TypeError("Procedure contract names must be unique");
+    }
     const registered = new Set<string>(contractErrorCodes);
     for (const contract of contracts) {
         const errors = [...contract.errors];

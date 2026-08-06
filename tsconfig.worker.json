@@ -5,7 +5,7 @@
         "types": ["bun-types", "node"]
     },
     "include": [
-        "src/app/worker.ts",
+        "src/app/worker*.ts",
         "src/contracts/**/*.ts",
         "src/shared/**/*.ts",
         "src/worker/**/*.ts"

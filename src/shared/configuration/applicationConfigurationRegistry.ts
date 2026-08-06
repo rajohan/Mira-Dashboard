@@ -330,7 +330,9 @@ export function configurationMetadata(
         (candidate) => candidate.environmentName === environmentName
     );
     if (entry === undefined) {
-        throw new Error("Application configuration registry is incomplete");
+        throw new Error(
+            `Application configuration registry is missing ${environmentName}`
+        );
     }
     return entry;
 }

@@ -242,12 +242,5 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
         });
     }
 
-    return async function handleTrpcHttpRequest(
-        request: Request,
-        requestUrl: URL,
-        bunServer: TrpcBunServer,
-        requestId: string
-    ): Promise<Response> {
-        return dispatchTrpcHttpRequest(request, requestUrl, bunServer, requestId);
-    };
+    return dispatchTrpcHttpRequest;
 }

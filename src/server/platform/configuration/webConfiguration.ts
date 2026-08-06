@@ -263,7 +263,18 @@ function webAuthnOrigins(input: PickedEnvironment): readonly string[] {
     if (new Set(values).size !== values.length) {
         configurationError(field, "invalid");
     }
-    return values;
+    return Object.freeze(values);
+}
+
+function webAuthnRelyingPartyName(input: PickedEnvironment): string {
+    const field = "MIRA_DASHBOARD_WEBAUTHN_RP_NAME" as const;
+    const value = requiredString(
+        input,
+        field,
+        applicationConfigurationLimits.webAuthnRpNameMaximumLength
+    );
+    if (value.normalize("NFC") !== value) configurationError(field, "invalid");
+    return value;
 }
 
 function webAuthnConfiguration(
@@ -272,24 +283,16 @@ function webAuthnConfiguration(
 ): WebAuthnRelyingPartyConfiguration {
     const rpIdField = "MIRA_DASHBOARD_WEBAUTHN_RP_ID" as const;
     const originsField = "MIRA_DASHBOARD_WEBAUTHN_ORIGINS" as const;
-    const rpNameField = "MIRA_DASHBOARD_WEBAUTHN_RP_NAME" as const;
     const rpId = requiredString(
         input,
         rpIdField,
         applicationConfigurationLimits.webAuthnRpIdMaximumLength
     );
-    const rpName = requiredString(
-        input,
-        rpNameField,
-        applicationConfigurationLimits.webAuthnRpNameMaximumLength
-    );
+    const rpName = webAuthnRelyingPartyName(input);
     const origins = webAuthnOrigins(input);
 
     if (!v.safeParse(webAuthnRpIdSchema, rpId, { abortEarly: true }).success) {
         configurationError(rpIdField, "invalid");
-    }
-    if (rpName.normalize("NFC") !== rpName) {
-        configurationError(rpNameField, "invalid");
     }
     let configuration: WebAuthnRelyingPartyConfiguration;
     try {
@@ -299,6 +302,8 @@ function webAuthnConfiguration(
             rpName,
         });
     } catch {
+        // RP ID and name have already passed the complete factory policy above;
+        // construction failures at this point belong to the origin allowlist.
         return configurationError(originsField, "inconsistent");
     }
     if (!configuration.allowedOrigins.includes(origin)) {

@@ -16,7 +16,8 @@ function freezeProcedureExpectedErrorPolicy<
 
 /**
  * Server-owned allowlist for expected errors intentionally exposed by each route.
- * The runtime boundary consumes this policy; contract metadata must match it exactly.
+ * It intentionally duplicates contract metadata: the server policy is authored as an
+ * independent enforcement boundary, and the startup assertion detects drift between them.
  */
 export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "accountSecurity.beginTotpEnrollment": [
@@ -238,7 +239,9 @@ export function applyProcedureExpectedErrorPolicy(
     path: string,
     error: TRPCError
 ): TRPCError {
-    const expectedErrors = runtimeProcedureExpectedErrorPolicy[path];
+    const expectedErrors = Object.hasOwn(runtimeProcedureExpectedErrorPolicy, path)
+        ? runtimeProcedureExpectedErrorPolicy[path]
+        : undefined;
     if (
         error.code === "INTERNAL_SERVER_ERROR" ||
         isImplicitInputValidationError(error) ||

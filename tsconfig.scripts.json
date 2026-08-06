@@ -4,10 +4,5 @@
         "lib": ["ESNext"],
         "types": ["bun-types", "node"]
     },
-    "include": [
-        "drizzle.config.ts",
-        "frontend/src/globals.d.ts",
-        "scripts/**/*.ts",
-        "tailwind.config.ts"
-    ]
+    "include": ["drizzle.config.ts", "scripts/**/*.ts", "tailwind.config.ts"]
 }

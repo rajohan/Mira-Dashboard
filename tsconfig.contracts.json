@@ -1,6 +1,8 @@
 {
     "extends": "./tsconfig.json",
     "compilerOptions": {
+        // Contracts/shared stay environment-neutral: no DOM, Bun, or Node ambient types;
+        // byte budgets therefore use the shared manual UTF-8 counter.
         "lib": ["ESNext"],
         "types": []
     },

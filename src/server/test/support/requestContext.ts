@@ -55,6 +55,57 @@ export function createTestStructuredLogger(): StructuredLogger {
     });
 }
 
+/** Capturing logger fixture for assertions at application logging boundaries. */
+export interface CapturingTestStructuredLogger {
+    readonly logger: StructuredLogger;
+    readonly logLines: string[];
+}
+
+/**
+ * Creates a test logger and its captured serialized records.
+ * @returns Stable logger fixture with an initially empty record buffer.
+ */
+export function createCapturingTestStructuredLogger(): CapturingTestStructuredLogger {
+    const logLines: string[] = [];
+    const logger = createStructuredLogger({
+        identity: {
+            bun: "test-bun",
+            pid: 1,
+            processRole: "web",
+            release: "test-release",
+            service: "mira-dashboard",
+        },
+        sink: {
+            write(line) {
+                logLines.push(line);
+            },
+        },
+    });
+    return { logger, logLines };
+}
+
+/**
+ * Waits until the expected number of asynchronous log records remains stable.
+ * @param logLines Captured serialized log records.
+ * @param expectedCount Exact terminal record count.
+ */
+export async function waitForTestLogQuiescence(
+    logLines: readonly string[],
+    expectedCount: number
+): Promise<void> {
+    let stableObservations = 0;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (logLines.length === expectedCount) {
+            stableObservations += 1;
+            if (stableObservations === 3) return;
+        } else {
+            stableObservations = 0;
+        }
+        await Bun.sleep(5);
+    }
+    throw new Error("Test log records did not reach a stable expected count");
+}
+
 /**
  * Creates one valid session identity with the requested test capabilities.
  * @param capabilities Capabilities granted to the test user.

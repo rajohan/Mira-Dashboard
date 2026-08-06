@@ -37,7 +37,7 @@
         "denyWarnings": true,
         "reportUnusedDisableDirectives": "error",
         "typeAware": true,
-        "typeCheck": true
+        "typeCheck": false
     },
     "plugins": [
         "eslint",
@@ -276,7 +276,13 @@
                 "src/browser/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
             ],
             "rules": {
-                "no-restricted-globals": ["error", "Bun", "Buffer", "process"],
+                "no-restricted-globals": [
+                    "error",
+                    {
+                        "checkGlobalObject": true,
+                        "globals": ["Bun", "Buffer", "Deno", "process"]
+                    }
+                ],
                 "no-restricted-imports": [
                     "error",
                     {

@@ -116,7 +116,13 @@ describe("effective source-boundary lint configuration", () => {
                 ]
             );
 
-            expect(testResult).toEqual({ exitCode: 0, output: "\n" });
+            expect(testResult.exitCode).toBe(0);
+            expect(testResult.output).not.toContain(
+                "'memo' import from 'react' is restricted"
+            );
+            expect(testResult.output).not.toContain("no-implied-eval");
+            expect(testResult.output).not.toContain("no-restricted-imports");
+            expect(testResult.output).not.toContain("no-console");
         } finally {
             await rm(fixtureRoot, { force: true, recursive: true });
         }

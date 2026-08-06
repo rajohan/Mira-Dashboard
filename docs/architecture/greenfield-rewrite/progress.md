@@ -9,7 +9,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 
 | Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`, including build, transport, database/outbox, browser data, chat batching, shutdown, parity, OpenClaw source audit, and capped resource evidence.                                                                                                                                |
+| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                                |
 | 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP/realtime foundations, source-boundary enforcement, staged typed configuration, generated configuration reference, structured logging/request correlation, and procedure error policy exist; executable web/worker roots, database runtime, browser shell, complete generated references, and release/rollback closure remain. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                               |
 | 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                                                                                         |
@@ -669,9 +669,12 @@ closes a phase; dated entries below provide the evidence, not a second status so
   environment reads.
 - The only script imports into the legacy backend/frontend are frozen as an exact 18-edge
   coexistence allowlist. New legacy edges fail CI.
-- Strict TypeScript graphs now isolate contracts/shared, browser, server, worker, and scripts.
-  Supported Oxlint restricted-import/global rules provide a fast guard, while the AST checker is
-  authoritative. The server-foundation job runs both checker tests and every greenfield typecheck.
+- Strict TypeScript graphs now isolate contracts/shared, browser, server, worker, and scripts and
+  are checked independently rather than exposed as incomplete composite project references. A
+  broad root compatibility graph supplies repository-wide type-aware Oxlint; supported Oxlint
+  restricted-import/global rules provide a fast guard, while the AST checker and the separate
+  TypeScript graphs are authoritative. The server-foundation job runs both checker tests and every
+  greenfield typecheck.
 
 ### 2026-08-06 — Typed configuration, errors, and observability boundary
 
@@ -692,8 +695,10 @@ closes a phase; dated entries below provide the evidence, not a second status so
   one constant stderr fallback. Sink writes and flushes must settle synchronously, and runtime
   disposal precedes the idempotent flush.
 - The Bun request boundary creates correlation before application routing. Application responses
-  receive `x-request-id`, and each dispatch emits exactly one response-created, sanitized-defect,
-  or client-cancellation event. Cancellation carries no defect fingerprint. SSE termination
+  receive `x-request-id`, and each dispatch emits exactly one terminal HTTP response-created,
+  sanitized-defect, or client-cancellation event. A tRPC defect may additionally emit one
+  correlated diagnostic before its sanitized `500` response-created outcome; it is not a second
+  terminal HTTP outcome. Cancellation carries no defect fingerprint. SSE termination
   observability remains assigned to the later realtime/browser lifecycle rather than being
   overstated here. Bun's outer pre-dispatch body ceiling remains the documented exception.
 - The actual 36-procedure router, public contract metadata, and a server-owned

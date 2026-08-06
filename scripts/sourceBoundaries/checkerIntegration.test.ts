@@ -1,17 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { checkSourceBoundaries } from "../checkSourceBoundaries.ts";
-
-async function temporaryProject(): Promise<string> {
-    const projectRoot = await mkdtemp(path.join(tmpdir(), "mira-source-boundary-"));
-    await mkdir(path.join(projectRoot, "scripts"));
-    await mkdir(path.join(projectRoot, "src", "browser"), { recursive: true });
-    await writeFile(path.join(projectRoot, "package.json"), "{}");
-    return projectRoot;
-}
+import { temporaryProject } from "./testSupport.ts";
 
 describe("source-boundary checker integration", () => {
     test("rejects triple-slash lib, types, and path authority directives", async () => {

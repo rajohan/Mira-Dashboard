@@ -18,17 +18,22 @@
         "noUncheckedSideEffectImports": true,
         "noFallthroughCasesInSwitch": true,
         "noImplicitOverride": true,
-        "erasableSyntaxOnly": true
+        "erasableSyntaxOnly": true,
+        "jsx": "react-jsx",
+        "lib": ["ESNext", "DOM", "DOM.Iterable"],
+        "types": ["bun-types", "node"]
     },
-    "files": [],
-    "references": [
-        { "path": "./tsconfig.app.json" },
-        { "path": "./tsconfig.browser.json" },
-        { "path": "./tsconfig.contracts.json" },
-        { "path": "./tsconfig.node.json" },
-        { "path": "./tsconfig.qualification.json" },
-        { "path": "./tsconfig.scripts.json" },
-        { "path": "./tsconfig.server.json" },
-        { "path": "./tsconfig.worker.json" }
+    // Repository-wide Oxlint compatibility graph; strict runtime partitions use their own configs.
+    "include": [
+        "backend/**/*.ts",
+        "contracts/**/*.ts",
+        "drizzle.config.ts",
+        "frontend/src/**/*",
+        "qualification/**/*.ts",
+        "scripts/**/*.ts",
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tailwind.config.ts",
+        "test/**/*.ts"
     ]
 }

@@ -353,9 +353,12 @@ the richer runtime type adds no value.
 
 The Bun `fetch` boundary creates one request ID before URL routing so application-handled health,
 readiness, not-found, tRPC, raw rejection, and sanitized defect responses share the same
-correlation header. Every dispatch records exactly one outcome event: `http.response.created` for
-a returned response, `http.request.failed` for a sanitized defect response, or
-`http.request.cancelled` for client cancellation. For SSE the response-created event marks
+correlation header. Every dispatch records exactly one terminal HTTP outcome event:
+`http.response.created` for a returned response, `http.request.failed` for a sanitized raw-handler
+defect response, or `http.request.cancelled` for client cancellation. A tRPC defect may additionally
+emit one correlated `trpc.request.defect` diagnostic before the outer boundary returns and records
+the sanitized `500` response; that diagnostic does not replace or duplicate the terminal HTTP
+outcome. For SSE the response-created event marks
 successful dispatch, not stream termination; close/cancel/error observability remains part of the
 browser/realtime lifecycle slice. Client cancellation is informational and carries neither a
 failure fingerprint nor a server-error outcome. Bun's outer 64 KiB pre-dispatch body ceiling

@@ -59,6 +59,17 @@ describe("application configuration Markdown", () => {
         expect(documentation).not.toContain("sentinel-secret-choice");
     });
 
+    test("escapes Markdown table control characters in registry text", () => {
+        const documentation = renderConfiguration([
+            {
+                ...completeEntry,
+                description: "Pipe | backslash \\ and\nnew line.",
+            },
+        ]);
+
+        expect(documentation).toContain(String.raw`Pipe \| backslash \\ and new line.`);
+    });
+
     test("fails closed when required metadata is missing", () => {
         const requiredFields = [
             "allowedValues",

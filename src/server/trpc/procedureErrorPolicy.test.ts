@@ -8,6 +8,7 @@ import type { ProcedureContract } from "../../contracts/registry.ts";
 import { captureFailure } from "../test/support/promise.ts";
 import { createTestRequestContext } from "../test/support/requestContext.ts";
 import {
+    applyProcedureExpectedErrorPolicy,
     assertProcedureExpectedErrorPolicy,
     procedureExpectedErrorPolicy,
     type ProcedureExpectedErrorPolicy,
@@ -113,6 +114,16 @@ describe("procedure expected-error policy", () => {
         expect((failure as TRPCError).code).toBe("INTERNAL_SERVER_ERROR");
     });
 
+    test("treats inherited object keys as unregistered procedure paths", () => {
+        for (const path of ["constructor", "toString", "valueOf"] as const) {
+            const result = applyProcedureExpectedErrorPolicy(
+                path,
+                new TRPCError({ code: "FORBIDDEN" })
+            );
+            expect(result.code).toBe("INTERNAL_SERVER_ERROR");
+        }
+    });
+
     test("keeps framework input validation implicit", async () => {
         const statusInputSchema = v.strictObject({});
         const statusProcedure = publicProcedure
@@ -153,5 +164,25 @@ describe("procedure expected-error policy", () => {
         const failure = await captureFailure(() => iterator.next());
         expect(failure).toBeInstanceOf(TRPCError);
         expect((failure as TRPCError).code).toBe("INTERNAL_SERVER_ERROR");
+    });
+
+    test("preserves declared errors raised during subscription iteration", async () => {
+        const testRouter = router({
+            events: router({
+                stream: publicProcedure.subscription(async function* () {
+                    await Promise.resolve();
+                    yield "started";
+                    throw new TRPCError({ code: "TOO_MANY_REQUESTS" });
+                }),
+            }),
+        });
+        const caller = testRouter.createCaller(await createTestRequestContext());
+        const stream = await caller.events.stream();
+        const iterator = stream[Symbol.asyncIterator]();
+
+        expect(await iterator.next()).toEqual({ done: false, value: "started" });
+        const failure = await captureFailure(() => iterator.next());
+        expect(failure).toBeInstanceOf(TRPCError);
+        expect((failure as TRPCError).code).toBe("TOO_MANY_REQUESTS");
     });
 });

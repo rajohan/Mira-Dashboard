@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { createStructuredLogger } from "../server/platform/observability/structuredLogger.ts";
 import {
+    createCapturingTestStructuredLogger,
     createTestApplicationRuntime,
     createTestServerSecurityServices,
 } from "../server/test/support/requestContext.ts";
@@ -28,7 +28,7 @@ interface EarlyRejectionExpectation {
 async function expectEarlyRejectionCancelsBody(
     input: EarlyRejectionExpectation
 ): Promise<void> {
-    const logLines: string[] = [];
+    const { logger, logLines } = createCapturingTestStructuredLogger();
     const cancellationReasons: unknown[] = [];
     const body = new ReadableStream<Uint8Array>({
         cancel(reason) {
@@ -42,20 +42,6 @@ async function expectEarlyRejectionCancelsBody(
         body,
         ...(input.headers === undefined ? {} : { headers: input.headers }),
         method: "POST",
-    });
-    const logger = createStructuredLogger({
-        identity: {
-            bun: "1.4.0-test",
-            pid: 123,
-            processRole: "web",
-            release: "handler-test",
-            service: "mira-dashboard",
-        },
-        sink: {
-            write(line) {
-                logLines.push(line);
-            },
-        },
     });
     const handler = createTrpcHttpHandler({
         ...createTestServerSecurityServices(),
@@ -116,22 +102,8 @@ describe("tRPC HTTP handler early rejection", () => {
 
 test("redacts an unexpected context defect through the tRPC boundary", async () => {
     const sentinel = "context-failure-secret";
-    const logLines: string[] = [];
+    const { logger, logLines } = createCapturingTestStructuredLogger();
     const request = new Request("https://dashboard.example/trpc/auth.status");
-    const logger = createStructuredLogger({
-        identity: {
-            bun: "1.4.0-test",
-            pid: 123,
-            processRole: "web",
-            release: "handler-test",
-            service: "mira-dashboard",
-        },
-        sink: {
-            write(line) {
-                logLines.push(line);
-            },
-        },
-    });
     const handler = createTrpcHttpHandler({
         ...createTestServerSecurityServices(),
         applicationRuntime: createTestApplicationRuntime({ logger }),
