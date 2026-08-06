@@ -6,17 +6,22 @@ and chat all run through the same application paths.
 
 ## Install
 
-From the repository or PR worktree:
+`.bun-version` selects Bun Canary. Install or update that channel before dependencies:
+
+```bash
+bun upgrade --canary
+```
+
+Then install from the repository or PR worktree:
 
 ```bash
 bun install --frozen-lockfile
 ```
 
-`.bun-version` selects Bun Canary. The root Bun config deliberately does not
-auto-install peer dependencies: required library peers are direct dependencies,
-while the `bun-plugin-tailwind` Bun peer is supplied by the selected runtime.
-This prevents a stable npm Bun executable from shadowing Canary in repository
-scripts.
+Dashboard targets Bun 1.4 and accepts newer Canary revisions within that runtime version. The
+root Bun config deliberately does not auto-install peer dependencies: required library peers are
+direct dependencies, while the `bun-plugin-tailwind` Bun peer is supplied by the selected
+runtime. This prevents a stable npm Bun executable from shadowing Canary in repository scripts.
 
 When Bun 1.4 is stable, re-test installs with peer auto-installation enabled.
 Remove `[install] peer = false` once `bun-plugin-tailwind` no longer installs a

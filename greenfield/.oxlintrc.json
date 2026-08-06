@@ -37,7 +37,7 @@
         "denyWarnings": true,
         "reportUnusedDisableDirectives": "error",
         "typeAware": true,
-        "typeCheck": false
+        "typeCheck": true
     },
     "plugins": [
         "eslint",

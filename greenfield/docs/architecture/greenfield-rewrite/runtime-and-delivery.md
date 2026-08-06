@@ -330,7 +330,7 @@ Additional safeguards:
 - use stream backpressure and abort propagation rather than accumulating chunks;
 - no unbounded `Promise.all` over files, containers, tests, sessions, or API results;
 - server-side pagination or cursors for every append-only history;
-- separate fast lint from memory-heavier type-aware lint and run them sequentially on the VPS;
+- run the Bun and browser type-aware lint partitions sequentially on the VPS;
 - cap Bun test concurrency and isolate tests that leak global runtime state; and
 - record cgroup OOM/limit exits as failed jobs with an actionable message.
 
@@ -350,8 +350,7 @@ remain colocated with that script.
 dev                     local Bun server + worker + frontend development
 build                   deterministic browser and server/worker artifacts
 typecheck               root TypeScript solution (browser + Bun), no emit
-lint                    fast oxlint rules
-lint:typed              oxlint type-aware rules in a separately budgeted process
+lint                    oxlint type-aware rules and type-check diagnostics, partitioned by runtime
 format / format:check   oxfmt
 test:unit               pure domain and utility tests
 test:database           temporary SQLite repository/migration tests

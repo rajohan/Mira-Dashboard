@@ -10,13 +10,13 @@
         "@dnd-kit/react": "^0.5.0",
         "@dnd-kit/sortable": "^10.0.0",
         "@headlessui/react": "^2.2.10",
-        "@microlink/react-json-view": "^1.31.25",
+        "@microlink/react-json-view": "^1.31.26",
         "@simplewebauthn/browser": "13.3.0",
         "@simplewebauthn/server": "13.3.2",
         "@tailwindcss/typography": "^0.5.20",
         "@tanstack/query-core": "5.101.4",
-        "@tanstack/query-db-collection": "^1.2.1",
-        "@tanstack/react-db": "^0.1.95",
+        "@tanstack/query-db-collection": "1.2.1",
+        "@tanstack/react-db": "0.1.95",
         "@tanstack/react-form": "^1.33.3",
         "@tanstack/react-query": "^5.101.4",
         "@tanstack/react-router": "^1.170.18",
@@ -60,11 +60,11 @@
         "@types/react-syntax-highlighter": "^15.5.13",
         "babel-plugin-react-compiler": "^1.0.0",
         "bun-plugin-tailwind": "^0.1.2",
-        "bun-types": "canary",
+        "bun-types": "1.4.0-canary.20260519T150915",
         "happy-dom": "^20.11.1",
         "oxfmt": "^0.62.0",
         "oxlint": "^1.77.0",
-        "oxlint-config-presets": "^0.1.17",
+        "oxlint-config-presets": "^0.1.18",
         "oxlint-tailwindcss": "^1.6.0",
         "oxlint-tsgolint": "^7.0.2001",
         "tailwindcss": "^4.3.3",
@@ -157,7 +157,7 @@
 
     "@levischuck/tiny-cbor": ["@levischuck/tiny-cbor@0.2.11", "", {}, "sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow=="],
 
-    "@microlink/react-json-view": ["@microlink/react-json-view@1.31.25", "", { "dependencies": { "react-base16-styling": "~0.10.0", "react-lifecycles-compat": "~3.0.4", "react-textarea-autosize": "~8.5.9" }, "peerDependencies": { "react": ">= 15", "react-dom": ">= 15" } }, "sha512-eVRAzd6GpIWhUwZkk1BHVtyS3Sgcw9eVJYvV/RGxahmV10TD3Z50cZNg4EQOzlEWDw+FeitTtr/Aj1yp7fRYXA=="],
+    "@microlink/react-json-view": ["@microlink/react-json-view@1.31.26", "", { "dependencies": { "react-base16-styling": "~0.10.0", "react-lifecycles-compat": "~3.0.4", "react-textarea-autosize": "~8.5.9" }, "peerDependencies": { "react": ">= 15", "react-dom": ">= 15" } }, "sha512-2sYpys438sineOJDkqk70F0rFRnZ0hpNgv0k8sEpUg3qafP5j7HrZWApj8DGi5rG7dlSRKdzgzRk4LNCsxk2MQ=="],
 
     "@noble/hashes": ["@noble/hashes@2.2.0", "", {}, "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg=="],
 
@@ -817,7 +817,7 @@
 
     "oxlint": ["oxlint@1.77.0", "", { "optionalDependencies": { "@oxlint/binding-android-arm-eabi": "1.77.0", "@oxlint/binding-android-arm64": "1.77.0", "@oxlint/binding-darwin-arm64": "1.77.0", "@oxlint/binding-darwin-x64": "1.77.0", "@oxlint/binding-freebsd-x64": "1.77.0", "@oxlint/binding-linux-arm-gnueabihf": "1.77.0", "@oxlint/binding-linux-arm-musleabihf": "1.77.0", "@oxlint/binding-linux-arm64-gnu": "1.77.0", "@oxlint/binding-linux-arm64-musl": "1.77.0", "@oxlint/binding-linux-ppc64-gnu": "1.77.0", "@oxlint/binding-linux-riscv64-gnu": "1.77.0", "@oxlint/binding-linux-riscv64-musl": "1.77.0", "@oxlint/binding-linux-s390x-gnu": "1.77.0", "@oxlint/binding-linux-x64-gnu": "1.77.0", "@oxlint/binding-linux-x64-musl": "1.77.0", "@oxlint/binding-openharmony-arm64": "1.77.0", "@oxlint/binding-win32-arm64-msvc": "1.77.0", "@oxlint/binding-win32-ia32-msvc": "1.77.0", "@oxlint/binding-win32-x64-msvc": "1.77.0" }, "peerDependencies": { "oxlint-tsgolint": ">=7.0.2001", "vite-plus": "*" }, "optionalPeers": ["oxlint-tsgolint", "vite-plus"], "bin": { "oxlint": "bin/oxlint" } }, "sha512-qnGh8XJHaQ0dprrDXNQZgS0FgjI6v+V3+X8DwmaV++5Aamy6jGKfDdQ1TUvhUxtmKFAbEf4/WeO5QZX+5WSngg=="],
 
-    "oxlint-config-presets": ["oxlint-config-presets@0.1.17", "", { "peerDependencies": { "oxlint": ">=0.15.0" }, "optionalPeers": ["oxlint"] }, "sha512-LMLU+yweNquiQ74koTOn0rP/9FXjkgK9yp6dkFpwTM9lau6oVks2WupOjjrQUB4PGu92UoHu/R7MH9a0mY0Flw=="],
+    "oxlint-config-presets": ["oxlint-config-presets@0.1.18", "", { "peerDependencies": { "oxlint": ">=0.15.0" }, "optionalPeers": ["oxlint"] }, "sha512-f0Iie2XIjvAopd5kv5xuVUPspCpWy3pJVLeQ1yWfFpBl1QAkiQEcPCOOqpkUKm+k6zqWJL+PyNCI+TimnBUFvw=="],
 
     "oxlint-tailwindcss": ["oxlint-tailwindcss@1.6.0", "", { "dependencies": { "@tailwindcss/node": "^4.3.3", "tailwindcss": "^4.3.3" } }, "sha512-Y1ZWJLI8Szu4Bl2OuZWH1lUv9VfDzD14CqlZBCU3Qxiz5AsthRqXWaYTshUPBFF1WXazsFfRBkWHRO+tIezfQA=="],
 

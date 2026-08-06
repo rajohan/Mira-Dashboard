@@ -156,7 +156,7 @@ The rewrite is ready only when all of the following are true:
   redaction, and audit behavior pass security review;
 - generated docs are complete, deterministic, CI-checked, and visible at `/docs` without secret
   disclosure;
-- oxfmt, oxlint, typed lint, TypeScript, Bun tests, coverage gates, build, bundle budgets, and
+- oxfmt, typed Oxlint, TypeScript, Bun tests, coverage gates, build, bundle budgets, and
   release preflight pass;
 - web, worker, child jobs, streams, caches, logs, and test/build commands have observed resource
   bounds below their cgroup limits;

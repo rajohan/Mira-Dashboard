@@ -5,9 +5,12 @@
         "**/coverage/**",
         "**/data/**",
         "**/dist/**",
+        "docs/generated/**",
+        "migrations/**",
         "**/node_modules/**",
         "**/*.min.css",
-        "**/*.min.js"
+        "**/*.min.js",
+        "greenfield/**"
     ],
     "printWidth": 90,
     "semi": true,
