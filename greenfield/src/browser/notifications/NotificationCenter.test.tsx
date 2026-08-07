@@ -44,7 +44,7 @@ const ids = Object.freeze([
     "019fd800-0000-7000-8000-000000000001",
 ]);
 
-function authenticatedStatus(): AuthStatus {
+function authenticatedStatus(): Extract<AuthStatus, { state: "authenticated" }> {
     return {
         session: {
             authenticatedAtMs: timestampMs,
@@ -246,6 +246,87 @@ describe("Notification center", () => {
                 ).toBeNull();
                 expect(harness.realtimeClient.activeSubscriptionCount).toBe(0);
             });
+        } finally {
+            await harness.cleanup();
+        }
+    });
+
+    test("preserves an open notification subtree while authentication is rechecked", async () => {
+        const status = authenticatedStatus();
+        const transport = new NotificationCenterTransport({
+            notifications: [
+                notification(ids[0]!, timestampMs, {
+                    title: "Preserved notification",
+                }),
+            ],
+            readCount: 0,
+            unreadCount: 1,
+        });
+        const harness = renderCenter(transport, status);
+
+        try {
+            const { trigger } = await openNotificationCenter();
+            expect(harness.realtimeClient.activeSubscriptionCount).toBe(1);
+            const sameIdentityStatus = Promise.withResolvers<AuthStatus>();
+            let sameIdentityCheck: Promise<AuthStatus> = Promise.resolve(status);
+            act(() => {
+                sameIdentityCheck = harness.queryClient.fetchQuery<AuthStatus>({
+                    queryFn: () => sameIdentityStatus.promise,
+                    queryKey: authStatusQueryKey,
+                    staleTime: 0,
+                });
+            });
+
+            await waitFor(() => {
+                expect(
+                    screen.queryByRole("button", { name: /Notifications,/u })
+                ).toBeNull();
+                expect(
+                    screen.queryByRole("heading", { level: 2, name: "Notifications" })
+                ).toBeNull();
+                expect(harness.realtimeClient.activeSubscriptionCount).toBe(0);
+            });
+            expect(trigger.isConnected).toBeTrue();
+
+            await act(async () => {
+                sameIdentityStatus.resolve(status);
+                await sameIdentityCheck;
+            });
+            expect(
+                await screen.findByRole("button", { name: "Notifications, 1 unread" })
+            ).toBe(trigger);
+            expect(trigger).toHaveAttribute("aria-expanded", "true");
+            expect(
+                await screen.findByRole("heading", { level: 2, name: "Notifications" })
+            ).toBeTruthy();
+            await waitFor(() =>
+                expect(harness.realtimeClient.activeSubscriptionCount).toBe(1)
+            );
+
+            const changedIdentityStatus = Promise.withResolvers<AuthStatus>();
+            let changedIdentityCheck: Promise<AuthStatus> = Promise.resolve(status);
+            act(() => {
+                changedIdentityCheck = harness.queryClient.fetchQuery<AuthStatus>({
+                    queryFn: () => changedIdentityStatus.promise,
+                    queryKey: authStatusQueryKey,
+                    staleTime: 0,
+                });
+            });
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("button", { name: /Notifications,/u })
+                ).toBeNull()
+            );
+            await act(async () => {
+                changedIdentityStatus.resolve({
+                    ...status,
+                    session: { ...status.session, id: "b".repeat(32) },
+                });
+                await changedIdentityCheck;
+            });
+            expect(trigger.isConnected).toBeFalse();
+            expect(screen.queryByRole("button", { name: /Notifications,/u })).toBeNull();
+            expect(harness.realtimeClient.activeSubscriptionCount).toBe(0);
         } finally {
             await harness.cleanup();
         }

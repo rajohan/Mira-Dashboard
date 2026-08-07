@@ -26,6 +26,47 @@ const { renderHook, waitFor } = await import("@testing-library/react");
 const sessionOwnedQueryKey = ["private", "mutation-owner"] as const;
 
 describe("authenticated mutation boundary", () => {
+    test("expires immediately when auth identity changes before cache reset begins", async () => {
+        const queryClient = createDashboardQueryClient();
+        const pendingResult = Promise.withResolvers<string>();
+        let operationSignal: AbortSignal | undefined;
+        let operationIsActive: (() => boolean) | undefined;
+        queryClient.setQueryData(authStatusQueryKey, {
+            state: "bootstrap-required",
+        } satisfies AuthStatus);
+        const generation = authenticatedBrowserCacheGeneration(queryClient);
+        const rendered = renderHook(() => useAuthenticatedMutationBoundary(), {
+            wrapper: ({ children }: { readonly children: ReactNode }) => (
+                <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+            ),
+        });
+        const operation = rendered.result.current
+            .run((signal, isActive) => {
+                operationSignal = signal;
+                operationIsActive = isActive;
+                return pendingResult.promise;
+            })
+            .catch((error: unknown) => error);
+
+        try {
+            await waitFor(() => expect(operationSignal).toBeInstanceOf(AbortSignal));
+            queryClient.setQueryData(authStatusQueryKey, {
+                state: "anonymous",
+            } satisfies AuthStatus);
+
+            expect(authenticatedBrowserCacheGeneration(queryClient)).toBe(generation);
+            expect(operationSignal?.aborted).toBeFalse();
+            expect(operationIsActive?.()).toBeFalse();
+            pendingResult.resolve("stale-result");
+            expect(await operation).toBeInstanceOf(AuthenticatedMutationExpiredError);
+            expect(rendered.result.current.completionIsCurrent()).toBeFalse();
+        } finally {
+            pendingResult.resolve("stale-result");
+            rendered.unmount();
+            queryClient.clear();
+        }
+    });
+
     test("expires generation A without allowing its success callback to mutate generation B", async () => {
         const queryClient = createDashboardQueryClient();
         const client = createDashboardTrpcClient({

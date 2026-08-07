@@ -2,7 +2,12 @@ import { describe, expect, spyOn, test } from "bun:test";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
-import { authStatusQueryKey, publishAuthenticationStatus } from "./authQueries.ts";
+import {
+    authStatusCacheIdentity,
+    authStatusQueryKey,
+    publishAuthenticationStatus,
+    publishAuthenticationStatusIfCurrent,
+} from "./authQueries.ts";
 
 const bootstrapStatus = { state: "bootstrap-required" } satisfies AuthStatus;
 const anonymousStatus = { state: "anonymous" } satisfies AuthStatus;
@@ -125,6 +130,58 @@ describe("authentication status publication", () => {
             await Promise.allSettled(
                 [publicationA, publicationB].filter(
                     (publication): publication is Promise<void> =>
+                        publication !== undefined
+                )
+            );
+            cancelQueries.mockRestore();
+            queryClient.clear();
+        }
+    });
+
+    test("rejects a guarded stale owner after an earlier identity transition", async () => {
+        const queryClient = createDashboardQueryClient();
+        const transitionGate = Promise.withResolvers<void>();
+        const transitionStarted = Promise.withResolvers<void>();
+        let cancellationCount = 0;
+        const cancelQueries = spyOn(queryClient, "cancelQueries").mockImplementation(
+            async () => {
+                cancellationCount += 1;
+                transitionStarted.resolve();
+                await transitionGate.promise;
+            }
+        );
+        queryClient.setQueryData(authStatusQueryKey, bootstrapStatus);
+        const expectedIdentity = authStatusCacheIdentity(bootstrapStatus);
+        const replacement = publishAuthenticationStatus(queryClient, anonymousStatus);
+        let stalePublication: Promise<boolean> | undefined;
+
+        try {
+            await transitionStarted.promise;
+            stalePublication = publishAuthenticationStatusIfCurrent(
+                queryClient,
+                pendingMfaStatus,
+                () => {
+                    const status =
+                        queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+                    return (
+                        status !== undefined &&
+                        authStatusCacheIdentity(status) === expectedIdentity
+                    );
+                }
+            );
+            await Promise.resolve();
+            expect(cancellationCount).toBe(1);
+
+            transitionGate.resolve();
+            await replacement;
+            expect(await stalePublication).toBeFalse();
+            expect(cancellationCount).toBe(1);
+            expect(queryClient.getQueryData(authStatusQueryKey)).toEqual(anonymousStatus);
+        } finally {
+            transitionGate.resolve();
+            await Promise.allSettled(
+                [replacement, stalePublication].filter(
+                    (publication): publication is Promise<void> | Promise<boolean> =>
                         publication !== undefined
                 )
             );

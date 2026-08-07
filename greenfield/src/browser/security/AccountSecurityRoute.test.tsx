@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
+import type { TRPCRequestOptions } from "@trpc/client";
 import { act } from "react";
 
 import type {
@@ -25,7 +26,7 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
-import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { authStatusQueryKey, publishAuthenticationStatus } from "../auth/authQueries.ts";
 import {
     createDashboardBrowserCollections,
     type DashboardBrowserCollections,
@@ -198,7 +199,11 @@ class SecurityTransport implements DashboardTrpcTransport {
     authStatus: AuthStatus = authenticatedStatus;
     readonly calls: TransportCall[] = [];
     credentials = new Map<string, AutomationCredentialSummary[]>();
-    mutationHandler: (path: string, input: unknown) => Promise<unknown> = (path) =>
+    mutationHandler: (
+        path: string,
+        input: unknown,
+        options?: TRPCRequestOptions
+    ) => Promise<unknown> = (path) =>
         Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
     principals: AutomationPrincipalSummary[] = [];
     sessions: AuthSessionSummary[] = [currentSession, otherSession];
@@ -208,9 +213,13 @@ class SecurityTransport implements DashboardTrpcTransport {
         this.summary = summary;
     }
 
-    mutation(path: string, input?: unknown): Promise<unknown> {
+    mutation(
+        path: string,
+        input?: unknown,
+        options?: TRPCRequestOptions
+    ): Promise<unknown> {
         this.calls.push({ input, kind: "mutation", path });
-        return this.mutationHandler(path, input);
+        return this.mutationHandler(path, input, options);
     }
 
     query(path: string, input?: unknown): Promise<unknown> {
@@ -607,6 +616,109 @@ describe("Dashboard account security route", () => {
             "new strong password",
         ]) {
             expect(cachedData(queryClient)).not.toContain(secret);
+        }
+    });
+
+    test("does not republish a delayed password rotation after logout", async () => {
+        const transport = new SecurityTransport(disabledSummary);
+        const passwordChangeResponse = Promise.withResolvers<unknown>();
+        let passwordChangeSignal: AbortSignal | undefined;
+        transport.mutationHandler = (path, input, options) => {
+            expect(path).toBe("auth.changePassword");
+            expect(input).toEqual({
+                currentPassword: "current password",
+                newPassword: "new strong password",
+            });
+            passwordChangeSignal = options?.signal;
+            return passwordChangeResponse.promise;
+        };
+        let deferredCollections: ReturnType<typeof deferCollectionResets> | undefined;
+        const queryClient = renderAccountSecurity(
+            transport,
+            unexpectedWebAuthnClient,
+            (collections) => {
+                deferredCollections = deferCollectionResets(collections);
+                return deferredCollections.collections;
+            }
+        );
+        const publishedAuthenticationStatuses: AuthStatus[] = [];
+        const unsubscribeAuthentication = queryClient.getQueryCache().subscribe(() => {
+            const status = queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+            if (status !== undefined) publishedAuthenticationStatuses.push(status);
+        });
+        const userActions = userEvent.setup();
+
+        try {
+            await waitFor(() => expect(deferredCollections?.resetCount).toBe(1));
+            await act(() => deferredCollections?.release(0));
+            await screen.findByRole("heading", {
+                level: 1,
+                name: "Account security",
+            });
+
+            await userActions.type(
+                screen.getByLabelText("Current password"),
+                "current password"
+            );
+            await userActions.type(
+                screen.getByLabelText("New password"),
+                "new strong password"
+            );
+            await userActions.click(
+                screen.getByRole("button", { name: "Change password" })
+            );
+            await waitFor(() => expect(passwordChangeSignal).toBeInstanceOf(AbortSignal));
+            expect(passwordChangeSignal?.aborted).toBeFalse();
+
+            transport.authStatus = { state: "anonymous" };
+            transport.sessions = [];
+            await act(() =>
+                publishAuthenticationStatus(queryClient, { state: "anonymous" })
+            );
+            await waitFor(() => expect(deferredCollections?.resetCount).toBe(2));
+            expect(passwordChangeSignal?.aborted).toBeTrue();
+            expect(
+                screen.queryByRole("heading", { name: "Account security" })
+            ).toBeNull();
+            expect(screen.getByText("Preparing secure session data…")).toBeTruthy();
+            const queryCallCountBeforeDelayedResponse = transport.calls.filter(
+                (call) => call.kind === "query"
+            ).length;
+
+            await act(async () => {
+                passwordChangeResponse.resolve({
+                    revokedSessions: 1,
+                    session: rotatedSession,
+                });
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            });
+
+            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual({
+                state: "anonymous",
+            });
+            expect(
+                publishedAuthenticationStatuses.some(
+                    (status) =>
+                        status.state === "authenticated" &&
+                        status.session.id === rotatedSession.id
+                )
+            ).toBeFalse();
+            expect(transport.calls.filter((call) => call.kind === "query")).toHaveLength(
+                queryCallCountBeforeDelayedResponse
+            );
+            expect(
+                screen.queryByText("Password changed and other sessions revoked.")
+            ).toBeNull();
+
+            await act(() => deferredCollections?.release(1));
+            expect(
+                await screen.findByRole("heading", { level: 1, name: "Sign in" })
+            ).toBeTruthy();
+            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual({
+                state: "anonymous",
+            });
+        } finally {
+            unsubscribeAuthentication();
         }
     });
 

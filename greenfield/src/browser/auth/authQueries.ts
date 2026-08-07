@@ -8,13 +8,37 @@ export const authStatusQueryKey = ["auth", "status"] as const;
 const authenticatedBrowserCacheGenerations = new WeakMap<QueryClient, number>();
 const authenticatedMutationControllers = new WeakMap<QueryClient, Set<AbortController>>();
 interface AuthenticationStatusTransition {
-    readonly completion: Promise<void>;
+    readonly completion: Promise<unknown>;
 }
 
 const authenticationStatusTransitions = new WeakMap<
     QueryClient,
     AuthenticationStatusTransition
 >();
+
+async function runAuthenticationStatusTransition<TResult>(
+    queryClient: QueryClient,
+    operation: () => Promise<TResult>
+): Promise<TResult> {
+    const previousTransition = authenticationStatusTransitions.get(queryClient);
+    const completion = (async () => {
+        try {
+            await previousTransition?.completion;
+        } catch {
+            // A later resolved identity must still be publishable after a failed transition.
+        }
+        return operation();
+    })();
+    const transition: AuthenticationStatusTransition = { completion };
+    authenticationStatusTransitions.set(queryClient, transition);
+    try {
+        return await completion;
+    } finally {
+        if (authenticationStatusTransitions.get(queryClient) === transition) {
+            authenticationStatusTransitions.delete(queryClient);
+        }
+    }
+}
 
 /** @returns Stable auth-boundary identity without volatile session activity metadata. */
 export function authStatusCacheIdentity(status: AuthStatus): string {
@@ -74,29 +98,35 @@ export async function publishAuthenticationStatus(
     queryClient: QueryClient,
     status: AuthStatus
 ): Promise<void> {
-    const previousTransition = authenticationStatusTransitions.get(queryClient);
-    const transition: AuthenticationStatusTransition = {
-        completion: (async () => {
-            try {
-                await previousTransition?.completion;
-            } catch {
-                // A later resolved identity must still be publishable after a failed transition.
-            }
-            await queryClient.cancelQueries({
-                exact: true,
-                queryKey: authStatusQueryKey,
-            });
-            queryClient.setQueryData(authStatusQueryKey, status);
-        })(),
-    };
-    authenticationStatusTransitions.set(queryClient, transition);
-    try {
-        await transition.completion;
-    } finally {
-        if (authenticationStatusTransitions.get(queryClient) === transition) {
-            authenticationStatusTransitions.delete(queryClient);
-        }
-    }
+    await runAuthenticationStatusTransition(queryClient, async () => {
+        await queryClient.cancelQueries({
+            exact: true,
+            queryKey: authStatusQueryKey,
+        });
+        queryClient.setQueryData(authStatusQueryKey, status);
+    });
+}
+
+/**
+ * Publishes an authentication identity only while the captured cache owner remains
+ * current at the serialized write point.
+ * @returns Whether the guarded status was published.
+ */
+export async function publishAuthenticationStatusIfCurrent(
+    queryClient: QueryClient,
+    status: AuthStatus,
+    isCurrent: () => boolean
+): Promise<boolean> {
+    return runAuthenticationStatusTransition(queryClient, async () => {
+        if (!isCurrent()) return false;
+        await queryClient.cancelQueries({
+            exact: true,
+            queryKey: authStatusQueryKey,
+        });
+        if (!isCurrent()) return false;
+        queryClient.setQueryData(authStatusQueryKey, status);
+        return true;
+    });
 }
 
 function beginAuthenticatedBrowserCacheReset(queryClient: QueryClient): void {

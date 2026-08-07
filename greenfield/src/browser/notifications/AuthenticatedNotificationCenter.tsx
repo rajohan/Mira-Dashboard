@@ -1,6 +1,8 @@
+import { Activity, useState } from "react";
+
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { useObservedQueryState } from "../api/useObservedQueryState.ts";
-import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { authStatusCacheIdentity, authStatusQueryKey } from "../auth/authQueries.ts";
 import { NotificationCenter } from "./NotificationCenter.tsx";
 
 /**
@@ -9,12 +11,31 @@ import { NotificationCenter } from "./NotificationCenter.tsx";
  */
 export function AuthenticatedNotificationCenter() {
     const authentication = useObservedQueryState<AuthStatus>(authStatusQueryKey);
+    const authenticatedIdentity =
+        authentication?.data?.state === "authenticated"
+            ? authStatusCacheIdentity(authentication.data)
+            : undefined;
+    const verificationSettled =
+        authentication?.status === "success" && authentication.fetchStatus === "idle";
+    const [releasedIdentity, setReleasedIdentity] = useState<string>();
+
     if (
-        authentication?.status !== "success" ||
-        authentication.fetchStatus !== "idle" ||
-        authentication.data?.state !== "authenticated"
+        releasedIdentity === undefined &&
+        verificationSettled &&
+        authenticatedIdentity !== undefined
     ) {
+        setReleasedIdentity(authenticatedIdentity);
+    }
+
+    if (releasedIdentity === undefined || authenticatedIdentity !== releasedIdentity) {
         return null;
     }
-    return <NotificationCenter />;
+    return (
+        <Activity
+            mode={verificationSettled ? "visible" : "hidden"}
+            name="authenticated-notifications"
+        >
+            <NotificationCenter />
+        </Activity>
+    );
 }

@@ -56,7 +56,10 @@ export function NotificationCenter() {
                     </span>
                 )}
             </PopoverTrigger>
-            <PopoverContent className="flex w-[min(32rem,calc(100vw-1rem))] flex-col">
+            <PopoverContent
+                anchored={false}
+                className="absolute top-full right-0 mt-2 flex w-[min(32rem,calc(100vw-1rem))] flex-col"
+            >
                 <NotificationPanel
                     latestError={latestState?.error ?? null}
                     latestLoading={latestRows.isLoading}
