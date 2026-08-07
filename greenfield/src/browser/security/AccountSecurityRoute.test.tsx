@@ -25,6 +25,10 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
+import {
+    createDashboardBrowserCollections,
+    type DashboardBrowserCollections,
+} from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DashboardWebAuthnClient } from "./webauthn/webauthnClient.ts";
@@ -252,6 +256,8 @@ class SecurityTransport implements DashboardTrpcTransport {
 }
 
 const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
+const collectionRegistries: DashboardBrowserCollections[] = [];
+const mountedViews: ReturnType<typeof render>[] = [];
 
 function renderAccountSecurity(
     transport: SecurityTransport,
@@ -262,14 +268,20 @@ function renderAccountSecurity(
     const router = createDashboardRouter(
         createMemoryHistory({ initialEntries: ["/account-security"] })
     );
-    render(
-        <DashboardBrowserApplication
-            queryClient={queryClient}
-            realtimeClient={noOpDashboardRealtimeClient}
-            router={router}
-            trpcClient={createDashboardTrpcClient(transport)}
-            webAuthnClient={webAuthnClient}
-        />
+    const trpcClient = createDashboardTrpcClient(transport);
+    const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+    collectionRegistries.push(collections);
+    mountedViews.push(
+        render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={router}
+                trpcClient={trpcClient}
+                webAuthnClient={webAuthnClient}
+            />
+        )
     );
     return queryClient;
 }
@@ -298,7 +310,11 @@ async function waitForDialogExit(): Promise<void> {
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
 }
 
-afterEach(() => {
+afterEach(async () => {
+    for (const view of mountedViews.splice(0)) view.unmount();
+    await Promise.all(
+        collectionRegistries.splice(0).map((collections) => collections.cleanup())
+    );
     for (const queryClient of queryClients.splice(0)) queryClient.clear();
 });
 

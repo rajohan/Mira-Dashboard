@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { applicationCapabilities } from "../../../contracts/security.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { insertAutomationPrincipal } from "./testSupport/securityIdentitySchema.ts";
 
@@ -80,13 +81,16 @@ describe("automation identity schema", () => {
 
         try {
             insertAutomationPrincipal(database);
-            database.sqlite.run(`
-                INSERT INTO automation_principal_capabilities (
-                    capability,
-                    granted_at,
-                    principal_id
-                ) VALUES ('notifications:read', 1000, 'openclaw-task-tracking')
-            `);
+            const insertCapability = database.sqlite.query<void, [string, number]>(`
+                    INSERT INTO automation_principal_capabilities (
+                        capability,
+                        granted_at,
+                        principal_id
+                    ) VALUES (?, ?, 'openclaw-task-tracking')
+                `);
+            for (const [index, capability] of applicationCapabilities.entries()) {
+                insertCapability.run(capability, 1000 + index);
+            }
             database.sqlite.run(`
                 INSERT INTO automation_principal_capabilities (
                     capability,

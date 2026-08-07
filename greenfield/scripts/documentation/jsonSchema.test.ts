@@ -8,6 +8,8 @@ import {
     isValidFactorLabel,
     totpFactorLabelSchema,
 } from "../../src/contracts/accountSecurity.ts";
+import { agentConfigurationSchema } from "../../src/contracts/agentModel.ts";
+import { listAgentTaskHistoryResultSchema } from "../../src/contracts/agents.ts";
 import {
     authPasswordMaximumLength,
     authPasswordMinimumLength,
@@ -100,9 +102,16 @@ describe("contract JSON Schema conversion", () => {
             )
         ).toMatchObject({
             items: {
-                enum: ["notifications:read", "reports:read", "tasks:read", "tasks:write"],
+                enum: [
+                    "agents:read",
+                    "agents:write",
+                    "notifications:read",
+                    "reports:read",
+                    "tasks:read",
+                    "tasks:write",
+                ],
             },
-            maxItems: 4,
+            maxItems: 6,
             type: "array",
             uniqueItems: true,
         });
@@ -223,6 +232,27 @@ describe("contract JSON Schema conversion", () => {
 
         expect(document).toContain("strict newest-first audit-event ordering");
         expect(document).toContain("audit continuation cursor");
+    });
+
+    test("documents agent directory and task-history refinements", () => {
+        const directoryDocument = JSON.stringify(
+            convertContractSchema(
+                agentConfigurationSchema,
+                "test.agentConfiguration",
+                "output"
+            )
+        );
+        expect(directoryDocument).toContain("reviewed agent ID to be unique");
+
+        const historyDocument = JSON.stringify(
+            convertContractSchema(
+                listAgentTaskHistoryResultSchema,
+                "test.agentTaskHistory",
+                "output"
+            )
+        );
+        expect(historyDocument).toContain("strict newest-first agent task-run ordering");
+        expect(historyDocument).toContain("task-history cursor");
     });
 
     test("documents task bounds, canonicalization, and runtime relationships", () => {

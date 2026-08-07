@@ -68,6 +68,10 @@ async function procedureContractsFor(
 ): Promise<readonly ProcedureContract[]> {
     const domain = name.slice(0, name.indexOf("."));
     switch (domain) {
+        case "agents": {
+            const module = await import("../../contracts/agents.ts");
+            return module.agentProcedureContracts;
+        }
         case "accountSecurity": {
             const module = await import("../../contracts/accountSecurity.ts");
             return module.accountSecurityProcedureContracts;

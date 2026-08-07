@@ -2,6 +2,7 @@ import { secondsToMilliseconds } from "date-fns";
 import * as v from "valibot";
 
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
+import type { AgentService } from "../server/domains/agents/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
@@ -123,6 +124,7 @@ export {
 
 /** Bun server startup dependencies and listen options. */
 export interface ServerOptions {
+    readonly agentService: AgentService["Service"];
     readonly applicationRuntime: ApplicationRuntime;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
@@ -169,6 +171,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                 ? undefined
                 : parseBrowserOrigin(options.browserOrigin);
         const handleTrpcHttpRequest = createTrpcHttpHandler({
+            agentService: options.agentService,
             applicationRuntime: options.applicationRuntime,
             authenticateCredential: options.authenticateCredential,
             authenticationLifecycle: options.authenticationLifecycle,

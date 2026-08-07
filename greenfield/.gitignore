@@ -12,7 +12,9 @@ lerna-debug.log*
 node_modules
 dist
 release-manifest.json
-data/
+/data/
+!/src/browser/data/
+!/src/browser/data/**
 .test-openclaw/
 .test-data
 dist-ssr

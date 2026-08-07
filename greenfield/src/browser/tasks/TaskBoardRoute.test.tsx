@@ -21,6 +21,10 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
+import {
+    createDashboardBrowserCollections,
+    type DashboardBrowserCollections,
+} from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
@@ -182,6 +186,8 @@ class TaskTransport implements DashboardTrpcTransport {
 }
 
 const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
+const collectionRegistries: DashboardBrowserCollections[] = [];
+const mountedViews: ReturnType<typeof render>[] = [];
 
 function renderTaskRoute(transport: TaskTransport) {
     const queryClient = createDashboardQueryClient();
@@ -189,19 +195,29 @@ function renderTaskRoute(transport: TaskTransport) {
     const router = createDashboardRouter(
         createMemoryHistory({ initialEntries: ["/tasks"] })
     );
-    render(
-        <DashboardBrowserApplication
-            queryClient={queryClient}
-            realtimeClient={noOpDashboardRealtimeClient}
-            router={router}
-            trpcClient={createDashboardTrpcClient(transport)}
-            webAuthnClient={unexpectedWebAuthnClient}
-        />
+    const trpcClient = createDashboardTrpcClient(transport);
+    const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+    collectionRegistries.push(collections);
+    mountedViews.push(
+        render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={router}
+                trpcClient={trpcClient}
+                webAuthnClient={unexpectedWebAuthnClient}
+            />
+        )
     );
     return queryClient;
 }
 
-afterEach(() => {
+afterEach(async () => {
+    for (const view of mountedViews.splice(0)) view.unmount();
+    await Promise.all(
+        collectionRegistries.splice(0).map((collections) => collections.cleanup())
+    );
     for (const queryClient of queryClients.splice(0)) queryClient.clear();
 });
 

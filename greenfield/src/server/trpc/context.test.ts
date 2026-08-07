@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { createTestAgentService } from "../domains/agents/testSupport/service.ts";
 import { createTestTaskService } from "../domains/tasks/testSupport/service.ts";
 import { readAuthenticationHttpCredentials } from "../rawHttp/authenticationCredentials.ts";
 import { generateOpaqueToken } from "../shared/opaqueToken.ts";
@@ -31,6 +32,7 @@ describe("tRPC request context", () => {
         const responseHeaders = new Headers();
 
         const context = await createRequestContext({
+            agentService: createTestAgentService(),
             applicationRuntime,
             authenticationCredential: credentials.authentication,
             authenticationClientSourceId: "client-source-1",
@@ -106,6 +108,7 @@ describe("tRPC request context", () => {
         const request = new Request("http://localhost/trpc/auth.status");
         const credentials = readAuthenticationHttpCredentials(request);
         const context = await createRequestContext({
+            agentService: createTestAgentService(),
             applicationRuntime: createTestApplicationRuntime(),
             authenticationCredential: credentials.authentication,
             authenticationClientSourceId: "client-source-without-user-agent",
@@ -132,6 +135,7 @@ describe("tRPC request context", () => {
             const request = new Request("http://localhost/trpc/events.stream");
             const credentials = readAuthenticationHttpCredentials(request);
             await createRequestContext({
+                agentService: createTestAgentService(),
                 applicationRuntime: createTestApplicationRuntime(),
                 authenticationCredential: credentials.authentication,
                 authenticationClientSourceId: "client-source-2",

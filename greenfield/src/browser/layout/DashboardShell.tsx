@@ -1,6 +1,6 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
 import { Outlet, useLocation } from "@tanstack/react-router";
-import { Home, ListTodo, Menu, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import { Bot, Home, ListTodo, Menu, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { DashboardNavigationPath } from "../lib/dashboardRoutes.ts";
@@ -16,6 +16,7 @@ interface NavigationItem {
 
 const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: Home, label: "Dashboard", to: "/" },
+    { icon: Bot, label: "Agents", to: "/agents" },
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
     { icon: ShieldCheck, label: "Account security", to: "/account-security" },
 ]);

@@ -8,6 +8,7 @@ import {
     secondsToMilliseconds,
 } from "date-fns";
 
+import { applicationCapabilities } from "../../../contracts/security.ts";
 import type { RawAuthenticationCredential } from "../../rawHttp/authenticationCredentials.ts";
 import { parseOpaqueToken } from "../../shared/opaqueToken.ts";
 import { parseAuthenticationResolution } from "./authenticationResolution.ts";
@@ -85,12 +86,7 @@ describe("session request authentication", () => {
                 kind: "authenticated",
                 principal: {
                     authorizationVersion: 1,
-                    capabilities: [
-                        "notifications:read",
-                        "reports:read",
-                        "tasks:read",
-                        "tasks:write",
-                    ],
+                    capabilities: applicationCapabilities,
                     authenticatorId: fixture.session.prefix,
                     id: authenticationTestUserId,
                     kind: "session",

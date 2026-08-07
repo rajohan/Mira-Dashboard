@@ -85,6 +85,7 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
             ref={scrollContainerRef}
         >
             <table
+                aria-label={label}
                 aria-rowcount={headerGroups.length + rows.length}
                 className={cn("w-full", tableClassName)}
             >

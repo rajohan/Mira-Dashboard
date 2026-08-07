@@ -819,3 +819,25 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 - The reviewed parity inventory now marks the 11 task operations and `/tasks` route implemented.
   This closes only the task portion of Phase 3. Agent, report, incident, notification, job,
   monitoring API, overview, cache/metrics, and real worker execution remain explicit gates.
+
+### 2026-08-07 — Phase 3 agent status and task-history slice
+
+- A reviewed, code-owned directory defines the five Dashboard automation agents independently of
+  Gateway connection state. Typed `agents:read` and `agents:write` capabilities expose exact
+  configuration, one/all current statuses, keyset-paginated task history, and scoped metadata
+  updates without treating mutable Gateway discovery as application authorization.
+- `agent_task_runs` retains one active interval per configured agent and immutable completed
+  history in a strict `WITHOUT ROWID` table. Every transition revalidates persisted rows, records
+  the user or automation actor, and runs behind immediate-write admission. State changes append a
+  durable `agents.status` realtime invalidation in the same transaction and wake delivery only
+  after commit; same-task heartbeats update activity without unbounded realtime-event growth.
+- `/agents` uses the shared Dashboard shell and presentation primitives, query-backed TanStack DB
+  collections for normalized definitions and live statuses, TanStack Query for keyset-paginated
+  history, TanStack Table, and the shared virtualizer. Durable realtime events invalidate the
+  relevant collection/query roots; a 30-second fallback begins only after the terminal event
+  stream closes. Current-task mutation remains an authenticated automation boundary rather than a
+  browser editing control.
+- The parity inventory now marks the five agent operations and `/agents` route implemented.
+  Persistent OpenClaw/Gateway availability and session state remain Phase 4 work; reports,
+  incidents, notifications, schedules/jobs, overview, cache/metrics, and the real worker remain
+  open Phase 3 gates.
