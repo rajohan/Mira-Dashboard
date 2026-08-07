@@ -3,8 +3,10 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { serializeReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import type { BuildSourceIdentity } from "../buildSourceIdentity.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
+import { inventoryReleaseArtifactTree } from "./releaseArtifactInventory.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
 import {
     createReleaseIdentity,
@@ -180,6 +182,46 @@ describe("release identity", () => {
             })
         );
         expect(runtimeFailure.message).toBe("Release identity is invalid");
+    });
+
+    test("reconstructs the migration graph from the release manifest", async () => {
+        const fixture = await releaseFixture();
+        const persisted = await writeReleaseIdentity(creationOptions(fixture));
+        const migrationId = "20260805000000_add-reviewed-node";
+        const migrationSql = "CREATE TABLE reviewed_node (id TEXT PRIMARY KEY);\n";
+        const snapshot = '{"version":"1"}\n';
+        const migrationRoot = path.join(fixture.releaseRoot, "migrations", migrationId);
+        await mkdir(migrationRoot);
+        await Promise.all([
+            writeFile(path.join(migrationRoot, "migration.sql"), migrationSql),
+            writeFile(path.join(migrationRoot, "snapshot.json"), snapshot),
+        ]);
+        const completeInventory = await inventoryReleaseArtifactTree(fixture.releaseRoot);
+        const artifacts = completeInventory.filter(
+            ({ path: artifactPath }) => artifactPath !== "release-manifest.json"
+        );
+        const releaseOwnedMigration = Object.freeze({
+            id: migrationId,
+            migrationSha256: new Bun.CryptoHasher("sha256")
+                .update(migrationSql)
+                .digest("hex"),
+            snapshotSha256: new Bun.CryptoHasher("sha256").update(snapshot).digest("hex"),
+        });
+        await writeFile(
+            path.join(fixture.releaseRoot, "release-manifest.json"),
+            serializeReleaseManifest({
+                ...persisted,
+                artifacts,
+                migrations: [...persisted.migrations, releaseOwnedMigration],
+            })
+        );
+
+        const reconstructed = await verifyReleaseArtifactIdentity(fixture.releaseRoot);
+
+        expect(reconstructed.migrations).toEqual([
+            ...persisted.migrations,
+            releaseOwnedMigration,
+        ]);
     });
 
     test("rejects dirty source, staged metadata drift and migration mismatch", async () => {

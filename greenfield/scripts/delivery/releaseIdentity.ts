@@ -205,7 +205,10 @@ function artifactByPath(
     return artifact;
 }
 
-function assertArtifactShape(artifacts: readonly ReleaseArtifactInventoryRecord[]): void {
+function assertArtifactShape(
+    artifacts: readonly ReleaseArtifactInventoryRecord[],
+    migrations: ReleaseManifest["migrations"]
+): void {
     for (const artifact of artifacts) {
         const root = artifact.path.split("/", 1)[0];
         if (!root || !allowedArtifactRoots.has(root)) throw invalidReleaseIdentity();
@@ -239,7 +242,7 @@ function assertArtifactShape(artifacts: readonly ReleaseArtifactInventoryRecord[
         throw invalidReleaseIdentity();
     }
 
-    const expectedMigrationPaths = migrationManifest
+    const expectedMigrationPaths = migrations
         .flatMap(({ id }) => [
             `migrations/${id}/migration.sql`,
             `migrations/${id}/snapshot.json`,
@@ -256,7 +259,7 @@ function assertArtifactShape(artifacts: readonly ReleaseArtifactInventoryRecord[
     ) {
         throw invalidReleaseIdentity();
     }
-    for (const migration of migrationManifest) {
+    for (const migration of migrations) {
         if (
             artifactByPath(artifacts, `migrations/${migration.id}/migration.sql`)
                 .sha256 !== migration.migrationSha256 ||
@@ -311,7 +314,7 @@ export async function createReleaseIdentity(
     ) {
         throw invalidReleaseIdentity();
     }
-    assertArtifactShape(artifacts);
+    assertArtifactShape(artifacts, migrationManifest);
     const [sourcePackages, stagedPackages, sourceDocsSha256, sourceBunVersion] =
         await Promise.all([
             readPackageInputs(options.repositoryRoot, ""),
@@ -389,7 +392,7 @@ async function reconstructReleaseArtifactIdentity(
     ) {
         throw invalidReleaseIdentity();
     }
-    assertArtifactShape(artifacts);
+    assertArtifactShape(artifacts, manifest.migrations);
     const stagedPackages = await readPackageInputs(releaseRoot, "metadata");
     const stagedBunVersion = await readUtf8(
         path.join(releaseRoot, "metadata/.bun-version"),
@@ -404,8 +407,7 @@ async function reconstructReleaseArtifactIdentity(
             artifactByPath(artifacts, "metadata/bun.lock").sha256 ||
         manifest.documentationSha256 !==
             aggregateArtifactIdentity(documentationRecords(artifacts)) ||
-        JSON.stringify(manifest.packages) !== JSON.stringify(stagedPackages.packages) ||
-        JSON.stringify(manifest.migrations) !== JSON.stringify(migrationManifest)
+        JSON.stringify(manifest.packages) !== JSON.stringify(stagedPackages.packages)
     ) {
         throw invalidReleaseIdentity();
     }
