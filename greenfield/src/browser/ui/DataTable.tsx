@@ -7,6 +7,7 @@ export interface DataTableRowWindow {
     readonly measureElement: (node: HTMLTableRowElement | null) => void;
     readonly totalSize: number;
     readonly virtualItems: readonly Readonly<{
+        end: number;
         index: number;
         start: number;
     }>[];
@@ -23,17 +24,7 @@ interface DataTableBaseProps<TFeatures extends TableFeatures, TData extends RowD
 type DataTableProps<
     TFeatures extends TableFeatures,
     TData extends RowData,
-> = DataTableBaseProps<TFeatures, TData> &
-    (
-        | Readonly<{
-              gridTemplateColumns?: string;
-              rowWindow?: undefined;
-          }>
-        | Readonly<{
-              gridTemplateColumns: string;
-              rowWindow: DataTableRowWindow;
-          }>
-    );
+> = DataTableBaseProps<TFeatures, TData> & Readonly<{ rowWindow?: DataTableRowWindow }>;
 
 /**
  * Renders one TanStack Table instance with shared Dashboard table semantics.
@@ -41,7 +32,6 @@ type DataTableProps<
  * @returns A styled table that is independent of sorting and virtualization policy.
  */
 export function DataTable<TFeatures extends TableFeatures, TData extends RowData>({
-    gridTemplateColumns,
     label,
     rowWindow,
     scrollClassName,
@@ -51,7 +41,14 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
 }: DataTableProps<TFeatures, TData>) {
     const headerGroups = table.getHeaderGroups();
     const rows = table.getRowModel().rows;
-    const usesGrid = gridTemplateColumns !== undefined;
+    const visibleColumnCount = headerGroups.at(-1)?.headers.length ?? 1;
+    const firstVirtualItem = rowWindow?.virtualItems.at(0);
+    const lastVirtualItem = rowWindow?.virtualItems.at(-1);
+    const topSpacerHeight = firstVirtualItem?.start ?? 0;
+    const bottomSpacerHeight =
+        rowWindow === undefined
+            ? 0
+            : Math.max(0, rowWindow.totalSize - (lastVirtualItem?.end ?? 0));
 
     function renderRow(
         row: Row<TFeatures, TData>,
@@ -64,21 +61,10 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                         ? undefined
                         : headerGroups.length + virtualItem.index + 1
                 }
-                className={cn(
-                    "border-primary-700 border-b text-sm",
-                    usesGrid && "grid",
-                    virtualItem !== undefined && "absolute top-0 left-0 w-full"
-                )}
+                className={cn("border-primary-700 border-b text-sm")}
                 data-index={virtualItem?.index}
                 key={row.id}
                 ref={virtualItem === undefined ? undefined : rowWindow?.measureElement}
-                style={{
-                    gridTemplateColumns,
-                    transform:
-                        virtualItem === undefined
-                            ? undefined
-                            : `translateY(${virtualItem.start}px)`,
-                }}
             >
                 {row.getAllCells().map((cell) => (
                     <td className="min-w-0 p-3" key={cell.id}>
@@ -101,20 +87,10 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
             <table
                 aria-rowcount={headerGroups.length + rows.length}
                 className={cn("w-full", tableClassName)}
-                style={usesGrid ? { display: "grid" } : undefined}
             >
-                <thead
-                    className={cn(
-                        "bg-primary-900 sticky top-0 z-10 shadow-sm",
-                        usesGrid && "grid"
-                    )}
-                >
+                <thead className="bg-primary-900 sticky top-0 z-10 shadow-sm">
                     {headerGroups.map((headerGroup) => (
-                        <tr
-                            className={cn(usesGrid && "grid")}
-                            key={headerGroup.id}
-                            style={usesGrid ? { gridTemplateColumns } : undefined}
-                        >
+                        <tr key={headerGroup.id}>
                             {headerGroup.headers.map((header) => (
                                 <th
                                     className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
@@ -129,17 +105,16 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                         </tr>
                     ))}
                 </thead>
-                <tbody
-                    className={cn(
-                        usesGrid && "grid",
-                        rowWindow !== undefined && "relative"
+                <tbody>
+                    {topSpacerHeight > 0 && (
+                        <tr aria-hidden="true">
+                            <td
+                                className="border-0 p-0"
+                                colSpan={visibleColumnCount}
+                                height={topSpacerHeight}
+                            />
+                        </tr>
                     )}
-                    style={
-                        rowWindow === undefined
-                            ? undefined
-                            : { height: rowWindow.totalSize }
-                    }
-                >
                     {rowWindow === undefined
                         ? rows.map((row) => renderRow(row))
                         : rowWindow.virtualItems.map((virtualItem) => {
@@ -148,6 +123,15 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                                   ? null
                                   : renderRow(row, virtualItem);
                           })}
+                    {bottomSpacerHeight > 0 && (
+                        <tr aria-hidden="true">
+                            <td
+                                className="border-0 p-0"
+                                colSpan={visibleColumnCount}
+                                height={bottomSpacerHeight}
+                            />
+                        </tr>
+                    )}
                 </tbody>
             </table>
         </section>

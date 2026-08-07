@@ -99,7 +99,6 @@ function TableFixture({ data, virtualized }: TableFixtureProps) {
         >
             {(virtualization) => (
                 <DataTable
-                    gridTemplateColumns="minmax(12rem, 1fr)"
                     label="Fixture rows"
                     rowWindow={virtualization}
                     scrollContainerRef={virtualization.scrollContainerRef}
@@ -123,6 +122,9 @@ describe("Dashboard data table and virtualizer", () => {
 
         expect(screen.getByText("Virtual row 0")).toBeTruthy();
         expect(screen.queryByText("Virtual row 99")).toBeNull();
+        const table = screen.getByRole("table");
+        expect(table.querySelector("[style]")).toBeNull();
+        expect(table.querySelector("td[height]")).toBeTruthy();
     });
 
     test("virtualizes non-table content independently", () => {

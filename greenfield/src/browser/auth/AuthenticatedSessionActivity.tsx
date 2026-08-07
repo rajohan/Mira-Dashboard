@@ -4,10 +4,20 @@ import { useEffect } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
-import { authStatusQueryKey, authStatusQueryOptions } from "./authQueries.ts";
+import { classifyDashboardBrowserFailure } from "../api/trpcError.ts";
+import {
+    authStatusQueryKey,
+    authStatusQueryOptions,
+    resetAuthenticatedBrowserCache,
+} from "./authQueries.ts";
 
 const browserSessionTouchThrottleMs = minutesToMilliseconds(1);
-const authenticatedActivityEvents = ["keydown", "pointerdown", "scroll"] as const;
+const authenticatedActivityEvents = ["keydown", "pointerdown"] as const;
+const passiveActivityListenerOptions = Object.freeze({ passive: true });
+const capturedPassiveActivityListenerOptions = Object.freeze({
+    capture: true,
+    passive: true,
+});
 
 function activityTouchIsDue(
     status: AuthStatus | undefined,
@@ -73,8 +83,19 @@ export function AuthenticatedSessionActivity() {
                 queryClient.setQueryData<AuthStatus>(authStatusQueryKey, (status) =>
                     updateCachedSessionActivity(status, result.lastSeenAtMs)
                 );
-            } catch {
-                // Activity writes are best-effort and retried after the throttle window.
+            } catch (error: unknown) {
+                if (
+                    active &&
+                    !controller.signal.aborted &&
+                    classifyDashboardBrowserFailure(error) === "unauthorized"
+                ) {
+                    await queryClient.cancelQueries();
+                    if (active) {
+                        resetAuthenticatedBrowserCache(queryClient, {
+                            state: "anonymous",
+                        });
+                    }
+                }
             } finally {
                 inFlight = false;
                 if (requestController === controller) requestController = undefined;
@@ -100,8 +121,17 @@ export function AuthenticatedSessionActivity() {
 
         requestTouchWhenVisible();
         for (const eventName of authenticatedActivityEvents) {
-            document.addEventListener(eventName, requestTouch, { passive: true });
+            document.addEventListener(
+                eventName,
+                requestTouch,
+                passiveActivityListenerOptions
+            );
         }
+        document.addEventListener(
+            "scroll",
+            requestTouch,
+            capturedPassiveActivityListenerOptions
+        );
         document.addEventListener("visibilitychange", requestTouchWhenVisible);
         window.addEventListener("focus", requestTouch);
 
@@ -111,6 +141,7 @@ export function AuthenticatedSessionActivity() {
             for (const eventName of authenticatedActivityEvents) {
                 document.removeEventListener(eventName, requestTouch);
             }
+            document.removeEventListener("scroll", requestTouch, true);
             document.removeEventListener("visibilitychange", requestTouchWhenVisible);
             window.removeEventListener("focus", requestTouch);
         };

@@ -100,4 +100,102 @@ describe("authenticated browser activity", () => {
             queryClient.clear();
         }
     });
+
+    test("captures non-bubbling scroll activity from an overflow container", async () => {
+        const queryClient = createDashboardQueryClient();
+        const currentLastSeenAtMs = Date.now();
+        const staleLastSeenAtMs = currentLastSeenAtMs - 61_000;
+        const touchedAtMs = currentLastSeenAtMs + 1;
+        queryClient.setQueryData(
+            authStatusQueryKey,
+            authenticatedStatus(currentLastSeenAtMs)
+        );
+        let mutationCalls = 0;
+        const client = createDashboardTrpcClient({
+            mutation(path) {
+                expect(path).toBe("auth.touch");
+                mutationCalls += 1;
+                return Promise.resolve({ lastSeenAtMs: touchedAtMs });
+            },
+            query(path) {
+                expect(path).toBe("auth.status");
+                return Promise.resolve(authenticatedStatus(currentLastSeenAtMs));
+            },
+        });
+        const rendered = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardTrpcProvider client={client}>
+                    <AuthenticatedSessionActivity />
+                </DashboardTrpcProvider>
+            </QueryClientProvider>
+        );
+        const scrollContainer = document.createElement("div");
+        document.body.append(scrollContainer);
+
+        try {
+            await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+            expect(mutationCalls).toBe(0);
+            queryClient.setQueryData(
+                authStatusQueryKey,
+                authenticatedStatus(staleLastSeenAtMs)
+            );
+
+            act(() => {
+                scrollContainer.dispatchEvent(new Event("scroll", { bubbles: false }));
+            });
+
+            await waitFor(() => expect(mutationCalls).toBe(1));
+        } finally {
+            scrollContainer.remove();
+            rendered.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("clears authenticated state when the server rejects a touch", async () => {
+        const queryClient = createDashboardQueryClient();
+        const staleStatus = authenticatedStatus(Date.now() - 61_000);
+        const statusRefresh = Promise.withResolvers<AuthStatus>();
+        const unauthorizedTouchError = Object.assign(new Error("Touch rejected"), {
+            data: { code: "UNAUTHORIZED" },
+        });
+        queryClient.setQueryData(authStatusQueryKey, staleStatus);
+        queryClient.setQueryData(["security", "private"], { private: true });
+        const client = createDashboardTrpcClient({
+            mutation(path) {
+                expect(path).toBe("auth.touch");
+                return Promise.reject(unauthorizedTouchError);
+            },
+            query(path) {
+                expect(path).toBe("auth.status");
+                return statusRefresh.promise;
+            },
+        });
+        const rendered = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardTrpcProvider client={client}>
+                    <AuthenticatedSessionActivity />
+                </DashboardTrpcProvider>
+            </QueryClientProvider>
+        );
+
+        try {
+            await waitFor(() =>
+                expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual({
+                    state: "anonymous",
+                })
+            );
+            expect(queryClient.getQueryData(["security", "private"])).toBeUndefined();
+
+            statusRefresh.resolve(staleStatus);
+            await statusRefresh.promise;
+            expect(queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toEqual({
+                state: "anonymous",
+            });
+        } finally {
+            statusRefresh.resolve(staleStatus);
+            rendered.unmount();
+            queryClient.clear();
+        }
+    });
 });

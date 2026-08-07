@@ -121,9 +121,6 @@ const auditColumns = auditColumnHelper.columns([
     }),
 ]);
 
-const auditGridTemplateColumns =
-    "minmax(11rem,1.1fr) minmax(11rem,1fr) minmax(13rem,1.2fr) minmax(12rem,1fr) minmax(18rem,1.8fr)";
-
 interface SecurityAuditTableProps {
     readonly events: readonly SecurityAuditEventSummary[];
 }
@@ -140,7 +137,6 @@ function SecurityAuditTable({ events }: SecurityAuditTableProps) {
     if (rows.length < minimumVirtualizedAuditRows) {
         return (
             <DataTable
-                gridTemplateColumns={auditGridTemplateColumns}
                 label="Security audit events"
                 table={table}
                 tableClassName="min-w-240"
@@ -156,7 +152,6 @@ function SecurityAuditTable({ events }: SecurityAuditTableProps) {
         >
             {(virtualization) => (
                 <DataTable
-                    gridTemplateColumns={auditGridTemplateColumns}
                     label="Security audit events"
                     rowWindow={virtualization}
                     scrollContainerRef={virtualization.scrollContainerRef}
