@@ -15,6 +15,8 @@ import type { AutomationSecurityLifecycleService } from "../../domains/security/
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../../domains/security/securityAuditLifecycle.ts";
+import type { TaskService } from "../../domains/tasks/service.ts";
+import { createTestTaskService } from "../../domains/tasks/testSupport/service.ts";
 import {
     createStructuredLogger,
     type StructuredLogger,
@@ -384,6 +386,7 @@ export interface TestServerSecurityServices {
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly taskService: TaskService["Service"];
 }
 
 /**
@@ -410,6 +413,7 @@ export function createTestServerSecurityServices(
             overrides.mfaLoginLifecycle ?? createTestMfaLoginLifecycleService(),
         securityAuditLifecycle:
             overrides.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
+        taskService: overrides.taskService ?? createTestTaskService(),
     };
 }
 
@@ -434,6 +438,7 @@ export function createTestApplicationRuntime(
                         Promise.reject(
                             new Error("Test application runtime has no realtime stream")
                         )),
+                wake: () => Promise.resolve(),
             }),
         }),
         shutdownListener:
@@ -494,6 +499,7 @@ export function createTestRequestContext(
         readonly requestId?: string;
         readonly responseHeaders?: Headers;
         readonly securityAuditLifecycle?: SecurityAuditLifecycleService;
+        readonly taskService?: TaskService["Service"];
     } = {}
 ): Promise<RequestContext> {
     const request = options.request ?? new Request("http://localhost/trpc/test");
@@ -519,5 +525,6 @@ export function createTestRequestContext(
         responseHeaders: options.responseHeaders ?? new Headers(),
         securityAuditLifecycle:
             options.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
+        taskService: options.taskService ?? createTestTaskService(),
     });
 }

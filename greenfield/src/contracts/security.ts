@@ -1,6 +1,8 @@
 import * as v from "valibot";
 
 import {
+    boundedControlSafeTextSchema,
+    compareStrings,
     hasUniqueArrayItems,
     lowercaseUuidV7Schema,
     positiveSafeIntegerSchema,
@@ -47,19 +49,8 @@ export const securityLabelMaximumLength = 128;
  * @returns Whether the label satisfies the shared security policy.
  */
 export function isValidSecurityLabel(value: string): boolean {
-    let codePointLength = 0;
-    let hasNonWhitespaceCodePoint = false;
-    for (const codePoint of value) {
-        codePointLength += 1;
-        if (
-            codePointLength > securityLabelMaximumLength ||
-            /\p{Cc}|\p{Cf}/u.test(codePoint)
-        ) {
-            return false;
-        }
-        if (/\S/u.test(codePoint)) hasNonWhitespaceCodePoint = true;
-    }
-    return codePointLength > 0 && hasNonWhitespaceCodePoint;
+    return v.safeParse(boundedControlSafeTextSchema(securityLabelMaximumLength), value)
+        .success;
 }
 
 /** Control-safe label shared by account factors and automation identities. */
@@ -100,7 +91,12 @@ export const securityRecordIdSchema = lowercaseUuidV7Schema(
 );
 
 /** Capabilities referenced by currently implemented authenticated contracts. */
-export const applicationCapabilities = ["notifications:read", "reports:read"] as const;
+export const applicationCapabilities = [
+    "notifications:read",
+    "reports:read",
+    "tasks:read",
+    "tasks:write",
+] as const;
 
 /** One capability granted to an authenticated application principal. */
 export type ApplicationCapability = (typeof applicationCapabilities)[number];
@@ -118,7 +114,7 @@ export const applicationCapabilitySchema = v.picklist(
 export function sortApplicationCapabilities(
     capabilities: ApplicationCapability[]
 ): readonly ApplicationCapability[] {
-    const sorted = capabilities.toSorted();
+    const sorted = capabilities.toSorted(compareStrings);
     Object.freeze(sorted);
     return sorted;
 }

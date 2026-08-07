@@ -8,6 +8,7 @@ import { DashboardBrowserApplication } from "./application.tsx";
 import { authStatusQueryKey } from "./auth/authQueries.ts";
 import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
+import { noOpDashboardRealtimeClient } from "./test/realtime.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
@@ -58,6 +59,7 @@ describe("Dashboard browser application", () => {
             render(
                 <DashboardBrowserApplication
                     queryClient={queryClient}
+                    realtimeClient={noOpDashboardRealtimeClient}
                     router={router}
                     trpcClient={trpcClient}
                     webAuthnClient={unexpectedWebAuthnClient}

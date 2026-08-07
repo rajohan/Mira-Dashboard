@@ -7,6 +7,7 @@ import type { AutomationSecurityLifecycleService } from "../server/domains/secur
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
+import type { TaskService } from "../server/domains/tasks/service.ts";
 import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
@@ -136,6 +137,7 @@ export interface ServerOptions {
     readonly port: number;
     readonly readiness: ReadinessController;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
+    readonly taskService: TaskService["Service"];
     /** Exact proxy peers allowed to supply one overwritten client address. */
     readonly trustedProxyAddresses?: readonly string[];
 }
@@ -173,6 +175,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             mfaAccountLifecycle: options.mfaAccountLifecycle,
             mfaLoginLifecycle: options.mfaLoginLifecycle,
             securityAuditLifecycle: options.securityAuditLifecycle,
+            taskService: options.taskService,
             trustedProxyAddresses: options.trustedProxyAddresses,
         });
         await options.applicationRuntime.initialize();

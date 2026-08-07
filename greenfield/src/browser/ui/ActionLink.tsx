@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import type { DashboardRoutePath } from "../lib/dashboardRoutes.ts";
 import { buttonClassNames, type ButtonSize, type ButtonVariant } from "./buttonStyles.ts";
 
 interface ActionLinkProps {
@@ -8,7 +9,7 @@ interface ActionLinkProps {
     readonly className?: string;
     readonly fullWidth?: boolean;
     readonly size?: ButtonSize;
-    readonly to: "/" | "/account-security" | "/login";
+    readonly to: DashboardRoutePath;
     readonly variant?: ButtonVariant;
 }
 

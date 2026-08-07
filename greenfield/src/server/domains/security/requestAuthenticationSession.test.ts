@@ -85,7 +85,12 @@ describe("session request authentication", () => {
                 kind: "authenticated",
                 principal: {
                     authorizationVersion: 1,
-                    capabilities: ["notifications:read", "reports:read"],
+                    capabilities: [
+                        "notifications:read",
+                        "reports:read",
+                        "tasks:read",
+                        "tasks:write",
+                    ],
                     authenticatorId: fixture.session.prefix,
                     id: authenticationTestUserId,
                     kind: "session",

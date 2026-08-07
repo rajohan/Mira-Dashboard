@@ -36,6 +36,22 @@ import {
     securityAuditPageCursorIsConsistent,
 } from "../../src/contracts/securityAudit.ts";
 import {
+    canonicalizeTaskStrings,
+    freezeTaskStrings,
+    taskDetailTimesAreOrdered,
+    taskProgressTimesAreOrdered,
+    taskStringsAreSorted,
+    taskTextIsTrimmed,
+    taskTimesAreOrdered,
+} from "../../src/contracts/taskModel.ts";
+import {
+    newestProgressOrderIsStable,
+    newestTaskOrderIsStable,
+    taskPageCursorIsConsistent,
+    taskPatchHasChange,
+    taskProgressPageCursorIsConsistent,
+} from "../../src/contracts/tasks.ts";
+import {
     hasMatchingWebAuthnAuthenticationCredentialIds,
     hasMatchingWebAuthnRegistrationCredentialIds,
     isCanonicalWebAuthnBase64Url,
@@ -44,6 +60,7 @@ import {
 import {
     getBoundedNonBlankTextMaximumLength,
     hasNoNulCharacter,
+    hasNoUnicodeControlOrFormat,
     hasUniqueArrayItems,
 } from "../../src/shared/validation.ts";
 
@@ -62,6 +79,7 @@ const securityLabelControlOrFormatPattern = [
     String.raw`\uDB40(?:\uDC01|[\uDC20-\uDC7F])`,
 ].join("|");
 const securityLabelJsonSchemaPattern = `^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:${securityLabelControlOrFormatPattern}))[\\s\\S]+$`;
+const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${securityLabelControlOrFormatPattern}))[\\s\\S]*$`;
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
@@ -132,6 +150,42 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         securityAuditPageCursorIsConsistent,
         "Live Valibot validation additionally requires an audit continuation cursor to identify the returned last event.",
+    ],
+    [
+        taskTextIsTrimmed,
+        "Live Valibot validation additionally requires compact task text to have canonical outer whitespace.",
+    ],
+    [
+        taskStringsAreSorted,
+        "Live Valibot validation additionally requires task strings to use canonical code-unit order.",
+    ],
+    [
+        taskTimesAreOrdered,
+        "Live Valibot validation additionally requires task update timestamps not to precede creation.",
+    ],
+    [
+        taskDetailTimesAreOrdered,
+        "Live Valibot validation additionally requires task update timestamps not to precede creation.",
+    ],
+    [
+        taskProgressTimesAreOrdered,
+        "Live Valibot validation additionally requires progress update timestamps not to precede creation.",
+    ],
+    [
+        newestTaskOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first task ordering by update timestamp and ID.",
+    ],
+    [
+        taskPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a task continuation cursor to identify the returned last row.",
+    ],
+    [
+        newestProgressOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first progress ordering by creation timestamp and ID.",
+    ],
+    [
+        taskProgressPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a progress continuation cursor to identify the returned last row.",
     ],
 ]);
 
@@ -259,6 +313,21 @@ export function convertContractSchema(
                 if (valibotAction.type === "check" && requirement === hasNoNulCharacter) {
                     return appendJsonSchemaPattern(jsonSchema, noNulJsonSchemaPattern);
                 }
+                if (
+                    valibotAction.type === "check" &&
+                    requirement === hasNoUnicodeControlOrFormat
+                ) {
+                    return appendJsonSchemaPattern(
+                        jsonSchema,
+                        controlSafeTextJsonSchemaPattern
+                    );
+                }
+                if (
+                    valibotAction.type === "check" &&
+                    requirement === taskPatchHasChange
+                ) {
+                    return { ...jsonSchema, minProperties: 1 };
+                }
                 if (valibotAction.type === "check") {
                     const maximumLength =
                         getBoundedNonBlankTextMaximumLength(requirement);
@@ -315,7 +384,9 @@ export function convertContractSchema(
                 if (
                     valibotAction.type === "transform" &&
                     (operation === sortWebAuthnTransports ||
-                        operation === sortApplicationCapabilities)
+                        operation === sortApplicationCapabilities ||
+                        operation === canonicalizeTaskStrings ||
+                        operation === freezeTaskStrings)
                 ) {
                     return jsonSchema;
                 }

@@ -12,7 +12,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                           |
 | 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                          |
-| 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                                                                                    |
+| 3 — Core operator domains           | Started                              | The task domain and `/tasks` parity slice are implemented with durable history, realtime invalidation, and browser workflows. Agent, report, incident, notification, schedule/job, cache/metrics, overview, and worker-domain parity remain open.                                                                                                                            |
 | 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                               |
 | 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                             |
@@ -782,3 +782,30 @@ closes a phase; dated entries below provide the evidence, not a second status so
 
 This completes Phase 1 only. Phase 3–6 domains, persistent Gateway/chat, privileged adapters,
 full-browser parity, production rehearsal, cutover, and legacy deletion remain open.
+
+### 2026-08-07 — Phase 3 task domain and browser slice
+
+- A normalized task aggregate now owns tasks, canonical labels, optional automation profiles,
+  progress updates, and an append-only task-event history. Immediate admitted transactions keep
+  every aggregate mutation, audit record, and realtime outbox event atomic; version checks reject
+  stale edits and status movement without replaying a started callback.
+- Eleven typed task procedures cover list/detail, create/update/delete, assign/move, and progress
+  add/update/delete/list. Effect services preserve typed domain failures, Valibot validates every
+  boundary and persisted record, capability policy separates task reads from writes, and task
+  mutations publish bounded realtime invalidations.
+- Mira-relevant task events also create one redacted `task_notification_outbox` intent in the same
+  transaction. The queue preserves legacy create/update/assignment/movement/progress/deletion
+  semantics, suppresses `openclaw-task-tracking` self-notifications, hides task titles from other
+  automations, labels retained task fields as untrusted data, and uses the task-event ID as the
+  stable Gateway idempotency key. The Effect worker claims one delivery per lease, aborts a stalled
+  send before its lease can expire, and only acknowledges or releases work while it still owns a
+  live lease. Production sending remains gated on the Phase 4 persistent authenticated Gateway
+  client rather than reusing the one-shot bootstrap verifier.
+- `/tasks` provides the reviewed four-column operator layout, server-side search and
+  assignee/recurring filters, accessible create/edit/detail/progress dialogs, and status movement
+  through `@dnd-kit/react`. Shared Headless UI controls, TanStack Form, TanStack Query, and the
+  existing reusable Dashboard presentation components own browser behavior rather than local
+  control implementations.
+- The reviewed parity inventory now marks the 11 task operations and `/tasks` route implemented.
+  This closes only the task portion of Phase 3. Agent, report, incident, notification, job,
+  monitoring API, overview, cache/metrics, and real worker execution remain explicit gates.
