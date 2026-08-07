@@ -32,6 +32,12 @@ the remaining rewrite phases are still incomplete.
 canonical `<project-root>/production/state` root for the static web/worker UID; empty database,
 docs, build, web, worker, and paired rollback then work end-to-end.
 
+**Status (2026-08-06): complete in the greenfield future root.** The executable browser/web/worker
+build, manifest-verified runtime and systemd artifacts, protected project-local state, copied
+candidate migration, atomic database promotion, crash journal, paired rollback, readiness, logs,
+and shutdown pass a disposable-project lifecycle. Production cutover, authenticated product
+smokes, and the remaining domain/UI phases are deliberately not claimed by this foundation gate.
+
 ### Phase 2: trust and transport
 
 - implement bootstrap, sessions, password, MFA, WebAuthn, recovery, step-up, automation

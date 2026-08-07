@@ -15,6 +15,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 
+import { migrationManifest } from "../../../shared/databaseMigrationManifest.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import { migrationsDirectory } from "../../test/support/freshDatabase.ts";
 import {
@@ -23,7 +24,6 @@ import {
     type MigrationArtifactVerificationTestHooks,
     type MigrationArtifactVerificationTestStage,
 } from "./loadVerifiedMigrations.ts";
-import { migrationManifest } from "./manifest.ts";
 
 const temporaryDirectories: string[] = [];
 

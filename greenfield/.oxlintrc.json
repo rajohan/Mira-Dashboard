@@ -82,6 +82,12 @@
                     "pascalCase": true
                 }
             }
+        ],
+        "unicorn/max-nested-calls": [
+            "error",
+            {
+                "max": 6
+            }
         ]
     },
     "settings": {
@@ -94,23 +100,13 @@
     },
     "overrides": [
         {
-            "files": ["src/contracts/**/*.ts", "src/test/parity/**/*Schemas.ts"],
-            "rules": {
-                "unicorn/max-nested-calls": [
-                    "error",
-                    {
-                        "max": 6
-                    }
-                ]
-            }
-        },
-        {
             "env": {
                 "node": true
             },
             "files": [
                 "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
                 "src/app/dashboardServer.ts",
+                "src/app/databaseMaintenance.ts",
                 "src/app/environmentSource.ts",
                 "src/app/server.ts",
                 "src/app/trpcHttpHandler.ts",
@@ -123,6 +119,42 @@
             ],
             "globals": {
                 "Bun": "readonly"
+            }
+        },
+        {
+            "files": ["src/app/worker.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
+            "rules": {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        "patterns": [
+                            {
+                                "group": ["**/browser/**", "**/scripts/**"],
+                                "message": "The worker composition root may import only worker, server, contract, and environment-neutral shared modules."
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "files": ["src/app/databaseMaintenance.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
+            "rules": {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        "patterns": [
+                            {
+                                "group": [
+                                    "**/browser/**",
+                                    "**/scripts/**",
+                                    "**/worker/**"
+                                ],
+                                "message": "The database maintenance composition root may import only reviewed server and environment-neutral shared modules."
+                            }
+                        ]
+                    }
+                ]
             }
         },
         {
@@ -374,10 +406,7 @@
                 "**/test/**",
                 "**/testSupport/**"
             ],
-            "files": [
-                "src/app/worker.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
-                "src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
-            ],
+            "files": ["src/worker/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
             "rules": {
                 "no-restricted-imports": [
                     "error",

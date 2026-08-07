@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { resolveDirectPackageVersions } from "./bunLock.ts";
+import { resolveDirectPackageVersions } from "./packageIdentity.ts";
 
-describe("Bun lockfile documentation facts", () => {
+describe("direct package identity", () => {
     test("separates declared constraints from exact direct resolutions", () => {
         const lockfile = `{
             "packages": {

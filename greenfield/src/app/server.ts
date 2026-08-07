@@ -9,6 +9,7 @@ import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/lo
 import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
+import type { FrontendAssetHandler } from "../server/rawHttp/frontendAssets.ts";
 import {
     type HealthProbeMethod,
     livenessResponse,
@@ -61,7 +62,15 @@ async function disposeRuntimeAndFlush(
 
 function responseWithRequestId(response: Response, requestId: string): Response {
     const headers = new Headers(response.headers);
-    headers.set("x-request-id", requestId);
+    const cacheDirectives = new Set(
+        (headers.get("cache-control") ?? "")
+            .toLowerCase()
+            .split(",")
+            .map((directive) => directive.trim())
+    );
+    if (!(cacheDirectives.has("public") && cacheDirectives.has("immutable"))) {
+        headers.set("x-request-id", requestId);
+    }
     return new Response(response.body, {
         headers,
         status: response.status,
@@ -116,6 +125,8 @@ export interface ServerOptions {
     readonly authenticateCredential: AuthenticateCredential;
     /** Explicit public browser origin when TLS terminates at a trusted proxy. */
     readonly browserOrigin?: string;
+    /** Manifest-indexed browser artifacts and controlled SPA navigation. */
+    readonly frontendAssets?: FrontendAssetHandler;
     /** Graceful request-drain budget before active connections are forced closed. */
     readonly gracefulShutdownTimeoutMs?: number;
     readonly hostname?: string;
@@ -194,7 +205,13 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                                 options.readiness
                             );
                         } else {
-                            response = new Response("Not found", { status: 404 });
+                            const frontendResponse = await options.frontendAssets?.(
+                                request,
+                                requestUrl
+                            );
+                            response =
+                                frontendResponse ??
+                                new Response("Not found", { status: 404 });
                         }
                     }
                     if (request.signal.aborted) {

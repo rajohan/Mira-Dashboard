@@ -1,5 +1,4 @@
 import { isIP } from "node:net";
-import path from "node:path";
 
 import { minutesToMilliseconds } from "date-fns";
 import { Redacted } from "effect";
@@ -8,7 +7,6 @@ import * as v from "valibot";
 import { webAuthnRpIdSchema } from "../../../contracts/webauthn.ts";
 import {
     applicationConfigurationLimits,
-    configurationMetadata,
     configurationEnvironmentNamesForRole,
     type ApplicationConfigurationEnvironmentName,
 } from "../../../shared/configuration/applicationConfigurationRegistry.ts";
@@ -22,12 +20,15 @@ import { parseRecentAuthenticationWindowMs } from "../../domains/security/recent
 import { parseBrowserOrigin } from "../../rawHttp/requestSecurity.ts";
 import { parseGatewayCredentialVerifierUrl } from "../gateway/gatewayCredentialVerifier.ts";
 import {
-    ApplicationConfigurationError,
-    type ApplicationConfigurationFailureReason,
-} from "./applicationConfigurationError.ts";
-
-export type ApplicationNodeEnvironment = "development" | "production" | "test";
-export type ApplicationLogLevel = "debug" | "error" | "info" | "warn";
+    type ApplicationLogLevel,
+    type ApplicationNodeEnvironment,
+    configurationChoice,
+    configurationError,
+    configurationProjectRoot,
+    pickApplicationEnvironment,
+    type PickedApplicationEnvironment,
+    requiredConfigurationString,
+} from "./processConfiguration.ts";
 
 /** Immutable, validated configuration consumed by the greenfield web process. */
 export interface WebConfiguration {
@@ -44,7 +45,6 @@ export interface WebConfiguration {
     readonly webAuthnRelyingParty: WebAuthnRelyingPartyConfiguration;
 }
 
-const unsafeTextPattern = /[\p{Cc}\p{Cf}]/u;
 const canonicalUnsignedIntegerPattern = /^(?:0|[1-9][0-9]*)$/u;
 const optionalEnvironmentValueSchema = v.optional(v.unknown());
 
@@ -69,84 +69,13 @@ export const webConfigurationEnvironmentSchema = v.object({
 export const webConfigurationEnvironmentNames =
     configurationEnvironmentNamesForRole("web");
 
-type PickedEnvironment = Readonly<
-    Partial<Record<ApplicationConfigurationEnvironmentName, unknown>>
->;
-
-function configurationError(
-    field: ApplicationConfigurationEnvironmentName,
-    reason: ApplicationConfigurationFailureReason
-): never {
-    throw new ApplicationConfigurationError(field, reason);
-}
-
-function pickEnvironment(source: Readonly<Record<string, unknown>>): PickedEnvironment {
-    const sourceProjection = Object.create(null) as Record<string, unknown>;
-    for (const environmentName of webConfigurationEnvironmentNames) {
-        let descriptor: PropertyDescriptor | undefined;
-        try {
-            descriptor = Object.getOwnPropertyDescriptor(source, environmentName);
-        } catch {
-            configurationError(environmentName, "invalid");
-        }
-        if (descriptor === undefined) continue;
-        if (!("value" in descriptor)) {
-            configurationError(environmentName, "invalid");
-        }
-        sourceProjection[environmentName] = descriptor.value;
-    }
-    const projected = v.parse(webConfigurationEnvironmentSchema, sourceProjection);
-    const picked = Object.create(null) as Record<
-        ApplicationConfigurationEnvironmentName,
-        unknown
-    >;
-    for (const environmentName of webConfigurationEnvironmentNames) {
-        const supplied = projected[environmentName];
-        const fallback = configurationMetadata(environmentName).defaultValue;
-        picked[environmentName] = supplied === undefined ? fallback : supplied;
-    }
-    return picked;
-}
-
-function requiredString(
-    input: PickedEnvironment,
-    field: ApplicationConfigurationEnvironmentName,
-    maximumLength: number,
-    allowEmpty = false
-): string {
-    const value = input[field];
-    if (value === null || value === undefined || value === "") {
-        if (allowEmpty && value === "") return value;
-        configurationError(field, "missing");
-    }
-    if (
-        typeof value !== "string" ||
-        value.length > maximumLength ||
-        value !== value.trim() ||
-        unsafeTextPattern.test(value)
-    ) {
-        configurationError(field, "invalid");
-    }
-    return value;
-}
-
-function choice<T extends string>(
-    input: PickedEnvironment,
-    field: ApplicationConfigurationEnvironmentName,
-    choices: readonly T[]
-): T {
-    const value = requiredString(input, field, 32);
-    if (!choices.includes(value as T)) configurationError(field, "invalid");
-    return value as T;
-}
-
 function canonicalInteger(
-    input: PickedEnvironment,
+    input: PickedApplicationEnvironment,
     field: ApplicationConfigurationEnvironmentName,
     minimum: number,
     maximum: number
 ): number {
-    const value = requiredString(input, field, 16);
+    const value = requiredConfigurationString(input, field, 16);
     if (!canonicalUnsignedIntegerPattern.test(value)) {
         configurationError(field, "invalid");
     }
@@ -155,23 +84,6 @@ function canonicalInteger(
         configurationError(field, "invalid");
     }
     return parsed;
-}
-
-function projectRoot(input: PickedEnvironment): string {
-    const field = "MIRA_DASHBOARD_PROJECT_ROOT" as const;
-    const value = requiredString(
-        input,
-        field,
-        applicationConfigurationLimits.projectRootMaximumLength
-    );
-    if (
-        !path.isAbsolute(value) ||
-        value === path.parse(value).root ||
-        path.resolve(value) !== value
-    ) {
-        configurationError(field, "invalid");
-    }
-    return value;
 }
 
 function parseIpAddress(value: string): string | undefined {
@@ -186,9 +98,9 @@ function parseIpAddress(value: string): string | undefined {
     }
 }
 
-function trustedProxyAddresses(input: PickedEnvironment): readonly string[] {
+function trustedProxyAddresses(input: PickedApplicationEnvironment): readonly string[] {
     const field = "MIRA_DASHBOARD_TRUSTED_PROXY_IPS" as const;
-    const raw = requiredString(
+    const raw = requiredConfigurationString(
         input,
         field,
         applicationConfigurationLimits.trustedProxyAddresses.maximumLength,
@@ -213,9 +125,9 @@ function trustedProxyAddresses(input: PickedEnvironment): readonly string[] {
     return Object.freeze(canonical.toSorted());
 }
 
-function publicOrigin(input: PickedEnvironment): string {
+function publicOrigin(input: PickedApplicationEnvironment): string {
     const field = "MIRA_DASHBOARD_PUBLIC_ORIGIN" as const;
-    const value = requiredString(
+    const value = requiredConfigurationString(
         input,
         field,
         applicationConfigurationLimits.publicOriginMaximumLength
@@ -227,9 +139,9 @@ function publicOrigin(input: PickedEnvironment): string {
     }
 }
 
-function gatewayUrl(input: PickedEnvironment): string {
+function gatewayUrl(input: PickedApplicationEnvironment): string {
     const field = "OPENCLAW_GATEWAY_URL" as const;
-    const value = requiredString(
+    const value = requiredConfigurationString(
         input,
         field,
         applicationConfigurationLimits.gatewayUrlMaximumLength
@@ -241,9 +153,9 @@ function gatewayUrl(input: PickedEnvironment): string {
     }
 }
 
-function webAuthnOrigins(input: PickedEnvironment): readonly string[] {
+function webAuthnOrigins(input: PickedApplicationEnvironment): readonly string[] {
     const field = "MIRA_DASHBOARD_WEBAUTHN_ORIGINS" as const;
-    const raw = requiredString(
+    const raw = requiredConfigurationString(
         input,
         field,
         applicationConfigurationLimits.webAuthnOrigins.maximumLength
@@ -266,9 +178,9 @@ function webAuthnOrigins(input: PickedEnvironment): readonly string[] {
     return Object.freeze(values);
 }
 
-function webAuthnRelyingPartyName(input: PickedEnvironment): string {
+function webAuthnRelyingPartyName(input: PickedApplicationEnvironment): string {
     const field = "MIRA_DASHBOARD_WEBAUTHN_RP_NAME" as const;
-    const value = requiredString(
+    const value = requiredConfigurationString(
         input,
         field,
         applicationConfigurationLimits.webAuthnRpNameMaximumLength
@@ -278,12 +190,12 @@ function webAuthnRelyingPartyName(input: PickedEnvironment): string {
 }
 
 function webAuthnConfiguration(
-    input: PickedEnvironment,
+    input: PickedApplicationEnvironment,
     origin: string
 ): WebAuthnRelyingPartyConfiguration {
     const rpIdField = "MIRA_DASHBOARD_WEBAUTHN_RP_ID" as const;
     const originsField = "MIRA_DASHBOARD_WEBAUTHN_ORIGINS" as const;
-    const rpId = requiredString(
+    const rpId = requiredConfigurationString(
         input,
         rpIdField,
         applicationConfigurationLimits.webAuthnRpIdMaximumLength
@@ -312,9 +224,9 @@ function webAuthnConfiguration(
     return configuration;
 }
 
-function totpKeyring(input: PickedEnvironment): Redacted.Redacted<string> {
+function totpKeyring(input: PickedApplicationEnvironment): Redacted.Redacted<string> {
     const field = "MIRA_DASHBOARD_TOTP_KEYRING" as const;
-    const raw = requiredString(
+    const raw = requiredConfigurationString(
         input,
         field,
         applicationConfigurationLimits.totpKeyringMaximumLength
@@ -328,7 +240,7 @@ function totpKeyring(input: PickedEnvironment): Redacted.Redacted<string> {
 }
 
 function durationMs(
-    input: PickedEnvironment,
+    input: PickedApplicationEnvironment,
     field: "MIRA_DASHBOARD_RECENT_AUTH_MINUTES" | "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",
     parsePolicy: (value: number) => number
 ): number {
@@ -354,8 +266,13 @@ function durationMs(
 export function parseWebConfiguration(
     source: Readonly<Record<string, unknown>>
 ): WebConfiguration {
-    const input = pickEnvironment(source);
-    const nodeEnvironment = choice(input, "NODE_ENV", [
+    const input = pickApplicationEnvironment(
+        "web",
+        webConfigurationEnvironmentNames,
+        source,
+        (projection) => v.parse(webConfigurationEnvironmentSchema, projection)
+    );
+    const nodeEnvironment = configurationChoice(input, "NODE_ENV", [
         "development",
         "production",
         "test",
@@ -366,7 +283,7 @@ export function parseWebConfiguration(
     }
     const configuration = Object.freeze({
         gatewayUrl: gatewayUrl(input),
-        logLevel: choice(input, "MIRA_DASHBOARD_LOG_LEVEL", [
+        logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [
             "debug",
             "error",
             "info",
@@ -379,7 +296,7 @@ export function parseWebConfiguration(
             applicationConfigurationLimits.port.minimum,
             applicationConfigurationLimits.port.maximum
         ),
-        projectRoot: projectRoot(input),
+        projectRoot: configurationProjectRoot(input),
         publicOrigin: origin,
         recentAuthenticationWindowMs: durationMs(
             input,

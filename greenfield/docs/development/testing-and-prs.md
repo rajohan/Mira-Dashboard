@@ -68,6 +68,12 @@ and additionally fails an otherwise green suite when output contains a React mis
 warning, an unconfigured React act environment warning, or a Bun panic/crash banner. Do not bypass
 that runner in repository test scripts.
 
+The browser suite preloads only the Happy DOM globals and React act-environment marker it needs;
+the tests themselves remain in the browser TypeScript graph. The product-shell test renders the
+real QueryClient, router, accessible route, and error-boundary composition. Build tests separately
+exercise the actual HTML entrypoint, React Compiler, Tailwind, code splitting, compression, CSP
+policy, and bundle budgets.
+
 ## Lint and boundaries
 
 Oxlint applies its baseline strict rules to tests as well as production source. Some

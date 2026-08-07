@@ -45,6 +45,13 @@ export interface DatabaseStartupDiagnostics {
     readonly startupMode: DatabaseRuntimeStartupMode;
 }
 
+/** Diagnostics from a delivery-owned candidate database migration. */
+export interface DatabaseCandidateMigrationDiagnostics {
+    readonly appliedMigrations: number;
+    readonly connection: DatabaseConnectionDiagnostics;
+    readonly migrationCount: number;
+}
+
 const startupModeSchema = v.picklist(
     ["initialize-empty", "validate-only"] as const,
     "Database startup mode is invalid"
@@ -262,6 +269,32 @@ function startOrValidateDatabase(
     });
 }
 
+function startCandidateDatabaseMigration(
+    database: Database,
+    migrations: readonly VerifiedMigration[],
+    releaseId: string
+): DatabaseCandidateMigrationDiagnostics {
+    const connection = configureDatabaseConnection(database);
+    const state = inspectMigrationState(database, migrations);
+    let appliedMigrations = 0;
+
+    if (state === "current") {
+        validateVerifiedMigrations(database, migrations);
+    } else {
+        if (state === "pending") assertDatabaseIntegrity(database);
+        appliedMigrations = applyVerifiedMigrations(database, migrations, { releaseId });
+        if (appliedMigrations < 1 || appliedMigrations > migrations.length) {
+            throw invalidHistory();
+        }
+    }
+
+    return Object.freeze({
+        appliedMigrations,
+        connection,
+        migrationCount: migrations.length,
+    });
+}
+
 /**
  * Initializes an empty file or validates an already-current reviewed database.
  * @param database Retained process-owned native connection.
@@ -276,5 +309,23 @@ export function initializeDatabaseRuntime(
 ) {
     return retryDatabaseStartupOperation(() =>
         startOrValidateDatabase(database, migrations, options)
+    );
+}
+
+/**
+ * Initializes or advances one isolated delivery candidate to the complete reviewed graph.
+ * This boundary must never receive the live production state directory.
+ * @param database Retained native connection to a private candidate database.
+ * @param migrations Complete checksum-verified canonical migration graph.
+ * @param releaseId Candidate release identity recorded for newly applied nodes.
+ * @returns Candidate migration diagnostics after exact schema/integrity validation.
+ */
+export function initializeDatabaseCandidateMigration(
+    database: Database,
+    migrations: readonly VerifiedMigration[],
+    releaseId: string
+) {
+    return retryDatabaseStartupOperation(() =>
+        startCandidateDatabaseMigration(database, migrations, releaseId)
     );
 }

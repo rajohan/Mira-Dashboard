@@ -7,15 +7,15 @@
 This matrix is the living phase status. Update it in the same change that materially advances or
 closes a phase; dated entries below provide the evidence, not a second status source.
 
-| Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                                                                                             |
-| ----------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                                              |
-| 1 — Foundation                      | In progress                          | Server composition, migrations, contracts, raw HTTP/realtime foundations, process-owned database runtime, source-boundary enforcement, staged typed configuration, generated configuration reference, structured logging/request correlation, and procedure error policy exist; executable web/worker roots, browser shell, complete generated references, and release/rollback closure remain. |
-| 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                                             |
-| 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                                                                                                       |
-| 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                                                  |
-| 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                                     |
-| 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                                                |
+| Phase                               | Status                               | Current evidence and remaining gate                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                           |
+| 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle. |
+| 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                          |
+| 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                                                                                    |
+| 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                               |
+| 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                  |
+| 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                             |
 
 ### 2026-08-03 — Phase 0 started
 
@@ -652,10 +652,9 @@ closes a phase; dated entries below provide the evidence, not a second status so
     | Complete shutdown     |         128,774,144 |        3,133 |         25 |
     | Child-process cancel  |         117,194,752 |        1,531 |         24 |
 
-- Phase 0 is complete, but the rewrite is not: Phase 1 remains in progress with browser/worker
-  roots, complete generated references, immutable release/rollback, and end-to-end empty-database
-  web/worker delivery still open. Final production load, restore, cutover, and legacy-removal
-  evidence remains in Phase 6.
+- Phase 0 closed with Phase 1 delivery work still open at that checkpoint. The later Phase 1 entry
+  below records its closure. Final production load, restore, cutover, and legacy-removal evidence
+  remains in Phase 6.
 
 ### 2026-08-06 — Source-boundary enforcement foundation
 
@@ -710,9 +709,9 @@ closes a phase; dated entries below provide the evidence, not a second status so
 - The actual 36-procedure router, public contract metadata, and a server-owned
   `ContractErrorCode` allowlist now match mechanically. Immediate and deferred subscription errors
   outside a route's declared set are internalized, as is any implemented procedure missing from
-  the policy; framework routing and input/transport validation remain implicit. Phase 1 is still
-  in progress: executable web/worker roots, worker lifecycle, browser shell, and release/rollback
-  delivery remain open.
+  the policy; framework routing and input/transport validation remain implicit. At this checkpoint,
+  executable web/worker roots, worker lifecycle, browser shell, and release/rollback delivery were
+  still open; the Phase 1 closure below records their completion.
 
 ### 2026-08-06 — Process-owned database runtime
 
@@ -734,10 +733,9 @@ closes a phase; dated entries below provide the evidence, not a second status so
   identities, and validates every rollback-journal, shared-memory, or WAL sidecar present during
   acquisition as a single-link current-user-owned `0600` regular file. It also rejects a writable
   or untrusted ancestor chain and never mutates host permissions. Persistent state remains at
-  `<project-root>/production/state` inside the existing project layout. The future greenfield
-  bootstrap/release boundary must safely protect that ancestor chain before runtime validation; on
-  the current host this includes clearing group write from `/home/ubuntu/projects`. That caller and
-  its disposable-host activation test remain an explicit Phase 1 blocker.
+  `<project-root>/production/state` inside the existing project layout. At this checkpoint, safe
+  ancestor preparation and disposable activation were still Phase 1 blockers; the delivery entry
+  below records their implementation and verification.
 - Every connection verifies foreign keys and checks enabled, `trusted_schema` disabled, WAL,
   `synchronous=FULL`, a 1,000-page automatic checkpoint, and `busy_timeout=0`. Zero is deliberate:
   SQLite never blocks the Bun thread waiting for another process; bounded Effect schedules own
@@ -747,5 +745,40 @@ closes a phase; dated entries below provide the evidence, not a second status so
   creates an absent database. Already-current state is revalidated against the exact schema and
   immutable ledger. The ledger enforces bounded canonical ids, exact checksums/release identities,
   strictly increasing non-future timestamps, and append-only triggers. A reviewed pending graph
-  fails closed with `DatabaseRuntimeSnapshotRequiredError`: verified snapshot/promotion, worker
-  startup, backup/restore, and release-pair rollback remain later delivery slices.
+  fails closed with `DatabaseRuntimeSnapshotRequiredError`: the later delivery slice below adds
+  verified snapshot, copied candidate migration, promotion, worker startup, and release-pair
+  rollback without weakening normal web/worker startup modes.
+
+### 2026-08-06 — Phase 1 delivery foundation closed
+
+- Real browser, web, worker, and database-maintenance entrypoints now build deterministically from
+  the future root. The browser owns singleton router/query providers, an accessible shell, React
+  error containment, immutable manifest-indexed assets, controlled SPA fallback, strict security
+  headers, representation-specific validators, precompression, and enforced bundle budgets.
+- Releases are clean-commit addressed and record the exact Bun revision, lockfile/direct package
+  identity, migration graph, generated documentation, browser/process/systemd artifact hashes,
+  build commands, and process roles. Publication verifies and freezes the complete tree; runtime
+  startup accepts only the matching immutable release and installed Bun identity.
+- Production state remains exclusively beneath `<project-root>/production`. Descriptor-rooted
+  preparation narrows unsafe current-user ancestors without broadening permissions and rejects
+  symlink, owner, device, inode, or path replacement drift. Web/worker structured logs, stdout,
+  stderr, backups, transition workspaces, and child output all remain project-local.
+- Deployment holds one lease across snapshot, copied candidate migration, database promotion,
+  release/runtime pointer changes, readiness, activation-record compare-and-swap, and cleanup. A
+  durable journal recovers interruption at the promotion boundary. Any pre-commit failure stops a
+  partially started candidate and restores the previous database/release pair; a post-commit
+  cleanup failure retains the committed candidate.
+- The two replacement user-systemd units are part of the immutable manifest. Installation accepts
+  only those exact files, atomically replaces protected user-unit entries, reloads user systemd,
+  and never implicitly starts, stops, enables, or disables a service. Activation installs the
+  verified stop-owner units before the first stop (using the candidate on an empty host), starts
+  worker before web, and stops web before worker; rollback reinstalls the previous release's units
+  first.
+- A disposable project lifecycle performs the real browser/process build, documentation and
+  migration gates, exact runtime publication, empty-database initialization, web/worker startup,
+  readiness, browser serving, project-local logging, and complete shutdown. Focused adversarial
+  tests additionally cover path swaps, immutable artifact tampering, failed readiness, partial
+  start, crash recovery, stale activation state, and post-commit cleanup interruption.
+
+This completes Phase 1 only. Phase 3–6 domains, persistent Gateway/chat, privileged adapters,
+full-browser parity, production rehearsal, cutover, and legacy deletion remain open.

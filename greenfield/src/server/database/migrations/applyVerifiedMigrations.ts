@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { getTime } from "date-fns";
 import * as v from "valibot";
 
+import { migrationManifest } from "../../../shared/databaseMigrationManifest.ts";
 import { timestampMillisecondsSchema } from "../../../shared/dateTime.ts";
 import {
     fullCommitShaSchema,
@@ -14,7 +15,6 @@ import {
     drizzleStatementBreakpoint,
     type VerifiedMigration,
 } from "./loadVerifiedMigrations.ts";
-import { migrationManifest } from "./manifest.ts";
 import { migrationIdSchema } from "./validation.ts";
 import {
     assertConstraintEnforcement,

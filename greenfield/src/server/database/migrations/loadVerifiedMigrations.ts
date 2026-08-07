@@ -1,8 +1,11 @@
 import * as v from "valibot";
 
+import {
+    migrationManifest,
+    type MigrationManifestEntry,
+} from "../../../shared/databaseMigrationManifest.ts";
 import { lowercaseSha256Schema } from "../../../shared/validation.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
-import { migrationManifest, type MigrationManifestEntry } from "./manifest.ts";
 import {
     type MigrationArtifactVerificationTestHooks,
     readStableMigrationArtifactGraph,
