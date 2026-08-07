@@ -12,10 +12,13 @@ describe("coverage runner", () => {
             "lcov",
             "--coverage-dir",
             "/tmp/coverage-output",
-            "--path-ignore-patterns",
-            "src/browser/**",
             "scripts",
-            "src",
+            "src/app",
+            "src/contracts",
+            "src/server",
+            "src/shared",
+            "src/test",
+            "src/worker",
         ]);
     });
 

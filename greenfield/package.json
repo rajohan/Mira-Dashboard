@@ -24,7 +24,7 @@
         "evidence:resources:sse": "bun src/test/integration/resources/runSseMemoryEvidence.ts",
         "test": "bun run test:bun && bun run test:browser",
         "test:browser": "bun scripts/runTestSuite.ts --preload ./src/browser/test/setup.ts src/browser",
-        "test:bun": "bun scripts/runTestSuite.ts --path-ignore-patterns='src/browser/**' scripts src",
+        "test:bun": "bun scripts/runTestSuite.ts scripts src/app src/contracts src/server src/shared src/test src/worker",
         "test:coverage": "bun scripts/runCoverage.ts",
         "typecheck": "bun run typecheck:browser && bun run typecheck:bun",
         "typecheck:browser": "bun node_modules/typescript/bin/tsc -p tsconfig.browser.json --noEmit",

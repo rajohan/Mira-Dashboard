@@ -48,10 +48,13 @@ export function createCoverageTestArguments(
     }
     return Object.freeze([
         ...coverageArguments,
-        "--path-ignore-patterns",
-        "src/browser/**",
         "scripts",
-        "src",
+        "src/app",
+        "src/contracts",
+        "src/server",
+        "src/shared",
+        "src/test",
+        "src/worker",
     ]);
 }
 

@@ -10,6 +10,7 @@ import { useState } from "react";
 import {
     automationCredentialSettingsSchema,
     type AutomationCredentialCursor,
+    type AutomationCredentialSummary,
     type AutomationPrincipalSummary,
     type ListAutomationCredentialsResult,
 } from "../../contracts/automationSecurity.ts";
@@ -36,6 +37,29 @@ import {
 interface AutomationCredentialPanelProps {
     readonly onIssuedToken: (token: string) => void;
     readonly principal: AutomationPrincipalSummary;
+}
+
+function isCredentialUsable(
+    credential: AutomationCredentialSummary,
+    checkedAtMs: number
+): boolean {
+    return (
+        credential.revokedAtMs === undefined &&
+        (credential.expiresAtMs === undefined || credential.expiresAtMs > checkedAtMs)
+    );
+}
+
+function credentialStatus(
+    credential: AutomationCredentialSummary,
+    checkedAtMs: number
+): string {
+    if (credential.revokedAtMs !== undefined) {
+        return `revoked ${formatDashboardDateTime(credential.revokedAtMs)}`;
+    }
+    if (credential.expiresAtMs !== undefined && credential.expiresAtMs <= checkedAtMs) {
+        return `expired ${formatDashboardDateTime(credential.expiresAtMs)}`;
+    }
+    return "active";
 }
 
 /**
@@ -177,26 +201,31 @@ export function AutomationCredentialPanel({
                         {credentials.isSuccess && (
                             <ul className="space-y-3">
                                 {credentials.data.pages.flatMap((page) =>
-                                    page.credentials.map((credential) => (
-                                        <li
-                                            className="border-primary-700 rounded-lg border p-3 text-sm"
-                                            key={credential.id}
-                                        >
-                                            <p className="text-primary-100 font-medium">
-                                                {credential.label}
-                                            </p>
-                                            <p className="text-primary-400 mt-1">
-                                                Created{" "}
-                                                {formatDashboardDateTime(
-                                                    credential.createdAtMs
-                                                )}{" "}
-                                                ·
-                                                {credential.revokedAtMs === undefined
-                                                    ? " active"
-                                                    : ` revoked ${formatDashboardDateTime(credential.revokedAtMs)}`}
-                                            </p>
-                                            {!principal.disabled &&
-                                                credential.revokedAtMs === undefined && (
+                                    page.credentials.map((credential) => {
+                                        const usable = isCredentialUsable(
+                                            credential,
+                                            credentials.dataUpdatedAt
+                                        );
+                                        return (
+                                            <li
+                                                className="border-primary-700 rounded-lg border p-3 text-sm"
+                                                key={credential.id}
+                                            >
+                                                <p className="text-primary-100 font-medium">
+                                                    {credential.label}
+                                                </p>
+                                                <p className="text-primary-400 mt-1">
+                                                    Created{" "}
+                                                    {formatDashboardDateTime(
+                                                        credential.createdAtMs
+                                                    )}{" "}
+                                                    ·{" "}
+                                                    {credentialStatus(
+                                                        credential,
+                                                        credentials.dataUpdatedAt
+                                                    )}
+                                                </p>
+                                                {!principal.disabled && usable && (
                                                     <div className="mt-3 flex flex-wrap gap-2">
                                                         <Button
                                                             aria-label={`Stage replacement for ${credential.label}`}
@@ -247,8 +276,9 @@ export function AutomationCredentialPanel({
                                                         </Button>
                                                     </div>
                                                 )}
-                                        </li>
-                                    ))
+                                            </li>
+                                        );
+                                    })
                                 )}
                             </ul>
                         )}

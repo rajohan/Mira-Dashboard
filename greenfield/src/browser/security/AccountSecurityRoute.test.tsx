@@ -768,6 +768,43 @@ describe("Dashboard account security route", () => {
         ).toHaveLength(1);
     });
 
+    test("marks expired automation credentials unusable", async () => {
+        const transport = new SecurityTransport();
+        const expiredCredential = Object.freeze({
+            ...automationCredential,
+            createdAtMs: timestampMs - 10_000,
+            expiresAtMs: timestampMs - 1,
+        });
+        transport.principals = [
+            Object.freeze({
+                ...automationPrincipal,
+                activeCredentialCount: 0,
+            }),
+        ];
+        transport.credentials.set(automationPrincipal.id, [expiredCredential]);
+        renderAccountSecurity(transport);
+        const userActions = userEvent.setup();
+        await screen.findByText(automationPrincipal.label);
+
+        await userActions.click(
+            screen.getByRole("button", { name: /Manage credentials/u })
+        );
+
+        const credentialLabel = await screen.findByText(expiredCredential.label);
+        const credentialItem = credentialLabel.closest("li");
+        expect(credentialItem?.textContent).toContain("expired ");
+        expect(
+            screen.queryByRole("button", {
+                name: `Stage replacement for ${expiredCredential.label}`,
+            })
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", {
+                name: `Revoke credential ${expiredCredential.label}`,
+            })
+        ).toBeNull();
+    });
+
     test("revokes one, other, and all browser sessions with final cache teardown", async () => {
         const transport = new SecurityTransport();
         transport.mutationHandler = (path, input) => {
