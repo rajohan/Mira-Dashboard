@@ -27,26 +27,37 @@ describe("Bun build admission", () => {
         const repositoryRoot = await repositoryFixture();
         const events: string[] = [];
         let releaseFirst!: () => void;
+        let markFirstStarted!: () => void;
         const firstMayFinish = new Promise<void>((resolve) => {
             releaseFirst = resolve;
+        });
+        const firstStarted = new Promise<void>((resolve) => {
+            markFirstStarted = resolve;
         });
 
         const first = withBunBuildAdmission(repositoryRoot, async () => {
             events.push("first-start");
+            markFirstStarted();
             await firstMayFinish;
             events.push("first-end");
         });
-        await Bun.sleep(20);
-        const second = withBunBuildAdmission(repositoryRoot, () => {
-            events.push("second");
-            return Promise.resolve();
-        });
-        await Bun.sleep(20);
+        let second: Promise<void> | undefined;
+        try {
+            await firstStarted;
+            second = withBunBuildAdmission(repositoryRoot, () => {
+                events.push("second");
+                return Promise.resolve();
+            });
+            await Bun.sleep(20);
 
-        expect(events).toEqual(["first-start"]);
-        releaseFirst();
-        await Promise.all([first, second]);
-        expect(events).toEqual(["first-start", "first-end", "second"]);
+            expect(events).toEqual(["first-start"]);
+            releaseFirst();
+            await Promise.all([first, second]);
+            expect(events).toEqual(["first-start", "first-end", "second"]);
+        } finally {
+            releaseFirst();
+            await Promise.allSettled([first, ...(second === undefined ? [] : [second])]);
+        }
     });
 
     test("recovers a validated dead-owner lock and rejects malformed lock data", async () => {
