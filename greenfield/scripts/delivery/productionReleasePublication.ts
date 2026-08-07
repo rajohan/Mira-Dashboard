@@ -409,7 +409,7 @@ export async function publishProductionRelease(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
     sourceReleaseRoot: string,
-    runtimeIdentity?: ReleaseRuntimeIdentity,
+    runtimeIdentity: ReleaseRuntimeIdentity,
     testHooks: ProductionReleasePublicationTestHooks = {}
 ): Promise<PublishedProductionRelease> {
     validatePublicationInputs(lease, paths, sourceReleaseRoot);

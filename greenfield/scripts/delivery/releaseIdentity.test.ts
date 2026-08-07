@@ -8,6 +8,7 @@ import { rejectionError } from "../testSupport/rejection.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
 import {
     createReleaseIdentity,
+    verifyReleaseArtifactIdentity,
     verifyReleaseIdentity,
     writeReleaseIdentity,
 } from "./releaseIdentity.ts";
@@ -128,12 +129,14 @@ describe("release identity", () => {
 
         const created = await createReleaseIdentity(creationOptions(fixture));
         const persisted = await writeReleaseIdentity(creationOptions(fixture));
+        const declared = await verifyReleaseArtifactIdentity(fixture.releaseRoot);
         const verified = await verifyReleaseIdentity(
             fixture.releaseRoot,
             runtimeIdentity
         );
 
         expect(persisted).toEqual(created);
+        expect(declared).toEqual(created);
         expect(verified).toEqual(created);
         expect(created.source).toEqual({ commitSha, treeState: "clean" });
         expect(created.runtime).toEqual(runtimeIdentity);
@@ -161,6 +164,22 @@ describe("release identity", () => {
         const manifestValue: unknown = JSON.parse(manifestText);
         expect(manifestValue).toEqual(created);
         expect(Object.isFrozen(verified)).toBe(true);
+    });
+
+    test("separates artifact verification from executable runtime binding", async () => {
+        const fixture = await releaseFixture();
+        const persisted = await writeReleaseIdentity(creationOptions(fixture));
+
+        expect(await verifyReleaseArtifactIdentity(fixture.releaseRoot)).toEqual(
+            persisted
+        );
+        const runtimeFailure = await rejectionError(
+            verifyReleaseIdentity(fixture.releaseRoot, {
+                revision: "f".repeat(40),
+                version: runtimeIdentity.version,
+            })
+        );
+        expect(runtimeFailure.message).toBe("Release identity is invalid");
     });
 
     test("rejects dirty source, staged metadata drift and migration mismatch", async () => {

@@ -30,7 +30,7 @@ const loopbackReadinessUrlSchema = v.pipe(
             const url = new URL(input);
             return (
                 url.protocol === "http:" &&
-                (url.hostname === "127.0.0.1" || url.hostname === "[::1]") &&
+                url.hostname === "127.0.0.1" &&
                 url.pathname === healthReadinessPath &&
                 url.search.length === 0 &&
                 url.hash.length === 0 &&
@@ -174,13 +174,14 @@ export function createSystemdProductionServiceController(
         },
         stop: () => stopUnits(execute, executable),
         async verifyReady(): Promise<void> {
-            await requireSystemctlSuccess(execute, executable, [
-                "--user",
-                "is-active",
-                "--quiet",
-                workerUnit,
-                webUnit,
-            ]);
+            for (const unit of [workerUnit, webUnit]) {
+                await requireSystemctlSuccess(execute, executable, [
+                    "--user",
+                    "is-active",
+                    "--quiet",
+                    unit,
+                ]);
+            }
             await awaitReadiness(fetch_, readinessUrl);
         },
     });

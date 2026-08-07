@@ -40,6 +40,11 @@ describe("production release activation CLI", () => {
                     : argument
             ),
             validArguments.map((argument) =>
+                argument.startsWith("--readiness-url=")
+                    ? "--readiness-url=http://[::1]:3100/api/health/ready"
+                    : argument
+            ),
+            validArguments.map((argument) =>
                 argument.startsWith("--release-root=")
                     ? "--release-root=dist/releases/candidate"
                     : argument

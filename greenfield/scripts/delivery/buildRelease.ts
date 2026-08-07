@@ -162,16 +162,13 @@ export async function buildDashboardRelease(
             runtimeIdentity: dependencies.runtimeIdentity,
             sourceIdentity: source,
         });
-        await verifyReleaseIdentity(paths.stagingRoot, dependencies.runtimeIdentity);
+        await verifyReleaseIdentity(paths.stagingRoot, manifest.runtime);
         requireSameCleanSource(source, sourceResolver(repositoryRoot));
 
         await makeReleaseTreeImmutable(repositoryRoot, paths.stagingRoot);
         await promoteStagedRelease(repositoryRoot, paths);
         candidateRoot = paths.finalRoot;
-        const verified = await verifyReleaseIdentity(
-            paths.finalRoot,
-            dependencies.runtimeIdentity
-        );
+        const verified = await verifyReleaseIdentity(paths.finalRoot, manifest.runtime);
         if (JSON.stringify(verified) !== JSON.stringify(manifest)) {
             throw releaseBuildFailure();
         }

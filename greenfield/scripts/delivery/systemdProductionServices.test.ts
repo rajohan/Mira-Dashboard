@@ -40,6 +40,14 @@ function successfulProcessResult(): SystemctlProcessResult {
     });
 }
 
+function inactiveProcessResult(): SystemctlProcessResult {
+    return Object.freeze({
+        exitCode: 3,
+        stderr: new Uint8Array(),
+        stdout: new Uint8Array(),
+    });
+}
+
 describe("production user-systemd service control", () => {
     test("points at exact artifacts and controls worker/web in safe order", async () => {
         const sourceReleases = await Promise.all([
@@ -101,19 +109,57 @@ describe("production user-systemd service control", () => {
             expect(commands).toEqual([
                 ["--user", "restart", "mira-dashboard-worker.service"],
                 ["--user", "restart", "mira-dashboard-web.service"],
-                [
-                    "--user",
-                    "is-active",
-                    "--quiet",
-                    "mira-dashboard-worker.service",
-                    "mira-dashboard-web.service",
-                ],
+                ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
+                ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
                 ["--user", "stop", "mira-dashboard-web.service"],
                 ["--user", "stop", "mira-dashboard-worker.service"],
             ]);
             expect(requests).toHaveLength(1);
             expect(requests[0]?.method).toBe("HEAD");
             expect(requests[0]?.url).toBe("http://127.0.0.1:3100/api/health/ready");
+            expect(() =>
+                createSystemdProductionServiceController(lease, paths, {
+                    readinessUrl: "http://[::1]:3100/api/health/ready",
+                })
+            ).toThrow("Production service control failed");
+
+            for (const inactiveUnit of [
+                "mira-dashboard-worker.service",
+                "mira-dashboard-web.service",
+            ]) {
+                const checkedUnits: string[] = [];
+                let readinessRequests = 0;
+                const inactiveController = createSystemdProductionServiceController(
+                    lease,
+                    paths,
+                    {
+                        execute: (_executable, arguments_) => {
+                            const unit = arguments_.at(-1);
+                            if (unit) checkedUnits.push(unit);
+                            return Promise.resolve(
+                                unit === inactiveUnit
+                                    ? inactiveProcessResult()
+                                    : successfulProcessResult()
+                            );
+                        },
+                        fetch: () => {
+                            readinessRequests += 1;
+                            return Promise.resolve(new Response(null, { status: 200 }));
+                        },
+                        readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                    }
+                );
+                const inactiveFailure = await rejectionError(
+                    inactiveController.verifyReady(fixtures.first, fixtures.runtime)
+                );
+                expect(inactiveFailure.message).toBe("Production service control failed");
+                expect(checkedUnits).toEqual(
+                    inactiveUnit === "mira-dashboard-worker.service"
+                        ? ["mira-dashboard-worker.service"]
+                        : ["mira-dashboard-worker.service", "mira-dashboard-web.service"]
+                );
+                expect(readinessRequests).toBe(0);
+            }
 
             await pointProductionProcessesAtRelease(
                 lease,

@@ -357,17 +357,9 @@ export async function createReleaseIdentity(
     });
 }
 
-/**
- * Reconstructs and validates all identities represented by a staged manifest.
- * @param releaseRoot Canonical immutable-release candidate root.
- * @param runtimeIdentity Bun runtime selected to serve the candidate.
- * @returns Deeply frozen verified manifest.
- */
-export async function verifyReleaseIdentity(
-    releaseRoot: string,
-    runtimeIdentity: ReleaseRuntimeIdentity = currentRuntimeIdentity()
+async function reconstructReleaseArtifactIdentity(
+    releaseRoot: string
 ): Promise<ReleaseManifest> {
-    assertRuntimeIdentity(runtimeIdentity);
     const manifestFile = await readUtf8(
         path.join(releaseRoot, releaseManifestFileName),
         releaseRoot,
@@ -385,12 +377,7 @@ export async function verifyReleaseIdentity(
     } catch {
         throw invalidReleaseIdentity();
     }
-    if (
-        manifest.runtime.version !== runtimeIdentity.version ||
-        manifest.runtime.revision !== runtimeIdentity.revision
-    ) {
-        throw invalidReleaseIdentity();
-    }
+    assertRuntimeIdentity(manifest.runtime);
 
     const completeInventory = await inventoryReleaseArtifactTree(releaseRoot);
     const artifacts = completeInventory.filter(
@@ -419,6 +406,40 @@ export async function verifyReleaseIdentity(
             aggregateArtifactIdentity(documentationRecords(artifacts)) ||
         JSON.stringify(manifest.packages) !== JSON.stringify(stagedPackages.packages) ||
         JSON.stringify(manifest.migrations) !== JSON.stringify(migrationManifest)
+    ) {
+        throw invalidReleaseIdentity();
+    }
+    return manifest;
+}
+
+/**
+ * Reconstructs every identity represented by one release artifact.
+ * This proves the manifest against its bytes but does not prove an executable runtime.
+ * Activation must bind the returned runtime identity to its explicit runtime source.
+ * @param releaseRoot Canonical immutable-release candidate root.
+ * @returns Deeply frozen, internally consistent manifest.
+ */
+export function verifyReleaseArtifactIdentity(
+    releaseRoot: string
+): Promise<ReleaseManifest> {
+    return reconstructReleaseArtifactIdentity(releaseRoot);
+}
+
+/**
+ * Reconstructs a release identity and binds it to one already selected Bun runtime.
+ * @param releaseRoot Canonical immutable-release candidate root.
+ * @param runtimeIdentity Bun runtime selected to serve the candidate.
+ * @returns Deeply frozen verified manifest.
+ */
+export async function verifyReleaseIdentity(
+    releaseRoot: string,
+    runtimeIdentity: ReleaseRuntimeIdentity
+): Promise<ReleaseManifest> {
+    assertRuntimeIdentity(runtimeIdentity);
+    const manifest = await reconstructReleaseArtifactIdentity(releaseRoot);
+    if (
+        manifest.runtime.version !== runtimeIdentity.version ||
+        manifest.runtime.revision !== runtimeIdentity.revision
     ) {
         throw invalidReleaseIdentity();
     }

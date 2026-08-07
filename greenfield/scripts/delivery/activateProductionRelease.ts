@@ -12,7 +12,7 @@ import { activatePublishedProductionRelease } from "./productionReleaseActivatio
 import { publishProductionRelease } from "./productionReleasePublication.ts";
 import { installProductionRuntime } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
-import { verifyReleaseIdentity } from "./releaseIdentity.ts";
+import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./systemdProductionServices.ts";
 
 const activationCliFailureMessage = "Production release activation failed";
@@ -38,7 +38,7 @@ const readinessUrlSchema = v.pipe(
             const url = new URL(input);
             return (
                 url.protocol === "http:" &&
-                (url.hostname === "127.0.0.1" || url.hostname === "[::1]") &&
+                url.hostname === "127.0.0.1" &&
                 url.pathname === healthReadinessPath &&
                 url.username.length === 0 &&
                 url.password.length === 0 &&
@@ -125,7 +125,7 @@ async function activateProductionRelease(
     options: ActivateProductionReleaseArguments
 ): Promise<ProductionActivationRecord> {
     const state = await prepareProtectedProductionStatePath(options.projectRoot);
-    const sourceManifest = await verifyReleaseIdentity(options.releaseRoot);
+    const sourceManifest = await verifyReleaseArtifactIdentity(options.releaseRoot);
     return withDeploymentLease(state.stateDirectory, async (lease) => {
         const paths = await prepareProductionDeliveryDirectories(state);
         const runtime = await installProductionRuntime(
