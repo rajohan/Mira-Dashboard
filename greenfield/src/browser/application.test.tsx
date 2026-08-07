@@ -7,7 +7,7 @@ import { createDashboardQueryClient } from "./queryClient.ts";
 import { createDashboardRouter } from "./router.tsx";
 import { acquireBrowserTestEnvironment } from "./testSupport/browserTestEnvironment.ts";
 
-const browserEnvironment = acquireBrowserTestEnvironment();
+const browserEnvironment = await acquireBrowserTestEnvironment();
 const { cleanup, render, screen } = await import("@testing-library/react");
 
 afterEach(() => {

@@ -4,7 +4,7 @@ import { act } from "react";
 
 import { acquireBrowserTestEnvironment } from "./testSupport/browserTestEnvironment.ts";
 
-const browserEnvironment = acquireBrowserTestEnvironment();
+const browserEnvironment = await acquireBrowserTestEnvironment();
 const { waitFor } = await import("@testing-library/react");
 
 afterAll(async () => {
