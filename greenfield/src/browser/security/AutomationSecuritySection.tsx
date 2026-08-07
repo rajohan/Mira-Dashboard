@@ -28,6 +28,7 @@ import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { AutomationCapabilityPicker } from "./AutomationCapabilityPicker.tsx";
 import { AutomationPrincipalCard } from "./AutomationPrincipalCard.tsx";
+import { revealIssuedAutomationToken } from "./issuedAutomationToken.ts";
 import {
     automationPrincipalsQueryKey,
     refreshSecurityQueries,
@@ -73,12 +74,14 @@ export function AutomationSecuritySection() {
                     "automationSecurity.createPrincipal",
                     value
                 );
-                await refreshSecurityQueries(queryClient);
-                return created.token;
+                await revealIssuedAutomationToken(
+                    created.token,
+                    (token) => setIssuedToken(token),
+                    () => refreshSecurityQueries(queryClient)
+                );
             });
             if (result.status === "success") {
                 formApi.reset();
-                setIssuedToken(result.value);
             }
         },
         validators: { onSubmit: createAutomationPrincipalInputSchema },

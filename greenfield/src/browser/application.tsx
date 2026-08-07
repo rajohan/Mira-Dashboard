@@ -5,6 +5,7 @@ import { ErrorBoundary } from "react-error-boundary";
 import { createDashboardQueryClient } from "./api/queryClient.ts";
 import { createDashboardTrpcClient, type DashboardTrpcClient } from "./api/trpcClient.ts";
 import { DashboardTrpcProvider } from "./api/trpcContext.tsx";
+import { AuthenticatedSessionActivity } from "./auth/AuthenticatedSessionActivity.tsx";
 import { createDashboardRouter, type DashboardRouter } from "./router.tsx";
 import {
     createDashboardWebAuthnClient,
@@ -41,6 +42,7 @@ export function DashboardBrowserApplication({
         <ErrorBoundary FallbackComponent={AppErrorFallback}>
             <QueryClientProvider client={queryClient}>
                 <DashboardTrpcProvider client={trpcClient}>
+                    <AuthenticatedSessionActivity />
                     <DashboardWebAuthnProvider client={webAuthnClient}>
                         <RouterProvider router={router} />
                     </DashboardWebAuthnProvider>

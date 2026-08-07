@@ -21,6 +21,50 @@ interface AutomationPrincipalCardProps {
     readonly principal: AutomationPrincipalSummary;
 }
 
+interface AutomationCapabilityEditorProps {
+    readonly busy: boolean;
+    readonly disabled: boolean;
+    readonly initialCapabilities: readonly ApplicationCapability[];
+    readonly onReplace: (capabilities: ApplicationCapability[]) => Promise<void>;
+}
+
+/**
+ * Owns an editable capability draft for one exact server authorization version.
+ * @returns Capability controls that reset when their keyed server version changes.
+ */
+function AutomationCapabilityEditor({
+    busy,
+    disabled,
+    initialCapabilities,
+    onReplace,
+}: AutomationCapabilityEditorProps) {
+    const [capabilities, setCapabilities] = useState<ApplicationCapability[]>([
+        ...initialCapabilities,
+    ]);
+
+    return (
+        <>
+            <AutomationCapabilityPicker
+                disabled={disabled || busy}
+                onChange={setCapabilities}
+                value={capabilities}
+            />
+            {!disabled && (
+                <Button
+                    busy={busy}
+                    busyLabel="Updating…"
+                    className="mt-3"
+                    onClick={() => void onReplace(capabilities)}
+                    size="sm"
+                    variant="secondary"
+                >
+                    Replace capabilities
+                </Button>
+            )}
+        </>
+    );
+}
+
 /**
  * Renders one automation principal and its mutable security controls.
  * @returns A principal card with capability and credential management.
@@ -29,26 +73,18 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
     const action = useExclusiveDashboardAction();
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
-    const [capabilities, setCapabilities] = useState<ApplicationCapability[]>([
-        ...principal.capabilities,
-    ]);
     const [disableConfirmationOpen, setDisableConfirmationOpen] = useState(false);
     const [issuedToken, setIssuedToken] = useState<string>();
 
-    async function replaceCapabilities() {
-        const result = await action.run(async () => {
-            const updated = await client.mutation(
-                "automationSecurity.replaceCapabilities",
-                {
-                    capabilities,
-                    expectedAuthorizationVersion: principal.authorizationVersion,
-                    principalId: principal.id,
-                }
-            );
+    async function replaceCapabilities(capabilities: ApplicationCapability[]) {
+        await action.run(async () => {
+            await client.mutation("automationSecurity.replaceCapabilities", {
+                capabilities,
+                expectedAuthorizationVersion: principal.authorizationVersion,
+                principalId: principal.id,
+            });
             await refreshSecurityQueries(queryClient);
-            return updated.principal.capabilities;
         });
-        if (result.status === "success") setCapabilities([...result.value]);
     }
 
     async function disablePrincipal() {
@@ -102,23 +138,13 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                     {issuedToken}
                 </OneTimeSecretPanel>
             )}
-            <AutomationCapabilityPicker
-                disabled={principal.disabled || action.busy}
-                onChange={setCapabilities}
-                value={capabilities}
+            <AutomationCapabilityEditor
+                busy={action.busy}
+                disabled={principal.disabled}
+                initialCapabilities={principal.capabilities}
+                key={`${principal.id}:${principal.authorizationVersion}`}
+                onReplace={replaceCapabilities}
             />
-            {!principal.disabled && (
-                <Button
-                    busy={action.busy}
-                    busyLabel="Updating…"
-                    className="mt-3"
-                    onClick={() => void replaceCapabilities()}
-                    size="sm"
-                    variant="secondary"
-                >
-                    Replace capabilities
-                </Button>
-            )}
             <ExpandableCard
                 className="mt-5"
                 description="Create, stage, rotate, or revoke scoped credentials."

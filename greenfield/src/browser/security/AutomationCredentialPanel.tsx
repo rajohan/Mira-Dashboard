@@ -27,6 +27,7 @@ import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
+import { revealIssuedAutomationToken } from "./issuedAutomationToken.ts";
 import {
     automationCredentialsQueryKey,
     refreshSecurityQueries,
@@ -88,12 +89,12 @@ export function AutomationCredentialPanel({
                         principalId: principal.id,
                     }
                 );
-                await refreshSecurityQueries(queryClient);
-                return created.token;
+                await revealIssuedAutomationToken(created.token, onIssuedToken, () =>
+                    refreshSecurityQueries(queryClient)
+                );
             });
             if (result.status === "success") {
                 formApi.setFieldValue("label", "");
-                onIssuedToken(result.value);
             }
         },
         validators: { onSubmit: automationCredentialSettingsSchema },
@@ -107,12 +108,12 @@ export function AutomationCredentialPanel({
                 principalId: principal.id,
                 replacement: { label },
             });
-            await refreshSecurityQueries(queryClient);
-            return rotated.token;
+            await revealIssuedAutomationToken(rotated.token, onIssuedToken, () =>
+                refreshSecurityQueries(queryClient)
+            );
         });
         if (result.status === "success") {
             credentialForm.setFieldValue("label", "");
-            onIssuedToken(result.value);
         }
     }
 

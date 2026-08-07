@@ -17,6 +17,7 @@ const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
 
 describe("Dashboard browser application", () => {
     test("renders the accessible overview through the real providers and router", async () => {
+        const timestampMs = Date.now();
         const queryClient = createDashboardQueryClient();
         const router = createDashboardRouter(
             createMemoryHistory({ initialEntries: ["/"] })
@@ -31,13 +32,13 @@ describe("Dashboard browser application", () => {
                 }
                 return Promise.resolve({
                     session: {
-                        authenticatedAtMs: 1_800_000_000_000,
+                        authenticatedAtMs: timestampMs,
                         authMethod: "password",
-                        createdAtMs: 1_800_000_000_000,
-                        expiresAtMs: 1_800_086_400_000,
+                        createdAtMs: timestampMs,
+                        expiresAtMs: timestampMs + 86_400_000,
                         id: "a".repeat(32),
                         isCurrent: true,
-                        lastSeenAtMs: 1_800_000_000_000,
+                        lastSeenAtMs: timestampMs,
                         userAgent: "Dashboard browser test",
                     },
                     state: "authenticated",

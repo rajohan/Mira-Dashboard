@@ -20,7 +20,7 @@ const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
-const timestampMs = 1_800_000_000_000;
+const timestampMs = Date.now();
 const user = Object.freeze({
     id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
     username: "operator",
