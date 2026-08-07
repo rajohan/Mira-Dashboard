@@ -6,11 +6,12 @@ import { Cause, Effect, Exit } from "effect";
 import { incidents } from "../../database/schema/incidents.ts";
 import { notifications } from "../../database/schema/notifications.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
-import { createMonitoringRepository, type MonitoringRepository } from "./repository.ts";
+import { createMonitoringRepository } from "./repository.ts";
 import {
     createMonitoringService,
     MonitoringService,
     MonitoringSnapshotValidationError,
+    type MonitoringSubmissionRepository,
     monitoringServiceLayer,
 } from "./service.ts";
 import {
@@ -62,7 +63,7 @@ describe("monitoring service", () => {
 
     test("rejects malformed snapshots before entering the repository", async () => {
         let repositoryEntries = 0;
-        const repository: MonitoringRepository = {
+        const repository: MonitoringSubmissionRepository = {
             withImmediateTransaction() {
                 repositoryEntries += 1;
                 throw new Error("repository should not be entered");
@@ -82,7 +83,7 @@ describe("monitoring service", () => {
 
     test("rejects a future watermark before entering the repository", async () => {
         let repositoryEntries = 0;
-        const repository: MonitoringRepository = {
+        const repository: MonitoringSubmissionRepository = {
             withImmediateTransaction() {
                 repositoryEntries += 1;
                 throw new Error("repository should not be entered");
@@ -107,9 +108,7 @@ describe("monitoring service", () => {
     test("does not turn an event-pump wakeup failure into a failed commit", async () => {
         const database = await openFreshMigratedDatabase();
         const service = serviceFor(database, {
-            wakeEventPump: () => {
-                throw new Error("pump unavailable");
-            },
+            wakeEventPump: () => Promise.reject(new Error("pump unavailable")),
         });
 
         try {
@@ -130,7 +129,7 @@ describe("monitoring service", () => {
 
     test("rejects invalid realtime retention before repository work", () => {
         let repositoryEntries = 0;
-        const repository: MonitoringRepository = {
+        const repository: MonitoringSubmissionRepository = {
             withImmediateTransaction() {
                 repositoryEntries += 1;
                 throw new Error("repository should not be entered");
@@ -148,7 +147,7 @@ describe("monitoring service", () => {
 
     test("rejects a realtime expiry outside the Date range before repository work", async () => {
         let repositoryEntries = 0;
-        const repository: MonitoringRepository = {
+        const repository: MonitoringSubmissionRepository = {
             withImmediateTransaction() {
                 repositoryEntries += 1;
                 throw new Error("repository should not be entered");
@@ -177,7 +176,7 @@ describe("monitoring service", () => {
 
     test("keeps unknown repository failures in the defect channel", async () => {
         const repositoryFailure = new Error("repository unavailable");
-        const repository: MonitoringRepository = {
+        const repository: MonitoringSubmissionRepository = {
             withImmediateTransaction() {
                 throw repositoryFailure;
             },

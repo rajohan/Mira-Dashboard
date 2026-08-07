@@ -78,7 +78,7 @@
             "purpose": "Deletes one notification.",
             "section": "Notifications",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["notifications.delete"],
                 "phase": "phase-3"
@@ -91,7 +91,7 @@
             "purpose": "Deletes a report and linked notifications.",
             "section": "Reports",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["reports.delete"],
                 "phase": "phase-3"
@@ -774,7 +774,7 @@
             "purpose": "Lists notifications with filters/limit.",
             "section": "Notifications",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["notifications.list"],
                 "phase": "phase-3"
@@ -865,7 +865,7 @@
             "purpose": "Lists reports, default limit `100`, max `200`. Supports `type` and `status`.",
             "section": "Reports",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["reports.list"],
                 "phase": "phase-3"
@@ -878,7 +878,7 @@
             "purpose": "Reads one report with full Markdown body.",
             "section": "Reports",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["reports.get"],
                 "phase": "phase-3"
@@ -1634,7 +1634,7 @@
             "purpose": "Creates/upserts a notification.",
             "section": "Notifications",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["notifications.upsert"],
                 "phase": "phase-3"
@@ -1647,7 +1647,7 @@
             "purpose": "Marks one notification read.",
             "section": "Notifications",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["notifications.markRead"],
                 "phase": "phase-3"
@@ -1660,7 +1660,7 @@
             "purpose": "Deletes read notifications, optionally by source.",
             "section": "Notifications",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["notifications.clearRead"],
                 "phase": "phase-3"
@@ -1673,7 +1673,7 @@
             "purpose": "Marks notifications read.",
             "section": "Notifications",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["notifications.markAllRead"],
                 "phase": "phase-3"
@@ -1829,7 +1829,7 @@
             "purpose": "Creates or upserts a report.",
             "section": "Reports",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["reports.upsert"],
                 "phase": "phase-3"

@@ -37,7 +37,32 @@ import {
     revokedAutomationCredentialResultIsConsistent,
     rotatedAutomationCredentialResultIsConsistent,
 } from "../../src/contracts/automationSecurity.ts";
+import {
+    incidentPageCursorIsConsistent,
+    newestIncidentOrderIsStable,
+} from "../../src/contracts/incidents.ts";
+import {
+    activeIncidentSummaryTimesAreConsistent,
+    activeIncidentTimesAreConsistent,
+    completeMonitoringSnapshotFitsBudget,
+    completeMonitoringSnapshotTimesAreConsistent,
+    monitoringJsonObjectFitsBudget,
+    notificationIncidentReferenceIsConsistent,
+    notificationTimesAreConsistent,
+    resolvedIncidentSummaryTimesAreConsistent,
+    resolvedIncidentTimesAreConsistent,
+} from "../../src/contracts/monitoring.ts";
+import {
+    newestNotificationOrderIsStable,
+    notificationInputIncidentReferenceIsConsistent,
+    notificationPageCursorIsConsistent,
+} from "../../src/contracts/notifications.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
+import {
+    newestReportOrderIsStable,
+    reportPageCursorIsConsistent,
+    upsertReportInputFitsBudget,
+} from "../../src/contracts/reports.ts";
 import {
     isValidSecurityLabel,
     securityLabelMaximumLength,
@@ -69,6 +94,7 @@ import {
     isCanonicalWebAuthnBase64Url,
     sortWebAuthnTransports,
 } from "../../src/contracts/webauthn.ts";
+import { jsonObjectSchema } from "../../src/shared/json.ts";
 import {
     getBoundedNonBlankTextMaximumLength,
     hasNoNulCharacter,
@@ -122,6 +148,74 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         canonicalAgentStatuses,
         "Live Valibot validation additionally requires one canonically ordered status per configured agent ID.",
+    ],
+    [
+        monitoringJsonObjectFitsBudget,
+        "Live Valibot validation additionally limits the serialized JSON object to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        completeMonitoringSnapshotTimesAreConsistent,
+        "Live Valibot validation additionally requires snapshot completion not to precede snapshot start.",
+    ],
+    [
+        completeMonitoringSnapshotFitsBudget,
+        "Live Valibot validation additionally limits the complete snapshot to its reviewed aggregate UTF-8 byte budget.",
+    ],
+    [
+        activeIncidentTimesAreConsistent,
+        "Live Valibot validation additionally requires active-incident observation timestamps to be monotonic.",
+    ],
+    [
+        resolvedIncidentTimesAreConsistent,
+        "Live Valibot validation additionally requires resolved-incident observation and resolution timestamps to be monotonic.",
+    ],
+    [
+        activeIncidentSummaryTimesAreConsistent,
+        "Live Valibot validation additionally requires active-incident summary timestamps to be monotonic.",
+    ],
+    [
+        resolvedIncidentSummaryTimesAreConsistent,
+        "Live Valibot validation additionally requires resolved-incident summary timestamps to be monotonic.",
+    ],
+    [
+        notificationIncidentReferenceIsConsistent,
+        "Live Valibot validation additionally requires notification incident ID and generation to be present together.",
+    ],
+    [
+        notificationTimesAreConsistent,
+        "Live Valibot validation additionally requires notification read time not to precede occurrence time.",
+    ],
+    [
+        newestIncidentOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first incident ordering by last-seen timestamp and ID.",
+    ],
+    [
+        incidentPageCursorIsConsistent,
+        "Live Valibot validation additionally requires an incident continuation cursor to identify the returned last row.",
+    ],
+    [
+        newestNotificationOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first notification ordering by occurrence timestamp and ID.",
+    ],
+    [
+        notificationPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a notification continuation cursor to identify the returned last row.",
+    ],
+    [
+        notificationInputIncidentReferenceIsConsistent,
+        "Live Valibot validation additionally requires producer incident ID and generation to be present together.",
+    ],
+    [
+        newestReportOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first report ordering by occurrence timestamp and ID.",
+    ],
+    [
+        reportPageCursorIsConsistent,
+        "Live Valibot validation additionally requires a report continuation cursor to identify the returned last row.",
+    ],
+    [
+        upsertReportInputFitsBudget,
+        "Live Valibot validation additionally limits report producer input to its reviewed aggregate UTF-8 byte budget.",
     ],
     [
         automationCredentialTimesAreOrdered,
@@ -294,6 +388,15 @@ export function convertContractSchema(
         $id: `urn:mira-dashboard:${schemaId}`,
         ...toJsonSchema(schema, {
             errorMode: "throw",
+            overrideSchema({ jsonSchema, valibotSchema }) {
+                if (valibotSchema === jsonObjectSchema) {
+                    return appendJsonSchemaComment(
+                        { ...jsonSchema, type: "object" },
+                        "Live Valibot validation additionally requires an acyclic plain JSON object with bounded depth, finite safe-magnitude numbers, and no sparse arrays."
+                    );
+                }
+                return null;
+            },
             overrideAction({ jsonSchema, valibotAction }) {
                 const requirement = readActionRequirement(valibotAction);
                 const operation = readActionOperation(valibotAction);

@@ -1,4 +1,14 @@
 import { agentProcedureNames, agentRouter } from "../domains/agents/procedures.ts";
+import {
+    incidentProcedureNames,
+    incidentRouter,
+    monitoringProcedureNames,
+    monitoringRouter,
+    notificationProcedureNames,
+    notificationRouter,
+    reportProcedureNames,
+    reportRouter,
+} from "../domains/monitoring/procedures.ts";
 import { eventsProcedureNames, eventsRouter } from "../domains/realtime/procedures.ts";
 import {
     automationSecurityProcedureNames,
@@ -31,6 +41,10 @@ export const appRouter = router({
     auth: authRouter,
     automationSecurity: automationSecurityRouter,
     events: eventsRouter,
+    incidents: incidentRouter,
+    monitoring: monitoringRouter,
+    notifications: notificationRouter,
+    reports: reportRouter,
     securityAudit: securityAuditRouter,
     system: systemRouter,
     tasks: taskRouter,
@@ -43,6 +57,10 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("auth", authProcedureNames),
     ...namespacedProcedureNames("automationSecurity", automationSecurityProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
+    ...namespacedProcedureNames("incidents", incidentProcedureNames),
+    ...namespacedProcedureNames("monitoring", monitoringProcedureNames),
+    ...namespacedProcedureNames("notifications", notificationProcedureNames),
+    ...namespacedProcedureNames("reports", reportProcedureNames),
     ...namespacedProcedureNames("securityAudit", securityAuditProcedureNames),
     ...namespacedProcedureNames("system", systemProcedureNames),
     ...namespacedProcedureNames("tasks", taskProcedureNames),

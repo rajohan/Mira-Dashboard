@@ -1,5 +1,7 @@
 import type { RequestAuthentication } from "../../contracts/security.ts";
 import type { AgentService } from "../domains/agents/service.ts";
+import type { MonitoringCatalogService } from "../domains/monitoring/catalogService.ts";
+import type { MonitoringService } from "../domains/monitoring/service.ts";
 import type { AuthenticationLifecycleService } from "../domains/security/authenticationLifecycle.ts";
 import {
     type AuthenticationLease,
@@ -33,6 +35,8 @@ export interface RequestContextOptions {
     readonly authenticateCredential: AuthenticateCredential;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+    readonly monitoringCatalogService: MonitoringCatalogService["Service"];
+    readonly monitoringService: MonitoringService["Service"];
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly request: Request;
     readonly requestId: string;
@@ -51,6 +55,8 @@ export interface RequestContext {
     readonly authenticationLease?: AuthenticationLease;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+    readonly monitoringCatalogService: MonitoringCatalogService["Service"];
+    readonly monitoringService: MonitoringService["Service"];
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly requestId: string;
     readonly responseHeaders: Headers;
@@ -80,6 +86,8 @@ export async function createRequestContext(
         automationSecurityLifecycle: options.automationSecurityLifecycle,
         mfaAccountLifecycle: options.mfaAccountLifecycle,
         mfaLoginLifecycle: options.mfaLoginLifecycle,
+        monitoringCatalogService: options.monitoringCatalogService,
+        monitoringService: options.monitoringService,
         ...(resolution.lease && { authenticationLease: resolution.lease }),
         pendingLoginCredential: options.pendingLoginCredential,
         requestId: options.requestId,

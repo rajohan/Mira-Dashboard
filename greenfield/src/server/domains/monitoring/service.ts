@@ -21,6 +21,7 @@ import { defaultRealtimeRetentionMilliseconds } from "../realtime/retention.ts";
 import {
     MonitoringSnapshotValidationError,
     normalizeMonitoringSnapshot,
+    type NormalizedMonitoringProblem,
 } from "./normalization.ts";
 import {
     insertRealtimeEvent,
@@ -64,9 +65,15 @@ export interface MonitoringServiceDependencies {
     generateId?: () => string;
     nowMs?: () => number;
     realtimeRetentionMs?: number;
-    repository: MonitoringRepository;
-    wakeEventPump?: () => void;
+    repository: MonitoringSubmissionRepository;
+    wakeEventPump?: () => Promise<void> | void;
 }
+
+/** Minimal persistence port owned by complete-snapshot ingestion. */
+export type MonitoringSubmissionRepository = Pick<
+    MonitoringRepository,
+    "withImmediateTransaction"
+>;
 
 export type MonitoringSubmissionError =
     | DatabaseRuntimeWriteUnavailableError
@@ -126,6 +133,19 @@ function isNewerThanLatestRun(
     return completedAtOrder > 0 || (completedAtOrder === 0 && runId > latestRunId);
 }
 
+function reportStatusForProblems(
+    problems: readonly NormalizedMonitoringProblem[]
+): "error" | "ok" | "warning" {
+    if (
+        problems.some(
+            (problem) => problem.severity === "critical" || problem.severity === "error"
+        )
+    ) {
+        return "error";
+    }
+    return problems.some((problem) => problem.severity === "warning") ? "warning" : "ok";
+}
+
 /**
  * Creates the business service for complete monitor snapshots.
  * All lifecycle, report, notification, observation, and outbox writes share one immediate
@@ -142,6 +162,14 @@ export function createMonitoringService(
         realtimeRetentionSchema,
         dependencies.realtimeRetentionMs ?? defaultRealtimeRetentionMilliseconds
     );
+    const wakeAfterCommit = async (changed: boolean): Promise<void> => {
+        if (!changed || dependencies.wakeEventPump === undefined) return;
+        try {
+            await dependencies.wakeEventPump();
+        } catch {
+            // SQLite is authoritative; adaptive polling recovers a missed wakeup.
+        }
+    };
 
     const commitCompleteSnapshot = async (
         input: unknown
@@ -197,6 +225,8 @@ export function createMonitoringService(
                     occurredAt: snapshotOccurredAt,
                     source: normalized.snapshot.report.source,
                     sourceJobId: normalized.snapshot.report.sourceJobId,
+                    status: reportStatusForProblems(normalized.snapshot.problems),
+                    summary: normalized.snapshot.report.summary ?? null,
                     title: normalized.snapshot.report.title,
                 });
                 unit.insertMonitorRun({
@@ -276,15 +306,7 @@ export function createMonitoringService(
                 )
             );
 
-            if (committed.realtimeEvents > 0 && dependencies.wakeEventPump) {
-                yield* Effect.sync(() => {
-                    try {
-                        dependencies.wakeEventPump?.();
-                    } catch {
-                        // SQLite is authoritative; adaptive polling recovers a missed wakeup.
-                    }
-                });
-            }
+            yield* Effect.promise(() => wakeAfterCommit(committed.realtimeEvents > 0));
             return committed;
         }
     );

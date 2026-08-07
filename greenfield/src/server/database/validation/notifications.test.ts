@@ -19,6 +19,30 @@ test("accepts notifications with both incident reference fields", () => {
     ).toBeDefined();
 });
 
+test("accepts nullable and omitted report-link fields on notification inserts", () => {
+    const {
+        reportId: _reportId,
+        source: _source,
+        ...withoutReportLink
+    } = validNotificationValues;
+
+    expect(
+        v.parse(notificationInsertSchema, {
+            ...validNotificationValues,
+            reportId: null,
+            source: null,
+        })
+    ).toBeDefined();
+    expect(v.parse(notificationInsertSchema, withoutReportLink)).toBeDefined();
+    expect(
+        v.parse(notificationSelectSchema, {
+            ...validNotificationSelectValues,
+            reportId: null,
+            source: null,
+        })
+    ).toBeDefined();
+});
+
 test("rejects notifications with only half of the incident reference pair", () => {
     const { incidentGeneration: _generation, ...withoutGeneration } =
         validNotificationValues;
@@ -60,6 +84,8 @@ test("reuses monitoring text policies and enforces notification read order", () 
         { kind: "k".repeat(101) },
         { message: "m".repeat(1001) },
         { readAt: subMilliseconds(validNotificationValues.occurredAt, 1) },
+        { reportId: "not-a-report-id" },
+        { source: "s".repeat(201) },
         { title: "t".repeat(501) },
     ]) {
         expect(() =>

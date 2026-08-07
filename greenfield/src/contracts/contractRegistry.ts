@@ -1,16 +1,23 @@
 import { accountSecurityProcedureContracts } from "./accountSecurity.ts";
+import { agentRealtimeEventContract } from "./agentRealtime.ts";
 import { agentProcedureContracts } from "./agents.ts";
 import { authProcedureContracts } from "./auth.ts";
 import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
 import { eventsStreamContract } from "./events.ts";
+import { incidentProcedureContracts } from "./incidents.ts";
+import { monitoringProcedureContracts } from "./monitoringIngestion.ts";
+import { monitoringRealtimeEventContracts } from "./monitoringRealtime.ts";
+import { notificationProcedureContracts } from "./notifications.ts";
 import {
     assertProcedureContractErrors,
     type ProcedureContract,
     type RawHttpContract,
     type RealtimeEventContract,
 } from "./registry.ts";
+import { reportProcedureContracts } from "./reports.ts";
 import { securityAuditProcedureContracts } from "./securityAudit.ts";
 import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
+import { taskRealtimeEventContract } from "./taskRealtime.ts";
 import { taskProcedureContracts } from "./tasks.ts";
 
 /** Implemented tRPC procedure metadata used by runtime wiring and docs. */
@@ -20,6 +27,10 @@ const registeredProcedureContracts = [
     ...authProcedureContracts,
     ...automationSecurityProcedureContracts,
     eventsStreamContract,
+    ...incidentProcedureContracts,
+    ...monitoringProcedureContracts,
+    ...notificationProcedureContracts,
+    ...reportProcedureContracts,
     ...securityAuditProcedureContracts,
     ...systemProcedureContracts,
     ...taskProcedureContracts,
@@ -61,4 +72,8 @@ export const procedureContracts = Object.freeze(
 export const rawHttpContracts: readonly RawHttpContract[] = [...systemRawHttpContracts];
 
 /** Implemented realtime topics used by runtime wiring and docs. */
-export const realtimeEventContracts: readonly RealtimeEventContract[] = [];
+export const realtimeEventContracts: readonly RealtimeEventContract[] = Object.freeze([
+    agentRealtimeEventContract,
+    ...monitoringRealtimeEventContracts,
+    taskRealtimeEventContract,
+]);

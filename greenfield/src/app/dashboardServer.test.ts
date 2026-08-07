@@ -6,6 +6,12 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { listAutomationPrincipalsResultSchema } from "../contracts/automationSecurity.ts";
+import {
+    monitoringSubmissionResultSchema,
+    reportDetailSchema,
+} from "../contracts/monitoring.ts";
+import { automationPrincipalCapabilities } from "../server/database/schema/automationPrincipalCapabilities.ts";
+import { automationPrincipalCapabilityInsertSchema } from "../server/database/validation/automationPrincipalCapabilities.ts";
 import { createWebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import {
     authenticationTestNow,
@@ -110,6 +116,16 @@ describe("Dashboard security composition", () => {
                 database,
                 authenticationTestNow
             );
+            database
+                .insert(automationPrincipalCapabilities)
+                .values(
+                    v.parse(automationPrincipalCapabilityInsertSchema, {
+                        capability: "monitoring:write",
+                        grantedAt: authenticationTestNow,
+                        principalId: authenticationTestPrincipalId,
+                    })
+                )
+                .run();
             server = await createDashboardServer({
                 applicationRuntime,
                 browserOrigin: "https://dashboard.example",
@@ -147,9 +163,78 @@ describe("Dashboard security composition", () => {
                 result.principals.find(({ id }) => id === authenticationTestPrincipalId)
             ).toMatchObject({
                 activeCredentialCount: 1,
-                capabilities: ["reports:read"],
+                capabilities: ["monitoring:write", "reports:read"],
                 disabled: false,
                 id: authenticationTestPrincipalId,
+            });
+
+            const nowMs = authenticationTestNow.getTime();
+            const snapshot = {
+                completedAtMs: nowMs - 1000,
+                monitorKey: "dashboard-composition",
+                problems: [],
+                report: {
+                    bodyMarkdown: "# Production composition",
+                    kind: "composition",
+                    metadata: { source: "dashboard-server-test" },
+                    source: "dashboard",
+                    sourceJobId: "composition-test",
+                    title: "Production composition",
+                },
+                runId: "018f6f50-6a9e-7b88-8000-000000000001",
+                startedAtMs: nowMs - 2000,
+            };
+            const ingestionResponse = await fetch(
+                new URL("/trpc/monitoring.submitCompleteSnapshot", server.url),
+                {
+                    body: JSON.stringify({ json: snapshot }),
+                    headers: {
+                        authorization: `Bearer ${fixture.automation.token}`,
+                        "content-type": "application/json",
+                    },
+                    method: "POST",
+                }
+            );
+            const ingestionBody = (await ingestionResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+            expect(ingestionResponse.status).toBe(200);
+            expect(ingestionBody.error).toBeUndefined();
+            const ingestion = v.parse(
+                monitoringSubmissionResultSchema,
+                ingestionBody.result?.data?.json
+            );
+            expect(ingestion).toMatchObject({
+                createdIncidents: 0,
+                observedIncidents: 0,
+                status: "accepted",
+            });
+            expect(ingestion.reportId).not.toBeNull();
+
+            const reportInput = encodeURIComponent(
+                JSON.stringify({ json: { id: ingestion.reportId } })
+            );
+            const reportResponse = await fetch(
+                new URL(`/trpc/reports.get?input=${reportInput}`, server.url),
+                {
+                    headers: {
+                        cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
+                    },
+                }
+            );
+            const reportBody = (await reportResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+            expect(reportResponse.status).toBe(200);
+            expect(reportBody.error).toBeUndefined();
+            expect(
+                v.parse(reportDetailSchema, reportBody.result?.data?.json)
+            ).toMatchObject({
+                bodyMarkdown: snapshot.report.bodyMarkdown,
+                id: ingestion.reportId,
+                title: snapshot.report.title,
             });
         } finally {
             try {

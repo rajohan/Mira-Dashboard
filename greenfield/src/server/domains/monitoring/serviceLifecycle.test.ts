@@ -192,11 +192,26 @@ describe("monitoring service", () => {
                     .all()
                     .map((notification) => ({
                         generation: notification.incidentGeneration,
+                        incidentId: notification.incidentId,
+                        linkUrl: notification.linkUrl,
                         readAt: notification.readAt,
+                        reportId: notification.reportId,
                     }))
             ).toEqual([
-                { generation: 1, readAt: manuallyReadAt },
-                { generation: 2, readAt: null },
+                {
+                    generation: 1,
+                    incidentId: filesystemIncident.id,
+                    linkUrl: `/incidents?incidentId=${filesystemIncident.id}`,
+                    readAt: manuallyReadAt,
+                    reportId: null,
+                },
+                {
+                    generation: 2,
+                    incidentId: filesystemIncident.id,
+                    linkUrl: `/incidents?incidentId=${filesystemIncident.id}`,
+                    readAt: null,
+                    reportId: null,
+                },
             ]);
 
             expect(allRowCounts(database)).toEqual({

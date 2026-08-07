@@ -9,8 +9,13 @@ export const trpcRequestBodyMaximumBytes = 64 * 1024;
 export const taskContentRequestBodyMaximumBytes = 640 * 1024;
 /** Raw body ceiling for task progress create and update procedures. */
 export const taskProgressRequestBodyMaximumBytes = 128 * 1024;
+/** Raw body ceiling for aggregate-bounded monitoring ingestion and report writes. */
+export const monitoringRequestBodyMaximumBytes = 640 * 1024;
 /** Bun-level ceiling applied before the Fetch handler is invoked. */
-export const serverRequestBodyMaximumBytes = taskContentRequestBodyMaximumBytes;
+export const serverRequestBodyMaximumBytes = Math.max(
+    taskContentRequestBodyMaximumBytes,
+    monitoringRequestBodyMaximumBytes
+);
 /** Raw body ceiling for authentication and account-security procedures. */
 export const authenticationRequestBodyMaximumBytes = 16 * 1024;
 /** Raw body ceiling for bounded WebAuthn authentication responses. */
@@ -32,17 +37,17 @@ function procedureNamespace(name: string): string | undefined {
     return separator <= 0 ? undefined : name.slice(0, separator);
 }
 
-function usesAuthenticationTransport(contract: ProcedureContract): boolean {
-    return (
-        contract.transport.handler === "authentication" ||
-        usesAuthenticationRequestBody(contract)
-    );
-}
-
 function usesAuthenticationRequestBody(contract: ProcedureContract): boolean {
     return (
         contract.transport.requestBody === "authentication" ||
         contract.transport.requestBody === "webauthn"
+    );
+}
+
+function usesAuthenticationTransport(contract: ProcedureContract): boolean {
+    return (
+        contract.transport.handler === "authentication" ||
+        usesAuthenticationRequestBody(contract)
     );
 }
 
@@ -125,6 +130,7 @@ function effectivePolicy(input: {
     readonly containsAuthenticationProcedure: boolean;
     readonly containsForbiddenBatchProcedure: boolean;
     readonly containsLongLivedProcedure: boolean;
+    readonly containsMonitoringProcedure: boolean;
     readonly containsTaskContentProcedure: boolean;
     readonly containsTaskProgressProcedure: boolean;
     readonly containsWebAuthnProcedure: boolean;
@@ -138,12 +144,26 @@ function effectivePolicy(input: {
     }
     const handlerPolicy =
         handlerIdleTimeoutSeconds === undefined ? {} : { handlerIdleTimeoutSeconds };
+    // Ordinary body profiles are allowances and compose by maximum. Authentication
+    // profiles below remain intentional restrictive ceilings for their namespaces.
     let requestBodyMaximumBytes = trpcRequestBodyMaximumBytes;
+    if (input.containsMonitoringProcedure) {
+        requestBodyMaximumBytes = Math.max(
+            requestBodyMaximumBytes,
+            monitoringRequestBodyMaximumBytes
+        );
+    }
     if (input.containsTaskContentProcedure) {
-        requestBodyMaximumBytes = taskContentRequestBodyMaximumBytes;
+        requestBodyMaximumBytes = Math.max(
+            requestBodyMaximumBytes,
+            taskContentRequestBodyMaximumBytes
+        );
     }
     if (input.containsTaskProgressProcedure) {
-        requestBodyMaximumBytes = taskProgressRequestBodyMaximumBytes;
+        requestBodyMaximumBytes = Math.max(
+            requestBodyMaximumBytes,
+            taskProgressRequestBodyMaximumBytes
+        );
     }
     if (input.containsAuthenticationProcedure) {
         requestBodyMaximumBytes = authenticationRequestBodyMaximumBytes;
@@ -184,6 +204,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
         let containsAuthenticationProcedure = false;
         let containsForbiddenBatchProcedure = false;
         let containsLongLivedProcedure = false;
+        let containsMonitoringProcedure = false;
         let containsTaskContentProcedure = false;
         let containsTaskProgressProcedure = false;
         let containsWebAuthnProcedure = false;
@@ -196,6 +217,8 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
                     contract.transport.batching === "forbidden";
                 containsLongLivedProcedure ||=
                     contract.transport.handler === "long-lived";
+                containsMonitoringProcedure ||=
+                    contract.transport.requestBody === "monitoring";
                 containsTaskContentProcedure ||=
                     contract.transport.requestBody === "task-content";
                 containsTaskProgressProcedure ||=
@@ -214,6 +237,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
             containsAuthenticationProcedure,
             containsForbiddenBatchProcedure,
             containsLongLivedProcedure,
+            containsMonitoringProcedure,
             containsTaskContentProcedure,
             containsTaskProgressProcedure,
             containsWebAuthnProcedure,
@@ -226,6 +250,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
             containsAuthenticationProcedure,
             containsForbiddenBatchProcedure: containsAuthenticationProcedure,
             containsLongLivedProcedure: false,
+            containsMonitoringProcedure: false,
             containsTaskContentProcedure: false,
             containsTaskProgressProcedure: false,
             containsWebAuthnProcedure: false,

@@ -1,0 +1,76 @@
+{
+  "$id": "urn:mira-dashboard:monitoring.submitCompleteSnapshot.output",
+  "type": "object",
+  "properties": {
+    "createdIncidents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "duplicateRunId": {
+      "type": "boolean"
+    },
+    "observedIncidents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "reopenedIncidents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "reportId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "resolvedIncidents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "realtimeEvents": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "duplicate",
+        "stale"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "createdIncidents",
+    "duplicateRunId",
+    "observedIncidents",
+    "reopenedIncidents",
+    "reportId",
+    "resolvedIncidents",
+    "realtimeEvents",
+    "runId",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,16 @@
+{
+  "$id": "urn:mira-dashboard:monitoring.reports.realtime.payload",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "\\S"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

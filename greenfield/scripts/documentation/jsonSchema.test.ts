@@ -22,6 +22,13 @@ import {
     createAutomationPrincipalResultSchema,
     listAutomationPrincipalsResultSchema,
 } from "../../src/contracts/automationSecurity.ts";
+import { listIncidentsResultSchema } from "../../src/contracts/incidents.ts";
+import {
+    completeMonitoringSnapshotInputSchema,
+    monitoringJsonObjectSchema,
+} from "../../src/contracts/monitoring.ts";
+import { listNotificationsResultSchema } from "../../src/contracts/notifications.ts";
+import { listReportsResultSchema } from "../../src/contracts/reports.ts";
 import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
 import { listSecurityAuditEventsResultSchema } from "../../src/contracts/securityAudit.ts";
 import {
@@ -37,6 +44,7 @@ import {
     webAuthnAuthenticationResponseSchema,
     webAuthnTransportListSchema,
 } from "../../src/contracts/webauthn.ts";
+import { jsonObjectSchema } from "../../src/shared/json.ts";
 import {
     boundedNonBlankTextSchema,
     hasUniqueArrayItems,
@@ -105,13 +113,16 @@ describe("contract JSON Schema conversion", () => {
                 enum: [
                     "agents:read",
                     "agents:write",
+                    "monitoring:write",
                     "notifications:read",
+                    "notifications:write",
                     "reports:read",
+                    "reports:write",
                     "tasks:read",
                     "tasks:write",
                 ],
             },
-            maxItems: 6,
+            maxItems: 9,
             type: "array",
             uniqueItems: true,
         });
@@ -255,6 +266,64 @@ describe("contract JSON Schema conversion", () => {
         expect(historyDocument).toContain("task-history cursor");
     });
 
+    test("documents monitoring JSON, aggregate, ordering, and cursor constraints", () => {
+        const jsonObjectDocument = convertContractSchema(
+            jsonObjectSchema,
+            "test.jsonObject",
+            "input"
+        );
+        expect(jsonObjectDocument).toMatchObject({ type: "object" });
+        expect(jsonObjectDocument.$comment).toContain("acyclic plain JSON object");
+
+        const monitoringJsonDocument = convertContractSchema(
+            monitoringJsonObjectSchema,
+            "test.monitoringJsonObject",
+            "input"
+        );
+        expect(monitoringJsonDocument).toMatchObject({ type: "object" });
+        expect(monitoringJsonDocument.$comment).toContain("acyclic plain JSON object");
+        expect(monitoringJsonDocument.$comment).toContain(
+            "serialized JSON object to its reviewed UTF-8 byte budget"
+        );
+
+        const snapshotDocument = JSON.stringify(
+            convertContractSchema(
+                completeMonitoringSnapshotInputSchema,
+                "test.monitoringSnapshot",
+                "input"
+            )
+        );
+        expect(snapshotDocument).toContain("snapshot completion not to precede");
+        expect(snapshotDocument).toContain("aggregate UTF-8 byte budget");
+
+        for (const [schema, schemaId, rowOrder, cursor] of [
+            [
+                listIncidentsResultSchema,
+                "test.incidentPage",
+                "strict newest-first incident ordering",
+                "incident continuation cursor",
+            ],
+            [
+                listNotificationsResultSchema,
+                "test.notificationPage",
+                "strict newest-first notification ordering",
+                "notification continuation cursor",
+            ],
+            [
+                listReportsResultSchema,
+                "test.reportPage",
+                "strict newest-first report ordering",
+                "report continuation cursor",
+            ],
+        ] as const) {
+            const document = JSON.stringify(
+                convertContractSchema(schema, schemaId, "output")
+            );
+            expect(document).toContain(rowOrder);
+            expect(document).toContain(cursor);
+        }
+    });
+
     test("documents task bounds, canonicalization, and runtime relationships", () => {
         const titleDocument = JSON.stringify(
             convertContractSchema(taskTitleSchema, "test.taskTitle", "input")
@@ -383,5 +452,10 @@ describe("contract JSON Schema conversion", () => {
         expect(() => convertContractSchema(schema, "test.unknown", "input")).toThrow(
             'The "check" action cannot be converted to JSON Schema.'
         );
+
+        const customSchema = v.custom<Record<string, unknown>>(() => true);
+        expect(() =>
+            convertContractSchema(customSchema, "test.unknownCustom", "input")
+        ).toThrow('The "custom" schema cannot be converted to JSON Schema.');
     });
 });

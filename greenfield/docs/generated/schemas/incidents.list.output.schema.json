@@ -1,0 +1,205 @@
+{
+  "$id": "urn:mira-dashboard:incidents.list.output",
+  "type": "object",
+  "properties": {
+    "incidents": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "firstSeenAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36,
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "kind": {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "\\S"
+              },
+              "lastSeenAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "monitorKey": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "\\S"
+              },
+              "occurrenceCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "severity": {
+                "enum": [
+                  "critical",
+                  "error",
+                  "info",
+                  "warning"
+                ],
+                "type": "string"
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 1000,
+                "pattern": "\\S"
+              },
+              "state": {
+                "const": "active"
+              }
+            },
+            "required": [
+              "fingerprint",
+              "firstSeenAtMs",
+              "generation",
+              "id",
+              "kind",
+              "lastSeenAtMs",
+              "monitorKey",
+              "occurrenceCount",
+              "severity",
+              "title",
+              "state"
+            ],
+            "additionalProperties": false,
+            "$comment": "Live Valibot validation additionally requires active-incident summary timestamps to be monotonic."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "firstSeenAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "id": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36,
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "kind": {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "\\S"
+              },
+              "lastSeenAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "monitorKey": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "\\S"
+              },
+              "occurrenceCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "severity": {
+                "enum": [
+                  "critical",
+                  "error",
+                  "info",
+                  "warning"
+                ],
+                "type": "string"
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 1000,
+                "pattern": "\\S"
+              },
+              "resolvedAtMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8640000000000000
+              },
+              "state": {
+                "const": "resolved"
+              }
+            },
+            "required": [
+              "fingerprint",
+              "firstSeenAtMs",
+              "generation",
+              "id",
+              "kind",
+              "lastSeenAtMs",
+              "monitorKey",
+              "occurrenceCount",
+              "severity",
+              "title",
+              "resolvedAtMs",
+              "state"
+            ],
+            "additionalProperties": false,
+            "$comment": "Live Valibot validation additionally requires resolved-incident summary timestamps to be monotonic."
+          }
+        ]
+      },
+      "maxItems": 100,
+      "$comment": "Live Valibot validation additionally requires strict newest-first incident ordering by last-seen timestamp and ID."
+    },
+    "nextCursor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "lastSeenAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        }
+      },
+      "required": [
+        "id",
+        "lastSeenAtMs"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "incidents"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires an incident continuation cursor to identify the returned last row.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -14,6 +14,8 @@ const validReportValues = Object.freeze({
     occurredAt: observedAt,
     source: "openclaw",
     sourceJobId: "ops-check:primary",
+    status: "ok" as const,
+    summary: null,
     title: "Heartbeat",
 });
 
@@ -29,6 +31,8 @@ test("rejects reports outside shared monitoring policies", () => {
         { occurredAt: toDate(-1) },
         { source: "s".repeat(201) },
         { sourceJobId: "j".repeat(201) },
+        { status: "unknown" },
+        { summary: "s".repeat(2001) },
         { title: "t".repeat(501) },
     ]) {
         expect(() =>

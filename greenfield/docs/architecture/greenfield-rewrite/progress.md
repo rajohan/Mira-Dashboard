@@ -12,7 +12,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                           |
 | 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                          |
-| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Report, incident, notification, schedule/job, cache/metrics, overview, and worker-domain parity remain open.                                                                                                                                             |
+| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server parity are implemented. Their browser workflows, schedules/jobs, overview, cache/metrics, and the real worker remain open.                                                           |
 | 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                               |
 | 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                             |
@@ -841,3 +841,30 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   Persistent OpenClaw/Gateway availability and session state remain Phase 4 work; reports,
   incidents, notifications, schedules/jobs, overview, cache/metrics, and the real worker remain
   open Phase 3 gates.
+
+### 2026-08-07 — Phase 3 monitoring ingestion and catalog slice
+
+- One automation-only `monitoring.submitCompleteSnapshot` boundary now exposes the complete-run
+  state machine through `monitoring:write`. It shares the production database repository,
+  immediate-write admission, domain clock, and post-commit realtime wake path with the report,
+  incident, and notification catalogs.
+- Twelve catalog procedures provide keyset-paginated incident, notification, and report reads;
+  immutable report upserts for scoped browser sessions or automation callers; automation-only
+  notification producer upserts; session-owned notification read/delete actions; and bounded
+  report deletion. Exact `reports:*` and `notifications:*` capabilities and principal-kind
+  middleware keep browser-session actions separate from automation-only ingestion.
+- Complete snapshots and report upserts have a qualified 640 KiB transport profile plus a stricter
+  512 KiB semantic aggregate budget. Each embedded JSON object retains its separate 64 KiB budget.
+  Exact registered procedure matching prevents unknown, malformed, or batched names from inheriting
+  the larger allowance, while authentication and WebAuthn retain their stricter profiles.
+- Typed validation, replay, catalog conflict, not-found, precondition, and database-admission
+  failures map to the declared tRPC error policy. Mutations clamp durable timestamps across clock
+  regressions, cap report-linked deletion work, and keep catalog writes, audit state, and compact
+  realtime invalidations atomic.
+- Generated procedure and realtime documentation now comes from the same Valibot contracts. The
+  reviewed parity inventory marks all six notification and four report legacy operations
+  implemented; incident reads and complete monitoring ingestion are net-new. Incident-generation
+  notifications retain a forward deep link to the immediately stacked authenticated `/incidents`
+  reader rather than choosing one arbitrary observation report; greenfield stays inactive until
+  the complete cutover stack lands. Browser workflows, schedules/jobs, overview, cache/metrics,
+  and real worker execution remain open Phase 3 gates.

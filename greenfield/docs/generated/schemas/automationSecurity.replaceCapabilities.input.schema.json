@@ -19,14 +19,17 @@
         "enum": [
           "agents:read",
           "agents:write",
+          "monitoring:write",
           "notifications:read",
+          "notifications:write",
           "reports:read",
+          "reports:write",
           "tasks:read",
           "tasks:write"
         ],
         "type": "string"
       },
-      "maxItems": 6,
+      "maxItems": 9,
       "uniqueItems": true
     }
   },

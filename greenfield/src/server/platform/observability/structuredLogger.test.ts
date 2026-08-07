@@ -55,6 +55,34 @@ test("writes bounded NDJSON with fixed envelope fields and selected details", ()
     expect(lines[0]).not.toContain("never-log-this");
 });
 
+test("records realtime wake failures without exposing raw failure text", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.warn({
+        component: "realtime-event-pump",
+        event: "realtime.wake.failed",
+        failure: new Error("never-log-this"),
+        outcome: "server-error",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "realtime-event-pump",
+        event: "realtime.wake.failed",
+        level: "warn",
+        outcome: "server-error",
+    });
+    expect(JSON.parse(lines[0] ?? "null")).toHaveProperty("failure");
+    expect(lines[0]).not.toContain("never-log-this");
+});
+
 test("normalizes unknown events and drops extra fields instead of relying on secret names", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({
