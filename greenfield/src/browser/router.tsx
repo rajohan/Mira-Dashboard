@@ -6,6 +6,10 @@ import {
 } from "@tanstack/react-router";
 
 import { DashboardShell } from "./layout/DashboardShell.tsx";
+import {
+    parseIncidentsRouteSearch,
+    parseReportsRouteSearch,
+} from "./monitoring/monitoringRouteSearch.ts";
 import { LoadingState } from "./ui/LoadingState.tsx";
 
 const rootRoute = createRootRoute({ component: DashboardShell });
@@ -29,11 +33,23 @@ const tasksRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/tasks",
 }).lazy(() => import("./routes/tasks.lazy.tsx").then((module) => module.Route));
+const reportsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/reports",
+    validateSearch: parseReportsRouteSearch,
+}).lazy(() => import("./routes/reports.lazy.tsx").then((module) => module.Route));
+const incidentsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/incidents",
+    validateSearch: parseIncidentsRouteSearch,
+}).lazy(() => import("./routes/incidents.lazy.tsx").then((module) => module.Route));
 const routeTree = rootRoute.addChildren([
     overviewRoute,
     loginRoute,
     accountSecurityRoute,
     agentsRoute,
+    incidentsRoute,
+    reportsRoute,
     tasksRoute,
 ]);
 
