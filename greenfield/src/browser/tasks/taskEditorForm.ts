@@ -10,6 +10,7 @@ import {
     taskMaximumLabels,
     taskPriorities,
     taskStatuses,
+    taskTextIsTrimmed,
     taskTitleSchema,
 } from "../../contracts/taskModel.ts";
 import type { CreateTaskInput, UpdateTaskInput } from "../../contracts/tasks.ts";
@@ -19,14 +20,24 @@ export const unassignedTaskOwner = "unassigned";
 const defaultTaskOwner = "mira-2026" satisfies (typeof taskAssigneeIds)[number];
 
 const optionalBodySchema = v.union([v.literal(""), taskBodyMarkdownSchema]);
-const optionalAutomationTextSchema = v.union([
-    v.literal(""),
-    boundedControlSafeTextSchema(200, "Automation value is invalid"),
-]);
-const optionalScheduleSummarySchema = v.union([
-    v.literal(""),
-    boundedControlSafeTextSchema(500, "Schedule summary is invalid"),
-]);
+function optionalCanonicalAutomationTextSchema(maximumLength: number, message: string) {
+    return v.union([
+        v.literal(""),
+        v.pipe(
+            boundedControlSafeTextSchema(maximumLength, message),
+            v.check(taskTextIsTrimmed, message)
+        ),
+    ]);
+}
+
+const optionalAutomationTextSchema = optionalCanonicalAutomationTextSchema(
+    200,
+    "Automation value is invalid"
+);
+const optionalScheduleSummarySchema = optionalCanonicalAutomationTextSchema(
+    500,
+    "Schedule summary is invalid"
+);
 
 function rawTaskLabelsFromText(value: string): string[] {
     return value

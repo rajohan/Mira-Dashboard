@@ -244,6 +244,108 @@ describe("task service", () => {
         }
     });
 
+    test("loads labels in contract order when SQLite collation differs", async () => {
+        const database = await openFreshMigratedDatabase();
+        const service = taskServiceFor(database);
+        const labels = ["\u{10000}", "\uE000"];
+
+        try {
+            const created = await runTaskEffect(
+                service.createTask(taskTestPrincipal, {
+                    labels,
+                    title: "Unicode label order",
+                })
+            );
+
+            expect(created.labels).toEqual(labels);
+            expect(
+                await runTaskEffect(service.getTask({ id: created.id }))
+            ).toMatchObject({ labels });
+            expect(await runTaskEffect(service.listTasks({ limit: 10 }))).toMatchObject({
+                tasks: [{ labels }],
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("returns domain conflicts for duplicate cron job relationships", async () => {
+        const database = await openFreshMigratedDatabase();
+        const service = taskServiceFor(database);
+
+        try {
+            const linked = await runTaskEffect(
+                service.createTask(taskTestPrincipal, {
+                    automation: {
+                        cronJobId: "shared-cron-job",
+                        kind: "openclaw-cron",
+                        recurring: true,
+                    },
+                    title: "Linked task",
+                })
+            );
+            const duplicateCreate = await Effect.runPromise(
+                Effect.flip(
+                    service.createTask(taskTestPrincipal, {
+                        automation: {
+                            cronJobId: "shared-cron-job",
+                            kind: "openclaw-cron",
+                            recurring: true,
+                        },
+                        title: "Duplicate task",
+                    })
+                )
+            );
+            const other = await runTaskEffect(
+                service.createTask(taskTestPrincipal, {
+                    automation: {
+                        cronJobId: "other-cron-job",
+                        kind: "openclaw-cron",
+                        recurring: true,
+                    },
+                    title: "Other task",
+                })
+            );
+            const duplicateUpdate = await Effect.runPromise(
+                Effect.flip(
+                    service.updateTask(taskTestPrincipal, {
+                        expectedVersion: other.version,
+                        id: other.id,
+                        patch: {
+                            automation: {
+                                cronJobId: "shared-cron-job",
+                                kind: "openclaw-cron",
+                                recurring: true,
+                            },
+                        },
+                    })
+                )
+            );
+
+            expect(duplicateCreate).toBeInstanceOf(TaskConflictError);
+            expect(duplicateUpdate).toBeInstanceOf(TaskConflictError);
+            expect(duplicateUpdate).toMatchObject({
+                message: "Task automation cron job is already linked",
+                resourceId: other.id,
+            });
+            expect(await runTaskEffect(service.getTask({ id: linked.id }))).toMatchObject(
+                { automation: { cronJobId: "shared-cron-job" } }
+            );
+            const unchanged = await runTaskEffect(service.getTask({ id: other.id }));
+            expect(unchanged.version).toBe(1);
+            expect(unchanged.automation).toMatchObject({
+                cronJobId: "other-cron-job",
+            });
+            expect(rowCount(database, "tasks")).toBe(2);
+            expect(rowCount(database, "task_automation_profiles")).toBe(2);
+            expect(rowCount(database, "task_events")).toBe(2);
+            expect(rowCount(database, "realtime_events")).toBe(2);
+            expect(rowCount(database, "task_notification_outbox")).toBe(0);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("rolls back progress insertion when the parent version is exhausted", async () => {
         const database = await openFreshMigratedDatabase();
         const service = taskServiceFor(database);

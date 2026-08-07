@@ -14,6 +14,7 @@ import type { JsonObject } from "../../../shared/json.ts";
 import { TaskConflictError } from "./errors.ts";
 import {
     requireTask,
+    requireTaskAutomationWrite,
     requireTaskVersion,
     requireTaskWrite,
     runTaskMutation,
@@ -129,11 +130,14 @@ function createTask(
         });
     }
     context.unit.replaceTaskLabels(taskId, taskLabelInserts(taskId, input.labels ?? []));
-    context.unit.replaceTaskAutomation(
-        taskId,
-        input.automation === undefined
-            ? undefined
-            : taskAutomationInsert(taskId, input.automation)
+    requireTaskAutomationWrite(
+        context.unit.replaceTaskAutomation(
+            taskId,
+            input.automation === undefined
+                ? undefined
+                : taskAutomationInsert(taskId, input.automation)
+        ),
+        taskId
     );
     appendMutationRecords(context, {
         eventType: "created",
@@ -213,11 +217,14 @@ function updateTask(
         );
     }
     if (automationChanged && input.patch.automation !== undefined) {
-        context.unit.replaceTaskAutomation(
-            input.id,
-            input.patch.automation === null
-                ? undefined
-                : taskAutomationInsert(input.id, input.patch.automation)
+        requireTaskAutomationWrite(
+            context.unit.replaceTaskAutomation(
+                input.id,
+                input.patch.automation === null
+                    ? undefined
+                    : taskAutomationInsert(input.id, input.patch.automation)
+            ),
+            input.id
         );
     }
     appendMutationRecords(context, {

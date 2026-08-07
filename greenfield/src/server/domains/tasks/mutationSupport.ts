@@ -115,6 +115,15 @@ export function requireTaskWrite(
     return task;
 }
 
+export function requireTaskAutomationWrite(written: boolean, taskId: string): void {
+    if (!written) {
+        throw new TaskConflictError({
+            message: "Task automation cron job is already linked",
+            resourceId: taskId,
+        });
+    }
+}
+
 export function requireTaskProgress(
     unit: TaskRepositoryUnitOfWork,
     taskId: string,

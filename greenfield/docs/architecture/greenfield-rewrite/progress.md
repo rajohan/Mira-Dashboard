@@ -799,8 +799,10 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   automations, labels retained task fields as untrusted data, and uses the task-event ID as the
   stable Gateway idempotency key. The Effect worker claims one delivery per lease, aborts a stalled
   send before its lease can expire, and only acknowledges or releases work while it still owns a
-  live lease. Production sending remains gated on the Phase 4 persistent authenticated Gateway
-  client rather than reusing the one-shot bootstrap verifier.
+  live lease. No greenfield process is activated in production before final cutover, and that
+  cutover remains gated on composing the Phase 4 persistent authenticated Gateway client rather
+  than reusing the one-shot bootstrap verifier. Task intents therefore cannot accumulate in
+  production without their consumer.
 - `/tasks` provides the reviewed four-column operator layout, server-side search and
   assignee/recurring filters, accessible create/edit/detail/progress dialogs, and status movement
   through `@dnd-kit/react`. Shared Headless UI controls, TanStack Form, TanStack Query, and the

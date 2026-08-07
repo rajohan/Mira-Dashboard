@@ -136,7 +136,7 @@ export class DrizzleTaskRepositoryUnitOfWork
     public replaceTaskAutomation(
         taskId: string,
         input: TaskAutomationProfileInsert | undefined
-    ): void {
+    ): boolean {
         if (input !== undefined && input.taskId !== taskId) {
             throw new TypeError("Task automation profile belongs to another task");
         }
@@ -144,11 +144,14 @@ export class DrizzleTaskRepositoryUnitOfWork
             .delete(taskAutomationProfiles)
             .where(eq(taskAutomationProfiles.taskId, taskId))
             .run();
-        if (input === undefined) return;
-        this.#transaction
+        if (input === undefined) return true;
+        const inserted = this.#transaction
             .insert(taskAutomationProfiles)
             .values(v.parse(taskAutomationProfileInsertSchema, input))
-            .run();
+            .onConflictDoNothing({ target: taskAutomationProfiles.cronJobId })
+            .returning({ taskId: taskAutomationProfiles.taskId })
+            .get();
+        return inserted !== undefined;
     }
 
     public replaceTaskLabels(taskId: string, inputs: readonly TaskLabelInsert[]): void {

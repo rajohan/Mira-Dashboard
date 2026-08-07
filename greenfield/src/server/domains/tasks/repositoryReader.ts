@@ -20,6 +20,7 @@ import {
     type ListTaskProgressInput,
     type ListTasksInput,
 } from "../../../contracts/tasks.ts";
+import { compareStrings } from "../../../shared/validation.ts";
 import { taskAutomationProfiles } from "../../database/schema/taskAutomationProfiles.ts";
 import { taskLabels } from "../../database/schema/taskLabels.ts";
 import { tasks } from "../../database/schema/tasks.ts";
@@ -169,7 +170,9 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
             const automation = automationByTask.get(task.id);
             return {
                 ...(automation === undefined ? {} : { automation }),
-                labels: labelsByTask.get(task.id) ?? [],
+                labels: (labelsByTask.get(task.id) ?? []).toSorted((left, right) =>
+                    compareStrings(left.label, right.label)
+                ),
                 task,
             };
         });

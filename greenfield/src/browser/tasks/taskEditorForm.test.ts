@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
+import * as v from "valibot";
+
 import type { TaskDetail } from "../../contracts/taskModel.ts";
 import {
     createTaskInputFromEditor,
+    taskEditorFormSchema,
     taskEditorValues,
     taskLabelsFromText,
     updateTaskInputFromEditor,
@@ -49,6 +52,26 @@ describe("task editor mapping", () => {
             status: "todo",
             title: "Create task",
         });
+    });
+
+    test("rejects noncanonical outer whitespace in every automation text field", () => {
+        const fields = [
+            "automationCronJobId",
+            "automationModel",
+            "automationScheduleSummary",
+            "automationSessionTarget",
+            "automationThinking",
+        ] as const;
+
+        for (const field of fields) {
+            const values = taskEditorValues();
+            values.automationEnabled = true;
+            values.automationCronJobId = "daily-task-runner";
+            values.title = "Create automated task";
+            values[field] = " noncanonical ";
+
+            expect(v.safeParse(taskEditorFormSchema, values).success).toBeFalse();
+        }
     });
 
     test("preserves versioned content and can explicitly remove automation", () => {

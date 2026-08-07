@@ -94,7 +94,7 @@ export interface TaskRepositoryUnitOfWork extends TaskRepositoryReader {
     replaceTaskAutomation(
         taskId: string,
         input: TaskAutomationProfileInsert | undefined
-    ): void;
+    ): boolean;
     replaceTaskLabels(taskId: string, inputs: readonly TaskLabelInsert[]): void;
     touchTask(id: string, updatedAt: Date): TaskRecord | undefined;
     updateTask(input: VersionedTaskMutationInput): TaskRecord | undefined;
