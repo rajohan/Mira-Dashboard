@@ -64,7 +64,6 @@ async function openPrivateDirectory(directory: string): Promise<OpenedDirectory>
     if (process.platform !== "linux") throw pointerFailure();
     let handle: FileHandle | undefined;
     try {
-        const before = await lstat(directory, { bigint: true });
         handle = await open(directory, directoryFlags);
         const [held, after, canonical] = await Promise.all([
             handle.stat({ bigint: true }),
@@ -73,11 +72,8 @@ async function openPrivateDirectory(directory: string): Promise<OpenedDirectory>
         ]);
         if (
             canonical !== directory ||
-            !validPrivateDirectory(before) ||
             !validPrivateDirectory(held) ||
             !validPrivateDirectory(after) ||
-            before.dev !== held.dev ||
-            before.ino !== held.ino ||
             after.dev !== held.dev ||
             after.ino !== held.ino
         ) {

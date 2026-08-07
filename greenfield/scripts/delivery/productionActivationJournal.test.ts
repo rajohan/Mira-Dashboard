@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -105,6 +105,26 @@ describe("production activation journal", () => {
                 "Production activation journal update failed"
             );
             await clearProductionActivationJournal(lease, paths, promoted);
+        });
+    });
+
+    test("fails closed when an opened journal entry disappears after reading", async () => {
+        const { paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            await createProductionActivationJournal(
+                lease,
+                paths,
+                absentTransition(Bun.randomUUIDv7())
+            );
+            const failure = await rejectionError(
+                loadProductionActivationJournal(lease, paths, {
+                    afterRead: () =>
+                        unlink(
+                            path.join(paths.stateDirectory, "activation-transition.json")
+                        ),
+                })
+            );
+            expect(failure.message).toBe("Production activation journal update failed");
         });
     });
 });

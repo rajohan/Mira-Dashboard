@@ -25,6 +25,11 @@ interface OpenedStateDirectory {
     readonly handle: FileHandle;
 }
 
+/** Deterministic post-read boundary used only by adversarial tests. */
+export interface ProductionActivationJournalTestHooks {
+    readonly afterRead?: () => Promise<void> | void;
+}
+
 function journalFailure(): Error {
     return new Error(activationJournalFailureMessage);
 }
@@ -72,7 +77,6 @@ async function openStateDirectory(
     }
     let handle: FileHandle | undefined;
     try {
-        const before = await lstat(paths.stateDirectory, { bigint: true });
         handle = await open(paths.stateDirectory, directoryFlags);
         const [held, after, canonical] = await Promise.all([
             handle.stat({ bigint: true }),
@@ -85,8 +89,6 @@ async function openStateDirectory(
             held.isSymbolicLink() ||
             held.uid !== BigInt(process.getuid()) ||
             (held.mode & 0o7777n) !== 0o700n ||
-            before.dev !== held.dev ||
-            before.ino !== held.ino ||
             after.dev !== held.dev ||
             after.ino !== held.ino
         ) {
@@ -100,7 +102,8 @@ async function openStateDirectory(
 }
 
 async function readJournal(
-    state: OpenedStateDirectory
+    state: OpenedStateDirectory,
+    testHooks: ProductionActivationJournalTestHooks = {}
 ): Promise<ProductionActivationTransition | undefined> {
     const journalFile = path.join(`/proc/self/fd/${state.handle.fd}`, journalFileName);
     let handle: FileHandle | undefined;
@@ -109,34 +112,35 @@ async function readJournal(
     let closed: boolean;
     try {
         handle = await open(journalFile, readFlags);
-        const before = await lstat(journalFile, { bigint: true });
         const heldBefore = await handle.stat({ bigint: true });
-        if (
-            !validJournalFile(before, state.device) ||
-            !validJournalFile(heldBefore, state.device) ||
-            before.dev !== heldBefore.dev ||
-            before.ino !== heldBefore.ino ||
-            before.ctimeNs !== heldBefore.ctimeNs ||
-            before.mtimeNs !== heldBefore.mtimeNs ||
-            before.size !== heldBefore.size
-        ) {
+        if (!validJournalFile(heldBefore, state.device)) {
             throw journalFailure();
         }
         const text = await handle.readFile("utf8");
         const value: unknown = JSON.parse(text);
         result = parseProductionActivationTransition(value);
-        const heldAfter = await handle.stat({ bigint: true });
+        await testHooks.afterRead?.();
+        const [heldAfter, pathAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(journalFile, { bigint: true }),
+        ]);
         if (
             heldAfter.dev !== heldBefore.dev ||
             heldAfter.ino !== heldBefore.ino ||
             heldAfter.ctimeNs !== heldBefore.ctimeNs ||
             heldAfter.mtimeNs !== heldBefore.mtimeNs ||
-            heldAfter.size !== heldBefore.size
+            heldAfter.size !== heldBefore.size ||
+            !validJournalFile(pathAfter, state.device) ||
+            pathAfter.dev !== heldBefore.dev ||
+            pathAfter.ino !== heldBefore.ino ||
+            pathAfter.ctimeNs !== heldBefore.ctimeNs ||
+            pathAfter.mtimeNs !== heldBefore.mtimeNs ||
+            pathAfter.size !== heldBefore.size
         ) {
             throw journalFailure();
         }
     } catch (error) {
-        if (errorCode(error) === "ENOENT") {
+        if (!handle && errorCode(error) === "ENOENT") {
             missing = true;
         } else {
             throw journalFailure();
@@ -220,13 +224,14 @@ async function replaceJournal(
  */
 export async function loadProductionActivationJournal(
     lease: DashboardDeploymentLease,
-    paths: PreparedProductionDeliveryPaths
+    paths: PreparedProductionDeliveryPaths,
+    testHooks: ProductionActivationJournalTestHooks = {}
 ): Promise<ProductionActivationTransition | undefined> {
     const state = await openStateDirectory(lease, paths);
     let journal: ProductionActivationTransition | undefined;
     let failed = false;
     try {
-        journal = await readJournal(state);
+        journal = await readJournal(state, testHooks);
     } catch {
         failed = true;
     }

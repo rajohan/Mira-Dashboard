@@ -5,7 +5,6 @@ import {
     lstat,
     mkdir,
     open,
-    readFile,
     readdir,
     realpath,
     rename,
@@ -114,6 +113,7 @@ export interface DatabaseSnapshotSourceIdentity {
 /** Deterministic mutation boundaries exposed only to adversarial tests. */
 export interface DatabaseSnapshotTestHooks {
     readonly afterSnapshotCreated?: (snapshotFile: string) => Promise<void> | void;
+    readonly afterSnapshotFileOpen?: (snapshotFile: string) => Promise<void> | void;
     readonly afterSnapshotFrozen?: (snapshotDirectory: string) => Promise<void> | void;
 }
 
@@ -218,7 +218,6 @@ async function openStableDirectory(
     let handle: FileHandle | undefined;
     let opened: OpenedDirectory | undefined;
     try {
-        const before = await lstat(directory, { bigint: true });
         handle = await open(directory, directoryFlags);
         const [held, after, canonical] = await Promise.all([
             handle.stat({ bigint: true }),
@@ -228,10 +227,8 @@ async function openStableDirectory(
         const heldIdentity = identity(held);
         if (
             canonical !== directory ||
-            !validDirectory(before, expectedMode, process.getuid()) ||
             !validDirectory(held, expectedMode, process.getuid()) ||
             !validDirectory(after, expectedMode, process.getuid()) ||
-            !sameIdentity(before, heldIdentity) ||
             !sameIdentity(after, heldIdentity) ||
             (expectedDevice !== undefined && held.dev !== expectedDevice)
         ) {
@@ -340,37 +337,35 @@ function verifySnapshotDatabase(
 
 async function hashAndFreezeSnapshotFile(
     snapshotFile: string,
-    expectedDevice: bigint
+    expectedDevice: bigint,
+    afterOpen?: (snapshotFile: string) => Promise<void> | void
 ): Promise<SnapshotFileIdentity> {
     if (typeof process.getuid !== "function") throw snapshotFailure();
     let handle: FileHandle | undefined;
     let result: SnapshotFileIdentity | undefined;
     try {
-        const before = await lstat(snapshotFile, { bigint: true });
         handle = await open(snapshotFile, snapshotFileFlags);
         const held = await handle.stat({ bigint: true });
+        const canonical = await realpath(`/proc/self/fd/${handle.fd}`);
         if (
-            !before.isFile() ||
-            before.isSymbolicLink() ||
-            before.nlink !== 1n ||
-            before.uid !== BigInt(process.getuid()) ||
-            before.dev !== expectedDevice ||
-            before.size <= 0n ||
-            before.size > BigInt(maximumSnapshotBytes) ||
-            held.dev !== before.dev ||
-            held.ino !== before.ino ||
-            held.size !== before.size
+            canonical !== snapshotFile ||
+            !held.isFile() ||
+            held.isSymbolicLink() ||
+            held.nlink !== 1n ||
+            held.uid !== BigInt(process.getuid()) ||
+            held.dev !== expectedDevice ||
+            held.size <= 0n ||
+            held.size > BigInt(maximumSnapshotBytes)
         ) {
             throw snapshotFailure();
         }
+        await afterOpen?.(snapshotFile);
         await handle.sync();
         const hasher = new Bun.CryptoHasher("sha256");
-        const buffer = Buffer.alloc(
-            Math.min(snapshotCopyBufferBytes, Number(before.size))
-        );
+        const buffer = Buffer.alloc(Math.min(snapshotCopyBufferBytes, Number(held.size)));
         let offset = 0;
-        while (offset < Number(before.size)) {
-            const length = Math.min(buffer.byteLength, Number(before.size) - offset);
+        while (offset < Number(held.size)) {
+            const length = Math.min(buffer.byteLength, Number(held.size) - offset);
             const read = await handle.read(buffer, 0, length, offset);
             if (read.bytesRead <= 0) throw snapshotFailure();
             hasher.update(buffer.subarray(0, read.bytesRead));
@@ -378,20 +373,31 @@ async function hashAndFreezeSnapshotFile(
         }
         await handle.chmod(immutableFileMode);
         await handle.sync();
-        const after = await handle.stat({ bigint: true });
+        const [after, pathAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(snapshotFile, { bigint: true }),
+        ]);
         if (
-            after.dev !== before.dev ||
-            after.ino !== before.ino ||
-            after.size !== before.size ||
+            after.dev !== held.dev ||
+            after.ino !== held.ino ||
+            after.size !== held.size ||
             after.nlink !== 1n ||
-            (after.mode & 0o7777n) !== 0o400n
+            (after.mode & 0o7777n) !== 0o400n ||
+            !pathAfter.isFile() ||
+            pathAfter.isSymbolicLink() ||
+            pathAfter.dev !== held.dev ||
+            pathAfter.ino !== held.ino ||
+            pathAfter.size !== held.size ||
+            pathAfter.nlink !== 1n ||
+            pathAfter.uid !== BigInt(process.getuid()) ||
+            (pathAfter.mode & 0o7777n) !== 0o400n
         ) {
             throw snapshotFailure();
         }
         result = Object.freeze({
-            bytes: Number(before.size),
-            dev: before.dev,
-            ino: before.ino,
+            bytes: Number(held.size),
+            dev: held.dev,
+            ino: held.ino,
             sha256: hasher.digest("hex"),
         });
     } catch {
@@ -453,40 +459,27 @@ async function verifyFrozenSnapshot(
     if (typeof process.getuid !== "function") throw snapshotFailure();
     const snapshotFile = path.join(snapshotDirectory, snapshotDatabaseFileName);
     const manifestFile = path.join(snapshotDirectory, snapshotManifestFileName);
-    const [directory, file, manifestStatus, entries] = await Promise.all([
+    const [directory, entries] = await Promise.all([
         lstat(snapshotDirectory, { bigint: true }),
-        lstat(snapshotFile, { bigint: true }),
-        lstat(manifestFile, { bigint: true }),
         readdir(snapshotDirectory),
     ]);
     if (
         !validDirectory(directory, 0o500n, process.getuid()) ||
-        !file.isFile() ||
-        file.isSymbolicLink() ||
-        file.nlink !== 1n ||
-        file.uid !== BigInt(process.getuid()) ||
-        file.dev !== expectedFile.dev ||
-        file.ino !== expectedFile.ino ||
-        file.size !== BigInt(expectedFile.bytes) ||
-        (file.mode & 0o7777n) !== 0o400n ||
-        !manifestStatus.isFile() ||
-        manifestStatus.isSymbolicLink() ||
-        manifestStatus.nlink !== 1n ||
-        manifestStatus.uid !== BigInt(process.getuid()) ||
-        manifestStatus.size <= 0n ||
-        manifestStatus.size > BigInt(maximumSnapshotManifestBytes) ||
-        (manifestStatus.mode & 0o7777n) !== 0o400n ||
+        directory.dev !== expectedFile.dev ||
         entries.length !== 2 ||
         entries.toSorted().join("\0") !==
             [snapshotDatabaseFileName, snapshotManifestFileName].toSorted().join("\0")
     ) {
         throw snapshotFailure();
     }
-    const rawManifest = await readFile(manifestFile, "utf8");
+    const rawManifest = await readImmutableSnapshotManifest(
+        manifestFile,
+        expectedFile.dev
+    );
     const parsed = parseDatabaseSnapshotManifest(JSON.parse(rawManifest) as unknown);
     if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw snapshotFailure();
 
-    const observed = await hashImmutableSnapshot(snapshotFile);
+    const observed = await hashImmutableSnapshot(snapshotFile, expectedFile);
     if (
         observed.bytes !== expectedFile.bytes ||
         observed.sha256 !== expectedFile.sha256
@@ -495,8 +488,80 @@ async function verifyFrozenSnapshot(
     }
 }
 
+async function readImmutableSnapshotManifest(
+    manifestFile: string,
+    expectedDevice: bigint
+): Promise<string> {
+    let handle: FileHandle | undefined;
+    let result: string | undefined;
+    try {
+        if (typeof process.getuid !== "function") throw snapshotFailure();
+        handle = await open(
+            manifestFile,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+        const held = await handle.stat({ bigint: true });
+        const canonical = await realpath(`/proc/self/fd/${handle.fd}`);
+        if (
+            canonical !== manifestFile ||
+            !held.isFile() ||
+            held.isSymbolicLink() ||
+            held.nlink !== 1n ||
+            held.uid !== BigInt(process.getuid()) ||
+            held.dev !== expectedDevice ||
+            held.size <= 0n ||
+            held.size > BigInt(maximumSnapshotManifestBytes) ||
+            (held.mode & 0o7777n) !== 0o400n
+        ) {
+            throw snapshotFailure();
+        }
+        const contents = Buffer.alloc(Number(held.size) + 1);
+        let offset = 0;
+        while (offset < contents.byteLength) {
+            const read = await handle.read(
+                contents,
+                offset,
+                contents.byteLength - offset,
+                offset
+            );
+            if (read.bytesRead === 0) break;
+            offset += read.bytesRead;
+        }
+        const [heldAfter, pathAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(manifestFile, { bigint: true }),
+        ]);
+        if (
+            offset !== Number(held.size) ||
+            heldAfter.dev !== held.dev ||
+            heldAfter.ino !== held.ino ||
+            heldAfter.size !== held.size ||
+            heldAfter.ctimeNs !== held.ctimeNs ||
+            heldAfter.mtimeNs !== held.mtimeNs ||
+            pathAfter.dev !== held.dev ||
+            pathAfter.ino !== held.ino ||
+            pathAfter.size !== held.size ||
+            pathAfter.ctimeNs !== held.ctimeNs ||
+            pathAfter.mtimeNs !== held.mtimeNs
+        ) {
+            throw snapshotFailure();
+        }
+        result = new TextDecoder("utf-8", { fatal: true }).decode(
+            contents.subarray(0, offset)
+        );
+    } catch {
+        throw snapshotFailure();
+    } finally {
+        const closed = await closeHandle(handle);
+        if (!closed) result = undefined;
+    }
+    if (result === undefined) throw snapshotFailure();
+    return result;
+}
+
 async function hashImmutableSnapshot(
-    snapshotFile: string
+    snapshotFile: string,
+    expected: SnapshotFileIdentity
 ): Promise<Pick<SnapshotFileIdentity, "bytes" | "sha256">> {
     let handle: FileHandle | undefined;
     let result: Pick<SnapshotFileIdentity, "bytes" | "sha256"> | undefined;
@@ -506,11 +571,16 @@ async function hashImmutableSnapshot(
             constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
         );
         const status = await handle.stat({ bigint: true });
+        const canonical = await realpath(`/proc/self/fd/${handle.fd}`);
         if (
+            typeof process.getuid !== "function" ||
+            canonical !== snapshotFile ||
             !status.isFile() ||
             status.nlink !== 1n ||
-            status.size <= 0n ||
-            status.size > BigInt(maximumSnapshotBytes) ||
+            status.uid !== BigInt(process.getuid()) ||
+            status.dev !== expected.dev ||
+            status.ino !== expected.ino ||
+            status.size !== BigInt(expected.bytes) ||
             (status.mode & 0o7777n) !== 0o400n
         ) {
             throw snapshotFailure();
@@ -526,6 +596,24 @@ async function hashImmutableSnapshot(
             if (read.bytesRead <= 0) throw snapshotFailure();
             hasher.update(buffer.subarray(0, read.bytesRead));
             offset += read.bytesRead;
+        }
+        const [heldAfter, pathAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(snapshotFile, { bigint: true }),
+        ]);
+        if (
+            heldAfter.dev !== status.dev ||
+            heldAfter.ino !== status.ino ||
+            heldAfter.size !== status.size ||
+            heldAfter.ctimeNs !== status.ctimeNs ||
+            heldAfter.mtimeNs !== status.mtimeNs ||
+            pathAfter.dev !== status.dev ||
+            pathAfter.ino !== status.ino ||
+            pathAfter.size !== status.size ||
+            pathAfter.ctimeNs !== status.ctimeNs ||
+            pathAfter.mtimeNs !== status.mtimeNs
+        ) {
+            throw snapshotFailure();
         }
         result = Object.freeze({
             bytes: Number(status.size),
@@ -632,7 +720,8 @@ async function snapshotPresentDatabase(
         verifySnapshotDatabase(snapshotFile, migrations);
         const fileIdentity = await hashAndFreezeSnapshotFile(
             snapshotFile,
-            backups.identity.dev
+            backups.identity.dev,
+            hooks.afterSnapshotFileOpen
         );
         const manifest = parseDatabaseSnapshotManifest({
             database: {

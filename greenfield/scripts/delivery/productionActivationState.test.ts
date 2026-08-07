@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -139,6 +139,29 @@ describe("production activation state", () => {
             expect(pairingFailure.message).toBe(
                 "Production activation state update failed"
             );
+        });
+    });
+
+    test("fails closed when an opened activation entry disappears after reading", async () => {
+        const { paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const empty = await loadProductionActivationState(lease, paths);
+            await commitProductionActivationState(lease, paths, empty, {
+                current: {
+                    releaseId: "a".repeat(40),
+                    runtimeRevision: "b".repeat(40),
+                },
+                formatVersion: 1,
+                previous: null,
+                transitionId: Bun.randomUUIDv7(),
+            });
+            const failure = await rejectionError(
+                loadProductionActivationState(lease, paths, {
+                    afterRead: () =>
+                        unlink(path.join(paths.stateDirectory, "activation.json")),
+                })
+            );
+            expect(failure.message).toBe("Production activation state update failed");
         });
     });
 });

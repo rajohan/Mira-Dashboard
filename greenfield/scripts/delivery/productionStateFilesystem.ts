@@ -152,11 +152,6 @@ async function openStableDirectory(
     resources: FileHandle[]
 ): Promise<OpenedDirectory> {
     try {
-        const beforeOpen = await lstat(requestedPath, { bigint: true });
-        if (!beforeOpen.isDirectory() || beforeOpen.isSymbolicLink()) {
-            throw invalidProductionStateFilesystem();
-        }
-
         const handle = await open(requestedPath, directoryOpenFlags);
         resources.push(handle);
         const heldDescriptorPath = descriptorPath(handle);
@@ -170,7 +165,6 @@ async function openStableDirectory(
             !snapshot.isDirectory() ||
             snapshot.isSymbolicLink() ||
             canonicalPath !== expectedCanonicalPath ||
-            !hasIdentity(beforeOpen, identity) ||
             !hasIdentity(afterOpen, identity)
         ) {
             throw invalidProductionStateFilesystem();
@@ -191,7 +185,6 @@ async function entryStillMatches(directory: OpenedDirectory): Promise<boolean> {
     let pathHandle: FileHandle | undefined;
     let matches: boolean | undefined;
     try {
-        const beforeOpen = await lstat(directory.canonicalPath, { bigint: true });
         pathHandle = await open(directory.canonicalPath, directoryOpenFlags);
         const pathDescriptor = descriptorPath(pathHandle);
         const [heldStat, pathStat, canonicalPath, afterOpen] = await Promise.all([
@@ -203,12 +196,10 @@ async function entryStillMatches(directory: OpenedDirectory): Promise<boolean> {
         matches =
             heldStat.isDirectory() &&
             pathStat.isDirectory() &&
-            !beforeOpen.isSymbolicLink() &&
             !afterOpen.isSymbolicLink() &&
             canonicalPath === directory.canonicalPath &&
             hasIdentity(heldStat, directory.identity) &&
             hasIdentity(pathStat, directory.identity) &&
-            hasIdentity(beforeOpen, directory.identity) &&
             hasIdentity(afterOpen, directory.identity);
     } catch {
         matches = false;

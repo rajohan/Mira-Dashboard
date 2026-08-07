@@ -165,15 +165,12 @@ async function readExactFile(
             snapshot,
             identity
         );
-        const pathBefore = await lstat(filePath, { bigint: true });
         file = await open(filePath, readFlags);
         const held = await file.stat({ bigint: true });
         const descriptorPath = await realpath(`/proc/self/fd/${file.fd}`);
         if (
             descriptorPath !== filePath ||
-            !validImmutableFile(pathBefore, identity.bytes, snapshot) ||
-            !validImmutableFile(held, identity.bytes, snapshot) ||
-            !sameSnapshot(pathBefore, held)
+            !validImmutableFile(held, identity.bytes, snapshot)
         ) {
             throw immutableReleaseFileFailure();
         }

@@ -143,7 +143,6 @@ export function createProjectFileLogDestination(
     let primary: OpenedLogFile | undefined;
     let fallback: OpenedLogFile | undefined;
     try {
-        const before = lstatSync(logsDirectory);
         directoryDescriptor = openSync(logsDirectory, directoryFlags);
         const held = fstatSync(directoryDescriptor);
         const canonicalDirectory = realpathSync(`/proc/self/fd/${directoryDescriptor}`);
@@ -155,11 +154,8 @@ export function createProjectFileLogDestination(
             held.isSymbolicLink() ||
             held.uid !== userId ||
             (held.mode & permissionBits) !== privateDirectoryMode ||
-            !before.isDirectory() ||
-            before.isSymbolicLink() ||
             !after.isDirectory() ||
             after.isSymbolicLink() ||
-            !sameIdentity(held, before) ||
             !sameIdentity(held, after)
         ) {
             throw invalidProjectLogDestination();
@@ -179,7 +175,6 @@ export function createProjectFileLogDestination(
             maximumFallbackLogBytes
         );
     } catch {
-        if (fallback) closeSync(fallback.descriptor);
         if (primary) closeSync(primary.descriptor);
         if (directoryDescriptor !== undefined) closeSync(directoryDescriptor);
         throw invalidProjectLogDestination();

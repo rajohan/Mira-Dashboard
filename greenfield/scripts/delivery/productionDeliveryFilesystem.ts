@@ -75,7 +75,6 @@ async function openPrivateDirectory(
         | undefined;
     let failed = false;
     try {
-        const before = await lstat(directory, { bigint: true });
         handle = await open(directory, directoryOpenFlags);
         const [held, after, canonical] = await Promise.all([
             handle.stat({ bigint: true }),
@@ -85,10 +84,8 @@ async function openPrivateDirectory(
         const observedIdentity = identity(held);
         if (
             canonical !== directory ||
-            !validPrivateDirectory(before, process.getuid()) ||
             !validPrivateDirectory(held, process.getuid()) ||
             !validPrivateDirectory(after, process.getuid()) ||
-            !sameIdentity(before, observedIdentity) ||
             !sameIdentity(after, observedIdentity) ||
             (expectedDevice !== undefined && held.dev !== expectedDevice)
         ) {
@@ -122,15 +119,6 @@ async function preparePrivateChild(
     let child: Awaited<ReturnType<typeof openPrivateDirectory>> | undefined;
     let failed = false;
     try {
-        const before = await lstat(anchoredChild, { bigint: true });
-        if (
-            !before.isDirectory() ||
-            before.isSymbolicLink() ||
-            before.uid !== BigInt(process.getuid()) ||
-            (before.mode & privateDirectoryModeBigInt) !== privateDirectoryModeBigInt
-        ) {
-            throw deliveryFilesystemFailure();
-        }
         await chmodThroughHandle(anchoredChild);
         child = await openPrivateDirectory(childPath, parent.identity.dev);
         const parentAfter = await parent.handle.stat({ bigint: true });

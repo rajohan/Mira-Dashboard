@@ -100,7 +100,6 @@ async function openOwnedDirectory(
     let opened: OpenedDirectory | undefined;
     let failed = false;
     try {
-        const before = await lstat(openPath, { bigint: true });
         handle = await open(openPath, directoryFlags);
         const [held, after, canonical] = await Promise.all([
             handle.stat({ bigint: true }),
@@ -109,11 +108,8 @@ async function openOwnedDirectory(
         ]);
         if (
             canonical !== expectedPath ||
-            !validOwnedDirectory(before, userId, expectedDevice) ||
             !validOwnedDirectory(held, userId, expectedDevice) ||
             !validOwnedDirectory(after, userId, expectedDevice) ||
-            before.dev !== held.dev ||
-            before.ino !== held.ino ||
             after.dev !== held.dev ||
             after.ino !== held.ino
         ) {
@@ -243,7 +239,6 @@ async function readExactHeldFile(
     let handle: FileHandle | undefined;
     let failed = false;
     try {
-        const before = await lstat(anchoredPath, { bigint: true });
         handle = await open(anchoredPath, sourceFileFlags);
         const held = await handle.stat({ bigint: true });
         if (
@@ -253,9 +248,7 @@ async function readExactHeldFile(
             held.uid !== BigInt(directory.userId) ||
             held.dev !== directory.device ||
             held.size !== BigInt(expected.bytes.byteLength) ||
-            (held.mode & 0o7777n) !== BigInt(privateFileMode) ||
-            before.dev !== held.dev ||
-            before.ino !== held.ino
+            (held.mode & 0o7777n) !== BigInt(privateFileMode)
         ) {
             throw unitFilesystemFailure();
         }

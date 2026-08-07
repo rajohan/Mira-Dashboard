@@ -1,6 +1,15 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    mkdtemp,
+    readFile,
+    readdir,
+    rm,
+    stat,
+    unlink,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -180,6 +189,23 @@ describe("verified database snapshots", () => {
         );
 
         expect(tamperFailure).toBeInstanceOf(DatabaseSnapshotError);
+        expect(await readdir(state.backupsDirectory)).toEqual([]);
+
+        const replacementFailure = await rejectionError(
+            Effect.runPromise(
+                createVerifiedDatabaseSnapshot(
+                    {
+                        expectedState: "present",
+                        migrationsDirectory,
+                        releaseId,
+                        stateDirectory: state.stateDirectory,
+                        transitionId: Bun.randomUUIDv7(),
+                    },
+                    { afterSnapshotFileOpen: unlink }
+                )
+            )
+        );
+        expect(replacementFailure).toBeInstanceOf(DatabaseSnapshotError);
         expect(await readdir(state.backupsDirectory)).toEqual([]);
     });
 });

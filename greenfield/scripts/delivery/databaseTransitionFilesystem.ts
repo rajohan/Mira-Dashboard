@@ -3,7 +3,6 @@ import {
     lstat,
     mkdir,
     open,
-    readFile,
     readdir,
     realpath,
     rename,
@@ -195,7 +194,6 @@ async function openPrivateDirectory(
     let handle: FileHandle | undefined;
     let result: OpenedDirectory | undefined;
     try {
-        const before = await lstat(directory, { bigint: true });
         handle = await open(directory, directoryFlags);
         const [held, after, canonical] = await Promise.all([
             handle.stat({ bigint: true }),
@@ -205,10 +203,8 @@ async function openPrivateDirectory(
         const expected = directoryIdentity(held);
         if (
             canonical !== expectedCanonicalPath ||
-            !validPrivateDirectory(before, process.getuid()) ||
             !validPrivateDirectory(held, process.getuid()) ||
             !validPrivateDirectory(after, process.getuid()) ||
-            !sameDirectoryIdentity(before, expected) ||
             !sameDirectoryIdentity(after, expected) ||
             (expectedDevice !== undefined && held.dev !== expectedDevice)
         ) {
@@ -280,24 +276,69 @@ async function readAndValidateSnapshotManifest(
     expected: DatabaseSnapshotManifest
 ): Promise<void> {
     const manifestFile = path.join(snapshotDirectory, snapshotManifestFileName);
-    const status = await lstat(manifestFile, { bigint: true });
-    if (
-        typeof process.getuid !== "function" ||
-        !status.isFile() ||
-        status.isSymbolicLink() ||
-        status.nlink !== 1n ||
-        status.uid !== BigInt(process.getuid()) ||
-        (status.mode & 0o7777n) !== 0o400n ||
-        status.size <= 0n ||
-        status.size > BigInt(maximumManifestBytes)
-    ) {
-        throw transitionFailure();
+    let handle: FileHandle | undefined;
+    let failed = false;
+    try {
+        if (typeof process.getuid !== "function") throw transitionFailure();
+        handle = await open(manifestFile, sourceFlags);
+        const held = await handle.stat({ bigint: true });
+        const canonical = await realpath(`/proc/self/fd/${handle.fd}`);
+        if (
+            canonical !== manifestFile ||
+            !held.isFile() ||
+            held.isSymbolicLink() ||
+            held.nlink !== 1n ||
+            held.uid !== BigInt(process.getuid()) ||
+            (held.mode & 0o7777n) !== 0o400n ||
+            held.size <= 0n ||
+            held.size > BigInt(maximumManifestBytes)
+        ) {
+            throw transitionFailure();
+        }
+        const bytes = Buffer.alloc(Number(held.size) + 1);
+        let offset = 0;
+        while (offset < bytes.byteLength) {
+            const read = await handle.read(
+                bytes,
+                offset,
+                bytes.byteLength - offset,
+                offset
+            );
+            if (read.bytesRead === 0) break;
+            offset += read.bytesRead;
+        }
+        const [heldAfter, pathAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(manifestFile, { bigint: true }),
+        ]);
+        if (
+            offset !== Number(held.size) ||
+            heldAfter.dev !== held.dev ||
+            heldAfter.ino !== held.ino ||
+            heldAfter.size !== held.size ||
+            heldAfter.ctimeNs !== held.ctimeNs ||
+            heldAfter.mtimeNs !== held.mtimeNs ||
+            pathAfter.dev !== held.dev ||
+            pathAfter.ino !== held.ino ||
+            pathAfter.size !== held.size ||
+            pathAfter.ctimeNs !== held.ctimeNs ||
+            pathAfter.mtimeNs !== held.mtimeNs
+        ) {
+            throw transitionFailure();
+        }
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(
+            bytes.subarray(0, offset)
+        );
+        const value: unknown = JSON.parse(text);
+        const parsed = parseDatabaseSnapshotManifest(value);
+        if (JSON.stringify(parsed) !== JSON.stringify(expected)) {
+            throw transitionFailure();
+        }
+    } catch {
+        failed = true;
     }
-    const value: unknown = JSON.parse(await readFile(manifestFile, "utf8"));
-    const parsed = parseDatabaseSnapshotManifest(value);
-    if (JSON.stringify(parsed) !== JSON.stringify(expected)) {
-        throw transitionFailure();
-    }
+    const closed = await closeHandle(handle);
+    if (failed || !closed) throw transitionFailure();
 }
 
 async function copyVerifiedSnapshot(
@@ -328,25 +369,23 @@ async function copyVerifiedSnapshot(
     let target: FileHandle | undefined;
     let failed = false;
     try {
-        const sourceBefore = await lstat(snapshot.snapshotFile, { bigint: true });
         source = await open(snapshot.snapshotFile, sourceFlags);
         const sourceHeld = await source.stat({ bigint: true });
+        const canonicalSource = await realpath(`/proc/self/fd/${source.fd}`);
         if (
-            !sourceBefore.isFile() ||
-            sourceBefore.isSymbolicLink() ||
-            sourceBefore.nlink !== 1n ||
-            sourceBefore.uid !== BigInt(process.getuid()) ||
-            sourceBefore.dev !== expectedDevice ||
-            sourceBefore.size !== BigInt(snapshot.manifest.database.bytes) ||
-            (sourceBefore.mode & 0o7777n) !== 0o400n ||
-            sourceHeld.dev !== sourceBefore.dev ||
-            sourceHeld.ino !== sourceBefore.ino ||
-            sourceHeld.size !== sourceBefore.size
+            canonicalSource !== snapshot.snapshotFile ||
+            !sourceHeld.isFile() ||
+            sourceHeld.isSymbolicLink() ||
+            sourceHeld.nlink !== 1n ||
+            sourceHeld.uid !== BigInt(process.getuid()) ||
+            sourceHeld.dev !== expectedDevice ||
+            sourceHeld.size !== BigInt(snapshot.manifest.database.bytes) ||
+            (sourceHeld.mode & 0o7777n) !== 0o400n
         ) {
             throw transitionFailure();
         }
         target = await open(destination, destinationFlags, privateFileMode);
-        const bytes = Number(sourceBefore.size);
+        const bytes = Number(sourceHeld.size);
         const buffer = Buffer.alloc(Math.min(copyBufferBytes, bytes));
         const sourceHasher = new Bun.CryptoHasher("sha256");
         let offset = 0;
@@ -369,15 +408,19 @@ async function copyVerifiedSnapshot(
             offset += read.bytesRead;
         }
         await target.sync();
-        const [sourceAfter, targetAfter] = await Promise.all([
+        const [sourceAfter, sourcePathAfter, targetAfter] = await Promise.all([
             source.stat({ bigint: true }),
+            lstat(snapshot.snapshotFile, { bigint: true }),
             target.stat({ bigint: true }),
         ]);
         if (
-            sourceAfter.dev !== sourceBefore.dev ||
-            sourceAfter.ino !== sourceBefore.ino ||
-            sourceAfter.size !== sourceBefore.size ||
-            targetAfter.size !== sourceBefore.size ||
+            sourceAfter.dev !== sourceHeld.dev ||
+            sourceAfter.ino !== sourceHeld.ino ||
+            sourceAfter.size !== sourceHeld.size ||
+            sourcePathAfter.dev !== sourceHeld.dev ||
+            sourcePathAfter.ino !== sourceHeld.ino ||
+            sourcePathAfter.size !== sourceHeld.size ||
+            targetAfter.size !== sourceHeld.size ||
             targetAfter.nlink !== 1n ||
             targetAfter.uid !== BigInt(process.getuid()) ||
             (targetAfter.mode & 0o7777n) !== 0o600n

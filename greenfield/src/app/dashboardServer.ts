@@ -1,3 +1,8 @@
+import { realpath } from "node:fs/promises";
+import path from "node:path";
+
+import { Redacted } from "effect";
+
 import { createAuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createAuthenticationLifecycleRepository } from "../server/domains/security/authenticationLifecycleRepository.ts";
 import {
@@ -461,7 +466,3 @@ if (import.meta.main) {
         process.exitCode = 1;
     }
 }
-import { realpath } from "node:fs/promises";
-import path from "node:path";
-
-import { Redacted } from "effect";

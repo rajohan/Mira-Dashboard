@@ -88,7 +88,6 @@ async function readStableManifest(
     let text: string | undefined;
     let failed = false;
     try {
-        const before = await lstat(manifestPath, { bigint: true });
         file = await open(manifestPath, manifestOpenFlags);
         const held = await file.stat({ bigint: true });
         const descriptorPath = await realpath(`/proc/self/fd/${file.fd}`);
@@ -102,8 +101,7 @@ async function readStableManifest(
             held.size > BigInt(maximumManifestBytes) ||
             (held.mode & writePermissionBits) !== 0n ||
             path.dirname(descriptorPath) !== releaseRoot ||
-            path.basename(descriptorPath) !== manifestFileName ||
-            !sameSnapshot(held, before)
+            path.basename(descriptorPath) !== manifestFileName
         ) {
             throw invalidRuntimeRelease();
         }

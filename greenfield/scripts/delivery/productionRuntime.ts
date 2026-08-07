@@ -265,15 +265,11 @@ async function copyRuntimeExecutable(
     let target: FileHandle | undefined;
     let failed = false;
     try {
-        const sourceBefore = await lstat(sourceExecutable, { bigint: true });
         source = await open(sourceExecutable, sourceFlags);
-        const heldBefore = snapshot(await source.stat({ bigint: true }));
+        const heldStatus = await source.stat({ bigint: true });
+        const heldBefore = snapshot(heldStatus);
         const canonical = await realpath(`/proc/self/fd/${source.fd}`);
-        if (
-            canonical !== sourceExecutable ||
-            !sameSnapshot(snapshot(sourceBefore), heldBefore) ||
-            (sourceBefore.mode & 0o100n) === 0n
-        ) {
+        if (canonical !== sourceExecutable || (heldStatus.mode & 0o100n) === 0n) {
             throw productionRuntimeFailure();
         }
 

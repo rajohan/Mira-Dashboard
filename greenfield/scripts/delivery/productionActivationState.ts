@@ -1,13 +1,5 @@
 import { constants, type BigIntStats } from "node:fs";
-import {
-    lstat,
-    open,
-    readFile,
-    realpath,
-    rename,
-    unlink,
-    type FileHandle,
-} from "node:fs/promises";
+import { lstat, open, realpath, rename, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -45,6 +37,11 @@ export interface ProductionActivationState {
     readonly fileIdentity?: FileIdentity;
     readonly record?: ProductionActivationRecord;
     readonly stateDirectory: string;
+}
+
+/** Deterministic post-read boundary used only by adversarial tests. */
+export interface ProductionActivationStateTestHooks {
+    readonly afterRead?: () => Promise<void> | void;
 }
 
 function activationFailure(): Error {
@@ -92,6 +89,16 @@ function sameFile(left: FileIdentity, right: FileIdentity): boolean {
     );
 }
 
+function sameFileAcrossRename(left: FileIdentity, right: FileIdentity): boolean {
+    return (
+        left.dev === right.dev &&
+        left.ino === right.ino &&
+        left.mtimeNs === right.mtimeNs &&
+        left.size === right.size &&
+        left.uid === right.uid
+    );
+}
+
 async function closeHandle(handle: FileHandle | undefined): Promise<boolean> {
     if (!handle) return true;
     try {
@@ -115,7 +122,6 @@ async function openStateDirectory(
     }
     let handle: FileHandle | undefined;
     try {
-        const before = await lstat(paths.stateDirectory, { bigint: true });
         handle = await open(paths.stateDirectory, directoryFlags);
         const [held, after, canonical] = await Promise.all([
             handle.stat({ bigint: true }),
@@ -128,8 +134,6 @@ async function openStateDirectory(
             held.isSymbolicLink() ||
             held.uid !== BigInt(process.getuid()) ||
             (held.mode & 0o7777n) !== 0o700n ||
-            before.dev !== held.dev ||
-            before.ino !== held.ino ||
             after.dev !== held.dev ||
             after.ino !== held.ino
         ) {
@@ -144,7 +148,8 @@ async function openStateDirectory(
 
 async function readActivationFile(
     stateHandle: FileHandle,
-    stateDevice: bigint
+    stateDevice: bigint,
+    testHooks: ProductionActivationStateTestHooks = {}
 ): Promise<Pick<ProductionActivationState, "fileIdentity" | "record">> {
     const activationFile = path.join(
         `/proc/self/fd/${stateHandle.fd}`,
@@ -154,20 +159,23 @@ async function readActivationFile(
     let result: Pick<ProductionActivationState, "fileIdentity" | "record"> | undefined;
     try {
         handle = await open(activationFile, readFlags);
-        const before = snapshotFile(
-            await lstat(activationFile, { bigint: true }),
-            stateDevice
-        );
         const held = snapshotFile(await handle.stat({ bigint: true }), stateDevice);
-        if (!sameFile(before, held)) throw activationFailure();
         const text = await handle.readFile("utf8");
         const value: unknown = JSON.parse(text);
         const record = parseProductionActivationRecord(value);
-        const after = snapshotFile(await handle.stat({ bigint: true }), stateDevice);
-        if (!sameFile(held, after)) throw activationFailure();
-        result = Object.freeze({ fileIdentity: after, record });
+        await testHooks.afterRead?.();
+        const [heldAfter, pathAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(activationFile, { bigint: true }),
+        ]);
+        const after = snapshotFile(heldAfter, stateDevice);
+        const current = snapshotFile(pathAfter, stateDevice);
+        if (!sameFile(held, after) || !sameFile(held, current)) {
+            throw activationFailure();
+        }
+        result = Object.freeze({ fileIdentity: current, record });
     } catch (error) {
-        if (errorCode(error) === "ENOENT") return Object.freeze({});
+        if (!handle && errorCode(error) === "ENOENT") return Object.freeze({});
         throw activationFailure();
     } finally {
         const closed = await closeHandle(handle);
@@ -185,13 +193,18 @@ async function readActivationFile(
  */
 export async function loadProductionActivationState(
     lease: DashboardDeploymentLease,
-    paths: PreparedProductionDeliveryPaths
+    paths: PreparedProductionDeliveryPaths,
+    testHooks: ProductionActivationStateTestHooks = {}
 ): Promise<ProductionActivationState> {
     const state = await openStateDirectory(lease, paths);
     let result: ProductionActivationState | undefined;
     let failed = false;
     try {
-        const observed = await readActivationFile(state.handle, state.identity.dev);
+        const observed = await readActivationFile(
+            state.handle,
+            state.identity.dev,
+            testHooks
+        );
         result = Object.freeze({
             [activationStateBrand]: true as const,
             ...observed,
@@ -223,11 +236,15 @@ function validateTransition(
     }
 }
 
-async function writeStagedRecord(
+async function writeAndCommitStagedRecord(
+    stateHandle: FileHandle,
     stageFile: string,
-    record: ProductionActivationRecord
+    activationFile: string,
+    record: ProductionActivationRecord,
+    expectedDevice: bigint
 ): Promise<void> {
     let handle: FileHandle | undefined;
+    let stageOwned = false;
     let failed = false;
     try {
         handle = await open(
@@ -235,16 +252,50 @@ async function writeStagedRecord(
             constants.O_CREAT |
                 constants.O_EXCL |
                 constants.O_NOFOLLOW |
-                constants.O_WRONLY,
+                constants.O_RDWR,
             privateFileMode
         );
+        stageOwned = true;
         const bytes = new TextEncoder().encode(
             serializeProductionActivationRecord(record)
         );
         if (bytes.byteLength > maximumActivationBytes) throw activationFailure();
         await handle.writeFile(bytes);
         await handle.sync();
-        const storedText = await readFile(stageFile, "utf8");
+        const storedBytes = Buffer.alloc(bytes.byteLength + 1);
+        let offset = 0;
+        while (offset < storedBytes.byteLength) {
+            const read = await handle.read(
+                storedBytes,
+                offset,
+                storedBytes.byteLength - offset,
+                offset
+            );
+            if (read.bytesRead === 0) break;
+            offset += read.bytesRead;
+        }
+        const status = await handle.stat({ bigint: true });
+        const [stateDirectory, descriptorPath] = await Promise.all([
+            realpath(`/proc/self/fd/${stateHandle.fd}`),
+            realpath(`/proc/self/fd/${handle.fd}`),
+        ]);
+        if (
+            typeof process.getuid !== "function" ||
+            descriptorPath !== path.join(stateDirectory, path.basename(stageFile)) ||
+            offset !== bytes.byteLength ||
+            !status.isFile() ||
+            status.nlink !== 1n ||
+            status.uid !== BigInt(process.getuid()) ||
+            status.dev !== expectedDevice ||
+            status.size !== BigInt(bytes.byteLength) ||
+            (status.mode & 0o7777n) !== BigInt(privateFileMode)
+        ) {
+            throw activationFailure();
+        }
+        const stagedIdentity = snapshotFile(status, expectedDevice);
+        const storedText = new TextDecoder("utf-8", { fatal: true }).decode(
+            storedBytes.subarray(0, offset)
+        );
         const stored: unknown = JSON.parse(storedText);
         if (
             JSON.stringify(parseProductionActivationRecord(stored)) !==
@@ -252,8 +303,30 @@ async function writeStagedRecord(
         ) {
             throw activationFailure();
         }
+        await rename(stageFile, activationFile);
+        stageOwned = false;
+        await stateHandle.sync();
+        const [heldAfter, pathAfter] = await Promise.all([
+            handle.stat({ bigint: true }),
+            lstat(activationFile, { bigint: true }),
+        ]);
+        const heldIdentity = snapshotFile(heldAfter, expectedDevice);
+        const pathIdentity = snapshotFile(pathAfter, expectedDevice);
+        if (
+            !sameFileAcrossRename(stagedIdentity, heldIdentity) ||
+            !sameFile(heldIdentity, pathIdentity)
+        ) {
+            throw activationFailure();
+        }
     } catch {
         failed = true;
+    }
+    if (stageOwned) {
+        try {
+            await unlink(stageFile);
+        } catch (error) {
+            if (errorCode(error) !== "ENOENT") failed = true;
+        }
     }
     const closed = await closeHandle(handle);
     if (failed || !closed) throw activationFailure();
@@ -287,7 +360,6 @@ export async function commitProductionActivationState(
     const stageFile = path.join(descriptorRoot, stageName);
     const activationFile = path.join(descriptorRoot, activationFileName);
     let committed: ProductionActivationState | undefined;
-    let stageOwned = false;
     let failed = false;
     try {
         const actual = await readActivationFile(state.handle, state.identity.dev);
@@ -301,11 +373,13 @@ export async function commitProductionActivationState(
         ) {
             throw activationFailure();
         }
-        await writeStagedRecord(stageFile, next);
-        stageOwned = true;
-        await rename(stageFile, activationFile);
-        stageOwned = false;
-        await state.handle.sync();
+        await writeAndCommitStagedRecord(
+            state.handle,
+            stageFile,
+            activationFile,
+            next,
+            state.identity.dev
+        );
         const observed = await readActivationFile(state.handle, state.identity.dev);
         if (JSON.stringify(observed.record) !== JSON.stringify(next)) {
             throw activationFailure();
@@ -317,13 +391,6 @@ export async function commitProductionActivationState(
         });
     } catch {
         failed = true;
-    }
-    if (stageOwned) {
-        try {
-            await unlink(stageFile);
-        } catch (error) {
-            if (errorCode(error) !== "ENOENT") failed = true;
-        }
     }
     const closed = await closeHandle(state.handle);
     if (failed || !closed || !committed) throw activationFailure();
