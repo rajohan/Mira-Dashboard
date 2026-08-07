@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { applicationCapabilities } from "../../../contracts/security.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { insertAutomationPrincipal } from "./testSupport/securityIdentitySchema.ts";
 
@@ -80,22 +81,16 @@ describe("automation identity schema", () => {
 
         try {
             insertAutomationPrincipal(database);
-            database.sqlite.run(`
-                INSERT INTO automation_principal_capabilities (
-                    capability,
-                    granted_at,
-                    principal_id
-                ) VALUES ('notifications:read', 1000, 'openclaw-task-tracking')
-            `);
-            database.sqlite.run(`
-                INSERT INTO automation_principal_capabilities (
-                    capability,
-                    granted_at,
-                    principal_id
-                ) VALUES
-                    ('tasks:read', 1000, 'openclaw-task-tracking'),
-                    ('tasks:write', 1000, 'openclaw-task-tracking')
-            `);
+            const insertCapability = database.sqlite.query<void, [string, number]>(`
+                    INSERT INTO automation_principal_capabilities (
+                        capability,
+                        granted_at,
+                        principal_id
+                    ) VALUES (?, ?, 'openclaw-task-tracking')
+                `);
+            for (const [index, capability] of applicationCapabilities.entries()) {
+                insertCapability.run(capability, 1000 + index);
+            }
             database.sqlite.run(`
                 INSERT INTO automation_credentials (
                     created_at,
@@ -156,11 +151,10 @@ describe("automation identity schema", () => {
             ).toThrow("automation_credentials_label_check");
             expect(() =>
                 database.sqlite.run(`
-                    INSERT INTO automation_principal_capabilities (
-                        capability,
-                        granted_at,
-                        principal_id
-                    ) VALUES ('reports:read', 8640000000000001, 'openclaw-task-tracking')
+                    UPDATE automation_principal_capabilities
+                    SET granted_at = 8640000000000001
+                    WHERE capability = 'reports:read'
+                      AND principal_id = 'openclaw-task-tracking'
                 `)
             ).toThrow("automation_principal_capabilities_granted_at_check");
             expect(() =>

@@ -1,4 +1,5 @@
 import type { RequestAuthentication } from "../../contracts/security.ts";
+import type { AgentService } from "../domains/agents/service.ts";
 import type { AuthenticationLifecycleService } from "../domains/security/authenticationLifecycle.ts";
 import {
     type AuthenticationLease,
@@ -23,6 +24,7 @@ export type AuthenticateCredential = (credential: RawAuthenticationCredential) =
 
 /** Dependencies supplied while constructing one application request context. */
 export interface RequestContextOptions {
+    readonly agentService: AgentService["Service"];
     readonly applicationRuntime: ApplicationRuntime;
     readonly authenticationCredential: RawAuthenticationCredential;
     readonly authenticationClientSourceId: string;
@@ -41,6 +43,7 @@ export interface RequestContextOptions {
 
 /** Dependencies supplied to every application tRPC procedure. */
 export interface RequestContext {
+    readonly agentService: AgentService["Service"];
     readonly authentication: RequestAuthentication;
     readonly authenticationClientSourceId: string;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
@@ -70,6 +73,7 @@ export async function createRequestContext(
     );
     const userAgent = options.request.headers.get("user-agent");
     return Object.freeze({
+        agentService: options.agentService,
         authentication: resolution.authentication,
         authenticationClientSourceId: options.authenticationClientSourceId,
         authenticationLifecycle: options.authenticationLifecycle,

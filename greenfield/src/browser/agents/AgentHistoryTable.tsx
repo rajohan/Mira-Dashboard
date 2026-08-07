@@ -1,0 +1,126 @@
+import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { History } from "lucide-react";
+
+import type { AgentTaskRun } from "../../contracts/agentModel.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { Badge } from "../ui/Badge.tsx";
+import { DataTable } from "../ui/DataTable.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
+import { Heading } from "../ui/Heading.tsx";
+import { Text } from "../ui/Text.tsx";
+import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
+
+const minimumVirtualizedRows = 50;
+const historyTableFeatures = tableFeatures({});
+const historyColumnHelper = createColumnHelper<
+    typeof historyTableFeatures,
+    AgentTaskRun
+>();
+
+const historyColumns = historyColumnHelper.columns([
+    historyColumnHelper.accessor("agentId", {
+        cell: ({ getValue }) => (
+            <Text as="span" className="font-medium" tone="accent">
+                {getValue()}
+            </Text>
+        ),
+        header: "Agent",
+    }),
+    historyColumnHelper.accessor("task", {
+        cell: ({ getValue }) => <Text className="wrap-break-word">{getValue()}</Text>,
+        header: "Task",
+    }),
+    historyColumnHelper.accessor("status", {
+        cell: ({ getValue }) => (
+            <Badge variant={getValue() === "active" ? "success" : "default"}>
+                {getValue()}
+            </Badge>
+        ),
+        header: "Status",
+    }),
+    historyColumnHelper.accessor("startedAtMs", {
+        cell: ({ getValue }) => (
+            <time dateTime={new Date(getValue()).toISOString()}>
+                {formatDashboardDateTime(getValue())}
+            </time>
+        ),
+        header: "Started",
+    }),
+    historyColumnHelper.accessor(
+        (run) => (run.status === "completed" ? run.completedAtMs : undefined),
+        {
+            cell: ({ getValue }) => {
+                const completedAtMs = getValue();
+                return completedAtMs === undefined ? (
+                    <Text as="span" tone="muted">
+                        In progress
+                    </Text>
+                ) : (
+                    <time dateTime={new Date(completedAtMs).toISOString()}>
+                        {formatDashboardDateTime(completedAtMs)}
+                    </time>
+                );
+            },
+            header: "Completed",
+            id: "completedAtMs",
+        }
+    ),
+]);
+
+interface AgentHistoryTableProps {
+    readonly runs: readonly AgentTaskRun[];
+}
+
+/** @returns Shared table and virtual window for durable agent task history. */
+export function AgentHistoryTable({ runs }: AgentHistoryTableProps) {
+    const table = useTable({
+        columns: historyColumns,
+        data: runs,
+        features: historyTableFeatures,
+        getRowId: (run) => run.id,
+    });
+    const rows = table.getRowModel().rows;
+
+    if (rows.length === 0) {
+        return (
+            <EmptyState
+                description="Completed and active current-task intervals will appear here."
+                icon={History}
+                title="No agent task history"
+            />
+        );
+    }
+
+    const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
+        <DataTable
+            label="Agent task history"
+            rowWindow={rowWindow}
+            scrollContainerRef={rowWindow?.scrollContainerRef}
+            table={table}
+            tableClassName="min-w-224"
+        />
+    );
+
+    return (
+        <section aria-labelledby="agent-history-heading">
+            <Heading id="agent-history-heading" level={2}>
+                Task history
+            </Heading>
+            <div className="mt-4">
+                {rows.length < minimumVirtualizedRows ? (
+                    tableElement()
+                ) : (
+                    <Virtualizer<HTMLTableRowElement>
+                        count={rows.length}
+                        estimateSize={() => 72}
+                        getItemKey={(index) =>
+                            rows[index]?.id ?? `missing-agent-history-${index}`
+                        }
+                    >
+                        {(virtualization) => tableElement(virtualization)}
+                    </Virtualizer>
+                )}
+            </div>
+        </section>
+    );
+}

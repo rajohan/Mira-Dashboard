@@ -7,6 +7,7 @@ import type { AuthStatus } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { resetAuthenticatedBrowserCache } from "../auth/authQueries.ts";
+import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
@@ -65,6 +66,7 @@ function sessionConfirmationCopy(confirmation: SessionConfirmation) {
 export function SessionManagementSection() {
     const action = useExclusiveDashboardAction();
     const client = useDashboardTrpcClient();
+    const collections = useDashboardBrowserCollections();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const sessions = useQuery(browserSessionsQueryOptions(client));
@@ -73,9 +75,17 @@ export function SessionManagementSection() {
     async function leaveAuthenticatedBrowser(operation: () => Promise<unknown>) {
         const result = await action.run(operation);
         if (result.status !== "success") return;
-        resetAuthenticatedBrowserCache(queryClient, anonymousAuthStatus);
+        await resetAuthenticatedBrowserCache(
+            queryClient,
+            collections,
+            anonymousAuthStatus
+        );
         await navigate({ replace: true, to: "/login" });
-        resetAuthenticatedBrowserCache(queryClient, anonymousAuthStatus);
+        await resetAuthenticatedBrowserCache(
+            queryClient,
+            collections,
+            anonymousAuthStatus
+        );
     }
 
     async function revokeSession(sessionId: string) {

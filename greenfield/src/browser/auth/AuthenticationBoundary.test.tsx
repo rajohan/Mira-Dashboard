@@ -10,6 +10,7 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
+import { createDashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
@@ -80,20 +81,22 @@ describe("authenticated route boundary", () => {
             },
         } satisfies AuthStatus);
         queryClient.setQueryData(authStatusQueryKey, cachedAuthenticatedStatus);
+        const trpcClient = createDashboardTrpcClient(transport);
+        const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+        const view = render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={createDashboardRouter(
+                    createMemoryHistory({ initialEntries: ["/"] })
+                )}
+                trpcClient={trpcClient}
+                webAuthnClient={unexpectedWebAuthnClient}
+            />
+        );
 
         try {
-            render(
-                <DashboardBrowserApplication
-                    queryClient={queryClient}
-                    realtimeClient={noOpDashboardRealtimeClient}
-                    router={createDashboardRouter(
-                        createMemoryHistory({ initialEntries: ["/"] })
-                    )}
-                    trpcClient={createDashboardTrpcClient(transport)}
-                    webAuthnClient={unexpectedWebAuthnClient}
-                />
-            );
-
             expect(await screen.findByLabelText("Authentication status")).toBeTruthy();
             expect(transport.statusQueryCount).toBeGreaterThan(0);
             expect(
@@ -132,6 +135,8 @@ describe("authenticated route boundary", () => {
                 await screen.findByRole("heading", { level: 1, name: "Sign in" })
             ).toBeTruthy();
         } finally {
+            view.unmount();
+            await collections.cleanup();
             queryClient.clear();
         }
     });

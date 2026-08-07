@@ -12,6 +12,7 @@
       "type": "array",
       "items": {
         "enum": [
+          "agents.status",
           "monitoring.incidents",
           "monitoring.notifications",
           "monitoring.reports",

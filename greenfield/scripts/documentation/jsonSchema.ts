@@ -2,6 +2,18 @@ import { toJsonSchema } from "@valibot/to-json-schema";
 
 import { hasValidPossessionFactorInventory } from "../../src/contracts/accountSecurity.ts";
 import {
+    activeRunTimeIsConsistent,
+    agentDefinitionsHaveUniqueIds,
+    canonicalAgentDefinitions,
+    completedRunTimeIsConsistent,
+    workingStatusTimeIsConsistent,
+} from "../../src/contracts/agentModel.ts";
+import {
+    agentTaskHistoryCursorIsConsistent,
+    canonicalAgentStatuses,
+    newestAgentTaskRunOrderIsStable,
+} from "../../src/contracts/agents.ts";
+import {
     authPasswordMaximumLength,
     authPasswordMinimumLength,
     browserSessionUserAgentMaximumLength,
@@ -83,6 +95,34 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${securityLabelControl
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        agentDefinitionsHaveUniqueIds,
+        "Live Valibot validation additionally requires every reviewed agent ID to be unique.",
+    ],
+    [
+        workingStatusTimeIsConsistent,
+        "Live Valibot validation additionally requires working-status activity not to precede task start.",
+    ],
+    [
+        activeRunTimeIsConsistent,
+        "Live Valibot validation additionally requires active-run activity not to precede task start.",
+    ],
+    [
+        completedRunTimeIsConsistent,
+        "Live Valibot validation additionally requires ordered start, activity, and completion timestamps.",
+    ],
+    [
+        newestAgentTaskRunOrderIsStable,
+        "Live Valibot validation additionally requires strict newest-first agent task-run ordering by start timestamp and ID.",
+    ],
+    [
+        agentTaskHistoryCursorIsConsistent,
+        "Live Valibot validation additionally requires an agent task-history cursor to identify the returned last row.",
+    ],
+    [
+        canonicalAgentStatuses,
+        "Live Valibot validation additionally requires one canonically ordered status per configured agent ID.",
+    ],
     [
         automationCredentialTimesAreOrdered,
         "Live Valibot validation additionally requires credential expiry after creation and revocation no earlier than creation.",
@@ -385,6 +425,7 @@ export function convertContractSchema(
                     valibotAction.type === "transform" &&
                     (operation === sortWebAuthnTransports ||
                         operation === sortApplicationCapabilities ||
+                        operation === canonicalAgentDefinitions ||
                         operation === canonicalizeTaskStrings ||
                         operation === freezeTaskStrings)
                 ) {

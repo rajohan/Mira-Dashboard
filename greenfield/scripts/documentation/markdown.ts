@@ -26,12 +26,18 @@ function accessLabel(access: ContractAccess): string {
             if (access.capabilityPolicy === "per-topic") {
                 return `Authenticated; per-topic: ${access.capabilities.join(", ")}`;
             }
-            if (
-                access.principalKinds?.length === 1 &&
-                access.principalKinds[0] === "session" &&
-                access.capabilities.length === 0
-            ) {
-                return "Authenticated browser session";
+            const principalKind =
+                access.principalKinds?.length === 1
+                    ? access.principalKinds[0]
+                    : undefined;
+            if (principalKind !== undefined) {
+                const principalLabel =
+                    principalKind === "session"
+                        ? "browser session"
+                        : "automation principal";
+                return access.capabilities.length === 0
+                    ? `Authenticated ${principalLabel}`
+                    : `Authenticated ${principalLabel}: ${access.capabilities.join(", ")}`;
             }
             return `Authenticated: ${access.capabilities.join(", ")}`;
         }

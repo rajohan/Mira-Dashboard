@@ -5,6 +5,8 @@ import type {
     ApplicationCapability,
     RequestAuthentication,
 } from "../../../contracts/security.ts";
+import type { AgentService } from "../../domains/agents/service.ts";
+import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
 import type { AuthenticationLifecycleService } from "../../domains/security/authenticationLifecycle.ts";
 import type { AuthenticationResolution } from "../../domains/security/authenticationResolution.ts";
 import type {
@@ -380,6 +382,7 @@ export function createTestMfaLoginLifecycleService(
 }
 
 export interface TestServerSecurityServices {
+    readonly agentService: AgentService["Service"];
     readonly authenticateCredential: AuthenticateCredential;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
@@ -398,6 +401,7 @@ export function createTestServerSecurityServices(
     overrides: Partial<TestServerSecurityServices> = {}
 ): TestServerSecurityServices {
     return {
+        agentService: overrides.agentService ?? createTestAgentService(),
         authenticateCredential:
             overrides.authenticateCredential ??
             (() => ({ authentication: { kind: "anonymous" as const } })),
@@ -490,6 +494,7 @@ export function createTestRequestContext(
     authentication: RequestAuthentication = anonymousAuthentication,
     applicationRuntime = createTestApplicationRuntime(),
     options: {
+        readonly agentService?: AgentService["Service"];
         readonly authenticationClientSourceId?: string;
         readonly authenticationLifecycle?: AuthenticationLifecycleService;
         readonly automationSecurityLifecycle?: AutomationSecurityLifecycleService;
@@ -505,6 +510,7 @@ export function createTestRequestContext(
     const request = options.request ?? new Request("http://localhost/trpc/test");
     const credentials = readAuthenticationHttpCredentials(request);
     return createRequestContext({
+        agentService: options.agentService ?? createTestAgentService(),
         applicationRuntime,
         authenticationCredential: credentials.authentication,
         authenticationClientSourceId:

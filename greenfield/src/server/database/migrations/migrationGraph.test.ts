@@ -30,6 +30,7 @@ interface TextPrimaryKeyRow {
 }
 
 const expectedTables: string[] = [
+    "agent_task_runs",
     "audit_events",
     "auth_challenges",
     "auth_pending_logins",

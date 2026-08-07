@@ -12,7 +12,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                           |
 | 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                          |
-| 3 — Core operator domains           | Started                              | The task domain and `/tasks` parity slice are implemented with durable history, realtime invalidation, and browser workflows. Agent, report, incident, notification, schedule/job, cache/metrics, overview, and worker-domain parity remain open.                                                                                                                            |
+| 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Report, incident, notification, schedule/job, cache/metrics, overview, and worker-domain parity remain open.                                                                                                                                             |
 | 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                               |
 | 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                             |
@@ -819,3 +819,25 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 - The reviewed parity inventory now marks the 11 task operations and `/tasks` route implemented.
   This closes only the task portion of Phase 3. Agent, report, incident, notification, job,
   monitoring API, overview, cache/metrics, and real worker execution remain explicit gates.
+
+### 2026-08-07 — Phase 3 agent status and task-history slice
+
+- A reviewed, code-owned directory defines the five Dashboard automation agents independently of
+  Gateway connection state. Typed `agents:read` and `agents:write` capabilities expose exact
+  configuration, one/all current statuses, keyset-paginated task history, and scoped metadata
+  updates without treating mutable Gateway discovery as application authorization.
+- `agent_task_runs` retains one active interval per configured agent and immutable completed
+  history in a strict `WITHOUT ROWID` table. Every transition revalidates persisted rows, records
+  the user or automation actor, and runs behind immediate-write admission. State changes append a
+  durable `agents.status` realtime invalidation in the same transaction and wake delivery only
+  after commit; same-task heartbeats update activity without unbounded realtime-event growth.
+- `/agents` uses the shared Dashboard shell and presentation primitives, query-backed TanStack DB
+  collections for normalized definitions and live statuses, TanStack Query for keyset-paginated
+  history, TanStack Table, and the shared virtualizer. Durable realtime events invalidate the
+  relevant collection/query roots; a 30-second fallback begins only after the terminal event
+  stream closes. Current-task mutation remains an authenticated automation boundary rather than a
+  browser editing control.
+- The parity inventory now marks the five agent operations and `/agents` route implemented.
+  Persistent OpenClaw/Gateway availability and session state remain Phase 4 work; reports,
+  incidents, notifications, schedules/jobs, overview, cache/metrics, and the real worker remain
+  open Phase 3 gates.

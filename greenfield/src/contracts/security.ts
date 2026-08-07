@@ -92,6 +92,8 @@ export const securityRecordIdSchema = lowercaseUuidV7Schema(
 
 /** Capabilities referenced by currently implemented authenticated contracts. */
 export const applicationCapabilities = [
+    "agents:read",
+    "agents:write",
     "notifications:read",
     "reports:read",
     "tasks:read",

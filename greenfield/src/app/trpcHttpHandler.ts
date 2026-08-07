@@ -1,5 +1,6 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
+import type { AgentService } from "../server/domains/agents/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
@@ -28,6 +29,7 @@ interface TrpcBunServer {
 
 /** Dependencies owned by the application composition root, excluding listener lifecycle. */
 export interface TrpcHttpHandlerOptions {
+    readonly agentService: AgentService["Service"];
     readonly applicationRuntime: ApplicationRuntime;
     readonly authenticateCredential: AuthenticateCredential;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
@@ -202,6 +204,7 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
         return fetchRequestHandler({
             createContext: ({ req, resHeaders }) =>
                 createRequestContext({
+                    agentService: options.agentService,
                     applicationRuntime: options.applicationRuntime,
                     authenticationClientSourceId,
                     authenticationCredential: credentials.authentication,

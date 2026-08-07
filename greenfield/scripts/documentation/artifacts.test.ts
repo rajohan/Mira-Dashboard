@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { monitoringRealtimeTopics } from "../../src/contracts/monitoringRealtime.ts";
+import {
+    realtimeStreamCapabilities,
+    realtimeStreamTopics,
+} from "../../src/contracts/events.ts";
 import { realtimeSubscriptionMaximumTopics } from "../../src/contracts/realtime.ts";
-import { taskRealtimeTopic } from "../../src/contracts/taskRealtime.ts";
 import { buildDocumentationArtifacts } from "./artifacts.ts";
 
 const packageManifest = {
@@ -70,11 +72,14 @@ describe("generated contract documentation", () => {
             "| `auth.status` | query | auth | Public |"
         );
         expect(procedureDocumentation).toContain(
+            "| `agents.updateMetadata` | mutation | agents | Authenticated automation principal: agents:write |"
+        );
+        expect(procedureDocumentation).toContain(
             "| None | None | Returns bootstrap, pending MFA"
         );
         expect(procedureDocumentation).toContain("`events.stream`");
         expect(procedureDocumentation).toContain(
-            "Authenticated; per-topic: notifications:read, reports:read"
+            `Authenticated; per-topic: ${realtimeStreamCapabilities.join(", ")}`
         );
         expect(procedureDocumentation).toContain("`system.runtimeIdentity`");
         const rawHttpDocumentation = first.get("raw-http.md");
@@ -128,10 +133,7 @@ describe("generated contract documentation", () => {
                     }),
                     topics: {
                         items: {
-                            enum: [
-                                ...Object.values(monitoringRealtimeTopics),
-                                taskRealtimeTopic,
-                            ],
+                            enum: realtimeStreamTopics,
                             type: "string",
                         },
                         maxItems: realtimeSubscriptionMaximumTopics,

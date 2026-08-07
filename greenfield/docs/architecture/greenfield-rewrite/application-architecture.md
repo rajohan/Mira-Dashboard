@@ -387,7 +387,7 @@ once. Reusable procedure builders are limited to:
 
 Expected errors use a small stable code set such as `UNAUTHORIZED`, `FORBIDDEN`, `CONFLICT`,
 `NOT_FOUND`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, and `SERVICE_UNAVAILABLE` with safe
-structured details. The `ContractErrorCode` union, all 36 actual router paths, the server-owned
+structured details. The `ContractErrorCode` union, all 55 actual router paths, the server-owned
 runtime allowlist, and generated contract metadata must match exactly. The base procedure
 middleware enforces that allowlist for immediate and deferred subscription failures; an
 implemented procedure missing from the policy or an undeclared code becomes a redacted internal
@@ -602,6 +602,11 @@ cache key. A server snapshot always wins over conflicting speculative collection
 - Feature modules own their query option factories, mutation option factories, collection
   adapter, components, and tests.
 - Shared UI contains presentation primitives, not domain-specific orchestration.
+- The reviewed Dashboard agent directory is code-owned configuration. Gateway discovery may
+  enrich future live availability, but cannot add identities or grant agent capabilities.
+- Agent current-task writes require an `agents:write` automation principal and retain durable
+  actor attribution. Browser sessions consume the read projection and history; they cannot
+  impersonate the task-tracking caller.
 - React Compiler remains enabled. Manual memoization is used only where stable identity is an
   external contract and a profiler or test justifies it.
 - Lists with unbounded rows use TanStack Virtual; tables use TanStack Table; neither becomes a

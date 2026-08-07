@@ -11,6 +11,11 @@ import { DashboardRealtimeProvider } from "./api/realtimeContext.tsx";
 import { createDashboardTrpcClient, type DashboardTrpcClient } from "./api/trpcClient.ts";
 import { DashboardTrpcProvider } from "./api/trpcContext.tsx";
 import { AuthenticatedSessionActivity } from "./auth/AuthenticatedSessionActivity.tsx";
+import {
+    createDashboardBrowserCollections,
+    type DashboardBrowserCollections,
+} from "./data/dashboardCollections.ts";
+import { DashboardCollectionsProvider } from "./data/dashboardCollectionsContext.tsx";
 import { createDashboardRouter, type DashboardRouter } from "./router.tsx";
 import {
     createDashboardWebAuthnClient,
@@ -23,10 +28,12 @@ const queryClient = createDashboardQueryClient();
 const realtimeClient = createDashboardRealtimeClient();
 const router = createDashboardRouter();
 const trpcClient = createDashboardTrpcClient();
+const collections = createDashboardBrowserCollections(queryClient, trpcClient);
 const webAuthnClient = createDashboardWebAuthnClient();
 
 /** Browser dependencies accepted by the testable provider boundary. */
 export interface DashboardBrowserApplicationProps {
+    readonly collections: DashboardBrowserCollections;
     readonly queryClient: QueryClient;
     readonly realtimeClient: DashboardRealtimeClient;
     readonly router: DashboardRouter;
@@ -40,6 +47,7 @@ export interface DashboardBrowserApplicationProps {
  * @returns The composed browser provider graph.
  */
 export function DashboardBrowserApplication({
+    collections,
     queryClient,
     realtimeClient,
     router,
@@ -49,14 +57,16 @@ export function DashboardBrowserApplication({
     return (
         <ErrorBoundary FallbackComponent={AppErrorFallback}>
             <QueryClientProvider client={queryClient}>
-                <DashboardRealtimeProvider client={realtimeClient}>
-                    <DashboardTrpcProvider client={trpcClient}>
-                        <AuthenticatedSessionActivity />
-                        <DashboardWebAuthnProvider client={webAuthnClient}>
-                            <RouterProvider router={router} />
-                        </DashboardWebAuthnProvider>
-                    </DashboardTrpcProvider>
-                </DashboardRealtimeProvider>
+                <DashboardCollectionsProvider collections={collections}>
+                    <DashboardRealtimeProvider client={realtimeClient}>
+                        <DashboardTrpcProvider client={trpcClient}>
+                            <AuthenticatedSessionActivity />
+                            <DashboardWebAuthnProvider client={webAuthnClient}>
+                                <RouterProvider router={router} />
+                            </DashboardWebAuthnProvider>
+                        </DashboardTrpcProvider>
+                    </DashboardRealtimeProvider>
+                </DashboardCollectionsProvider>
             </QueryClientProvider>
         </ErrorBoundary>
     );
@@ -69,6 +79,7 @@ export function DashboardBrowserApplication({
 export default function DashboardBrowserApplicationRoot() {
     return (
         <DashboardBrowserApplication
+            collections={collections}
             queryClient={queryClient}
             realtimeClient={realtimeClient}
             router={router}

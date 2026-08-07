@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { Redacted } from "effect";
 
+import { createAgentRepository } from "../server/domains/agents/repository.ts";
+import { createAgentService } from "../server/domains/agents/service.ts";
 import { createAuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createAuthenticationLifecycleRepository } from "../server/domains/security/authenticationLifecycleRepository.ts";
 import {
@@ -72,6 +74,7 @@ import { createServer, type ApplicationServer, type ServerOptions } from "./serv
 /** Production composition inputs above the generic Bun/tRPC server primitive. */
 export interface DashboardServerOptions extends Omit<
     ServerOptions,
+    | "agentService"
     | "authenticateCredential"
     | "applicationRuntime"
     | "authenticationLifecycle"
@@ -242,14 +245,21 @@ export async function createDashboardServer(
             repository: createSecurityAuditLifecycleRepository(database),
             sessionIdleDurationMs: options.sessionIdleDurationMs,
         });
-        const taskNow = options.now;
+        const domainNow = options.now;
+        const agentService = createAgentService({
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            repository: createAgentRepository(database, databaseRuntime),
+            wakeEventPump: () =>
+                options.applicationRuntime.services.realtimeEvents.wake(),
+        });
         const taskService = createTaskService({
-            ...(taskNow === undefined ? {} : { nowMs: () => taskNow().getTime() }),
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: createTaskRepository(database, databaseRuntime),
             wakeEventPump: () =>
                 options.applicationRuntime.services.realtimeEvents.wake(),
         });
         const serverOptions: ServerOptions = {
+            agentService,
             applicationRuntime: options.applicationRuntime,
             authenticateCredential: (credential) =>
                 authenticator.authenticate(credential),
