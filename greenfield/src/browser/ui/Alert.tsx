@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck, Info } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 import { Icon } from "./Icon.tsx";
 
 const alertStyle = Object.freeze({

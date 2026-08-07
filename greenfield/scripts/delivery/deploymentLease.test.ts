@@ -38,13 +38,15 @@ describe("Dashboard deployment lease", () => {
         const state = await stateFixture();
         const events: string[] = [];
         const firstMayFinish = Promise.withResolvers<void>();
+        const firstStarted = Promise.withResolvers<void>();
 
         const first = withDeploymentLease(state, async () => {
             events.push("first-start");
+            firstStarted.resolve();
             await firstMayFinish.promise;
             events.push("first-end");
         });
-        await Bun.sleep(30);
+        await firstStarted.promise;
         const second = withDeploymentLease(state, () => {
             events.push("second");
             return Promise.resolve();
@@ -61,12 +63,21 @@ describe("Dashboard deployment lease", () => {
         const state = await stateFixture();
         const lockPath = path.join(state, ".deployment.lock");
         const initializingLock = await open(lockPath, "wx", 0o600);
+        await initializingLock.writeFile(
+            JSON.stringify({ pid: process.pid, token: Bun.randomUUIDv7() }),
+            "utf8"
+        );
         let entered = false;
 
         const transition = withDeploymentLease(state, () => {
             entered = true;
             return Promise.resolve();
         });
+        await Bun.sleep(50);
+        expect(entered).toBe(false);
+
+        await initializingLock.write("\n");
+        await initializingLock.sync();
         await Bun.sleep(50);
         expect(entered).toBe(false);
 

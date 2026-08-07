@@ -1,13 +1,11 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
 
-import { acquireBrowserTestEnvironment } from "../testSupport/browserTestEnvironment.ts";
 import { DataTable } from "./DataTable.tsx";
 import { Virtualizer } from "./Virtualizer.tsx";
 
-const browserEnvironment = await acquireBrowserTestEnvironment();
-const { cleanup, render, screen } = await import("@testing-library/react");
+const { render, screen } = await import("@testing-library/react");
 
 const originalOffsetHeight = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -32,11 +30,7 @@ beforeAll(() => {
     Reflect.set(globalThis, "ResizeObserver", undefined);
 });
 
-afterEach(() => {
-    cleanup();
-});
-
-afterAll(async () => {
+afterAll(() => {
     if (originalOffsetHeight === undefined) {
         Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
     } else {
@@ -56,7 +50,6 @@ afterAll(async () => {
     } else {
         Reflect.deleteProperty(globalThis, "ResizeObserver");
     }
-    await browserEnvironment.release();
 });
 
 interface FixtureRow {

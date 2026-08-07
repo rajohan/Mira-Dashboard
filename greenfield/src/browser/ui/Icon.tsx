@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 
 const iconSizes = Object.freeze({
     lg: "size-6",

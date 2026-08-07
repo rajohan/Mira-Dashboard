@@ -8,7 +8,7 @@ import {
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 import { IconOnlyButton } from "./IconOnlyButton.tsx";
 
 const sizeClasses = Object.freeze({

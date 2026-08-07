@@ -1,4 +1,4 @@
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 
 export type ButtonVariant = "danger" | "ghost" | "primary" | "secondary";
 export type ButtonSize = "lg" | "md" | "sm";

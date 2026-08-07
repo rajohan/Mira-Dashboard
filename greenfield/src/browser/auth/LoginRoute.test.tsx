@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 
@@ -15,10 +15,8 @@ import {
 import { DashboardBrowserApplication } from "../application.tsx";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
-import { acquireBrowserTestEnvironment } from "../testSupport/browserTestEnvironment.ts";
 
-const browserEnvironment = await acquireBrowserTestEnvironment();
-const { cleanup, render, screen, waitFor } = await import("@testing-library/react");
+const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -117,12 +115,7 @@ function cachedBrowserData(queryClient: ReturnType<typeof createDashboardQueryCl
 }
 
 afterEach(() => {
-    cleanup();
     for (const queryClient of queryClients.splice(0)) queryClient.clear();
-});
-
-afterAll(async () => {
-    await browserEnvironment.release();
 });
 
 describe("Dashboard login route", () => {

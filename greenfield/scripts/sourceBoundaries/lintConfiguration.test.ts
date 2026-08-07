@@ -85,8 +85,9 @@ describe("effective source-boundary lint configuration", () => {
                     repositoryRoot,
                     "src",
                     "browser",
-                    "testSupport",
-                    "frontendBuildFixture",
+                    "test",
+                    "fixtures",
+                    "frontendBuild",
                     "src",
                     "index.css"
                 ),
@@ -110,34 +111,6 @@ describe("effective source-boundary lint configuration", () => {
                 path.join(fixtureRoot, "src", "worker", "workerConsole.ts"),
                 'console.log("forbidden");\n'
             );
-
-            const executable = path.join(
-                repositoryRoot,
-                "node_modules",
-                ".bin",
-                "oxlint"
-            );
-            const [browserResult, workerResult] = await Promise.all([
-                runOxlint(executable, fixtureRoot, "tsconfig.browser.json", [
-                    "src/browser/browserBoundary.ts",
-                ]),
-                runOxlint(executable, fixtureRoot, "tsconfig.bun.json", [
-                    "src/worker/workerConsole.ts",
-                ]),
-            ]);
-            const result = {
-                exitCode: browserResult.exitCode + workerResult.exitCode,
-                output: `${browserResult.output}\n${workerResult.output}`,
-            };
-
-            expect(result.exitCode).not.toBe(0);
-            expect(result.output).toContain("'memo' import from 'react' is restricted");
-            expect(result.output).toContain(
-                "'../server/privateServer.ts' import is restricted"
-            );
-            expect(result.output).toContain("no-implied-eval");
-            expect(result.output).toContain("no-console");
-
             const testFixtureSource =
                 'import { memo } from "react";\nimport { privateServerValue } from "../server/privateServer.ts";\nexport const testBoundary = [memo, privateServerValue] as const;\n';
             await writeFile(
@@ -158,23 +131,37 @@ describe("effective source-boundary lint configuration", () => {
                     '"../../server/privateServer.ts"'
                 )
             );
-            const testResult = await runOxlint(
-                executable,
-                fixtureRoot,
-                "tsconfig.browser.json",
-                [
+
+            const executable = path.join(
+                repositoryRoot,
+                "node_modules",
+                ".bin",
+                "oxlint"
+            );
+            const [browserResult, workerResult] = await Promise.all([
+                runOxlint(executable, fixtureRoot, "tsconfig.browser.json", [
+                    "src/browser/browserBoundary.ts",
                     "src/browser/browserBoundary.spec.ts",
                     "src/browser/__tests__/browserBoundary.ts",
-                ]
-            );
+                ]),
+                runOxlint(executable, fixtureRoot, "tsconfig.bun.json", [
+                    "src/worker/workerConsole.ts",
+                ]),
+            ]);
+            const result = {
+                exitCode: browserResult.exitCode + workerResult.exitCode,
+                output: `${browserResult.output}\n${workerResult.output}`,
+            };
 
-            expect(testResult.exitCode).toBe(0);
-            expect(testResult.output).not.toContain(
-                "'memo' import from 'react' is restricted"
+            expect(result.exitCode).not.toBe(0);
+            expect(result.output).toContain("'memo' import from 'react' is restricted");
+            expect(result.output).toContain(
+                "'../server/privateServer.ts' import is restricted"
             );
-            expect(testResult.output).not.toContain("no-implied-eval");
-            expect(testResult.output).not.toContain("no-restricted-imports");
-            expect(testResult.output).not.toContain("no-console");
+            expect(result.output).toContain("no-implied-eval");
+            expect(result.output).toContain("no-console");
+            expect(result.output).not.toContain("browserBoundary.spec.ts");
+            expect(result.output).not.toContain("__tests__/browserBoundary.ts");
         } finally {
             await rm(fixtureRoot, { force: true, recursive: true });
         }

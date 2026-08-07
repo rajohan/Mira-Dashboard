@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 
@@ -8,21 +8,11 @@ import { DashboardBrowserApplication } from "./application.tsx";
 import { authStatusQueryKey } from "./auth/authQueries.ts";
 import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
-import { acquireBrowserTestEnvironment } from "./testSupport/browserTestEnvironment.ts";
 
-const browserEnvironment = await acquireBrowserTestEnvironment();
-const { cleanup, render, screen } = await import("@testing-library/react");
+const { render, screen } = await import("@testing-library/react");
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
     authenticate: () => Promise.reject(new TypeError("Unexpected authentication")),
     register: () => Promise.reject(new TypeError("Unexpected registration")),
-});
-
-afterEach(() => {
-    cleanup();
-});
-
-afterAll(async () => {
-    await browserEnvironment.release();
 });
 
 describe("Dashboard browser application", () => {

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { LogOut, MonitorX, RefreshCw, ShieldX, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
@@ -11,6 +12,7 @@ import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
@@ -22,6 +24,40 @@ import { SecuritySection } from "./SecurityUi.tsx";
 
 const anonymousAuthStatus: AuthStatus = Object.freeze({ state: "anonymous" });
 
+type SessionConfirmation =
+    | Readonly<{ kind: "revoke-all" }>
+    | Readonly<{ kind: "revoke-others" }>
+    | Readonly<{ kind: "revoke-session"; sessionId: string }>;
+
+function sessionConfirmationCopy(confirmation: SessionConfirmation) {
+    switch (confirmation.kind) {
+        case "revoke-session": {
+            return {
+                confirmLabel: "Revoke session",
+                description:
+                    "This browser session will be signed out and must authenticate again.",
+                title: "Revoke browser session?",
+            };
+        }
+        case "revoke-others": {
+            return {
+                confirmLabel: "Revoke other sessions",
+                description:
+                    "Every browser except this one will be signed out and must authenticate again.",
+                title: "Revoke every other session?",
+            };
+        }
+        case "revoke-all": {
+            return {
+                confirmLabel: "Revoke every session",
+                description:
+                    "Every browser session, including this one, will be signed out immediately.",
+                title: "Revoke every browser session?",
+            };
+        }
+    }
+}
+
 /**
  * Renders current and historical browser-session controls.
  * @returns The browser-session management section.
@@ -32,6 +68,7 @@ export function SessionManagementSection() {
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const sessions = useQuery(browserSessionsQueryOptions(client));
+    const [confirmation, setConfirmation] = useState<SessionConfirmation>();
 
     async function leaveAuthenticatedBrowser(operation: () => Promise<unknown>) {
         const result = await action.run(operation);
@@ -54,6 +91,34 @@ export function SessionManagementSection() {
         );
         if (result.status === "success") await refreshSecurityQueries(queryClient);
     }
+
+    async function confirmSessionAction() {
+        const pendingConfirmation = confirmation;
+        if (pendingConfirmation === undefined) return;
+        try {
+            switch (pendingConfirmation.kind) {
+                case "revoke-session": {
+                    await revokeSession(pendingConfirmation.sessionId);
+                    break;
+                }
+                case "revoke-others": {
+                    await revokeOtherSessions();
+                    break;
+                }
+                case "revoke-all": {
+                    await leaveAuthenticatedBrowser(() =>
+                        client.mutation("auth.revokeAllSessions", {})
+                    );
+                    break;
+                }
+            }
+        } finally {
+            setConfirmation(undefined);
+        }
+    }
+
+    const confirmationCopy =
+        confirmation === undefined ? undefined : sessionConfirmationCopy(confirmation);
 
     return (
         <SecuritySection
@@ -117,9 +182,15 @@ export function SessionManagementSection() {
                                 </div>
                                 {!session.isCurrent && (
                                     <Button
+                                        aria-label={`Revoke session ${session.userAgent ?? "unnamed browser"}`}
                                         busy={action.busy}
                                         busyLabel="Revoking…"
-                                        onClick={() => void revokeSession(session.id)}
+                                        onClick={() =>
+                                            setConfirmation({
+                                                kind: "revoke-session",
+                                                sessionId: session.id,
+                                            })
+                                        }
                                         size="sm"
                                         variant="danger"
                                     >
@@ -136,7 +207,7 @@ export function SessionManagementSection() {
                 <Button
                     busy={action.busy}
                     busyLabel="Revoking…"
-                    onClick={() => void revokeOtherSessions()}
+                    onClick={() => setConfirmation({ kind: "revoke-others" })}
                     variant="secondary"
                 >
                     <Icon icon={MonitorX} size="sm" tone="inherit" />
@@ -145,11 +216,7 @@ export function SessionManagementSection() {
                 <Button
                     busy={action.busy}
                     busyLabel="Revoking…"
-                    onClick={() =>
-                        void leaveAuthenticatedBrowser(() =>
-                            client.mutation("auth.revokeAllSessions", {})
-                        )
-                    }
+                    onClick={() => setConfirmation({ kind: "revoke-all" })}
                     variant="danger"
                 >
                     <Icon icon={ShieldX} size="sm" tone="inherit" />
@@ -169,6 +236,16 @@ export function SessionManagementSection() {
                     Sign out this browser
                 </Button>
             </div>
+            <ConfirmModal
+                busy={action.busy}
+                confirmLabel={confirmationCopy?.confirmLabel}
+                danger
+                description={confirmationCopy?.description ?? ""}
+                onCancel={() => setConfirmation(undefined)}
+                onConfirm={() => void confirmSessionAction()}
+                open={confirmation !== undefined}
+                title={confirmationCopy?.title ?? "Confirm session action"}
+            />
         </SecuritySection>
     );
 }

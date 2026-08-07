@@ -1,7 +1,7 @@
 import type { ReactTable, Row, RowData, TableFeatures } from "@tanstack/react-table";
 import type { RefObject } from "react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 
 export interface DataTableRowWindow {
     readonly measureElement: (node: HTMLTableRowElement | null) => void;

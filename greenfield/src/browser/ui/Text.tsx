@@ -1,6 +1,6 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 
 const textSizes = Object.freeze({
     lg: "text-base leading-7",

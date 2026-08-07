@@ -1,6 +1,6 @@
 import { LoaderCircle } from "lucide-react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 import { Icon } from "./Icon.tsx";
 
 const loadingStateSizes = Object.freeze({

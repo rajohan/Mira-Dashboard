@@ -1,11 +1,11 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
-import { Link, Outlet, useLocation } from "@tanstack/react-router";
+import { Outlet, useLocation } from "@tanstack/react-router";
 import { Home, Menu, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 
-import { cn } from "../ui/classNames.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
+import { NavigationLink } from "../ui/NavigationLink.tsx";
 
 interface NavigationItem {
     readonly icon: LucideIcon;
@@ -29,22 +29,15 @@ function Navigation({ currentPath, onNavigate }: NavigationProps) {
             {navigationItems.map((item) => {
                 const active = currentPath === item.to;
                 return (
-                    <Link
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                            "mb-1 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                            "focus-visible:ring-accent-300 focus-visible:ring-2 focus-visible:outline-none",
-                            active
-                                ? "bg-accent-500/90 text-white"
-                                : "text-primary-300 hover:bg-primary-800 hover:text-primary-50"
-                        )}
+                    <NavigationLink
+                        active={active}
                         key={item.to}
                         onClick={onNavigate}
                         to={item.to}
                     >
                         <Icon icon={item.icon} tone="inherit" />
                         <span>{item.label}</span>
-                    </Link>
+                    </NavigationLink>
                 );
             })}
         </nav>

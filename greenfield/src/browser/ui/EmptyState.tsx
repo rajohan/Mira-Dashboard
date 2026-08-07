@@ -1,8 +1,8 @@
 import { Inbox, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { cn } from "../lib/classNames.ts";
 import { Card } from "./Card.tsx";
-import { cn } from "./classNames.ts";
 import { Heading } from "./Heading.tsx";
 import { Icon } from "./Icon.tsx";
 import { Text } from "./Text.tsx";

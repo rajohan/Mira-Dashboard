@@ -1,6 +1,6 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 
 const headingSizes = Object.freeze({
     page: "text-3xl tracking-tight sm:text-4xl",

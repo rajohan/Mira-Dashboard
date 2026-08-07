@@ -1,7 +1,7 @@
 import { Input as HeadlessInput } from "@headlessui/react";
 import type { InputHTMLAttributes, Ref } from "react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 import { useFormFieldInvalid } from "./formFieldContext.ts";
 
 export interface InputProps extends Omit<

@@ -1,5 +1,7 @@
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { mergeCoverageReportFiles } from "lcov-result-merger";
 
 import { checkCoverageFile, requiredLineCoveragePercent } from "./checkCoverage.ts";
 import { runTestSuite } from "./runTestSuite.ts";
@@ -8,35 +10,57 @@ const projectRoot = path.resolve(import.meta.dir, "..");
 const coverageDirectory = path.join(projectRoot, "coverage");
 const lcovPath = path.join(coverageDirectory, "lcov.info");
 const coveredSourceRoots = Object.freeze(["src"]);
-const coverageTestTargets = Object.freeze(["scripts", "src"]);
+
+export type CoveragePartition = "browser" | "bun";
+
+const coveragePartitions = Object.freeze([
+    Object.freeze({ name: "bun", outputDirectoryName: "bun" }),
+    Object.freeze({ name: "browser", outputDirectoryName: "browser" }),
+] satisfies readonly Readonly<{
+    name: CoveragePartition;
+    outputDirectoryName: string;
+}>[]);
 
 /**
  * Builds the exact Bun test arguments used by the coverage gate.
  * @param outputDirectory Directory where Bun writes coverage artifacts.
+ * @param partition Runtime partition whose tests and preload policy are selected.
  * @returns Complete arguments after `bun test`.
  */
-export function createCoverageTestArguments(outputDirectory: string): readonly string[] {
-    return Object.freeze([
+export function createCoverageTestArguments(
+    outputDirectory: string,
+    partition: CoveragePartition
+): readonly string[] {
+    const coverageArguments = [
+        "--reporter",
+        "dots",
         "--coverage",
-        "--coverage-reporter",
-        "text",
         "--coverage-reporter",
         "lcov",
         "--coverage-dir",
         outputDirectory,
-        ...coverageTestTargets,
+    ];
+    if (partition === "browser") {
+        return Object.freeze([
+            ...coverageArguments,
+            "--preload",
+            "./src/browser/test/setup.ts",
+            "src/browser",
+        ]);
+    }
+    return Object.freeze([
+        ...coverageArguments,
+        "--path-ignore-patterns",
+        "src/browser/**",
+        "scripts",
+        "src",
     ]);
 }
 
-/** @returns Completion after the exact stale LCOV artifact is absent. */
-async function removeStaleLcov(): Promise<void> {
-    try {
-        await unlink(lcovPath);
-    } catch (error) {
-        if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
-            throw error;
-        }
-    }
+/** @returns Completion after coverage output has one fresh private directory. */
+async function resetCoverageDirectory(): Promise<void> {
+    await rm(coverageDirectory, { force: true, recursive: true });
+    await mkdir(coverageDirectory, { mode: 0o700, recursive: true });
 }
 
 /**
@@ -44,14 +68,29 @@ async function removeStaleLcov(): Promise<void> {
  * @returns Zero when tests, output policy, and line coverage all pass.
  */
 export async function runCoverage(): Promise<number> {
-    await mkdir(coverageDirectory, { recursive: true });
-    await removeStaleLcov();
+    await resetCoverageDirectory();
 
-    const testExitCode = await runTestSuite(
-        createCoverageTestArguments(coverageDirectory),
-        projectRoot
-    );
-    if (testExitCode !== 0) return testExitCode;
+    const partitionReports: string[] = [];
+    for (const partition of coveragePartitions) {
+        const outputDirectory = path.join(
+            coverageDirectory,
+            partition.outputDirectoryName
+        );
+        const testExitCode = await runTestSuite(
+            createCoverageTestArguments(outputDirectory, partition.name),
+            projectRoot
+        );
+        if (testExitCode !== 0) return testExitCode;
+        partitionReports.push(path.join(outputDirectory, "lcov.info"));
+    }
+
+    const mergedCoverage = await mergeCoverageReportFiles(partitionReports, {
+        pattern: "",
+    });
+    await writeFile(lcovPath, `${mergedCoverage}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+    });
 
     const summary = await checkCoverageFile(
         lcovPath,

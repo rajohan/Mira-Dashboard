@@ -1,6 +1,7 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
+import { act } from "react";
 
 import type {
     AccountSecuritySummary,
@@ -25,11 +26,9 @@ import {
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
 import { createDashboardRouter } from "../router.tsx";
-import { acquireBrowserTestEnvironment } from "../testSupport/browserTestEnvironment.ts";
 import type { DashboardWebAuthnClient } from "./webauthn/webauthnClient.ts";
 
-const browserEnvironment = await acquireBrowserTestEnvironment();
-const { cleanup, render, screen, waitFor } = await import("@testing-library/react");
+const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -100,6 +99,23 @@ const enabledSummary = Object.freeze({
     recentAuth: { mfa: recentVerification, password: recentVerification },
     webAuthn: { available: true, rpId: "localhost" },
 } satisfies AccountSecuritySummary);
+const automationCredential = Object.freeze({
+    createdAtMs: timestampMs,
+    id: "019fd979-42cc-7ce4-8392-3de63748a594",
+    label: "Heartbeat credential",
+    prefix: "c".repeat(32),
+} satisfies AutomationCredentialSummary);
+const automationPrincipal = Object.freeze({
+    activeCredentialCount: 1,
+    authorizationVersion: 1,
+    capabilities: ["notifications:read"],
+    createdAtMs: timestampMs,
+    disabled: false,
+    id: "openclaw-heartbeat",
+    label: "OpenClaw heartbeat",
+    totalCredentialCount: 1,
+    updatedAtMs: timestampMs,
+} satisfies AutomationPrincipalSummary);
 const authenticationOptions = Object.freeze({
     allowCredentials: [{ id: "AAAAAAAA", type: "public-key" }],
     challenge: "A".repeat(32),
@@ -273,13 +289,15 @@ function recoveryCodes(): string[] {
     );
 }
 
-afterEach(() => {
-    cleanup();
-    for (const queryClient of queryClients.splice(0)) queryClient.clear();
-});
+async function waitForDialogExit(): Promise<void> {
+    await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+}
 
-afterAll(async () => {
-    await browserEnvironment.release();
+afterEach(() => {
+    for (const queryClient of queryClients.splice(0)) queryClient.clear();
 });
 
 describe("Dashboard account security route", () => {
@@ -574,6 +592,182 @@ describe("Dashboard account security route", () => {
         expect(registrationInputs).toEqual([registrationOptions]);
     });
 
+    test("confirms destructive MFA actions before mutation", async () => {
+        const securityKey = {
+            backedUp: false,
+            createdAtMs: timestampMs,
+            deviceType: "singleDevice" as const,
+            id: "019fda70-b47b-7a29-b2a7-f15d32c2bfe2",
+            label: "Backup security key",
+            transports: ["usb" as const],
+            usable: true,
+        } satisfies WebAuthnCredentialSummary;
+        const mixedMfaSummary = {
+            ...enabledSummary,
+            mfa: {
+                ...enabledSummary.mfa,
+                methods: ["recovery", "totp", "webauthn"] as const,
+                webAuthnCredentials: [securityKey],
+            },
+        } satisfies AccountSecuritySummary;
+        const transport = new SecurityTransport(mixedMfaSummary);
+        const codes = recoveryCodes();
+        transport.mutationHandler = (path, input) => {
+            switch (path) {
+                case "accountSecurity.removeTotpFactor": {
+                    expect(input).toEqual({ factorId: totpFactor.id });
+                    transport.summary = {
+                        ...mixedMfaSummary,
+                        mfa: {
+                            ...mixedMfaSummary.mfa,
+                            methods: ["recovery", "webauthn"],
+                            totpFactors: [],
+                        },
+                    };
+                    return Promise.resolve({ factorId: totpFactor.id, removed: true });
+                }
+                case "accountSecurity.rotateRecoveryCodes": {
+                    expect(input).toEqual({});
+                    return Promise.resolve({ recoveryCodes: codes });
+                }
+                default: {
+                    return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+                }
+            }
+        };
+        renderAccountSecurity(transport);
+        const userActions = userEvent.setup();
+        await screen.findByText(totpFactor.label);
+
+        await userActions.click(
+            screen.getByRole("button", {
+                name: `Remove authenticator ${totpFactor.label}`,
+            })
+        );
+        expect(
+            transport.calls.filter(
+                (call) => call.path === "accountSecurity.removeTotpFactor"
+            )
+        ).toHaveLength(0);
+        await userActions.click(
+            screen.getByRole("button", { name: "Remove authenticator" })
+        );
+        await waitFor(() => expect(screen.queryByText(totpFactor.label)).toBeNull());
+        await waitForDialogExit();
+
+        await userActions.click(
+            screen.getByRole("button", { name: "Rotate recovery codes" })
+        );
+        expect(
+            transport.calls.filter(
+                (call) => call.path === "accountSecurity.rotateRecoveryCodes"
+            )
+        ).toHaveLength(0);
+        await userActions.click(
+            screen.getByRole("button", { name: "Rotate recovery codes" })
+        );
+        await waitForDialogExit();
+        expect(screen.getByText(codes[0]!)).toBeTruthy();
+        await userActions.click(screen.getByRole("button", { name: "Dismiss" }));
+    });
+
+    test("confirms destructive automation actions before mutation", async () => {
+        const transport = new SecurityTransport();
+        transport.principals = [automationPrincipal];
+        transport.credentials.set(automationPrincipal.id, [automationCredential]);
+        transport.mutationHandler = (path, input) => {
+            if (path === "automationSecurity.revokeCredential") {
+                expect(input).toEqual({
+                    credentialId: automationCredential.id,
+                    expectedAuthorizationVersion:
+                        automationPrincipal.authorizationVersion,
+                    principalId: automationPrincipal.id,
+                });
+                const credential = {
+                    ...automationCredential,
+                    revokedAtMs: timestampMs + 1000,
+                };
+                transport.credentials.set(automationPrincipal.id, [credential]);
+                return Promise.resolve({ credential, revoked: true });
+            }
+            expect(path).toBe("automationSecurity.disablePrincipal");
+            expect(input).toEqual({
+                expectedAuthorizationVersion: automationPrincipal.authorizationVersion,
+                principalId: automationPrincipal.id,
+            });
+            const principal = {
+                ...automationPrincipal,
+                activeCredentialCount: 0,
+                authorizationVersion: 2,
+                disabled: true as const,
+                disabledAtMs: timestampMs + 2000,
+                updatedAtMs: timestampMs + 2000,
+            };
+            transport.principals = [principal];
+            return Promise.resolve({
+                changed: true,
+                principal,
+                revokedCredentials: 0,
+            });
+        };
+        renderAccountSecurity(transport);
+        const userActions = userEvent.setup();
+        await screen.findByText(automationPrincipal.label);
+
+        await userActions.click(
+            screen.getByRole("button", { name: /Manage credentials/u })
+        );
+        await screen.findByText(automationCredential.label);
+        await userActions.click(
+            screen.getByRole("button", {
+                name: `Revoke credential ${automationCredential.label}`,
+            })
+        );
+        expect(
+            transport.calls.filter(
+                (call) => call.path === "automationSecurity.revokeCredential"
+            )
+        ).toHaveLength(0);
+        await userActions.click(
+            screen.getByRole("button", { name: "Revoke credential" })
+        );
+        expect(await screen.findByText(/revoked /u)).toBeTruthy();
+        await waitForDialogExit();
+        expect(
+            transport.calls.filter(
+                (call) => call.path === "automationSecurity.revokeCredential"
+            )
+        ).toHaveLength(1);
+
+        await userActions.click(
+            screen.getByRole("button", {
+                name: `Disable principal ${automationPrincipal.label}`,
+            })
+        );
+        expect(
+            transport.calls.filter(
+                (call) => call.path === "automationSecurity.disablePrincipal"
+            )
+        ).toHaveLength(0);
+        await userActions.click(
+            screen.getByRole("button", { name: "Disable principal" })
+        );
+        await waitFor(() =>
+            expect(
+                transport.calls.filter(
+                    (call) => call.path === "automationSecurity.disablePrincipal"
+                )
+            ).toHaveLength(1)
+        );
+        await waitForDialogExit();
+        expect(await screen.findByText(/^Disabled ·/u)).toBeTruthy();
+        expect(
+            transport.calls.filter(
+                (call) => call.path === "automationSecurity.disablePrincipal"
+            )
+        ).toHaveLength(1);
+    });
+
     test("revokes one, other, and all browser sessions with final cache teardown", async () => {
         const transport = new SecurityTransport();
         transport.mutationHandler = (path, input) => {
@@ -595,8 +789,20 @@ describe("Dashboard account security route", () => {
         const userActions = userEvent.setup();
         await screen.findByText("Other browser");
 
-        await userActions.click(screen.getByRole("button", { name: "Revoke" }));
+        await userActions.click(
+            screen.getByRole("button", { name: "Revoke session Other browser" })
+        );
+        expect(
+            screen.getByRole("dialog", { name: "Revoke browser session?" })
+        ).toBeTruthy();
+        expect(
+            transport.calls.filter((call) => call.path === "auth.revokeSession")
+        ).toHaveLength(0);
+        await userActions.click(screen.getByRole("button", { name: "Revoke session" }));
         await waitFor(() => expect(screen.queryByText("Other browser")).toBeNull());
+        await userActions.click(
+            screen.getByRole("button", { name: "Revoke other sessions" })
+        );
         await userActions.click(
             screen.getByRole("button", { name: "Revoke other sessions" })
         );
@@ -604,6 +810,9 @@ describe("Dashboard account security route", () => {
             expect(
                 transport.calls.filter((call) => call.path === "auth.revokeOtherSessions")
             ).toHaveLength(1)
+        );
+        await userActions.click(
+            screen.getByRole("button", { name: "Revoke every session" })
         );
         await userActions.click(
             screen.getByRole("button", { name: "Revoke every session" })
@@ -624,46 +833,38 @@ describe("Dashboard account security route", () => {
 
     test("reveals a created automation token once without placing it in query data", async () => {
         const transport = new SecurityTransport();
-        const prefix = "c".repeat(32);
-        const token = `${prefix}.${"d".repeat(64)}`;
-        const credential: AutomationCredentialSummary = {
-            createdAtMs: timestampMs,
-            id: "019fd979-42cc-7ce4-8392-3de63748a594",
-            label: "Heartbeat credential",
-            prefix,
-        };
-        const principal: AutomationPrincipalSummary = {
-            activeCredentialCount: 1,
-            authorizationVersion: 1,
-            capabilities: ["notifications:read"],
-            createdAtMs: timestampMs,
-            disabled: false,
-            id: "openclaw-heartbeat",
-            label: "OpenClaw heartbeat",
-            totalCredentialCount: 1,
-            updatedAtMs: timestampMs,
-        };
+        const token = `${automationCredential.prefix}.${"d".repeat(64)}`;
         transport.mutationHandler = (path, input) => {
             expect(path).toBe("automationSecurity.createPrincipal");
             expect(input).toEqual({
                 capabilities: ["notifications:read"],
-                id: principal.id,
-                initialCredential: { label: credential.label },
-                label: principal.label,
+                id: automationPrincipal.id,
+                initialCredential: { label: automationCredential.label },
+                label: automationPrincipal.label,
             });
-            transport.principals = [principal];
-            transport.credentials.set(principal.id, [credential]);
-            return Promise.resolve({ credential, principal, token });
+            transport.principals = [automationPrincipal];
+            transport.credentials.set(automationPrincipal.id, [automationCredential]);
+            return Promise.resolve({
+                credential: automationCredential,
+                principal: automationPrincipal,
+                token,
+            });
         };
         const queryClient = renderAccountSecurity(transport);
         const userActions = userEvent.setup();
         await screen.findByRole("heading", { level: 1, name: "Account security" });
 
-        await userActions.type(screen.getByLabelText("Principal ID"), principal.id);
-        await userActions.type(screen.getByLabelText("Principal label"), principal.label);
+        await userActions.type(
+            screen.getByLabelText("Principal ID"),
+            automationPrincipal.id
+        );
+        await userActions.type(
+            screen.getByLabelText("Principal label"),
+            automationPrincipal.label
+        );
         await userActions.type(
             screen.getByLabelText("Initial credential label"),
-            credential.label
+            automationCredential.label
         );
         await userActions.click(screen.getByLabelText("notifications:read"));
         await userActions.click(
@@ -674,6 +875,6 @@ describe("Dashboard account security route", () => {
         expect(cachedData(queryClient)).not.toContain(token);
         await userActions.click(screen.getByRole("button", { name: "Dismiss" }));
         expect(screen.queryByText(token)).toBeNull();
-        expect(await screen.findByText(principal.label)).toBeTruthy();
+        expect(await screen.findByText(automationPrincipal.label)).toBeTruthy();
     });
 });

@@ -32,12 +32,20 @@ import {
     sortApplicationCapabilities,
 } from "../../src/contracts/security.ts";
 import {
+    securityAuditEventsHaveStableOrder,
+    securityAuditPageCursorIsConsistent,
+} from "../../src/contracts/securityAudit.ts";
+import {
     hasMatchingWebAuthnAuthenticationCredentialIds,
     hasMatchingWebAuthnRegistrationCredentialIds,
     isCanonicalWebAuthnBase64Url,
     sortWebAuthnTransports,
 } from "../../src/contracts/webauthn.ts";
-import { hasUniqueArrayItems } from "../../src/shared/validation.ts";
+import {
+    getBoundedNonBlankTextMaximumLength,
+    hasNoNulCharacter,
+    hasUniqueArrayItems,
+} from "../../src/shared/validation.ts";
 
 /** JSON Schema conversion direction for transport schemas. */
 export type SchemaTypeMode = "input" | "output";
@@ -54,8 +62,9 @@ const securityLabelControlOrFormatPattern = [
     String.raw`\uDB40(?:\uDC01|[\uDC20-\uDC7F])`,
 ].join("|");
 const securityLabelJsonSchemaPattern = `^(?=[\\s\\S]*\\S)(?![\\s\\S]*(?:${securityLabelControlOrFormatPattern}))[\\s\\S]+$`;
+const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
-const automationRuntimeCheckComments = new Map<unknown, string>([
+const runtimeCheckComments = new Map<unknown, string>([
     [
         automationCredentialTimesAreOrdered,
         "Live Valibot validation additionally requires credential expiry after creation and revocation no earlier than creation.",
@@ -116,6 +125,14 @@ const automationRuntimeCheckComments = new Map<unknown, string>([
         disabledAutomationPrincipalResultIsConsistent,
         "Live Valibot validation additionally requires terminal disabled state and zero newly revoked credentials for an idempotent no-op.",
     ],
+    [
+        securityAuditEventsHaveStableOrder,
+        "Live Valibot validation additionally requires strict newest-first audit-event ordering by occurrence timestamp and ID.",
+    ],
+    [
+        securityAuditPageCursorIsConsistent,
+        "Live Valibot validation additionally requires an audit continuation cursor to identify the returned last event.",
+    ],
 ]);
 
 function appendJsonSchemaComment(
@@ -132,6 +149,26 @@ function appendJsonSchemaComment(
             typeof existing === "string" && existing.length > 0
                 ? `${existing} ${comment}`
                 : comment,
+    };
+}
+
+function appendJsonSchemaPattern(
+    jsonSchema: object,
+    pattern: string
+): Record<string, unknown> {
+    const existingPattern =
+        "pattern" in jsonSchema && typeof jsonSchema.pattern === "string"
+            ? jsonSchema.pattern
+            : undefined;
+    if (existingPattern === undefined) return { ...jsonSchema, pattern };
+
+    const existingAllOfValue: unknown = Reflect.get(jsonSchema, "allOf");
+    const existingAllOf: readonly unknown[] = Array.isArray(existingAllOfValue)
+        ? (existingAllOfValue as unknown[])
+        : [];
+    return {
+        ...jsonSchema,
+        allOf: [...existingAllOf, { pattern }],
     };
 }
 
@@ -219,6 +256,20 @@ export function convertContractSchema(
                 ) {
                     return { ...jsonSchema, uniqueItems: true };
                 }
+                if (valibotAction.type === "check" && requirement === hasNoNulCharacter) {
+                    return appendJsonSchemaPattern(jsonSchema, noNulJsonSchemaPattern);
+                }
+                if (valibotAction.type === "check") {
+                    const maximumLength =
+                        getBoundedNonBlankTextMaximumLength(requirement);
+                    if (maximumLength !== undefined) {
+                        return {
+                            ...jsonSchema,
+                            maxLength: maximumLength,
+                            minLength: 1,
+                        };
+                    }
+                }
                 if (
                     valibotAction.type === "check" &&
                     requirement === isCanonicalWebAuthnBase64Url
@@ -254,7 +305,7 @@ export function convertContractSchema(
                     };
                 }
                 if (valibotAction.type === "check") {
-                    const comment = automationRuntimeCheckComments.get(requirement);
+                    const comment = runtimeCheckComments.get(requirement);
                     if (comment !== undefined) {
                         return appendJsonSchemaComment(jsonSchema, comment);
                     }

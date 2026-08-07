@@ -15,6 +15,11 @@ describe("test output policy", () => {
             "React act environment is not configured",
         ],
         [
+            "Headless UI animations fallback",
+            "Headless UI has polyfilled `Element.prototype.getAnimations` for your tests.",
+            "Headless UI Web Animations test shim is missing",
+        ],
+        [
             "Bun main-thread panic",
             "panic(main thread): assertion failed",
             "Bun main thread panicked",

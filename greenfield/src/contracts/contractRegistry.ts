@@ -22,8 +22,7 @@ const registeredProcedureContracts = [
 ] as const satisfies readonly ProcedureContract[];
 
 /** Exact registered procedure union used by environment-neutral typed clients. */
-export type RegisteredProcedureContract =
-    (typeof registeredProcedureContracts)[number];
+export type RegisteredProcedureContract = (typeof registeredProcedureContracts)[number];
 assertProcedureContractErrors(registeredProcedureContracts);
 export const procedureContracts = Object.freeze(
     registeredProcedureContracts.map((registeredContract) => {

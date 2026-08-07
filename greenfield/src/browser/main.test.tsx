@@ -1,15 +1,8 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import { act } from "react";
 
-import { acquireBrowserTestEnvironment } from "./testSupport/browserTestEnvironment.ts";
-
-const browserEnvironment = await acquireBrowserTestEnvironment();
 const { screen } = await import("@testing-library/react");
-
-afterAll(async () => {
-    await browserEnvironment.release();
-});
 
 describe("Dashboard browser entrypoint", () => {
     test("mounts the composed application into the document root", async () => {

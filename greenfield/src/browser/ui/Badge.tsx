@@ -1,6 +1,6 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
-import { cn } from "./classNames.ts";
+import { cn } from "../lib/classNames.ts";
 
 const badgeStyles = Object.freeze({
     danger: "border-red-500/30 bg-red-500/15 text-red-300",
