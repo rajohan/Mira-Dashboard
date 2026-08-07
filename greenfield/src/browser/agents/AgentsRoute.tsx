@@ -18,6 +18,7 @@ import { PageHeader } from "../ui/PageHeader.tsx";
 import { AgentHistoryTable } from "./AgentHistoryTable.tsx";
 import { agentHistoryQueryOptions } from "./agentQueries.ts";
 import { AgentStatusGrid } from "./AgentStatusGrid.tsx";
+import { useAgentCollectionQueryState } from "./useAgentCollectionQueryState.ts";
 import { useAgentRealtimeInvalidation } from "./useAgentRealtimeInvalidation.ts";
 
 const emptyAgents: readonly AgentDefinition[] = Object.freeze([]);
@@ -31,13 +32,14 @@ export function AgentsRoute() {
     const collections = useDashboardBrowserCollections().agents;
     const configuration = useLiveQuery(collections.definitions);
     const statuses = useLiveQuery(collections.statuses);
+    const collectionQueries = useAgentCollectionQueryState();
     const history = useInfiniteQuery(agentHistoryQueryOptions(client));
     const agents = configuration.data ?? emptyAgents;
     const agentStatuses = statuses.data ?? emptyStatuses;
     const runs = history.data?.pages.flatMap((page) => page.runs) ?? emptyRuns;
     const error =
-        collections.definitions.utils.lastError ??
-        collections.statuses.utils.lastError ??
+        collectionQueries.configuration?.error ??
+        collectionQueries.statuses?.error ??
         history.error;
     const pending = configuration.isLoading || statuses.isLoading || history.isPending;
     const hasCompleteData =
@@ -57,8 +59,8 @@ export function AgentsRoute() {
                 actions={
                     <Button
                         busy={
-                            collections.definitions.utils.isFetching ||
-                            collections.statuses.utils.isFetching ||
+                            collectionQueries.configuration?.fetchStatus === "fetching" ||
+                            collectionQueries.statuses?.fetchStatus === "fetching" ||
                             history.isFetching
                         }
                         busyLabel="Refreshing…"

@@ -7,6 +7,7 @@ import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { AgentNotFoundError } from "./errors.ts";
 import {
     agentServiceFor,
+    agentTestUuid,
     agentTestPrincipal,
     openFreshMigratedDatabase,
     runAgentEffect,
@@ -83,8 +84,8 @@ describe("agent service", () => {
             );
             expect(restarted).toMatchObject({
                 currentTask: "Start after clock regression",
-                lastActivityAtMs: 30_000,
-                startedAtMs: 30_000,
+                lastActivityAtMs: 30_001,
+                startedAtMs: 30_001,
                 state: "working",
             });
 
@@ -159,6 +160,59 @@ describe("agent service", () => {
             );
             expect(secondPage.runs).toHaveLength(1);
             expect(secondPage.runs[0]?.id).not.toBe(firstPage.runs[0]?.id);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("keeps exact, list, and history status consistent across equal timestamps", async () => {
+        const database = await openFreshMigratedDatabase();
+        let nowMs = 10_000;
+        const ids = [agentTestUuid(900), agentTestUuid(1)];
+        const service = agentServiceFor(database, {
+            generateId: () => ids.shift()!,
+            nowMs: () => nowMs,
+        });
+
+        try {
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "First run",
+                })
+            );
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: null,
+                })
+            );
+
+            nowMs = 1000;
+            const restarted = await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Restart after clock regression",
+                })
+            );
+            const exact = await runAgentEffect(service.getStatus({ id: "main" }));
+            const listed = await runAgentEffect(service.listStatuses());
+            const history = await runAgentEffect(
+                service.listTaskHistory({ agentId: "main", limit: 10 })
+            );
+
+            if (restarted.state !== "working") {
+                throw new TypeError("Restarted agent must be working");
+            }
+            expect(restarted.startedAtMs).toBe(10_001);
+            expect(exact).toEqual(restarted);
+            expect(listed.statuses.find(({ agentId }) => agentId === "main")).toEqual(
+                restarted
+            );
+            expect(history.runs.map(({ id }) => id)).toEqual([
+                agentTestUuid(1),
+                agentTestUuid(900),
+            ]);
         } finally {
             database.sqlite.close(true);
         }

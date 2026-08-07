@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { resetAuthenticatedBrowserCache } from "./authQueries.ts";
 
@@ -11,13 +12,14 @@ import { resetAuthenticatedBrowserCache } from "./authQueries.ts";
  */
 export function useAuthenticationAction() {
     const client = useDashboardTrpcClient();
+    const collections = useDashboardBrowserCollections();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const action = useExclusiveDashboardAction();
 
     async function refreshAuthenticationStatus() {
         const status = await client.query("auth.status", {});
-        resetAuthenticatedBrowserCache(queryClient, status);
+        await resetAuthenticatedBrowserCache(queryClient, collections, status);
         return status;
     }
 
@@ -29,7 +31,7 @@ export function useAuthenticationAction() {
                 try {
                     await refreshAuthenticationStatus();
                 } catch {
-                    resetAuthenticatedBrowserCache(queryClient);
+                    await resetAuthenticatedBrowserCache(queryClient, collections);
                 }
                 throw error;
             }

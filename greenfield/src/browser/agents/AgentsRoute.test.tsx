@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act } from "react";
@@ -11,6 +11,7 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardBrowserApplication } from "../application.tsx";
+import { resetAuthenticatedBrowserCache } from "../auth/authQueries.ts";
 import {
     createDashboardBrowserCollections,
     type DashboardBrowserCollections,
@@ -18,8 +19,9 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { agentStatusesQueryKey } from "./agentQueries.ts";
 
-const { render, screen } = await import("@testing-library/react");
+const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -47,6 +49,7 @@ const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
 });
 
 class AgentTransport implements DashboardTrpcTransport {
+    configurationQueryCount = 0;
     mainStatus: AgentStatus = {
         agentId: "main",
         currentTask: "Implement agents route",
@@ -54,6 +57,8 @@ class AgentTransport implements DashboardTrpcTransport {
         startedAtMs: timestampMs,
         state: "working",
     };
+    statusQueryCount = 0;
+    statusQueryResponse: Promise<unknown> | undefined;
 
     mutation(path: string): Promise<unknown> {
         return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
@@ -65,6 +70,7 @@ class AgentTransport implements DashboardTrpcTransport {
                 return Promise.resolve(authenticatedStatus);
             }
             case "agents.getConfiguration": {
+                this.configurationQueryCount += 1;
                 return Promise.resolve({
                     agents: [
                         {
@@ -83,6 +89,10 @@ class AgentTransport implements DashboardTrpcTransport {
                 });
             }
             case "agents.listStatuses": {
+                this.statusQueryCount += 1;
+                if (this.statusQueryResponse !== undefined) {
+                    return this.statusQueryResponse;
+                }
                 return Promise.resolve({
                     statuses: [this.mainStatus],
                 });
@@ -233,5 +243,108 @@ describe("Dashboard agents route", () => {
         await user.click(screen.getByRole("button", { name: "Load older tasks" }));
         expect(await screen.findByText("Older agent task")).toBeTruthy();
         expect(screen.getByText("Newest agent task")).toBeTruthy();
+    });
+
+    test("recreates agent collections after the authenticated cache is reset", async () => {
+        const transport = new AgentTransport();
+        const queryClient = createDashboardQueryClient();
+        queryClients.push(queryClient);
+        const trpcClient = createDashboardTrpcClient(transport);
+        const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+        collectionRegistries.push(collections);
+        const firstView = render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={createDashboardRouter(
+                    createMemoryHistory({ initialEntries: ["/agents"] })
+                )}
+                trpcClient={trpcClient}
+                webAuthnClient={unexpectedWebAuthnClient}
+            />
+        );
+        mountedViews.push(firstView);
+
+        expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+        expect(transport.configurationQueryCount).toBe(1);
+        expect(transport.statusQueryCount).toBe(1);
+        firstView.unmount();
+        mountedViews.splice(mountedViews.indexOf(firstView), 1);
+
+        await act(async () => {
+            await resetAuthenticatedBrowserCache(
+                queryClient,
+                collections,
+                authenticatedStatus
+            );
+        });
+        mountedViews.push(
+            render(
+                <DashboardBrowserApplication
+                    collections={collections}
+                    queryClient={queryClient}
+                    realtimeClient={noOpDashboardRealtimeClient}
+                    router={createDashboardRouter(
+                        createMemoryHistory({ initialEntries: ["/agents"] })
+                    )}
+                    trpcClient={trpcClient}
+                    webAuthnClient={unexpectedWebAuthnClient}
+                />
+            )
+        );
+
+        expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+        await waitFor(() => {
+            expect(transport.configurationQueryCount).toBe(2);
+            expect(transport.statusQueryCount).toBe(2);
+        });
+        expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
+    });
+
+    test("renders the final collection refresh failure and clears busy state", async () => {
+        const transport = new AgentTransport();
+        const queryClient = createDashboardQueryClient();
+        queryClient.setQueryDefaults(agentStatusesQueryKey, { retry: false });
+        queryClients.push(queryClient);
+        const router = createDashboardRouter(
+            createMemoryHistory({ initialEntries: ["/agents"] })
+        );
+        const trpcClient = createDashboardTrpcClient(transport);
+        const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+        collectionRegistries.push(collections);
+        mountedViews.push(
+            render(
+                <DashboardBrowserApplication
+                    collections={collections}
+                    queryClient={queryClient}
+                    realtimeClient={noOpDashboardRealtimeClient}
+                    router={router}
+                    trpcClient={trpcClient}
+                    webAuthnClient={unexpectedWebAuthnClient}
+                />
+            )
+        );
+        const user = userEvent.setup();
+        const statusRefresh = Promise.withResolvers<unknown>();
+
+        expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+        transport.statusQueryResponse = statusRefresh.promise;
+        await user.click(screen.getByRole("button", { name: "Refresh" }));
+        expect(await screen.findByText("Refreshing…")).toBeTruthy();
+
+        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        try {
+            await act(async () => {
+                statusRefresh.reject(new TypeError("redacted status failure"));
+                await statusRefresh.promise.catch(() => {});
+            });
+            expect(consoleError).toHaveBeenCalled();
+        } finally {
+            consoleError.mockRestore();
+        }
+        expect(await screen.findByRole("alert")).toBeTruthy();
+        await waitFor(() => expect(screen.queryByText("Refreshing…")).toBeNull());
+        expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
     });
 });

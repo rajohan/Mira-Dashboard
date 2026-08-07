@@ -40,12 +40,11 @@ export function useRealtimeQueryInvalidation({
         };
         const subscription = hub.subscribe([topic], {
             onData(output) {
-                if (
-                    output.data.kind === "resync-required" ||
-                    output.data.event.topic === topic
-                ) {
-                    scheduleRefresh();
+                if (output.data.kind === "resync-required") {
+                    startFallbackRefresh();
+                    return;
                 }
+                if (output.data.event.topic === topic) scheduleRefresh();
             },
             onError: startFallbackRefresh,
         });

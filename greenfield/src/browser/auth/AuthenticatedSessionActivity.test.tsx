@@ -7,6 +7,8 @@ import type { AuthStatus } from "../../contracts/auth.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import { createDashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
+import { createDashboardBrowserCollections } from "../data/dashboardCollections.ts";
+import { DashboardCollectionsProvider } from "../data/dashboardCollectionsContext.tsx";
 import { AuthenticatedSessionActivity } from "./AuthenticatedSessionActivity.tsx";
 import { authStatusQueryKey } from "./authQueries.ts";
 
@@ -53,11 +55,14 @@ describe("authenticated browser activity", () => {
                 return statusRefresh.promise;
             },
         });
+        const collections = createDashboardBrowserCollections(queryClient, client);
         const rendered = render(
             <QueryClientProvider client={queryClient}>
-                <DashboardTrpcProvider client={client}>
-                    <AuthenticatedSessionActivity />
-                </DashboardTrpcProvider>
+                <DashboardCollectionsProvider collections={collections}>
+                    <DashboardTrpcProvider client={client}>
+                        <AuthenticatedSessionActivity />
+                    </DashboardTrpcProvider>
+                </DashboardCollectionsProvider>
             </QueryClientProvider>
         );
         let unmounted = false;
@@ -97,6 +102,7 @@ describe("authenticated browser activity", () => {
         } finally {
             statusRefresh.resolve(authenticatedStatus(touchedAtMs));
             if (!unmounted) rendered.unmount();
+            await collections.cleanup();
             queryClient.clear();
         }
     });
@@ -122,11 +128,14 @@ describe("authenticated browser activity", () => {
                 return Promise.resolve(authenticatedStatus(currentLastSeenAtMs));
             },
         });
+        const collections = createDashboardBrowserCollections(queryClient, client);
         const rendered = render(
             <QueryClientProvider client={queryClient}>
-                <DashboardTrpcProvider client={client}>
-                    <AuthenticatedSessionActivity />
-                </DashboardTrpcProvider>
+                <DashboardCollectionsProvider collections={collections}>
+                    <DashboardTrpcProvider client={client}>
+                        <AuthenticatedSessionActivity />
+                    </DashboardTrpcProvider>
+                </DashboardCollectionsProvider>
             </QueryClientProvider>
         );
         const scrollContainer = document.createElement("div");
@@ -148,6 +157,7 @@ describe("authenticated browser activity", () => {
         } finally {
             scrollContainer.remove();
             rendered.unmount();
+            await collections.cleanup();
             queryClient.clear();
         }
     });
@@ -171,11 +181,14 @@ describe("authenticated browser activity", () => {
                 return statusRefresh.promise;
             },
         });
+        const collections = createDashboardBrowserCollections(queryClient, client);
         const rendered = render(
             <QueryClientProvider client={queryClient}>
-                <DashboardTrpcProvider client={client}>
-                    <AuthenticatedSessionActivity />
-                </DashboardTrpcProvider>
+                <DashboardCollectionsProvider collections={collections}>
+                    <DashboardTrpcProvider client={client}>
+                        <AuthenticatedSessionActivity />
+                    </DashboardTrpcProvider>
+                </DashboardCollectionsProvider>
             </QueryClientProvider>
         );
 
@@ -195,6 +208,7 @@ describe("authenticated browser activity", () => {
         } finally {
             statusRefresh.resolve(staleStatus);
             rendered.unmount();
+            await collections.cleanup();
             queryClient.clear();
         }
     });

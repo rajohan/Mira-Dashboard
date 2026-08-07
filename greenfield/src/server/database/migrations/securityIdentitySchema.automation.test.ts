@@ -92,15 +92,6 @@ describe("automation identity schema", () => {
                 insertCapability.run(capability, 1000 + index);
             }
             database.sqlite.run(`
-                INSERT INTO automation_principal_capabilities (
-                    capability,
-                    granted_at,
-                    principal_id
-                ) VALUES
-                    ('tasks:read', 1000, 'openclaw-task-tracking'),
-                    ('tasks:write', 1000, 'openclaw-task-tracking')
-            `);
-            database.sqlite.run(`
                 INSERT INTO automation_credentials (
                     created_at,
                     expires_at,
@@ -160,11 +151,10 @@ describe("automation identity schema", () => {
             ).toThrow("automation_credentials_label_check");
             expect(() =>
                 database.sqlite.run(`
-                    INSERT INTO automation_principal_capabilities (
-                        capability,
-                        granted_at,
-                        principal_id
-                    ) VALUES ('reports:read', 8640000000000001, 'openclaw-task-tracking')
+                    UPDATE automation_principal_capabilities
+                    SET granted_at = 8640000000000001
+                    WHERE capability = 'reports:read'
+                      AND principal_id = 'openclaw-task-tracking'
                 `)
             ).toThrow("automation_principal_capabilities_granted_at_check");
             expect(() =>

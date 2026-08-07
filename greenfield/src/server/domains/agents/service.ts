@@ -279,14 +279,18 @@ function updateInsideTransaction(
             "task-run replacement"
         );
     }
+    const startedAt =
+        latestActivityAt === undefined
+            ? occurredAt
+            : maximumDate([now, addMilliseconds(latestActivityAt, 1)]);
     const inserted = insertRun(
         unit,
         { ...input, currentTask: input.currentTask },
         actor,
-        occurredAt,
+        startedAt,
         generateId
     );
-    appendRealtimeEvent(unit, input.agentId, occurredAt, retentionMs);
+    appendRealtimeEvent(unit, input.agentId, startedAt, retentionMs);
     return { changed: true, status: statusFromRecord(input.agentId, inserted) };
 }
 
@@ -342,9 +346,11 @@ export function createAgentService(
         getStatus: (input) =>
             readEffect(() => {
                 requireConfiguredAgent(input.id);
-                return statusFromRecord(
-                    input.id,
-                    dependencies.repository.findLatestRun(input.id)
+                return dependencies.repository.withReadTransaction((reader) =>
+                    statusFromRecord(
+                        input.id,
+                        reader.findActiveRun(input.id) ?? reader.findLatestRun(input.id)
+                    )
                 );
             }),
         listStatuses: () => Effect.sync(() => listStatuses(dependencies.repository)),

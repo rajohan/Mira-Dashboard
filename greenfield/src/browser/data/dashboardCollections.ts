@@ -6,33 +6,60 @@ import {
 } from "../agents/agentCollections.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
-/** Browser-owned normalized collections and their explicit lifetime boundary. */
+/** Browser-owned normalized collections and their explicit lifetime/reset boundaries. */
 export interface DashboardBrowserCollections {
     readonly agents: AgentCollections;
     readonly cleanup: () => Promise<void>;
+    readonly reset: () => Promise<void>;
+}
+
+async function cleanupAgentCollections(collections: AgentCollections): Promise<void> {
+    await Promise.all([
+        collections.definitions.cleanup(),
+        collections.statuses.cleanup(),
+    ]);
 }
 
 /**
  * Creates all normalized collections owned by one browser application runtime.
  * @param queryClient Browser-owned TanStack Query cache.
  * @param trpcClient Browser-owned validated transport client.
- * @returns One deeply stable collection registry with idempotent cleanup.
+ * @returns One stable registry that replaces feature collections at auth boundaries.
  */
 export function createDashboardBrowserCollections(
     queryClient: QueryClient,
     trpcClient: DashboardTrpcClient
 ): DashboardBrowserCollections {
-    const agents = createAgentCollections(queryClient, trpcClient);
+    let agents = createAgentCollections(queryClient, trpcClient);
     let cleaned = false;
+    let pendingOperation = Promise.resolve();
+
+    function enqueue(operation: () => Promise<void>): Promise<void> {
+        const result = pendingOperation.then(operation);
+        pendingOperation = result.catch(() => undefined);
+        return result;
+    }
+
     return Object.freeze({
-        agents,
+        get agents() {
+            return agents;
+        },
         async cleanup(): Promise<void> {
-            if (cleaned) return;
-            cleaned = true;
-            await Promise.all([
-                agents.definitions.cleanup(),
-                agents.statuses.cleanup(),
-            ]);
+            await enqueue(async () => {
+                if (cleaned) return;
+                cleaned = true;
+                await cleanupAgentCollections(agents);
+            });
+        },
+        async reset(): Promise<void> {
+            await enqueue(async () => {
+                if (cleaned) {
+                    throw new TypeError("Dashboard collections are cleaned up");
+                }
+                const previousAgents = agents;
+                await cleanupAgentCollections(previousAgents);
+                agents = createAgentCollections(queryClient, trpcClient);
+            });
         },
     });
 }

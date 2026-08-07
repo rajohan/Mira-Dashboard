@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { classifyDashboardBrowserFailure } from "../api/trpcError.ts";
+import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
 import {
     authStatusQueryKey,
     authStatusQueryOptions,
@@ -60,6 +61,7 @@ function updateCachedSessionActivity(
  */
 export function AuthenticatedSessionActivity() {
     const client = useDashboardTrpcClient();
+    const collections = useDashboardBrowserCollections();
     const queryClient = useQueryClient();
     const status = useQuery(authStatusQueryOptions(client));
     const authenticatedSessionId =
@@ -91,7 +93,7 @@ export function AuthenticatedSessionActivity() {
                 ) {
                     await queryClient.cancelQueries();
                     if (active) {
-                        resetAuthenticatedBrowserCache(queryClient, {
+                        await resetAuthenticatedBrowserCache(queryClient, collections, {
                             state: "anonymous",
                         });
                     }
@@ -145,7 +147,7 @@ export function AuthenticatedSessionActivity() {
             document.removeEventListener("visibilitychange", requestTouchWhenVisible);
             window.removeEventListener("focus", requestTouch);
         };
-    }, [authenticatedSessionId, client, queryClient]);
+    }, [authenticatedSessionId, client, collections, queryClient]);
 
     return null;
 }

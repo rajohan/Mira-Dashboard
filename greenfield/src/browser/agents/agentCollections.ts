@@ -8,7 +8,7 @@ import {
     agentStatusSchema,
 } from "../../contracts/agentModel.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
-import { agentQueryKey } from "./agentQueries.ts";
+import { agentConfigurationQueryKey, agentStatusesQueryKey } from "./agentQueries.ts";
 
 /**
  * Creates the normalized agent directory and status collections for one browser runtime.
@@ -32,7 +32,7 @@ export function createAgentCollections(
                 );
                 return result.agents.map((agent) => ({ ...agent }));
             },
-            queryKey: [...agentQueryKey, "configuration"],
+            queryKey: agentConfigurationQueryKey,
             schema: agentDefinitionSchema,
             staleTime: Number.POSITIVE_INFINITY,
         })
@@ -49,7 +49,7 @@ export function createAgentCollections(
                 );
                 return result.statuses.map((status): AgentStatus => ({ ...status }));
             },
-            queryKey: [...agentQueryKey, "statuses"],
+            queryKey: agentStatusesQueryKey,
             schema: agentStatusSchema,
             staleTime: 10_000,
         })

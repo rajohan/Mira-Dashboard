@@ -9,6 +9,8 @@ import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 type AgentHistoryCursor = NonNullable<ListAgentTaskHistoryInput["cursor"]>;
 
 export const agentQueryKey = ["agents"] as const;
+export const agentConfigurationQueryKey = [...agentQueryKey, "configuration"] as const;
+export const agentStatusesQueryKey = [...agentQueryKey, "statuses"] as const;
 
 /** @returns Cursor-paginated newest-first agent task history query options. */
 export function agentHistoryQueryOptions(client: DashboardTrpcClient) {
