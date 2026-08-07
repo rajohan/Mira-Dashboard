@@ -61,6 +61,12 @@ const activationCliResultSchema = v.strictObject({
     status: v.literal("ACTIVATED"),
     transitionId: v.pipe(v.string(), v.uuid()),
 });
+const activationArgumentNames = new Set([
+    "project-root",
+    "readiness-url",
+    "release-root",
+    "runtime-source",
+]);
 
 /** Explicit immutable-release activation command. */
 export type ActivateProductionReleaseArguments = Readonly<
@@ -108,6 +114,9 @@ export function parseActivateProductionReleaseArguments(
         throw new TypeError(activationCliUsage);
     }
     const named = readNamedArguments(arguments_);
+    if (Object.keys(named).some((name) => !activationArgumentNames.has(name))) {
+        throw new TypeError(activationCliUsage);
+    }
     const candidate: unknown = {
         projectRoot: named["project-root"],
         readinessUrl: named["readiness-url"],

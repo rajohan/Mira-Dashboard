@@ -28,10 +28,12 @@ import {
     createProductionActivationJournal,
     loadProductionActivationJournal,
     markProductionDatabasePromoted,
+    markProductionRollbackRequired,
 } from "./productionActivationJournal.ts";
 import {
     commitProductionActivationState,
     loadProductionActivationState,
+    restorePreviousProductionActivationState,
     type ProductionActivationState,
 } from "./productionActivationState.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
@@ -102,7 +104,10 @@ function sameRecord(
     right: ProductionActivationRecord | null | undefined
 ): boolean {
     if (left === null || left === undefined || right === null || right === undefined) {
-        return left === right;
+        return (
+            (left === null || left === undefined) &&
+            (right === null || right === undefined)
+        );
     }
     const samePrevious =
         left.previous === null || right.previous === null
@@ -249,6 +254,28 @@ async function reconcileActivationCommit(
     }
 }
 
+async function reconcileActivationRollback(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    expected: ProductionActivationState,
+    previous: ProductionActivationRecord | null
+): Promise<ProductionActivationState> {
+    try {
+        return await restorePreviousProductionActivationState(
+            lease,
+            paths,
+            expected,
+            previous
+        );
+    } catch {
+        const observed = await loadProductionActivationState(lease, paths);
+        if (!sameRecord(observed.record, previous ?? undefined)) {
+            throw activationError();
+        }
+        return observed;
+    }
+}
+
 async function restorePreviousDatabase(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
@@ -287,49 +314,41 @@ async function discardTransitionWorkspace(
         : discardOrphanDatabaseTransitionWorkspace(lease, paths, transitionId));
 }
 
-async function recoverExistingTransition(
+function activationMatchesCandidate(
+    activation: ProductionActivationState,
+    journal: ProductionActivationTransition
+): boolean {
+    return (
+        activation.record?.transitionId === journal.transitionId &&
+        activation.record.current.releaseId === journal.candidate.releaseId &&
+        activation.record.current.runtimeRevision === journal.candidate.runtimeRevision
+    );
+}
+
+async function rollbackTransition(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
+    journal: ProductionActivationTransition,
+    activation: ProductionActivationState,
     dependencies: ProductionReleaseActivationDependencies
 ): Promise<ProductionActivationState> {
-    const journal = await loadProductionActivationJournal(lease, paths);
-    const activation = await loadProductionActivationState(lease, paths);
-    if (!journal) return activation;
+    const candidateCommitted = activationMatchesCandidate(activation, journal);
+    const previousAuthoritative = sameRecord(
+        activation.record,
+        journal.previousActivation
+    );
+    if (!candidateCommitted && !previousAuthoritative) throw activationError();
 
-    const committed =
-        activation.record !== undefined &&
-        activation.record.transitionId === journal.transitionId &&
-        activation.record.current.releaseId === journal.candidate.releaseId &&
-        activation.record.current.runtimeRevision === journal.candidate.runtimeRevision;
-    if (committed) {
-        const currentRecord = activation.record;
-        if (!currentRecord) throw activationError();
-        const current = await loadActiveArtifacts(paths, currentRecord, dependencies);
-        await prepareAndStartServices(dependencies.services, current);
-        await dependencies.services.verifyReady(current.release, current.runtime);
-        await discardOrphanDatabaseTransitionWorkspace(
-            lease,
-            paths,
-            journal.transitionId
-        );
-        await clearProductionActivationJournal(lease, paths, journal);
-        return activation;
-    }
-    if (!sameRecord(activation.record, journal.previousActivation)) {
-        throw activationError();
-    }
-
-    const previous = activation.record
-        ? await loadActiveArtifacts(paths, activation.record, dependencies)
+    const candidate = await loadExactArtifacts(
+        paths,
+        journal.candidate.releaseId,
+        journal.candidate.runtimeRevision,
+        dependencies
+    );
+    const previous = journal.previousActivation
+        ? await loadActiveArtifacts(paths, journal.previousActivation, dependencies)
         : undefined;
-    const stopOwner =
-        previous ??
-        (await loadExactArtifacts(
-            paths,
-            journal.candidate.releaseId,
-            journal.candidate.runtimeRevision,
-            dependencies
-        ));
+    const stopOwner = candidateCommitted ? candidate : (previous ?? candidate);
     await dependencies.services.prepare(stopOwner.release, stopOwner.runtime);
     await dependencies.services.stop();
     const recovery = await inspectDatabaseTransitionRecovery(lease, paths, journal);
@@ -343,13 +362,54 @@ async function recoverExistingTransition(
             dependencies
         );
     }
+    const restoredActivation = candidateCommitted
+        ? await reconcileActivationRollback(
+              lease,
+              paths,
+              activation,
+              journal.previousActivation
+          )
+        : activation;
     await discardOrphanDatabaseTransitionWorkspace(lease, paths, journal.transitionId);
     if (previous) {
         await prepareAndStartServices(dependencies.services, previous);
         await dependencies.services.verifyReady(previous.release, previous.runtime);
     }
     await clearProductionActivationJournal(lease, paths, journal);
-    return activation;
+    return restoredActivation;
+}
+
+async function recoverExistingTransition(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    dependencies: ProductionReleaseActivationDependencies
+): Promise<ProductionActivationState> {
+    const journal = await loadProductionActivationJournal(lease, paths);
+    const activation = await loadProductionActivationState(lease, paths);
+    if (!journal) return activation;
+
+    const committed = activationMatchesCandidate(activation, journal);
+    if (committed && journal.phase !== "rollback-required") {
+        if (journal.phase !== "database-promoted") throw activationError();
+        const currentRecord = activation.record;
+        if (!currentRecord) throw activationError();
+        const current = await loadActiveArtifacts(paths, currentRecord, dependencies);
+        try {
+            await prepareAndStartServices(dependencies.services, current);
+            await dependencies.services.verifyReady(current.release, current.runtime);
+        } catch {
+            const rollback = await markProductionRollbackRequired(lease, paths, journal);
+            return rollbackTransition(lease, paths, rollback, activation, dependencies);
+        }
+        await discardOrphanDatabaseTransitionWorkspace(
+            lease,
+            paths,
+            journal.transitionId
+        );
+        await clearProductionActivationJournal(lease, paths, journal);
+        return activation;
+    }
+    return rollbackTransition(lease, paths, journal, activation, dependencies);
 }
 
 async function activateRelease(
@@ -425,8 +485,6 @@ async function activateRelease(
             verifiedCandidate
         );
         journal = await markProductionDatabasePromoted(lease, paths, journal);
-        await prepareAndStartServices(dependencies.services, candidate);
-        await dependencies.services.verifyReady(candidate.release, candidate.runtime);
         const committedState = await reconcileActivationCommit(
             lease,
             paths,
@@ -436,11 +494,18 @@ async function activateRelease(
         const committed = committedState.record;
         if (!committed) throw activationError();
         await dependencies.testHooks?.afterActivationCommit?.();
+        try {
+            await prepareAndStartServices(dependencies.services, candidate);
+            await dependencies.services.verifyReady(candidate.release, candidate.runtime);
+        } catch {
+            journal = await markProductionRollbackRequired(lease, paths, journal);
+            throw activationError();
+        }
+        await discardDatabaseTransitionWorkspace(lease, paths, workspace);
+        workspace = undefined;
         await clearProductionActivationJournal(lease, paths, journal);
         journal = undefined;
         await dependencies.testHooks?.afterActivationJournalClear?.();
-        await discardDatabaseTransitionWorkspace(lease, paths, workspace);
-        workspace = undefined;
         return committed;
     } catch {
         const observedJournal = await loadProductionActivationJournal(lease, paths).catch(
@@ -450,35 +515,22 @@ async function activateRelease(
             lease,
             paths
         ).catch(() => activation);
-        if (sameRecord(observedActivation.record, expectedCommitted)) {
-            await prepareAndStartServices(dependencies.services, candidate);
-            await dependencies.services.verifyReady(candidate.release, candidate.runtime);
-            try {
-                await discardTransitionWorkspace(lease, paths, transitionId, workspace);
-                if (observedJournal) {
-                    await clearProductionActivationJournal(lease, paths, observedJournal);
-                }
-            } catch {
-                // Activation is authoritative; retain recovery evidence for a later pass.
+        if (observedJournal) {
+            const recovered = await recoverExistingTransition(lease, paths, dependencies);
+            if (sameRecord(recovered.record, expectedCommitted)) {
+                return expectedCommitted;
             }
+            throw activationError();
+        }
+        if (sameRecord(observedActivation.record, expectedCommitted)) {
+            await discardTransitionWorkspace(lease, paths, transitionId, workspace);
             return expectedCommitted;
         }
 
         try {
             await dependencies.services.stop();
-            let rollbackPromoted = promoted;
-            let rollbackWorkspace = workspace;
-            if (observedJournal) {
-                const recovery = await inspectDatabaseTransitionRecovery(
-                    lease,
-                    paths,
-                    observedJournal
-                );
-                if (recovery.state === "promoted") {
-                    rollbackPromoted = recovery.promoted;
-                    rollbackWorkspace = recovery.workspace;
-                }
-            }
+            const rollbackPromoted = promoted;
+            const rollbackWorkspace = workspace;
             if (rollbackPromoted && rollbackWorkspace) {
                 await restorePreviousDatabase(
                     lease,
@@ -501,9 +553,6 @@ async function activateRelease(
                     previous.release,
                     previous.runtime
                 );
-            }
-            if (observedJournal) {
-                await clearProductionActivationJournal(lease, paths, observedJournal);
             }
         } catch {
             // Keep the durable journal and private workspace for the next recovery pass.

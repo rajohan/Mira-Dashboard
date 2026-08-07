@@ -21,7 +21,7 @@ const sourceDatabaseIdentitySchema = v.strictObject({
 export const productionActivationTransitionSchema = v.strictObject({
     candidate: releaseRuntimeSchema,
     formatVersion: v.literal(1, invalidActivationTransition),
-    phase: v.picklist(["prepared", "database-promoted"] as const),
+    phase: v.picklist(["prepared", "database-promoted", "rollback-required"] as const),
     previousActivation: v.nullable(productionActivationRecordSchema),
     previousDatabase: v.variant("state", [
         v.strictObject({ state: v.literal("absent") }),

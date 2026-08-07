@@ -11,6 +11,7 @@ import {
     createProductionActivationJournal,
     loadProductionActivationJournal,
     markProductionDatabasePromoted,
+    markProductionRollbackRequired,
 } from "./productionActivationJournal.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
@@ -74,7 +75,9 @@ describe("production activation journal", () => {
             expect(loadedPrepared?.phase).toBe("prepared");
             const promoted = await markProductionDatabasePromoted(lease, paths, prepared);
             expect(promoted.phase).toBe("database-promoted");
-            await clearProductionActivationJournal(lease, paths, promoted);
+            const rollback = await markProductionRollbackRequired(lease, paths, promoted);
+            expect(rollback.phase).toBe("rollback-required");
+            await clearProductionActivationJournal(lease, paths, rollback);
             expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
         });
     });
@@ -104,7 +107,14 @@ describe("production activation journal", () => {
             expect(staleFailure.message).toBe(
                 "Production activation journal update failed"
             );
-            await clearProductionActivationJournal(lease, paths, promoted);
+            const rollback = await markProductionRollbackRequired(lease, paths, promoted);
+            const staleRollbackFailure = await rejectionError(
+                markProductionRollbackRequired(lease, paths, promoted)
+            );
+            expect(staleRollbackFailure.message).toBe(
+                "Production activation journal update failed"
+            );
+            await clearProductionActivationJournal(lease, paths, rollback);
         });
     });
 

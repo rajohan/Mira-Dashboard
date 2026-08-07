@@ -5,6 +5,7 @@ import path from "node:path";
 import * as v from "valibot";
 
 const maximumProcessLockBytes = 512;
+const processLockInitializationGraceMs = 5000;
 const lockOpenFlags =
     constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR;
 const lockReadFlags = constants.O_NOFOLLOW | constants.O_RDONLY;
@@ -93,6 +94,38 @@ function sameSnapshot(
     );
 }
 
+async function processLockMayStillBeInitializing(
+    lockPath: string,
+    failureMessage: string,
+    contents: string | undefined
+): Promise<boolean> {
+    // O_EXCL publishes the pathname before the owner can finish its bounded record.
+    // A newline terminates every complete record, so completed malformed data must
+    // fail immediately while only a secure incomplete publication receives grace.
+    if (contents?.endsWith("\n")) return false;
+    let status: BigIntStats;
+    try {
+        status = await lstat(lockPath, { bigint: true });
+    } catch (error) {
+        if (errorCode(error) === "ENOENT") return true;
+        throw processLockFailure(failureMessage);
+    }
+    if (
+        typeof process.getuid !== "function" ||
+        !status.isFile() ||
+        status.isSymbolicLink() ||
+        status.nlink !== 1n ||
+        status.uid !== BigInt(process.getuid()) ||
+        (status.mode & 0o022n) !== 0n ||
+        status.size < 0n ||
+        status.size > BigInt(maximumProcessLockBytes)
+    ) {
+        return false;
+    }
+    const ageMs = Date.now() - Number(status.ctimeMs);
+    return ageMs >= 0 && ageMs <= processLockInitializationGraceMs;
+}
+
 async function createProcessLock(
     options: ExclusiveProcessLockOptions
 ): Promise<OwnedProcessLock | undefined> {
@@ -133,6 +166,7 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
     | undefined
 > {
     let handle: FileHandle;
+    let contents: string | undefined;
     try {
         handle = await open(options.lockPath, lockReadFlags);
     } catch (error) {
@@ -144,7 +178,7 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
             await handle.stat({ bigint: true }),
             options.failureMessage
         );
-        const contents = await handle.readFile("utf8");
+        contents = await handle.readFile("utf8");
         const after = snapshot(
             await handle.stat({ bigint: true }),
             options.failureMessage
@@ -161,6 +195,15 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
             snapshot: after,
         });
     } catch {
+        if (
+            await processLockMayStillBeInitializing(
+                options.lockPath,
+                options.failureMessage,
+                contents
+            )
+        ) {
+            return undefined;
+        }
         throw processLockFailure(options.failureMessage);
     } finally {
         await handle.close();

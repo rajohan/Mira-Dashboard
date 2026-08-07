@@ -236,6 +236,40 @@ function validateTransition(
     }
 }
 
+function stateMatches(
+    actual: Pick<ProductionActivationState, "fileIdentity" | "record">,
+    expected: ProductionActivationState
+): boolean {
+    return (
+        JSON.stringify(actual.record) === JSON.stringify(expected.record) &&
+        (actual.fileIdentity === undefined) === (expected.fileIdentity === undefined) &&
+        (actual.fileIdentity === undefined ||
+            expected.fileIdentity === undefined ||
+            sameFile(actual.fileIdentity, expected.fileIdentity))
+    );
+}
+
+function validateRollback(
+    current: ProductionActivationState,
+    previous: ProductionActivationRecord | undefined
+): void {
+    const currentRecord = current.record;
+    if (!currentRecord) throw activationFailure();
+    if (previous === undefined) {
+        if (currentRecord.previous !== null) throw activationFailure();
+        return;
+    }
+    if (
+        currentRecord.previous === null ||
+        currentRecord.previous.databaseSnapshotTransitionId !==
+            currentRecord.transitionId ||
+        currentRecord.previous.releaseId !== previous.current.releaseId ||
+        currentRecord.previous.runtimeRevision !== previous.current.runtimeRevision
+    ) {
+        throw activationFailure();
+    }
+}
+
 async function writeAndCommitStagedRecord(
     stateHandle: FileHandle,
     stageFile: string,
@@ -363,14 +397,7 @@ export async function commitProductionActivationState(
     let failed = false;
     try {
         const actual = await readActivationFile(state.handle, state.identity.dev);
-        if (
-            JSON.stringify(actual.record) !== JSON.stringify(expected.record) ||
-            (actual.fileIdentity === undefined) !==
-                (expected.fileIdentity === undefined) ||
-            (actual.fileIdentity !== undefined &&
-                expected.fileIdentity !== undefined &&
-                !sameFile(actual.fileIdentity, expected.fileIdentity))
-        ) {
+        if (!stateMatches(actual, expected)) {
             throw activationFailure();
         }
         await writeAndCommitStagedRecord(
@@ -395,4 +422,71 @@ export async function commitProductionActivationState(
     const closed = await closeHandle(state.handle);
     if (failed || !closed || !committed) throw activationFailure();
     return committed;
+}
+
+/**
+ * Restores the immediate pre-transition activation state after candidate failure.
+ * @param lease Active wider deployment lease.
+ * @param paths Exact project-local production paths.
+ * @param expectedCurrent Exact committed candidate compare-and-swap state.
+ * @param untrustedPrevious Immediate predecessor from the durable transition journal.
+ * @returns Newly loaded authoritative predecessor state after directory fsync.
+ */
+export async function restorePreviousProductionActivationState(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    expectedCurrent: ProductionActivationState,
+    untrustedPrevious: ProductionActivationRecord | null
+): Promise<ProductionActivationState> {
+    const previous =
+        untrustedPrevious === null
+            ? undefined
+            : parseProductionActivationRecord(untrustedPrevious);
+    if (
+        expectedCurrent[activationStateBrand] !== true ||
+        expectedCurrent.stateDirectory !== paths.stateDirectory
+    ) {
+        throw activationFailure();
+    }
+    validateRollback(expectedCurrent, previous);
+    const currentRecord = expectedCurrent.record;
+    if (!currentRecord) throw activationFailure();
+    const state = await openStateDirectory(lease, paths);
+    const descriptorRoot = `/proc/self/fd/${state.handle.fd}`;
+    const activationFile = path.join(descriptorRoot, activationFileName);
+    let restored: ProductionActivationState | undefined;
+    let failed = false;
+    try {
+        const actual = await readActivationFile(state.handle, state.identity.dev);
+        if (!stateMatches(actual, expectedCurrent)) throw activationFailure();
+        if (previous === undefined) {
+            await unlink(activationFile);
+            await state.handle.sync();
+        } else {
+            await writeAndCommitStagedRecord(
+                state.handle,
+                path.join(
+                    descriptorRoot,
+                    `.activation-rollback-${currentRecord.transitionId}.json`
+                ),
+                activationFile,
+                previous,
+                state.identity.dev
+            );
+        }
+        const observed = await readActivationFile(state.handle, state.identity.dev);
+        if (JSON.stringify(observed.record) !== JSON.stringify(previous)) {
+            throw activationFailure();
+        }
+        restored = Object.freeze({
+            [activationStateBrand]: true as const,
+            ...observed,
+            stateDirectory: paths.stateDirectory,
+        });
+    } catch {
+        failed = true;
+    }
+    const closed = await closeHandle(state.handle);
+    if (failed || !closed || !restored) throw activationFailure();
+    return restored;
 }

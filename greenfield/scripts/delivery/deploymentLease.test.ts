@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    open,
+    rename,
+    rm,
+    symlink,
+    unlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -46,6 +55,25 @@ describe("Dashboard deployment lease", () => {
         firstMayFinish.resolve();
         await Promise.all([first, second]);
         expect(events).toEqual(["first-start", "first-end", "second"]);
+    });
+
+    test("waits while a competing process is publishing its lock record", async () => {
+        const state = await stateFixture();
+        const lockPath = path.join(state, ".deployment.lock");
+        const initializingLock = await open(lockPath, "wx", 0o600);
+        let entered = false;
+
+        const transition = withDeploymentLease(state, () => {
+            entered = true;
+            return Promise.resolve();
+        });
+        await Bun.sleep(50);
+        expect(entered).toBe(false);
+
+        await initializingLock.close();
+        await unlink(lockPath);
+        await transition;
+        expect(entered).toBe(true);
     });
 
     test("rejects permissive, replaced and linked state directories", async () => {

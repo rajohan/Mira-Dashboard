@@ -20,7 +20,7 @@ describe("Dashboard browser entrypoint", () => {
             await waitFor(
                 () => {
                     const heading = document.querySelector("h1");
-                    expect(heading).toBeInstanceOf(HTMLElement);
+                    expect(heading).not.toBeNull();
                     expect(heading?.textContent).toBe("Mira Dashboard");
                 },
                 { container: document.body }

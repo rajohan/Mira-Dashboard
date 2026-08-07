@@ -33,6 +33,7 @@ describe("production release activation CLI", () => {
     test("rejects unknown, duplicate, external-readiness, and relative inputs", () => {
         const invalidArguments = [
             [...validArguments, "--unknown=value"],
+            [...validArguments.slice(0, 3), "--runtime-soruce=/opt/bun/candidate/bun"],
             [...validArguments, validArguments[0]!],
             validArguments.map((argument) =>
                 argument.startsWith("--readiness-url=")

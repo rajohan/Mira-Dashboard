@@ -132,6 +132,20 @@ async function awaitReadiness(
     throw serviceFailure();
 }
 
+async function requireUnitsActive(
+    execute: NonNullable<SystemdProductionServiceOptions["execute"]>,
+    executable: string
+): Promise<void> {
+    for (const unit of [workerUnit, webUnit]) {
+        await requireSystemctlSuccess(execute, executable, [
+            "--user",
+            "is-active",
+            "--quiet",
+            unit,
+        ]);
+    }
+}
+
 /**
  * Creates the idempotent user-systemd adapter used by crash-safe activation.
  * Release/runtime pointers are changed only while the activation orchestrator has stopped writers.
@@ -174,15 +188,9 @@ export function createSystemdProductionServiceController(
         },
         stop: () => stopUnits(execute, executable),
         async verifyReady(): Promise<void> {
-            for (const unit of [workerUnit, webUnit]) {
-                await requireSystemctlSuccess(execute, executable, [
-                    "--user",
-                    "is-active",
-                    "--quiet",
-                    unit,
-                ]);
-            }
+            await requireUnitsActive(execute, executable);
             await awaitReadiness(fetch_, readinessUrl);
+            await requireUnitsActive(execute, executable);
         },
     });
 }

@@ -8,6 +8,7 @@ import { withDeploymentLease } from "./deploymentLease.ts";
 import {
     commitProductionActivationState,
     loadProductionActivationState,
+    restorePreviousProductionActivationState,
 } from "./productionActivationState.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
@@ -80,10 +81,29 @@ describe("production activation state", () => {
                 releaseId: "a".repeat(40),
                 runtimeRevision: "b".repeat(40),
             });
-            const activationStatus = await stat(
+            const committedActivationStatus = await stat(
                 path.join(paths.stateDirectory, "activation.json")
             );
-            expect(activationStatus.mode & 0o777).toBe(0o600);
+            expect(committedActivationStatus.mode & 0o777).toBe(0o600);
+            if (!first.record) throw new Error("Expected first activation record");
+            const restoredFirst = await restorePreviousProductionActivationState(
+                lease,
+                paths,
+                second,
+                first.record
+            );
+            expect(restoredFirst.record).toEqual(first.record);
+            const restoredEmpty = await restorePreviousProductionActivationState(
+                lease,
+                paths,
+                restoredFirst,
+                null
+            );
+            expect(restoredEmpty.record).toBeUndefined();
+            const removedActivationStatus = await stat(
+                path.join(paths.stateDirectory, "activation.json")
+            ).catch(() => null);
+            expect(removedActivationStatus).toBeNull();
             const stateEntries = await readdir(paths.stateDirectory);
             expect(
                 stateEntries.filter((entry) => entry.startsWith(".activation-"))

@@ -111,6 +111,8 @@ describe("production user-systemd service control", () => {
                 ["--user", "restart", "mira-dashboard-web.service"],
                 ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
                 ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
+                ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
+                ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
                 ["--user", "stop", "mira-dashboard-web.service"],
                 ["--user", "stop", "mira-dashboard-worker.service"],
             ]);
@@ -160,6 +162,34 @@ describe("production user-systemd service control", () => {
                 );
                 expect(readinessRequests).toBe(0);
             }
+
+            let activeChecks = 0;
+            let readinessRequests = 0;
+            const exitedDuringReadiness = createSystemdProductionServiceController(
+                lease,
+                paths,
+                {
+                    execute: (_executable, arguments_) => {
+                        if (arguments_.includes("is-active")) activeChecks += 1;
+                        return Promise.resolve(
+                            activeChecks === 3
+                                ? inactiveProcessResult()
+                                : successfulProcessResult()
+                        );
+                    },
+                    fetch: () => {
+                        readinessRequests += 1;
+                        return Promise.resolve(new Response(null, { status: 200 }));
+                    },
+                    readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                }
+            );
+            const exitedFailure = await rejectionError(
+                exitedDuringReadiness.verifyReady(fixtures.first, fixtures.runtime)
+            );
+            expect(exitedFailure.message).toBe("Production service control failed");
+            expect(activeChecks).toBe(3);
+            expect(readinessRequests).toBe(1);
 
             await pointProductionProcessesAtRelease(
                 lease,

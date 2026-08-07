@@ -296,6 +296,35 @@ export async function markProductionDatabasePromoted(
 }
 
 /**
+ * Durably records that a committed candidate failed to become ready and must roll back.
+ * @param lease Active wider deployment lease.
+ * @param paths Exact project-local production paths.
+ * @param expected Durable database-promoted journal.
+ * @returns Durable rollback-required journal.
+ */
+export async function markProductionRollbackRequired(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    expected: ProductionActivationTransition
+): Promise<ProductionActivationTransition> {
+    if (expected.phase !== "database-promoted") throw journalFailure();
+    const next = parseProductionActivationTransition({
+        ...expected,
+        phase: "rollback-required",
+    });
+    const state = await openStateDirectory(lease, paths);
+    let failed = false;
+    try {
+        await replaceJournal(state, expected, next);
+    } catch {
+        failed = true;
+    }
+    const closed = await closeHandle(state.handle);
+    if (failed || !closed) throw journalFailure();
+    return next;
+}
+
+/**
  * Deletes the exact completed or rolled-back journal and fsyncs state.
  * @param lease Active wider deployment lease.
  * @param paths Exact project-local production paths.

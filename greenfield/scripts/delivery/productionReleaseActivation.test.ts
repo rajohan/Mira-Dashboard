@@ -24,8 +24,15 @@ import {
     verifyDatabaseTransitionCandidate,
 } from "./databaseTransitionFilesystem.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
-import { createProductionActivationJournal } from "./productionActivationJournal.ts";
-import { loadProductionActivationState } from "./productionActivationState.ts";
+import {
+    createProductionActivationJournal,
+    markProductionDatabasePromoted,
+    markProductionRollbackRequired,
+} from "./productionActivationJournal.ts";
+import {
+    commitProductionActivationState,
+    loadProductionActivationState,
+} from "./productionActivationState.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import {
     activatePublishedProductionRelease,
@@ -64,6 +71,7 @@ function createProjectFixture() {
 
 class TestServiceController implements ProductionServiceController {
     readonly events: string[] = [];
+    onStart: ((release: PublishedProductionRelease) => Promise<void> | void) | undefined;
     rejectReadyReleaseId: string | undefined;
     rejectStartReleaseId: string | undefined;
 
@@ -72,12 +80,13 @@ class TestServiceController implements ProductionServiceController {
         return Promise.resolve();
     }
 
-    start(release: PublishedProductionRelease): Promise<void> {
+    async start(release: PublishedProductionRelease): Promise<void> {
         const releaseId = release.manifest.source.commitSha;
         this.events.push(`start:${releaseId}`);
-        return releaseId === this.rejectStartReleaseId
-            ? Promise.reject(new Error("candidate partially started"))
-            : Promise.resolve();
+        await this.onStart?.(release);
+        if (releaseId === this.rejectStartReleaseId) {
+            throw new Error("candidate partially started");
+        }
     }
 
     stop(): Promise<void> {
@@ -157,6 +166,13 @@ describe("production release activation", () => {
                 runtimeSource
             );
             const services = new TestServiceController();
+            const authoritativeAtStart: string[] = [];
+            services.onStart = async (release) => {
+                const observed = await loadProductionActivationState(lease, paths);
+                const releaseId = release.manifest.source.commitSha;
+                expect(observed.record?.current.releaseId).toBe(releaseId);
+                authoritativeAtStart.push(releaseId);
+            };
             const dependencies = activationDependencies(services, fixtures.probeRuntime);
             const initial = await Effect.runPromise(
                 activatePublishedProductionRelease(
@@ -202,6 +218,7 @@ describe("production release activation", () => {
                 `start:${secondReleaseId}`,
                 `ready:${secondReleaseId}`,
             ]);
+            expect(authoritativeAtStart).toEqual([firstReleaseId, secondReleaseId]);
             const activation = await loadProductionActivationState(lease, paths);
             const stateEntries = await readdir(paths.stateDirectory);
             expect(activation.record).toEqual(upgraded);
@@ -259,12 +276,13 @@ describe("production release activation", () => {
                     path.join(paths.stateDirectory, "mira-dashboard.db")
                 )
             ).toBe(firstReleaseId);
-            expect(services.events.slice(-9)).toEqual([
+            expect(services.events.slice(-10)).toEqual([
                 `prepare:${firstReleaseId}`,
                 "stop",
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
                 `ready:${secondReleaseId}`,
+                `prepare:${secondReleaseId}`,
                 "stop",
                 `prepare:${firstReleaseId}`,
                 `start:${firstReleaseId}`,
@@ -295,11 +313,12 @@ describe("production release activation", () => {
                 "Production release activation failed"
             );
             expect(activationAfterPartialStart.record).toEqual(initial);
-            expect(services.events.slice(-8)).toEqual([
+            expect(services.events.slice(-9)).toEqual([
                 `prepare:${firstReleaseId}`,
                 "stop",
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
+                `prepare:${secondReleaseId}`,
                 "stop",
                 `prepare:${firstReleaseId}`,
                 `start:${firstReleaseId}`,
@@ -313,43 +332,51 @@ describe("production release activation", () => {
             localReleaseFixture(firstReleaseId),
             localReleaseFixture(secondReleaseId),
         ]);
-        for (const boundary of [
-            "afterActivationCommit",
-            "afterActivationJournalClear",
-        ] as const) {
-            const { projectRoot, runtimeSource } = await createProjectFixture();
-            const state = await prepareProtectedProductionStatePath(projectRoot);
-            await withDeploymentLease(state.stateDirectory, async (lease) => {
-                const paths = await prepareProductionDeliveryDirectories(state);
-                const fixtures = await publishFixtures(
+        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource
+            );
+            const services = new TestServiceController();
+            const baseDependencies = activationDependencies(
+                services,
+                fixtures.probeRuntime
+            );
+            await Effect.runPromise(
+                activatePublishedProductionRelease(
                     lease,
                     paths,
-                    sourceReleases,
-                    runtimeSource
-                );
-                const services = new TestServiceController();
-                const baseDependencies = activationDependencies(
-                    services,
-                    fixtures.probeRuntime
-                );
-                await Effect.runPromise(
-                    activatePublishedProductionRelease(
-                        lease,
-                        paths,
-                        fixtures.first,
-                        fixtures.runtime,
-                        baseDependencies
-                    )
-                );
+                    fixtures.first,
+                    fixtures.runtime,
+                    baseDependencies
+                )
+            );
+            for (const scenario of [
+                {
+                    boundary: "afterActivationCommit" as const,
+                    candidate: fixtures.second,
+                    expectedReleaseId: secondReleaseId,
+                },
+                {
+                    boundary: "afterActivationJournalClear" as const,
+                    candidate: fixtures.first,
+                    expectedReleaseId: firstReleaseId,
+                },
+            ]) {
                 let hookCalls = 0;
                 const upgraded = await Effect.runPromise(
                     activatePublishedProductionRelease(
                         lease,
                         paths,
-                        fixtures.second,
+                        scenario.candidate,
                         fixtures.runtime,
                         activationDependencies(services, fixtures.probeRuntime, {
-                            [boundary]: () => {
+                            [scenario.boundary]: () => {
                                 hookCalls += 1;
                                 throw new Error("simulated cleanup interruption");
                             },
@@ -360,7 +387,7 @@ describe("production release activation", () => {
                 const activation = await loadProductionActivationState(lease, paths);
                 const stateEntries = await readdir(paths.stateDirectory);
                 expect(hookCalls).toBe(1);
-                expect(upgraded.current.releaseId).toBe(secondReleaseId);
+                expect(upgraded.current.releaseId).toBe(scenario.expectedReleaseId);
                 expect(activation.record).toEqual(upgraded);
                 expect(stateEntries).not.toContain("activation-transition.json");
                 expect(
@@ -368,9 +395,130 @@ describe("production release activation", () => {
                         entry.startsWith(".database-transition-")
                     )
                 ).toEqual([]);
-                expect(services.events.at(-1)).toBe(`ready:${secondReleaseId}`);
+                expect(services.events.at(-1)).toBe(
+                    `ready:${scenario.expectedReleaseId}`
+                );
+            }
+        });
+    }, 15_000);
+
+    test("recovers a durable rollback request after candidate activation commit", async () => {
+        const sourceReleases = await Promise.all([
+            localReleaseFixture(firstReleaseId),
+            localReleaseFixture(secondReleaseId),
+        ]);
+        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource
+            );
+            const services = new TestServiceController();
+            const dependencies = activationDependencies(services, fixtures.probeRuntime);
+            const initial = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.first,
+                    fixtures.runtime,
+                    dependencies
+                )
+            );
+            const previousState = await loadProductionActivationState(lease, paths);
+            const transitionId = Bun.randomUUIDv7();
+            const snapshot = await runDatabaseSnapshotMaintenance(
+                lease,
+                paths,
+                fixtures.first,
+                fixtures.runtime,
+                transitionId,
+                "present",
+                dependencies.maintenance
+            );
+            if (snapshot.state !== "present") throw new Error("Expected snapshot");
+            const prepared = await createProductionActivationJournal(
+                lease,
+                paths,
+                parseProductionActivationTransition({
+                    candidate: {
+                        releaseId: secondReleaseId,
+                        runtimeRevision: runtimeIdentity.revision,
+                    },
+                    formatVersion: 1,
+                    phase: "prepared",
+                    previousActivation: initial,
+                    previousDatabase: {
+                        manifest: snapshot.manifest,
+                        sourceDatabase: snapshot.sourceDatabase,
+                        state: "present",
+                    },
+                    transitionId,
+                })
+            );
+            const workspace = await prepareDatabaseTransitionWorkspace(
+                lease,
+                paths,
+                transitionId,
+                snapshot
+            );
+            await runDatabaseCandidateMaintenance(
+                lease,
+                paths,
+                fixtures.second,
+                fixtures.runtime,
+                transitionId,
+                workspace.candidateDirectory,
+                dependencies.maintenance
+            );
+            await promoteDatabaseTransitionCandidate(
+                lease,
+                paths,
+                await verifyDatabaseTransitionCandidate(workspace)
+            );
+            const promoted = await markProductionDatabasePromoted(lease, paths, prepared);
+            await commitProductionActivationState(lease, paths, previousState, {
+                current: {
+                    releaseId: secondReleaseId,
+                    runtimeRevision: runtimeIdentity.revision,
+                },
+                formatVersion: 1,
+                previous: {
+                    databaseSnapshotTransitionId: transitionId,
+                    releaseId: firstReleaseId,
+                    runtimeRevision: runtimeIdentity.revision,
+                },
+                transitionId,
             });
-        }
+            await markProductionRollbackRequired(lease, paths, promoted);
+
+            const recovered = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.first,
+                    fixtures.runtime,
+                    dependencies
+                )
+            );
+
+            expect(recovered).toEqual(initial);
+            const recoveredState = await loadProductionActivationState(lease, paths);
+            expect(recoveredState.record).toEqual(initial);
+            expect(
+                readMigrationReleaseId(
+                    path.join(paths.stateDirectory, "mira-dashboard.db")
+                )
+            ).toBe(firstReleaseId);
+            const stateEntries = await readdir(paths.stateDirectory);
+            expect(stateEntries).not.toContain("activation-transition.json");
+            expect(
+                stateEntries.filter((entry) => entry.startsWith(".database-transition-"))
+            ).toEqual([]);
+        });
     });
 
     test("recovers a crash after database promotion but before journal advancement", async () => {
