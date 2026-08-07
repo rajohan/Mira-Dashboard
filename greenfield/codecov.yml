@@ -1,0 +1,37 @@
+coverage:
+    precision: 2
+    round: down
+    range: 20..85
+    status:
+        project:
+            dashboard:
+                target: 85%
+                threshold: 0%
+                informational: false
+                if_ci_failed: error
+                if_not_found: failure
+                flags:
+                    - dashboard
+                paths:
+                    - src/
+        patch:
+            dashboard:
+                target: 85%
+                threshold: 0%
+                informational: false
+                if_ci_failed: error
+                if_not_found: failure
+                flags:
+                    - dashboard
+                paths:
+                    - src/
+
+comment:
+    layout: "reach,diff,flags,tree"
+    behavior: default
+    require_changes: false
+
+flags:
+    dashboard:
+        paths:
+            - src/
