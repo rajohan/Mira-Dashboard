@@ -343,6 +343,14 @@ const taskMutationTransport = {
     handler: "default",
     requestBody: "default",
 } as const;
+const taskContentMutationTransport = {
+    ...taskMutationTransport,
+    requestBody: "task-content",
+} as const;
+const taskProgressMutationTransport = {
+    ...taskMutationTransport,
+    requestBody: "task-progress",
+} as const;
 const existingTaskMutationErrors = [
     "CONFLICT",
     "FORBIDDEN",
@@ -403,7 +411,7 @@ export const taskProcedureContracts = [
         output: taskDetailSchema,
         outputSchemaId: "tasks.create.output",
         summary: "Creates one task with server-owned identity and audit history.",
-        transport: taskMutationTransport,
+        transport: taskContentMutationTransport,
     },
     {
         access: taskWriteAccess,
@@ -416,7 +424,7 @@ export const taskProcedureContracts = [
         output: taskDetailSchema,
         outputSchemaId: "tasks.update.output",
         summary: "Updates task content under optimistic concurrency control.",
-        transport: taskMutationTransport,
+        transport: taskContentMutationTransport,
     },
     {
         access: taskWriteAccess,
@@ -470,7 +478,7 @@ export const taskProcedureContracts = [
         output: taskProgressUpdateSchema,
         outputSchemaId: "tasks.addUpdate.output",
         summary: "Appends one authenticated progress update to a task.",
-        transport: taskMutationTransport,
+        transport: taskProgressMutationTransport,
     },
     {
         access: taskWriteAccess,
@@ -483,7 +491,7 @@ export const taskProcedureContracts = [
         output: taskProgressUpdateSchema,
         outputSchemaId: "tasks.updateProgress.output",
         summary: "Edits one task progress entry under optimistic concurrency control.",
-        transport: taskMutationTransport,
+        transport: taskProgressMutationTransport,
     },
     {
         access: taskWriteAccess,

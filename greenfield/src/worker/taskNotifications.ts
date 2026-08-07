@@ -87,14 +87,17 @@ function sendEffect(
 function settleClaim(
     dependencies: Required<Pick<TaskNotificationWorkerDependencies, "nowMs">> &
         TaskNotificationWorkerDependencies,
-    notification: ClaimedTaskNotification
+    notification: ClaimedTaskNotification,
+    claimedAtMs: number
 ): Effect.Effect<
     "delivered" | "retried",
     TaskNotificationLeaseLostError | TaskNotificationQueueError
 > {
     return Effect.uninterruptibleMask((restore) => {
+        const settlementTimeMs = () =>
+            Math.max(dependencies.nowMs(), notification.createdAtMs, claimedAtMs);
         const markDelivered = Effect.gen(function* () {
-            const settledAtMs = dependencies.nowMs();
+            const settledAtMs = settlementTimeMs();
             const acknowledged = yield* queueEffect("deliver", () =>
                 dependencies.queue.markDelivered({
                     deliveredAtMs: settledAtMs,
@@ -111,7 +114,7 @@ function settleClaim(
             return "delivered" as const;
         });
         const retryLater = Effect.gen(function* () {
-            const settledAtMs = dependencies.nowMs();
+            const settledAtMs = settlementTimeMs();
             const released = yield* queueEffect("retry", () =>
                 dependencies.queue.retryLater({
                     availableAtMs:
@@ -183,7 +186,11 @@ export function processTaskNotificationBatch(
         let delivered = 0;
         let retried = 0;
         for (const notification of notifications) {
-            const outcome = yield* settleClaim(resolvedDependencies, notification);
+            const outcome = yield* settleClaim(
+                resolvedDependencies,
+                notification,
+                claimedAtMs
+            );
             if (outcome === "delivered") delivered += 1;
             else retried += 1;
         }

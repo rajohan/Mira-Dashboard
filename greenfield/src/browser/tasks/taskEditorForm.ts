@@ -2,6 +2,8 @@ import * as v from "valibot";
 
 import {
     taskAssigneeIds,
+    taskAutomationScheduleSummaryMaximumLength,
+    taskAutomationTextMaximumLength,
     taskAutomationProfileInputSchema,
     taskBodyMarkdownSchema,
     type TaskDetail,
@@ -31,23 +33,31 @@ function optionalCanonicalAutomationTextSchema(maximumLength: number, message: s
 }
 
 const optionalAutomationTextSchema = optionalCanonicalAutomationTextSchema(
-    200,
+    taskAutomationTextMaximumLength,
     "Automation value is invalid"
 );
 const optionalScheduleSummarySchema = optionalCanonicalAutomationTextSchema(
-    500,
+    taskAutomationScheduleSummaryMaximumLength,
     "Schedule summary is invalid"
 );
 
+function automationTextIsValid(enabled: boolean, value: string): boolean {
+    return !enabled || v.safeParse(optionalAutomationTextSchema, value).success;
+}
+
+function automationScheduleSummaryIsValid(enabled: boolean, value: string): boolean {
+    return !enabled || v.safeParse(optionalScheduleSummarySchema, value).success;
+}
+
 function rawTaskLabelsFromText(value: string): string[] {
     return value
-        .split(",")
+        .split(/\r?\n/u)
         .map((label) => label.trim())
         .filter((label) => label.length > 0);
 }
 
 /**
- * Converts a comma-separated label field to canonical contract labels.
+ * Converts a one-label-per-line field to canonical contract labels.
  * @param value Browser label field.
  * @returns Validated, sorted task labels.
  */
@@ -58,25 +68,25 @@ export function taskLabelsFromText(value: string): readonly string[] {
 const taskLabelsTextSchema = v.pipe(
     v.string("Task labels are invalid"),
     v.maxLength(
-        taskMaximumLabels * (taskLabelMaximumLength + 2),
+        taskMaximumLabels * (taskLabelMaximumLength * 2 + 2),
         "Task labels are outside their budget"
     ),
     v.check(
         (value) =>
             v.safeParse(taskLabelInputSchema, rawTaskLabelsFromText(value)).success,
-        "Use at most 20 unique comma-separated labels"
+        "Use at most 20 unique labels, one per line"
     )
 );
 
 const taskEditorObjectSchema = v.strictObject({
     assignee: v.picklist([...taskAssigneeIds, unassignedTaskOwner]),
-    automationCronJobId: optionalAutomationTextSchema,
+    automationCronJobId: v.string("Automation value is invalid"),
     automationEnabled: v.boolean(),
-    automationModel: optionalAutomationTextSchema,
+    automationModel: v.string("Automation value is invalid"),
     automationRecurring: v.boolean(),
-    automationScheduleSummary: optionalScheduleSummarySchema,
-    automationSessionTarget: optionalAutomationTextSchema,
-    automationThinking: optionalAutomationTextSchema,
+    automationScheduleSummary: v.string("Schedule summary is invalid"),
+    automationSessionTarget: v.string("Automation value is invalid"),
+    automationThinking: v.string("Automation value is invalid"),
     bodyMarkdown: optionalBodySchema,
     labelsText: taskLabelsTextSchema,
     priority: v.picklist(taskPriorities),
@@ -93,6 +103,52 @@ export const taskEditorFormSchema = v.pipe(
             "Cron job id is required when automation is enabled"
         ),
         ["automationCronJobId"]
+    ),
+    v.forward(
+        v.check(
+            (value) =>
+                automationTextIsValid(value.automationEnabled, value.automationCronJobId),
+            "Automation value is invalid"
+        ),
+        ["automationCronJobId"]
+    ),
+    v.forward(
+        v.check(
+            (value) =>
+                automationTextIsValid(value.automationEnabled, value.automationModel),
+            "Automation value is invalid"
+        ),
+        ["automationModel"]
+    ),
+    v.forward(
+        v.check(
+            (value) =>
+                automationScheduleSummaryIsValid(
+                    value.automationEnabled,
+                    value.automationScheduleSummary
+                ),
+            "Schedule summary is invalid"
+        ),
+        ["automationScheduleSummary"]
+    ),
+    v.forward(
+        v.check(
+            (value) =>
+                automationTextIsValid(
+                    value.automationEnabled,
+                    value.automationSessionTarget
+                ),
+            "Automation value is invalid"
+        ),
+        ["automationSessionTarget"]
+    ),
+    v.forward(
+        v.check(
+            (value) =>
+                automationTextIsValid(value.automationEnabled, value.automationThinking),
+            "Automation value is invalid"
+        ),
+        ["automationThinking"]
     )
 );
 
@@ -110,7 +166,7 @@ export function taskEditorValues(task?: TaskDetail): TaskEditorValues {
         automationSessionTarget: task?.automation?.sessionTarget ?? "",
         automationThinking: task?.automation?.thinking ?? "",
         bodyMarkdown: task?.bodyMarkdown ?? "",
-        labelsText: task?.labels.join(", ") ?? "",
+        labelsText: task?.labels.join("\n") ?? "",
         priority: task?.priority ?? "medium",
         status: task?.status ?? "todo",
         title: task?.title ?? "",

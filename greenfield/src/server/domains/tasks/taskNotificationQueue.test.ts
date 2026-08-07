@@ -66,6 +66,7 @@ describe("task notification queue", () => {
             ).toEqual([
                 {
                     attemptCount: 1,
+                    createdAtMs: 1000,
                     eventId: firstEventId,
                     message: "First task notification",
                 },
@@ -86,6 +87,7 @@ describe("task notification queue", () => {
             ).toEqual([
                 {
                     attemptCount: 2,
+                    createdAtMs: 1000,
                     eventId: firstEventId,
                     message: "First task notification",
                 },
@@ -99,6 +101,7 @@ describe("task notification queue", () => {
             ).toEqual([
                 {
                     attemptCount: 1,
+                    createdAtMs: 2000,
                     eventId: secondEventId,
                     message: "Second task notification",
                 },

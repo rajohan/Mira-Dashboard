@@ -37,6 +37,12 @@ export const taskTitleMaximumLength = 240;
 /** Maximum Unicode code points in a task body. */
 export const taskBodyMaximumLength = 100_000;
 
+/** Maximum Unicode code points in one compact automation field. */
+export const taskAutomationTextMaximumLength = 200;
+
+/** Maximum Unicode code points in an automation schedule summary. */
+export const taskAutomationScheduleSummaryMaximumLength = 500;
+
 /** Maximum Unicode code points in one progress update. */
 export const taskProgressMaximumLength = 20_000;
 
@@ -138,11 +144,11 @@ export const taskLabelListSchema = v.pipe(
 );
 
 const taskAutomationTextSchema = canonicalControlSafeTextSchema(
-    200,
+    taskAutomationTextMaximumLength,
     "Task automation value is invalid"
 );
 const taskScheduleSummarySchema = canonicalControlSafeTextSchema(
-    500,
+    taskAutomationScheduleSummaryMaximumLength,
     "Task automation schedule summary is invalid"
 );
 const taskAutomationBaseEntries = {

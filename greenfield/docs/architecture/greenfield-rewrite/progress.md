@@ -236,10 +236,11 @@ closes a phase; dated entries below provide the evidence, not a second status so
   hashes canonical JSON for immutable run idempotency. Bounded JSON objects reject cycles,
   non-JSON values, sparse arrays, excessive depth, and payloads over 64 KiB; report
   bodies and problem counts have separate explicit limits.
-- The current `Bun.serve` boundary rejects every request body above 64 KiB before the tRPC Fetch
-  adapter parses it. The monitoring submission API is not exposed yet; before it is, its serialized
-  worst case must fit that ceiling or use a separately qualified bounded raw/streaming route. The
-  process-wide allowance is not silently raised to accommodate a hypothetical future payload.
+- The `Bun.serve` boundary now has a reviewed 640 KiB outer ceiling for maximum task-content
+  requests, while the default tRPC profile remains 64 KiB. The monitoring submission API is not
+  exposed yet; before it is, its serialized worst case must fit a specifically reviewed
+  per-procedure ceiling or use a separately qualified bounded raw/streaming route. The default
+  allowance is not silently raised to accommodate a hypothetical future payload.
 - The synchronous transaction core and narrow Drizzle repository execute every accepted snapshot
   inside one SQLite `IMMEDIATE` transaction. The transaction inserts the immutable report and monitor run,
   creates or updates incidents, records one immutable observation per run and incident, resolves
@@ -426,9 +427,10 @@ closes a phase; dated entries below provide the evidence, not a second status so
   future state-changing auth procedures from inheriting a shared stale request context or public
   status reads from becoming one-request database amplification. Exact Origin and Fetch Metadata checks still run before
   authentication or lifecycle work. Any simultaneous bearer and Dashboard-cookie credentials are
-  rejected before context creation. Auth request bodies have a 16 KiB pre-parse ceiling, every
-  current request has a Bun-level 64 KiB ceiling, and every application-handled tRPC success,
-  error, and raw auth rejection uses `Cache-Control: no-store`. A trusted reverse proxy owns the
+  rejected before context creation. Auth request bodies have a 16 KiB pre-parse ceiling, WebAuthn
+  receives 32 KiB, and ordinary procedures retain 64 KiB beneath the 640 KiB Bun listener ceiling
+  required by reviewed task-content profiles. Every application-handled tRPC success, error, and
+  raw auth rejection uses `Cache-Control: no-store`. A trusted reverse proxy owns the
   total body-read deadline because Bun buffers request bodies before invoking the Fetch handler;
   the production composition is hard-bound to `127.0.0.1` so remote access cannot bypass that
   ingress. The listener uses a 10-second general idle timeout; after its body is fully bounded, an
@@ -793,12 +795,17 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   add/update/delete/list. Effect services preserve typed domain failures, Valibot validates every
   boundary and persisted record, capability policy separates task reads from writes, and task
   mutations publish bounded realtime invalidations.
+- Exact procedure metadata assigns 640 KiB only to task create/content update and 128 KiB only to
+  progress add/update; all other task procedures retain the 64 KiB default. Canonical first-party
+  serialization of every maximum contract value fits its profile, while unknown and malformed task
+  procedure names cannot inherit either larger allowance.
 - Mira-relevant task events also create one redacted `task_notification_outbox` intent in the same
   transaction. The queue preserves legacy create/update/assignment/movement/progress/deletion
   semantics, suppresses `openclaw-task-tracking` self-notifications, hides task titles from other
   automations, labels retained task fields as untrusted data, and uses the task-event ID as the
   stable Gateway idempotency key. The Effect worker claims one delivery per lease, aborts a stalled
-  send before its lease can expire, and only acknowledges or releases work while it still owns a
+  send before its lease can expire, clamps settlement timestamps to the row's creation and claim
+  times across clock regressions, and only acknowledges or releases work while it still owns a
   live lease. No greenfield process is activated in production before final cutover, and that
   cutover remains gated on composing the Phase 4 persistent authenticated Gateway client rather
   than reusing the one-shot bootstrap verifier. Task intents therefore cannot accumulate in
@@ -807,7 +814,8 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   assignee/recurring filters, accessible create/edit/detail/progress dialogs, and status movement
   through `@dnd-kit/react`. Shared Headless UI controls, TanStack Form, TanStack Query, and the
   existing reusable Dashboard presentation components own browser behavior rather than local
-  control implementations.
+  control implementations. Labels use one lossless line per value so commas round-trip, and hidden
+  automation drafts are validated only while their relationship is enabled.
 - The reviewed parity inventory now marks the 11 task operations and `/tasks` route implemented.
   This closes only the task portion of Phase 3. Agent, report, incident, notification, job,
   monitoring API, overview, cache/metrics, and real worker execution remain explicit gates.

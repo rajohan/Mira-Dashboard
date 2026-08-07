@@ -22,9 +22,10 @@ const workerId = "019fd300-0000-7000-8000-000000000003";
 function claimed(
     eventId: string,
     attemptCount: number,
+    createdAtMs: number,
     message: string
 ): ClaimedTaskNotification {
-    return { attemptCount, eventId, message };
+    return { attemptCount, createdAtMs, eventId, message };
 }
 
 describe("task notification worker", () => {
@@ -40,8 +41,8 @@ describe("task notification worker", () => {
         const queue: TaskNotificationQueue = {
             claim: () =>
                 Promise.resolve([
-                    claimed(firstEventId, 1, "First notification"),
-                    claimed(secondEventId, 2, "Second notification"),
+                    claimed(firstEventId, 1, 1000, "First notification"),
+                    claimed(secondEventId, 2, 1000, "Second notification"),
                 ]),
             markDelivered: (input) => {
                 delivered.push(input.eventId);
@@ -97,7 +98,7 @@ describe("task notification worker", () => {
     test("fails closed when a successful send loses its delivery lease", async () => {
         const queue: TaskNotificationQueue = {
             claim: () =>
-                Promise.resolve([claimed(firstEventId, 1, "First notification")]),
+                Promise.resolve([claimed(firstEventId, 1, 1000, "First notification")]),
             markDelivered: () => Promise.resolve(false),
             retryLater: () => Promise.resolve(true),
         };
@@ -123,7 +124,7 @@ describe("task notification worker", () => {
         const retried: string[] = [];
         const queue: TaskNotificationQueue = {
             claim: () =>
-                Promise.resolve([claimed(firstEventId, 1, "First notification")]),
+                Promise.resolve([claimed(firstEventId, 1, 1000, "First notification")]),
             markDelivered: () => Promise.resolve(true),
             retryLater: (input) => {
                 retried.push(input.eventId);
@@ -163,7 +164,7 @@ describe("task notification worker", () => {
         const retried: string[] = [];
         const queue: TaskNotificationQueue = {
             claim: () =>
-                Promise.resolve([claimed(firstEventId, 1, "First notification")]),
+                Promise.resolve([claimed(firstEventId, 1, 1000, "First notification")]),
             markDelivered: () => Promise.resolve(true),
             retryLater: (input) => {
                 retried.push(input.eventId);
@@ -195,6 +196,79 @@ describe("task notification worker", () => {
         });
         expect(sendSignal?.aborted).toBeTrue();
         expect(retried).toEqual([firstEventId]);
+    });
+
+    test("does not deliver before the claimed row when the clock regresses", async () => {
+        const clock = [100_000, 0];
+        let deliveredAtMs: number | undefined;
+        const queue: TaskNotificationQueue = {
+            claim: () =>
+                Promise.resolve([claimed(firstEventId, 1, 1000, "First notification")]),
+            markDelivered: (input) => {
+                deliveredAtMs = input.deliveredAtMs;
+                return Promise.resolve(true);
+            },
+            retryLater: () => Promise.resolve(true),
+        };
+        const sender: TaskNotificationChatSender = {
+            send: () => Promise.resolve(),
+        };
+
+        expect(
+            await Effect.runPromise(
+                processTaskNotificationBatch({
+                    nowMs: () => {
+                        const nowMs = clock.shift();
+                        if (nowMs === undefined) throw new Error("Test clock exhausted");
+                        return nowMs;
+                    },
+                    queue,
+                    sender,
+                    workerId,
+                })
+            )
+        ).toEqual({ claimed: 1, delivered: 1, retried: 0 });
+        expect(deliveredAtMs).toBe(100_000);
+    });
+
+    test("preserves retry delay after the claimed row when the clock regresses", async () => {
+        const clock = [100_000, 0];
+        const retried: Parameters<TaskNotificationQueue["retryLater"]>[0][] = [];
+        const queue: TaskNotificationQueue = {
+            claim: () =>
+                Promise.resolve([claimed(firstEventId, 1, 1000, "First notification")]),
+            markDelivered: () => Promise.resolve(true),
+            retryLater: (input) => {
+                retried.push(input);
+                return Promise.resolve(true);
+            },
+        };
+        const sender: TaskNotificationChatSender = {
+            send: () => Promise.reject(new Error("Gateway unavailable")),
+        };
+
+        expect(
+            await Effect.runPromise(
+                processTaskNotificationBatch({
+                    nowMs: () => {
+                        const nowMs = clock.shift();
+                        if (nowMs === undefined) throw new Error("Test clock exhausted");
+                        return nowMs;
+                    },
+                    queue,
+                    sender,
+                    workerId,
+                })
+            )
+        ).toEqual({ claimed: 1, delivered: 0, retried: 1 });
+        expect(retried).toEqual([
+            {
+                availableAtMs: 105_000,
+                eventId: firstEventId,
+                settledAtMs: 100_000,
+                workerId,
+            },
+        ]);
     });
 
     test("caps exponential retry delay and rejects invalid attempts", () => {

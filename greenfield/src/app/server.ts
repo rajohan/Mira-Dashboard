@@ -115,6 +115,8 @@ function cancelledRequestResponse(requestId: string): Response {
 export {
     authenticationRequestBodyMaximumBytes,
     serverRequestBodyMaximumBytes,
+    taskContentRequestBodyMaximumBytes,
+    taskProgressRequestBodyMaximumBytes,
     trpcMaximumBatchSize,
     trpcRequestBodyMaximumBytes,
 } from "./trpcRequestPolicy.ts";

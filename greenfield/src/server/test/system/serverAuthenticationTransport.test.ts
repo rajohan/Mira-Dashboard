@@ -7,6 +7,8 @@ import {
     authenticationRequestBodyMaximumBytes,
     createServer,
     type ApplicationServer,
+    taskContentRequestBodyMaximumBytes,
+    taskProgressRequestBodyMaximumBytes,
     trpcMaximumBatchSize,
     trpcRequestBodyMaximumBytes,
 } from "../../../app/server.ts";
@@ -294,16 +296,118 @@ describe("authentication HTTP transport policy", () => {
             headers: { "content-type": "application/json" },
             method: "POST",
         });
+        const defaultTask = await fetch(new URL("/trpc/tasks.assign", server.url), {
+            body: "x".repeat(trpcRequestBodyMaximumBytes + 1),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+        });
+        const disguisedUnknownTasks = await Promise.all(
+            [
+                "/trpc/tasks.create,unknown.future",
+                "/trpc/tasks.create%2F",
+                "/trpc/tasks.create///",
+            ].map((path) =>
+                fetch(new URL(path, server.url), {
+                    body: "x".repeat(trpcRequestBodyMaximumBytes + 1),
+                    headers: { "content-type": "application/json" },
+                    method: "POST",
+                })
+            )
+        );
+        const oversizedTaskContent = await fetch(
+            new URL("/trpc/tasks.create", server.url),
+            {
+                body: "x".repeat(taskContentRequestBodyMaximumBytes + 1),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            }
+        );
+        const oversizedTaskProgress = await fetch(
+            new URL("/trpc/tasks.addUpdate", server.url),
+            {
+                body: "x".repeat(taskProgressRequestBodyMaximumBytes + 1),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            }
+        );
 
         for (const response of [declared, streamed]) {
             expect(response.status).toBe(413);
             expect(response.headers.get("cache-control")).toBe("no-store");
         }
-        for (const response of [nonAuthDeclared, nonAuthStreamed]) {
+        for (const response of [
+            defaultTask,
+            nonAuthDeclared,
+            nonAuthStreamed,
+            oversizedTaskContent,
+            oversizedTaskProgress,
+            ...disguisedUnknownTasks,
+        ]) {
             expect(response.status).toBe(413);
         }
         expect(authenticationCalls).toBe(0);
         expect(loginCalls).toBe(0);
+    });
+
+    test("admits canonical task content above the default ceiling", async () => {
+        let authenticationCalls = 0;
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime(),
+            authenticationLifecycle: createTestAuthenticationLifecycleService(),
+            authenticateCredential: () => {
+                authenticationCalls += 1;
+                return { authentication: { kind: "anonymous" } };
+            },
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+        const taskContentBody = JSON.stringify({
+            json: {
+                bodyMarkdown: "x".repeat(70 * 1024),
+                title: "Large task body",
+            },
+        });
+        const taskProgressBody = JSON.stringify({
+            json: {
+                messageMarkdown: "\u0001".repeat(12_000),
+                taskId: "019fd300-0000-7000-8000-000000000001",
+            },
+        });
+        expect(Buffer.byteLength(taskContentBody)).toBeGreaterThan(
+            trpcRequestBodyMaximumBytes
+        );
+        expect(Buffer.byteLength(taskContentBody)).toBeLessThan(
+            taskContentRequestBodyMaximumBytes
+        );
+        expect(Buffer.byteLength(taskProgressBody)).toBeGreaterThan(
+            trpcRequestBodyMaximumBytes
+        );
+        expect(Buffer.byteLength(taskProgressBody)).toBeLessThan(
+            taskProgressRequestBodyMaximumBytes
+        );
+
+        const [taskContent, taskProgress] = await Promise.all([
+            fetch(new URL("/trpc/tasks.create", server.url), {
+                body: taskContentBody,
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            }),
+            fetch(new URL("/trpc/tasks.addUpdate", server.url), {
+                body: taskProgressBody,
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            }),
+        ]);
+
+        for (const response of [taskContent, taskProgress]) {
+            expect(response.status).toBe(401);
+            expect(response.status).not.toBe(413);
+            expect(response.headers.get("cache-control")).toContain("no-store");
+        }
+        expect(authenticationCalls).toBe(2);
     });
 
     test("rejects unsupported methods and raw GET bodies before context creation", async () => {

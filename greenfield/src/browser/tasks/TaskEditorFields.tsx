@@ -119,18 +119,19 @@ export function TaskEditorFields({ busy, creating, form }: TaskEditorFieldsProps
             <form.Field name="labelsText">
                 {(field) => (
                     <FormField
+                        description="One label per line. Commas remain part of a label."
                         disabled={busy}
                         error={firstFormFieldError(field.state.meta.errors)}
                         label="Labels"
                     >
-                        <Input
-                            className="mt-2"
+                        <Textarea
+                            className="mt-2 min-h-24"
                             name={field.name}
                             onBlur={field.handleBlur}
                             onChange={(event) =>
                                 field.handleChange(event.currentTarget.value)
                             }
-                            placeholder="delivery, database"
+                            placeholder={"delivery\ndatabase"}
                             value={field.state.value}
                         />
                     </FormField>

@@ -35,6 +35,7 @@ function parseClaim(row: RawTaskNotificationRow): ClaimedTaskNotification {
     });
     return Object.freeze({
         attemptCount: parsed.attemptCount,
+        createdAtMs: parsed.createdAt.getTime(),
         eventId: parsed.eventId,
         message: parsed.message,
     });

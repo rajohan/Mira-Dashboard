@@ -36,6 +36,7 @@ export const taskNotificationEventIdSchema = lowercaseUuidV7Schema(
 /** One validated delivery claimed by a worker after its attempt count increments. */
 export interface ClaimedTaskNotification {
     readonly attemptCount: number;
+    readonly createdAtMs: number;
     readonly eventId: string;
     readonly message: string;
 }
