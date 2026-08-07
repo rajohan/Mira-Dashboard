@@ -7,7 +7,14 @@ import type { DashboardBrowserCollections } from "../data/dashboardCollections.t
 export const authStatusQueryKey = ["auth", "status"] as const;
 const authenticatedBrowserCacheGenerations = new WeakMap<QueryClient, number>();
 const authenticatedMutationControllers = new WeakMap<QueryClient, Set<AbortController>>();
-const authenticationStatusTransitions = new WeakMap<QueryClient, Promise<void>>();
+interface AuthenticationStatusTransition {
+    readonly completion: Promise<void>;
+}
+
+const authenticationStatusTransitions = new WeakMap<
+    QueryClient,
+    AuthenticationStatusTransition
+>();
 
 /** @returns Stable auth-boundary identity without volatile session activity metadata. */
 export function authStatusCacheIdentity(status: AuthStatus): string {
@@ -67,23 +74,24 @@ export async function publishAuthenticationStatus(
     queryClient: QueryClient,
     status: AuthStatus
 ): Promise<void> {
-    const previousTransition =
-        authenticationStatusTransitions.get(queryClient) ?? Promise.resolve();
-    const transition = (async () => {
-        try {
-            await previousTransition;
-        } catch {
-            // A later resolved identity must still be publishable after a failed transition.
-        }
-        await queryClient.cancelQueries({
-            exact: true,
-            queryKey: authStatusQueryKey,
-        });
-        queryClient.setQueryData(authStatusQueryKey, status);
-    })();
+    const previousTransition = authenticationStatusTransitions.get(queryClient);
+    const transition: AuthenticationStatusTransition = {
+        completion: (async () => {
+            try {
+                await previousTransition?.completion;
+            } catch {
+                // A later resolved identity must still be publishable after a failed transition.
+            }
+            await queryClient.cancelQueries({
+                exact: true,
+                queryKey: authStatusQueryKey,
+            });
+            queryClient.setQueryData(authStatusQueryKey, status);
+        })(),
+    };
     authenticationStatusTransitions.set(queryClient, transition);
     try {
-        await transition;
+        await transition.completion;
     } finally {
         if (authenticationStatusTransitions.get(queryClient) === transition) {
             authenticationStatusTransitions.delete(queryClient);
