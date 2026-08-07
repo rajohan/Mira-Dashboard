@@ -27,6 +27,13 @@ export class DrizzleBrowserSessionStore {
         this.#database = database;
     }
 
+    deleteAllSessions(userId: string): number {
+        return this.#database
+            .delete(authSessions)
+            .where(eq(authSessions.userId, userId))
+            .run().changes;
+    }
+
     deleteOtherSessions(userId: string, retainedSessionId: string): number {
         return this.#database
             .delete(authSessions)

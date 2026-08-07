@@ -5,15 +5,27 @@ import {
     type RouterHistory,
 } from "@tanstack/react-router";
 
-import { DashboardShell, OverviewRoute } from "./routeComponents.tsx";
+import { DashboardShell } from "./layout/DashboardShell.tsx";
+import { LoadingState } from "./ui/LoadingState.tsx";
 
 const rootRoute = createRootRoute({ component: DashboardShell });
 const overviewRoute = createRoute({
-    component: OverviewRoute,
     getParentRoute: () => rootRoute,
     path: "/",
-});
-const routeTree = rootRoute.addChildren([overviewRoute]);
+}).lazy(() => import("./routes/overview.lazy.tsx").then((module) => module.Route));
+const loginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/login",
+}).lazy(() => import("./routes/login.lazy.tsx").then((module) => module.Route));
+const accountSecurityRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/account-security",
+}).lazy(() => import("./routes/accountSecurity.lazy.tsx").then((module) => module.Route));
+const routeTree = rootRoute.addChildren([
+    overviewRoute,
+    loginRoute,
+    accountSecurityRoute,
+]);
 
 /**
  * Creates one browser router owned by the browser composition root.
@@ -22,6 +34,7 @@ const routeTree = rootRoute.addChildren([overviewRoute]);
  */
 export function createDashboardRouter(history?: RouterHistory) {
     return createRouter({
+        defaultPendingComponent: () => <LoadingState label="Loading page…" />,
         defaultPreload: "intent",
         defaultPreloadStaleTime: 30_000,
         ...(history === undefined ? {} : { history }),

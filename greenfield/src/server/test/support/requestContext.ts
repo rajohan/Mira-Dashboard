@@ -14,6 +14,7 @@ import type {
 import type { AutomationSecurityLifecycleService } from "../../domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
+import type { SecurityAuditLifecycleService } from "../../domains/security/securityAuditLifecycle.ts";
 import {
     createStructuredLogger,
     type StructuredLogger,
@@ -231,12 +232,32 @@ export function createTestAuthenticationLifecycleService(
             overrides.login ??
             (() => Promise.resolve({ status: "bootstrap-required" as const })),
         logout: overrides.logout ?? (() => Promise.resolve(false)),
+        revokeAllSessions:
+            overrides.revokeAllSessions ??
+            (() => Promise.resolve({ revokedSessions: 0 })),
+        revokeOtherSessions:
+            overrides.revokeOtherSessions ??
+            (() => Promise.resolve({ revokedSessions: 0 })),
         revokeSession:
             overrides.revokeSession ?? (() => Promise.resolve({ revoked: false })),
         status:
             overrides.status ??
             (() => ({ authenticated: false, isBootstrapRequired: false })),
         touchSession: overrides.touchSession ?? (() => Promise.resolve(undefined)),
+    });
+}
+
+/**
+ * Creates an inert security-audit lifecycle that fails closed unless overridden.
+ * @param overrides Lifecycle methods exercised by the current test.
+ * @returns A complete inert security-audit lifecycle.
+ */
+export function createTestSecurityAuditLifecycleService(
+    overrides: Partial<SecurityAuditLifecycleService> = {}
+): SecurityAuditLifecycleService {
+    return Object.freeze({
+        listEvents:
+            overrides.listEvents ?? (() => ({ status: "session-changed" as const })),
     });
 }
 
@@ -362,6 +383,7 @@ export interface TestServerSecurityServices {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+    readonly securityAuditLifecycle: SecurityAuditLifecycleService;
 }
 
 /**
@@ -386,6 +408,8 @@ export function createTestServerSecurityServices(
             overrides.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:
             overrides.mfaLoginLifecycle ?? createTestMfaLoginLifecycleService(),
+        securityAuditLifecycle:
+            overrides.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
     };
 }
 
@@ -469,6 +493,7 @@ export function createTestRequestContext(
         readonly request?: Request;
         readonly requestId?: string;
         readonly responseHeaders?: Headers;
+        readonly securityAuditLifecycle?: SecurityAuditLifecycleService;
     } = {}
 ): Promise<RequestContext> {
     const request = options.request ?? new Request("http://localhost/trpc/test");
@@ -492,5 +517,7 @@ export function createTestRequestContext(
         request,
         requestId: options.requestId ?? "test-request-id",
         responseHeaders: options.responseHeaders ?? new Headers(),
+        securityAuditLifecycle:
+            options.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
     });
 }

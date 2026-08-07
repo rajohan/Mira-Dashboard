@@ -91,6 +91,10 @@ export type RevokeSessionResult =
     | { readonly revoked: boolean }
     | { readonly status: "step-up-required" };
 
+export type RevokeSessionsResult =
+    | { readonly revokedSessions: number }
+    | { readonly status: "step-up-required" };
+
 export type AuthenticationStatus =
     | { readonly authenticated: false; readonly isBootstrapRequired: boolean }
     | {
@@ -127,6 +131,14 @@ export interface AuthenticationLifecycleService {
         sessionId: string,
         metadata: AuthenticationRequestMetadata
     ): Promise<RevokeSessionResult | undefined>;
+    revokeAllSessions(
+        identity: AuthenticatedBrowserIdentity,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<RevokeSessionsResult | undefined>;
+    revokeOtherSessions(
+        identity: AuthenticatedBrowserIdentity,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<RevokeSessionsResult | undefined>;
     status(identity?: AuthenticatedBrowserIdentity): AuthenticationStatus;
     touchSession(
         identity: AuthenticatedBrowserIdentity

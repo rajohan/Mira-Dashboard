@@ -208,7 +208,7 @@
             "purpose": "Pages append-only redacted events newest-first (`limit`, `before` cursor).",
             "section": "Audit",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["securityAudit.listEvents"],
                 "phase": "phase-2"
@@ -1127,7 +1127,7 @@
             "purpose": "Revokes every session, including the current one.",
             "section": "Account Security",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["auth.revokeAllSessions"],
                 "phase": "phase-2"
@@ -1140,7 +1140,7 @@
             "purpose": "Revokes every other browser session.",
             "section": "Account Security",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["auth.revokeOtherSessions"],
                 "phase": "phase-2"

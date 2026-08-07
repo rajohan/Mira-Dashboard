@@ -49,6 +49,7 @@ export interface AuthenticationLifecycleUnitOfWork
         BrowserSessionWriter,
         SecurityAuditWriter {
     countUsers(): number;
+    deleteAllSessions(userId: string): number;
     deleteOtherSessions(userId: string, retainedSessionId: string): number;
     deleteRateLimitBuckets(kind: AuthenticationRateLimitKind): number;
     deleteSession(userId: string, sessionId: string): boolean;
@@ -95,6 +96,10 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
 
     countUsers(): number {
         return this.#users.countUsers();
+    }
+
+    deleteAllSessions(userId: string): number {
+        return this.#sessions.deleteAllSessions(userId);
     }
 
     deleteOtherSessions(userId: string, retainedSessionId: string): number {

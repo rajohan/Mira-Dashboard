@@ -4,6 +4,7 @@ import * as v from "valibot";
 import {
     authSessionListSchema,
     authSessionRevokeResultSchema,
+    authSessionsRevokeResultSchema,
     authSessionTouchResultSchema,
     passwordChangeInputSchema,
     passwordChangeResultSchema,
@@ -96,6 +97,53 @@ export const authSessionRoutes = {
                 appendClearedDashboardSessionCookie(ctx.responseHeaders);
             }
             return result;
+        }),
+    revokeAllSessions: sessionProcedure
+        .input(emptyInputSchema)
+        .output(authSessionsRevokeResultSchema)
+        .mutation(async ({ ctx }) => {
+            const result = await ctx.authenticationLifecycle.revokeAllSessions(
+                ctx.sessionIdentity,
+                authenticationRequestMetadata(ctx, undefined)
+            );
+            if (result === undefined) {
+                appendClearedDashboardSessionCookie(ctx.responseHeaders);
+                throw new TRPCError({
+                    code: "UNAUTHORIZED",
+                    message: "Authentication state changed; sign in again",
+                });
+            }
+            if ("status" in result) {
+                throw authenticationPolicyError(
+                    "step_up_required",
+                    "Recent password or multi-factor authentication is required"
+                );
+            }
+            appendClearedDashboardSessionCookie(ctx.responseHeaders);
+            return v.parse(authSessionsRevokeResultSchema, result);
+        }),
+    revokeOtherSessions: sessionProcedure
+        .input(emptyInputSchema)
+        .output(authSessionsRevokeResultSchema)
+        .mutation(async ({ ctx }) => {
+            const result = await ctx.authenticationLifecycle.revokeOtherSessions(
+                ctx.sessionIdentity,
+                authenticationRequestMetadata(ctx, undefined)
+            );
+            if (result === undefined) {
+                appendClearedDashboardSessionCookie(ctx.responseHeaders);
+                throw new TRPCError({
+                    code: "UNAUTHORIZED",
+                    message: "Authentication state changed; sign in again",
+                });
+            }
+            if ("status" in result) {
+                throw authenticationPolicyError(
+                    "step_up_required",
+                    "Recent password or multi-factor authentication is required"
+                );
+            }
+            return v.parse(authSessionsRevokeResultSchema, result);
         }),
     sessions: sessionProcedure
         .input(emptyInputSchema)

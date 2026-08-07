@@ -8,19 +8,26 @@ import {
     type RawHttpContract,
     type RealtimeEventContract,
 } from "./registry.ts";
+import { securityAuditProcedureContracts } from "./securityAudit.ts";
 import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
 
 /** Implemented tRPC procedure metadata used by runtime wiring and docs. */
-const registeredProcedureContracts: readonly ProcedureContract[] = [
+const registeredProcedureContracts = [
     ...accountSecurityProcedureContracts,
     ...authProcedureContracts,
     ...automationSecurityProcedureContracts,
     eventsStreamContract,
+    ...securityAuditProcedureContracts,
     ...systemProcedureContracts,
-];
+] as const satisfies readonly ProcedureContract[];
+
+/** Exact registered procedure union used by environment-neutral typed clients. */
+export type RegisteredProcedureContract =
+    (typeof registeredProcedureContracts)[number];
 assertProcedureContractErrors(registeredProcedureContracts);
 export const procedureContracts = Object.freeze(
-    registeredProcedureContracts.map((contract) => {
+    registeredProcedureContracts.map((registeredContract) => {
+        const contract: ProcedureContract = registeredContract;
         const access =
             "capabilities" in contract.access
                 ? Object.freeze({

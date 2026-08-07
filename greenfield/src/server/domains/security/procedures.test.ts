@@ -310,6 +310,102 @@ describe("authentication procedures", () => {
         expect(responseHeaders.get("set-cookie")).toBeNull();
     });
 
+    test("keeps the retained cookie for other-session revocation and clears it for all", async () => {
+        const otherHeaders = new Headers();
+        const otherContext = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    revokeOtherSessions: () => Promise.resolve({ revokedSessions: 2 }),
+                }),
+                responseHeaders: otherHeaders,
+            }
+        );
+        expect(
+            await appRouter.createCaller(otherContext).auth.revokeOtherSessions()
+        ).toEqual({ revokedSessions: 2 });
+        expect(otherHeaders.get("set-cookie")).toBeNull();
+
+        const allHeaders = new Headers();
+        const allContext = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    revokeAllSessions: () => Promise.resolve({ revokedSessions: 3 }),
+                }),
+                responseHeaders: allHeaders,
+            }
+        );
+        expect(await appRouter.createCaller(allContext).auth.revokeAllSessions()).toEqual(
+            { revokedSessions: 3 }
+        );
+        expect(allHeaders.get("set-cookie")).toContain("Max-Age=0");
+    });
+
+    test("handles policy and identity races for bulk session revocation", async () => {
+        for (const operation of ["all", "others"] as const) {
+            const policyHeaders = new Headers();
+            const policyContext = await createTestRequestContext(
+                createTestSessionAuthentication([]),
+                createTestApplicationRuntime(),
+                {
+                    authenticationLifecycle: createTestAuthenticationLifecycleService(
+                        operation === "all"
+                            ? {
+                                  revokeAllSessions: () =>
+                                      Promise.resolve({
+                                          status: "step-up-required",
+                                      }),
+                              }
+                            : {
+                                  revokeOtherSessions: () =>
+                                      Promise.resolve({
+                                          status: "step-up-required",
+                                      }),
+                              }
+                    ),
+                    responseHeaders: policyHeaders,
+                }
+            );
+            const policyFailure = await captureFailure(() =>
+                operation === "all"
+                    ? appRouter.createCaller(policyContext).auth.revokeAllSessions()
+                    : appRouter.createCaller(policyContext).auth.revokeOtherSessions()
+            );
+            expect(policyFailure).toBeInstanceOf(TRPCError);
+            expect((policyFailure as TRPCError).code).toBe("FORBIDDEN");
+            expect(policyHeaders.get("set-cookie")).toBeNull();
+
+            const staleHeaders = new Headers();
+            const staleContext = await createTestRequestContext(
+                createTestSessionAuthentication([]),
+                createTestApplicationRuntime(),
+                {
+                    authenticationLifecycle: createTestAuthenticationLifecycleService(
+                        operation === "all"
+                            ? {
+                                  revokeAllSessions: () => Promise.resolve(undefined),
+                              }
+                            : {
+                                  revokeOtherSessions: () => Promise.resolve(undefined),
+                              }
+                    ),
+                    responseHeaders: staleHeaders,
+                }
+            );
+            const staleFailure = await captureFailure(() =>
+                operation === "all"
+                    ? appRouter.createCaller(staleContext).auth.revokeAllSessions()
+                    : appRouter.createCaller(staleContext).auth.revokeOtherSessions()
+            );
+            expect(staleFailure).toBeInstanceOf(TRPCError);
+            expect((staleFailure as TRPCError).code).toBe("UNAUTHORIZED");
+            expect(staleHeaders.get("set-cookie")).toContain("Max-Age=0");
+        }
+    });
+
     test("clears stale authentication after a password-change race", async () => {
         const responseHeaders = new Headers();
         const context = await createTestRequestContext(

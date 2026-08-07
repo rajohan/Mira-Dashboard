@@ -194,6 +194,152 @@ describe("authentication lifecycle sessions", () => {
         }
     });
 
+    test("revokes other and all sessions atomically without no-op audit growth", async () => {
+        const harness = await createAuthenticationLifecycleHarness();
+
+        try {
+            const created = await bootstrapAuthenticationLifecycle(harness);
+            const identity = {
+                sessionId: created.session.id,
+                userId: created.user.id,
+            };
+            for (const requestId of ["request-second", "request-third"]) {
+                const login = await harness.service.login(
+                    { password: "current-password-1", username: "operator" },
+                    { clientSourceId: requestId, requestId }
+                );
+                if (login.status !== "created") {
+                    throw new Error(`Expected login creation, received ${login.status}`);
+                }
+            }
+
+            expect(
+                await harness.service.revokeOtherSessions(identity, {
+                    clientSourceId: "client-source-1",
+                    requestId: "request-revoke-others",
+                })
+            ).toEqual({ revokedSessions: 2 });
+            expect(
+                harness.database.sqlite
+                    .query<{ id: string }, []>("SELECT id FROM auth_sessions")
+                    .all()
+            ).toEqual([{ id: identity.sessionId }]);
+            expect(
+                harness.database.sqlite
+                    .query<{ action: string; metadataJson: string }, []>(
+                        "SELECT action, metadata_json AS metadataJson FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT 1"
+                    )
+                    .get()
+            ).toEqual({
+                action: "auth.session.revoke-others",
+                metadataJson: JSON.stringify({ revokedSessions: 2 }),
+            });
+
+            const auditCountBeforeNoop = harness.database.sqlite
+                .query<{ count: number }, []>(
+                    "SELECT count(*) AS count FROM audit_events"
+                )
+                .get()?.count;
+            expect(
+                await harness.service.revokeOtherSessions(identity, {
+                    clientSourceId: "client-source-1",
+                    requestId: "request-revoke-others-again",
+                })
+            ).toEqual({ revokedSessions: 0 });
+            expect(
+                harness.database.sqlite
+                    .query<{ count: number }, []>(
+                        "SELECT count(*) AS count FROM audit_events"
+                    )
+                    .get()?.count
+            ).toBe(auditCountBeforeNoop);
+
+            const replacement = await harness.service.login(
+                { password: "current-password-1", username: "operator" },
+                {
+                    clientSourceId: "client-source-replacement",
+                    requestId: "request-replacement",
+                }
+            );
+            if (replacement.status !== "created") {
+                throw new Error(
+                    `Expected login creation, received ${replacement.status}`
+                );
+            }
+            expect(
+                await harness.service.revokeAllSessions(identity, {
+                    clientSourceId: "client-source-1",
+                    requestId: "request-revoke-all",
+                })
+            ).toEqual({ revokedSessions: 2 });
+            expect(
+                harness.database.sqlite
+                    .query<{ count: number }, []>(
+                        "SELECT count(*) AS count FROM auth_sessions"
+                    )
+                    .get()
+            ).toEqual({ count: 0 });
+            expect(
+                harness.database.sqlite
+                    .query<{ action: string; metadataJson: string }, []>(
+                        "SELECT action, metadata_json AS metadataJson FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT 1"
+                    )
+                    .get()
+            ).toEqual({
+                action: "auth.session.revoke-all",
+                metadataJson: JSON.stringify({ revokedSessions: 2 }),
+            });
+        } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
+    test("requires recent authentication for every bulk session mutation", async () => {
+        for (const operation of ["all", "others"] as const) {
+            const harness = await createAuthenticationLifecycleHarness({
+                recentAuthenticationWindowMs: 60_000,
+            });
+
+            try {
+                const created = await bootstrapAuthenticationLifecycle(harness);
+                const second = await harness.service.login(
+                    { password: "current-password-1", username: "operator" },
+                    {
+                        clientSourceId: "client-source-2",
+                        requestId: "request-second",
+                    }
+                );
+                if (second.status !== "created") {
+                    throw new Error(`Expected login creation, received ${second.status}`);
+                }
+                harness.advanceSeconds(61);
+                const identity = {
+                    sessionId: created.session.id,
+                    userId: created.user.id,
+                };
+                const metadata = {
+                    clientSourceId: "client-source-1",
+                    requestId: `request-stale-${operation}`,
+                };
+
+                expect(
+                    operation === "all"
+                        ? await harness.service.revokeAllSessions(identity, metadata)
+                        : await harness.service.revokeOtherSessions(identity, metadata)
+                ).toEqual({ status: "step-up-required" });
+                expect(
+                    harness.database.sqlite
+                        .query<{ count: number }, []>(
+                            "SELECT count(*) AS count FROM auth_sessions"
+                        )
+                        .get()
+                ).toEqual({ count: 2 });
+            } finally {
+                harness.database.sqlite.close(true);
+            }
+        }
+    });
+
     test("audits a successful logout once without repeatable no-op growth", async () => {
         const harness = await createAuthenticationLifecycleHarness();
 

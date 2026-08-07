@@ -5,29 +5,35 @@ import { act } from "react";
 import { acquireBrowserTestEnvironment } from "./testSupport/browserTestEnvironment.ts";
 
 const browserEnvironment = await acquireBrowserTestEnvironment();
-const { waitFor } = await import("@testing-library/react");
+const { screen } = await import("@testing-library/react");
 
 afterAll(async () => {
     await browserEnvironment.release();
 });
 
 describe("Dashboard browser entrypoint", () => {
-    test("mounts the lazy application graph into the document root", async () => {
+    test("mounts the composed application into the document root", async () => {
         document.body.innerHTML = '<div id="root"></div>';
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = () =>
+            Promise.resolve(
+                Response.json(
+                    { result: { data: { json: { state: "anonymous" } } } },
+                    { status: 200 }
+                )
+            );
         let entrypoint: typeof import("./main.tsx") | undefined;
         try {
             entrypoint = await act(async () => import("./main.tsx"));
-            await waitFor(
-                () => {
-                    const heading = document.querySelector("h1");
-                    expect(heading).not.toBeNull();
-                    expect(heading?.textContent).toBe("Mira Dashboard");
-                },
-                { container: document.body }
-            );
+
+            expect(
+                await screen.findByRole("heading", { level: 1, name: "Sign in" })
+            ).toBeTruthy();
         } finally {
-            const mountedRoot = entrypoint?.dashboardBrowserRoot;
-            if (mountedRoot) act(() => mountedRoot.unmount());
+            if (entrypoint !== undefined) {
+                act(() => entrypoint?.dashboardBrowserRoot.unmount());
+            }
+            globalThis.fetch = originalFetch;
             document.body.replaceChildren();
         }
     });
