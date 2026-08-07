@@ -30,6 +30,7 @@ import {
     authenticationHandlerIdleTimeoutSeconds,
     authenticationRequestBodyMaximumBytes,
     isTrpcRequestPath,
+    monitoringRequestBodyMaximumBytes,
     readTrpcRequestPolicy,
     serverRequestBodyMaximumBytes,
     taskContentRequestBodyMaximumBytes,
@@ -108,6 +109,19 @@ describe("tRPC request policy", () => {
             rejectsBatch: false,
             requestBodyMaximumBytes: taskProgressRequestBodyMaximumBytes,
         });
+        expect(policy("/trpc/monitoring.submitCompleteSnapshot")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: monitoringRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/reports.upsert")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: monitoringRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/reports.delete")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
+        });
+        expect(monitoringRequestBodyMaximumBytes).toBe(serverRequestBodyMaximumBytes);
     });
 
     test("combines mixed batches using the strictest applicable policies", () => {

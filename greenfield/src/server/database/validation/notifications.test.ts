@@ -60,6 +60,8 @@ test("reuses monitoring text policies and enforces notification read order", () 
         { kind: "k".repeat(101) },
         { message: "m".repeat(1001) },
         { readAt: subMilliseconds(validNotificationValues.occurredAt, 1) },
+        { reportId: "not-a-report-id" },
+        { source: "s".repeat(201) },
         { title: "t".repeat(501) },
     ]) {
         expect(() =>

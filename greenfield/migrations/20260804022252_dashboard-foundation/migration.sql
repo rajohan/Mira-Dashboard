@@ -139,7 +139,7 @@ CREATE TABLE `automation_principal_capabilities` (
 	`principal_id` text NOT NULL,
 	CONSTRAINT `automation_principal_capabilities_pk` PRIMARY KEY(`principal_id`, `capability`),
 	CONSTRAINT `fk_automation_principal_capabilities_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'notifications:read', 'reports:read', 'tasks:read', 'tasks:write')),
+	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')),
 	CONSTRAINT "automation_principal_capabilities_granted_at_check" CHECK("granted_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
@@ -225,9 +225,12 @@ CREATE TABLE `notifications` (
 	`message` text NOT NULL,
 	`occurred_at` integer NOT NULL,
 	`read_at` integer,
+	`report_id` text,
 	`severity` text NOT NULL,
+	`source` text,
 	`title` text NOT NULL,
 	CONSTRAINT `fk_notifications_incident_id_incidents_id_fk` FOREIGN KEY (`incident_id`) REFERENCES `incidents`(`id`) ON DELETE RESTRICT,
+	CONSTRAINT `fk_notifications_report_id_reports_id_fk` FOREIGN KEY (`report_id`) REFERENCES `reports`(`id`) ON DELETE CASCADE,
 	CONSTRAINT "notifications_channel_check" CHECK("channel" = 'dashboard'),
 	CONSTRAINT "notifications_incident_pair_check" CHECK(("incident_id" IS NULL AND "incident_generation" IS NULL) OR ("incident_id" IS NOT NULL AND "incident_generation" IS NOT NULL)),
 	CONSTRAINT "notifications_incident_generation_check" CHECK("incident_generation" IS NULL OR "incident_generation" >= 1),
@@ -257,8 +260,11 @@ CREATE TABLE `reports` (
 	`occurred_at` integer NOT NULL,
 	`source` text NOT NULL,
 	`source_job_id` text,
+	`status` text DEFAULT 'ok' NOT NULL,
+	`summary` text,
 	`title` text NOT NULL,
-	CONSTRAINT "reports_metadata_json_check" CHECK(CASE WHEN json_valid("metadata_json") THEN json_type("metadata_json") = 'object' ELSE 0 END)
+	CONSTRAINT "reports_metadata_json_check" CHECK(CASE WHEN json_valid("metadata_json") THEN json_type("metadata_json") = 'object' ELSE 0 END),
+	CONSTRAINT "reports_status_check" CHECK("status" IN ('error', 'ok', 'warning'))
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `schema_migrations` (
@@ -589,6 +595,7 @@ CREATE INDEX `incidents_active_monitor_seen_idx` ON `incidents` (`monitor_key`,`
 CREATE INDEX `monitor_runs_monitor_completed_id_idx` ON `monitor_runs` (`monitor_key`,`completed_at`,`id`) WHERE "monitor_runs"."complete_snapshot" = 1 AND "monitor_runs"."state" = 'succeeded';--> statement-breakpoint
 CREATE UNIQUE INDEX `notifications_incident_generation_channel_unique` ON `notifications` (`incident_id`,`incident_generation`,`channel`) WHERE "notifications"."incident_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `notifications_unread_occurred_idx` ON `notifications` (`occurred_at`) WHERE "notifications"."read_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `notifications_report_id_idx` ON `notifications` (`report_id`);--> statement-breakpoint
 CREATE INDEX `realtime_events_expires_id_idx` ON `realtime_events` (`expires_at`,`id`);--> statement-breakpoint
 CREATE INDEX `realtime_events_topic_id_idx` ON `realtime_events` (`topic`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_kind_occurred_id_idx` ON `reports` (`kind`,`occurred_at`,`id`);--> statement-breakpoint

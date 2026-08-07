@@ -9,6 +9,10 @@ export const realtimeEventDeliveryMaximumBytes = 8 * 1024;
 export const realtimeSubscriptionMaximumTopics = 64;
 /** Canonical upper bound for one durable realtime topic. */
 export const realtimeTopicMaximumCharacters = 128;
+/** Runtime retention shared by durable producers and client-facing documentation. */
+export const realtimeEventRetentionMilliseconds = 7 * 24 * 60 * 60 * 1000;
+/** Human-readable form of the reviewed durable retention policy. */
+export const realtimeEventRetentionLabel = "7 days";
 
 /** Runtime and documentation metadata for one authorized realtime topic. */
 export interface RealtimeTopicDefinition {

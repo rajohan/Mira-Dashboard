@@ -60,12 +60,24 @@ function createRealtimeEvent(input: {
     };
 }
 
+/**
+ * Appends one validated monitoring invalidation to the current transaction.
+ * @param unit Monitoring transaction that owns the related state change.
+ * @param input Validated routing, identity, time, and retention metadata.
+ */
+export function appendMonitoringRealtimeEvent(
+    unit: MonitoringUnitOfWork,
+    input: Parameters<typeof createRealtimeEvent>[0]
+): void {
+    unit.insertRealtimeEvent(createRealtimeEvent(input));
+}
+
 export function insertRealtimeEvent(
     unit: MonitoringUnitOfWork,
     counts: MutableSubmissionCounts,
     input: Parameters<typeof createRealtimeEvent>[0]
 ): void {
-    unit.insertRealtimeEvent(createRealtimeEvent(input));
+    appendMonitoringRealtimeEvent(unit, input);
     counts.realtimeEvents += 1;
 }
 
@@ -78,6 +90,7 @@ export function insertIncidentNotification(input: {
     outboxOccurredAt: Date;
     problem: NormalizedMonitoringProblem;
     reportTitle: string;
+    source: string;
     unit: MonitoringUnitOfWork;
 }): void {
     const notification = input.unit.insertNotification({
@@ -89,7 +102,9 @@ export function insertIncidentNotification(input: {
         linkUrl: incidentLink(input.incident.id),
         message: input.problem.title,
         occurredAt: input.occurredAt,
+        reportId: null,
         severity: input.problem.severity,
+        source: input.source,
         title: input.reportTitle,
     });
     insertRealtimeEvent(input.unit, input.counts, {

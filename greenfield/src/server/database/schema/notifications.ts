@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { incidents } from "./incidents.ts";
+import { reports } from "./reports.ts";
 
 /** User-visible notifications, optionally tied to one incident generation. */
 export const notifications = sqliteTable(
@@ -25,9 +26,13 @@ export const notifications = sqliteTable(
         message: text("message").notNull(),
         occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
         readAt: integer("read_at", { mode: "timestamp_ms" }),
+        reportId: text("report_id").references(() => reports.id, {
+            onDelete: "cascade",
+        }),
         severity: text("severity", {
             enum: ["critical", "error", "info", "warning"],
         }).notNull(),
+        source: text("source"),
         title: text("title").notNull(),
     },
     (table) => [
@@ -54,5 +59,6 @@ export const notifications = sqliteTable(
         index("notifications_unread_occurred_idx")
             .on(table.occurredAt)
             .where(sql`${table.readAt} IS NULL`),
+        index("notifications_report_id_idx").on(table.reportId),
     ]
 );

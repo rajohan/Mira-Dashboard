@@ -370,11 +370,13 @@ outcome. For SSE the response-created event marks
 successful dispatch, not stream termination; close/cancel/error observability remains part of the
 browser/realtime lifecycle slice. Client cancellation is informational and carries neither a
 failure fingerprint nor a server-error outcome. Bun's outer 640 KiB pre-dispatch body ceiling
-supports the largest reviewed task-content request and may reject before application correlation
-exists. The raw tRPC boundary selects exact registered-procedure ceilings before parsing or
-authentication: 16 KiB for authentication, 32 KiB for WebAuthn, 64 KiB by default, 128 KiB for
-task progress, and 640 KiB for task create/content update. Unknown procedures retain the default
-ceiling, while unknown authentication-namespace procedures retain the stricter authentication
+supports the largest reviewed task-content and monitoring mutation requests and may reject before
+application correlation exists. The raw tRPC boundary selects exact registered-procedure ceilings
+before parsing or authentication: 16 KiB for authentication, 32 KiB for WebAuthn, 64 KiB by
+default, 128 KiB for task progress, and 640 KiB for task create/content update, complete monitoring
+snapshots, and
+immutable report upserts. Unknown procedures retain the default ceiling, while unknown
+authentication-namespace procedures retain the stricter authentication
 profile. The raw handler receives the generated ID and resolves direct-client provenance against
 the exact trusted-proxy allowlist before context construction. `createContext` then authenticates the
 already parsed session or automation credential and establishes identity plus audit correlation
@@ -387,7 +389,7 @@ once. Reusable procedure builders are limited to:
 
 Expected errors use a small stable code set such as `UNAUTHORIZED`, `FORBIDDEN`, `CONFLICT`,
 `NOT_FOUND`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, and `SERVICE_UNAVAILABLE` with safe
-structured details. The `ContractErrorCode` union, all 55 actual router paths, the server-owned
+structured details. The `ContractErrorCode` union, all 68 actual router paths, the server-owned
 runtime allowlist, and generated contract metadata must match exactly. The base procedure
 middleware enforces that allowlist for immediate and deferred subscription failures; an
 implemented procedure missing from the policy or an undeclared code becomes a redacted internal

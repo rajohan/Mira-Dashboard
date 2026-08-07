@@ -1,0 +1,26 @@
+{
+  "$id": "urn:mira-dashboard:notifications.markAllRead.output",
+  "type": "object",
+  "properties": {
+    "affectedCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "completedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "remaining": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "affectedCount",
+    "completedAtMs",
+    "remaining"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

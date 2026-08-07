@@ -1,0 +1,61 @@
+{
+  "$id": "urn:mira-dashboard:notifications.markAllRead.input",
+  "type": "object",
+  "properties": {
+    "filters": {
+      "type": "object",
+      "properties": {
+        "incidentId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "\\S"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "severities": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "critical",
+              "error",
+              "info",
+              "warning"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "default": {}
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

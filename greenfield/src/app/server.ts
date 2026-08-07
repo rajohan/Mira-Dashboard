@@ -3,6 +3,8 @@ import * as v from "valibot";
 
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
 import type { AgentService } from "../server/domains/agents/service.ts";
+import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
+import type { MonitoringService } from "../server/domains/monitoring/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
@@ -138,6 +140,8 @@ export interface ServerOptions {
     readonly hostname?: string;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+    readonly monitoringCatalogService: MonitoringCatalogService["Service"];
+    readonly monitoringService: MonitoringService["Service"];
     readonly port: number;
     readonly readiness: ReadinessController;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
@@ -179,6 +183,8 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             browserOrigin,
             mfaAccountLifecycle: options.mfaAccountLifecycle,
             mfaLoginLifecycle: options.mfaLoginLifecycle,
+            monitoringCatalogService: options.monitoringCatalogService,
+            monitoringService: options.monitoringService,
             securityAuditLifecycle: options.securityAuditLifecycle,
             taskService: options.taskService,
             trustedProxyAddresses: options.trustedProxyAddresses,

@@ -121,6 +121,7 @@ export function applyMonitoringSnapshotLifecycle(input: {
                 outboxOccurredAt: input.outboxOccurredAt,
                 problem,
                 reportTitle: input.snapshot.report.title,
+                source: input.snapshot.report.source,
                 unit: input.unit,
             });
         }

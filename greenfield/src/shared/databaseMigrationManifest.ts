@@ -13,8 +13,8 @@ export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]
     Object.freeze({
         id: "20260804022252_dashboard-foundation",
         migrationSha256:
-            "ad96460f166f83ed20ba077bd75716c4cf97274b5bfe0b6fa6a56ddd0ed1ebc6",
+            "73f4cba5631a545f5129be957f1ed92d1a9ff36dd0700f8eb9a4aae2810b98b1",
         snapshotSha256:
-            "16e382f0aca3a2e0769db17e282cc08a9645e2d9ea45e9e274618c00c9bd34ec",
+            "5d8097256cdc861cbc770bff860dfed3cd92dcb4f52879f6b4d6679aa436f1ec",
     }),
 ]);
