@@ -16,27 +16,63 @@ const sourceDatabaseIdentitySchema = v.strictObject({
     mtimeNs: v.pipe(v.string(), v.regex(/^(?:0|[1-9]\d{0,39})$/u)),
     size: v.pipe(v.string(), v.regex(/^[1-9]\d{0,39}$/u)),
 });
-
-/** Durable recovery journal spanning database promotion and activation-record commit. */
-export const productionActivationTransitionSchema = v.strictObject({
+const transitionIdentitySchema = {
     candidate: releaseRuntimeSchema,
     formatVersion: v.literal(1, invalidActivationTransition),
-    phase: v.picklist(["prepared", "database-promoted", "rollback-required"] as const),
     previousActivation: v.nullable(productionActivationRecordSchema),
-    previousDatabase: v.variant("state", [
-        v.strictObject({ state: v.literal("absent") }),
-        v.strictObject({
-            manifest: databaseSnapshotManifestSchema,
-            sourceDatabase: sourceDatabaseIdentitySchema,
-            state: v.literal("present"),
-        }),
-    ]),
     transitionId: lowercaseUuidV7Schema(invalidActivationTransition),
-});
+} as const;
+const recordedPreviousDatabaseSchema = v.variant("state", [
+    v.strictObject({ state: v.literal("absent") }),
+    v.strictObject({
+        manifest: databaseSnapshotManifestSchema,
+        sourceDatabase: sourceDatabaseIdentitySchema,
+        state: v.literal("present"),
+    }),
+]);
+
+/** Durable recovery journal spanning database promotion and activation-record commit. */
+export const productionActivationTransitionSchema = v.variant("phase", [
+    v.strictObject({
+        ...transitionIdentitySchema,
+        phase: v.literal("service-stop-requested"),
+        previousDatabase: v.strictObject({ state: v.literal("unrecorded") }),
+    }),
+    v.strictObject({
+        ...transitionIdentitySchema,
+        phase: v.literal("prepared"),
+        previousDatabase: recordedPreviousDatabaseSchema,
+    }),
+    v.strictObject({
+        ...transitionIdentitySchema,
+        phase: v.literal("database-promoted"),
+        previousDatabase: recordedPreviousDatabaseSchema,
+    }),
+    v.strictObject({
+        ...transitionIdentitySchema,
+        phase: v.literal("rollback-required"),
+        previousDatabase: recordedPreviousDatabaseSchema,
+    }),
+]);
 
 export type ProductionActivationTransition = v.InferOutput<
     typeof productionActivationTransitionSchema
 >;
+export type ProductionActivationPreviousDatabase = Extract<
+    ProductionActivationTransition,
+    { phase: "prepared" }
+>["previousDatabase"];
+
+function freezeTransitionIdentity(transition: ProductionActivationTransition): void {
+    Object.freeze(transition.candidate);
+    if (transition.previousActivation) {
+        Object.freeze(transition.previousActivation.current);
+        if (transition.previousActivation.previous) {
+            Object.freeze(transition.previousActivation.previous);
+        }
+        Object.freeze(transition.previousActivation);
+    }
+}
 
 /**
  * Parses, validates semantic pairing, and freezes one recovery journal.
@@ -51,6 +87,11 @@ export function parseProductionActivationTransition(
     });
     if (!parsed.success) throw new TypeError(invalidActivationTransition);
     const transition = parsed.output;
+    freezeTransitionIdentity(transition);
+    if (transition.phase === "service-stop-requested") {
+        Object.freeze(transition.previousDatabase);
+        return Object.freeze(transition);
+    }
     const validAbsentPair =
         transition.previousDatabase.state === "absent" &&
         transition.previousActivation === null;
@@ -62,14 +103,6 @@ export function parseProductionActivationTransition(
             transition.previousActivation.current.releaseId;
     if (!validAbsentPair && !validPresentPair) {
         throw new TypeError(invalidActivationTransition);
-    }
-    Object.freeze(transition.candidate);
-    if (transition.previousActivation) {
-        Object.freeze(transition.previousActivation.current);
-        if (transition.previousActivation.previous) {
-            Object.freeze(transition.previousActivation.previous);
-        }
-        Object.freeze(transition.previousActivation);
     }
     if (transition.previousDatabase.state === "present") {
         Object.freeze(transition.previousDatabase.manifest.database);

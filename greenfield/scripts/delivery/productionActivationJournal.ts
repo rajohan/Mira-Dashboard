@@ -5,9 +5,11 @@ import path from "node:path";
 import {
     parseProductionActivationTransition,
     serializeProductionActivationTransition,
+    type ProductionActivationPreviousDatabase,
     type ProductionActivationTransition,
 } from "../../src/shared/productionActivationTransition.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
+import { removeStalePrivateStateStage } from "./privateStateStageFile.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 
 const activationJournalFailureMessage = "Production activation journal update failed";
@@ -194,9 +196,16 @@ async function replaceJournal(
         descriptorRoot,
         `.activation-transition-${next.transitionId}.json`
     );
+    const stageName = path.basename(stageFile);
     const finalFile = path.join(descriptorRoot, journalFileName);
     let stageOwned = false;
     try {
+        await removeStalePrivateStateStage({
+            directoryHandle: state.handle,
+            expectedDevice: state.device,
+            maximumBytes: maximumJournalBytes,
+            stageName,
+        });
         await writeJournalStage(stageFile, next);
         stageOwned = true;
         await rename(stageFile, finalFile);
@@ -241,19 +250,19 @@ export async function loadProductionActivationJournal(
 }
 
 /**
- * Creates the prepared recovery journal before database promotion.
+ * Records activation intent before any active service can be stopped.
  * @param lease Active wider deployment lease.
  * @param paths Exact project-local production paths.
- * @param untrustedTransition Verified transition identity and snapshot pairing.
- * @returns Parsed durable prepared journal.
+ * @param untrustedTransition Verified candidate and prior activation identity.
+ * @returns Parsed durable service-stop-requested journal.
  */
 export async function createProductionActivationJournal(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
     untrustedTransition: ProductionActivationTransition
-): Promise<ProductionActivationTransition> {
+): Promise<Extract<ProductionActivationTransition, { phase: "service-stop-requested" }>> {
     const transition = parseProductionActivationTransition(untrustedTransition);
-    if (transition.phase !== "prepared") throw journalFailure();
+    if (transition.phase !== "service-stop-requested") throw journalFailure();
     const state = await openStateDirectory(lease, paths);
     let failed = false;
     try {
@@ -267,6 +276,39 @@ export async function createProductionActivationJournal(
 }
 
 /**
+ * Records the exact stopped-writer database snapshot before candidate preparation.
+ * @param lease Active wider deployment lease.
+ * @param paths Exact project-local production paths.
+ * @param expected Durable service-stop-requested journal.
+ * @param untrustedPreviousDatabase Verified absent state or immutable snapshot identity.
+ * @returns Durable prepared journal paired with the pre-activation database.
+ */
+export async function markProductionSnapshotPrepared(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    expected: ProductionActivationTransition,
+    untrustedPreviousDatabase: ProductionActivationPreviousDatabase
+): Promise<Extract<ProductionActivationTransition, { phase: "prepared" }>> {
+    if (expected.phase !== "service-stop-requested") throw journalFailure();
+    const next = parseProductionActivationTransition({
+        ...expected,
+        phase: "prepared",
+        previousDatabase: untrustedPreviousDatabase,
+    });
+    if (next.phase !== "prepared") throw journalFailure();
+    const state = await openStateDirectory(lease, paths);
+    let failed = false;
+    try {
+        await replaceJournal(state, expected, next);
+    } catch {
+        failed = true;
+    }
+    const closed = await closeHandle(state.handle);
+    if (failed || !closed) throw journalFailure();
+    return next;
+}
+
+/**
  * Advances the recovery journal after atomic database promotion.
  * @param lease Active wider deployment lease.
  * @param paths Exact project-local production paths.
@@ -277,12 +319,13 @@ export async function markProductionDatabasePromoted(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
     expected: ProductionActivationTransition
-): Promise<ProductionActivationTransition> {
+): Promise<Extract<ProductionActivationTransition, { phase: "database-promoted" }>> {
     if (expected.phase !== "prepared") throw journalFailure();
     const next = parseProductionActivationTransition({
         ...expected,
         phase: "database-promoted",
     });
+    if (next.phase !== "database-promoted") throw journalFailure();
     const state = await openStateDirectory(lease, paths);
     let failed = false;
     try {
@@ -306,12 +349,13 @@ export async function markProductionRollbackRequired(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
     expected: ProductionActivationTransition
-): Promise<ProductionActivationTransition> {
+): Promise<Extract<ProductionActivationTransition, { phase: "rollback-required" }>> {
     if (expected.phase !== "database-promoted") throw journalFailure();
     const next = parseProductionActivationTransition({
         ...expected,
         phase: "rollback-required",
     });
+    if (next.phase !== "rollback-required") throw journalFailure();
     const state = await openStateDirectory(lease, paths);
     let failed = false;
     try {

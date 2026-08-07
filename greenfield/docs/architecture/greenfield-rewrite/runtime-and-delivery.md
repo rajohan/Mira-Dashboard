@@ -472,7 +472,9 @@ Deployment flow:
 3. Prepare and verify `<project-root>/production/state` plus its protected ancestor chain before
    changing the active release pointer.
 4. Acquire the deployment lease, install/reload the verified stop-owner units, drain active jobs,
-   enter maintenance mode, and quiesce all database writers.
+   enter maintenance mode, durably journal the exact stop intent, and only then quiesce all
+   database writers. Recovery treats this pre-snapshot phase as database-unmodified and
+   idempotently restores the previous service owner before clearing the journal.
 5. Snapshot and verify the current database while writers remain stopped.
 6. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
    database state.

@@ -26,8 +26,10 @@ import {
 import { withDeploymentLease } from "./deploymentLease.ts";
 import {
     createProductionActivationJournal,
+    loadProductionActivationJournal,
     markProductionDatabasePromoted,
     markProductionRollbackRequired,
+    markProductionSnapshotPrepared,
 } from "./productionActivationJournal.ts";
 import {
     commitProductionActivationState,
@@ -327,6 +329,68 @@ describe("production release activation", () => {
         });
     });
 
+    test("recovers the active service after interruption immediately after stop", async () => {
+        const sourceReleases = await Promise.all([
+            localReleaseFixture(firstReleaseId),
+            localReleaseFixture(secondReleaseId),
+        ]);
+        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource
+            );
+            const services = new TestServiceController();
+            const initial = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.first,
+                    fixtures.runtime,
+                    activationDependencies(services, fixtures.probeRuntime)
+                )
+            );
+            let observedPhase: string | undefined;
+            const failure = await rejectionError(
+                Effect.runPromise(
+                    activatePublishedProductionRelease(
+                        lease,
+                        paths,
+                        fixtures.second,
+                        fixtures.runtime,
+                        activationDependencies(services, fixtures.probeRuntime, {
+                            afterServicesStopped: async () => {
+                                const observedJournal =
+                                    await loadProductionActivationJournal(lease, paths);
+                                observedPhase = observedJournal?.phase;
+                                throw new Error("simulated process interruption");
+                            },
+                        })
+                    )
+                )
+            );
+
+            expect(failure.message).toBe("Production release activation failed");
+            expect(observedPhase).toBe("service-stop-requested");
+            const recoveredActivation = await loadProductionActivationState(lease, paths);
+            expect(recoveredActivation.record).toEqual(initial);
+            expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
+            expect(services.events.slice(-7)).toEqual([
+                `prepare:${firstReleaseId}`,
+                "stop",
+                `prepare:${firstReleaseId}`,
+                "stop",
+                `prepare:${firstReleaseId}`,
+                `start:${firstReleaseId}`,
+                `ready:${firstReleaseId}`,
+            ]);
+        });
+    });
+
     test("keeps a committed candidate when post-commit cleanup is interrupted", async () => {
         const sourceReleases = await Promise.all([
             localReleaseFixture(firstReleaseId),
@@ -440,7 +504,7 @@ describe("production release activation", () => {
                 dependencies.maintenance
             );
             if (snapshot.state !== "present") throw new Error("Expected snapshot");
-            const prepared = await createProductionActivationJournal(
+            const stopRequested = await createProductionActivationJournal(
                 lease,
                 paths,
                 parseProductionActivationTransition({
@@ -449,15 +513,21 @@ describe("production release activation", () => {
                         runtimeRevision: runtimeIdentity.revision,
                     },
                     formatVersion: 1,
-                    phase: "prepared",
+                    phase: "service-stop-requested",
                     previousActivation: initial,
-                    previousDatabase: {
-                        manifest: snapshot.manifest,
-                        sourceDatabase: snapshot.sourceDatabase,
-                        state: "present",
-                    },
+                    previousDatabase: { state: "unrecorded" },
                     transitionId,
                 })
+            );
+            const prepared = await markProductionSnapshotPrepared(
+                lease,
+                paths,
+                stopRequested,
+                {
+                    manifest: snapshot.manifest,
+                    sourceDatabase: snapshot.sourceDatabase,
+                    state: "present",
+                }
             );
             const workspace = await prepareDatabaseTransitionWorkspace(
                 lease,
@@ -558,7 +628,7 @@ describe("production release activation", () => {
                 dependencies.maintenance
             );
             if (snapshot.state !== "present") throw new Error("Expected snapshot");
-            await createProductionActivationJournal(
+            const stopRequested = await createProductionActivationJournal(
                 lease,
                 paths,
                 parseProductionActivationTransition({
@@ -567,16 +637,17 @@ describe("production release activation", () => {
                         runtimeRevision: runtimeIdentity.revision,
                     },
                     formatVersion: 1,
-                    phase: "prepared",
+                    phase: "service-stop-requested",
                     previousActivation: initial,
-                    previousDatabase: {
-                        manifest: snapshot.manifest,
-                        sourceDatabase: snapshot.sourceDatabase,
-                        state: "present",
-                    },
+                    previousDatabase: { state: "unrecorded" },
                     transitionId,
                 })
             );
+            await markProductionSnapshotPrepared(lease, paths, stopRequested, {
+                manifest: snapshot.manifest,
+                sourceDatabase: snapshot.sourceDatabase,
+                state: "present",
+            });
             const workspace = await prepareDatabaseTransitionWorkspace(
                 lease,
                 paths,

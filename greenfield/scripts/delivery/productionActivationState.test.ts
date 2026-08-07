@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readdir, rm, stat, unlink } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -86,6 +86,11 @@ describe("production activation state", () => {
             );
             expect(committedActivationStatus.mode & 0o777).toBe(0o600);
             if (!first.record) throw new Error("Expected first activation record");
+            const staleRollbackStage = path.join(
+                paths.stateDirectory,
+                `.activation-rollback-${secondTransition}.json`
+            );
+            await writeFile(staleRollbackStage, "partial", { mode: 0o600 });
             const restoredFirst = await restorePreviousProductionActivationState(
                 lease,
                 paths,
@@ -93,6 +98,7 @@ describe("production activation state", () => {
                 first.record
             );
             expect(restoredFirst.record).toEqual(first.record);
+            expect(await stat(staleRollbackStage).catch(() => null)).toBeNull();
             const restoredEmpty = await restorePreviousProductionActivationState(
                 lease,
                 paths,

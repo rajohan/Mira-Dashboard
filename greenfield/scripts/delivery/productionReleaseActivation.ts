@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
 import {
     parseProductionActivationTransition,
+    type ProductionActivationPreviousDatabase,
     type ProductionActivationTransition,
 } from "../../src/shared/productionActivationTransition.ts";
 import {
@@ -29,6 +30,7 @@ import {
     loadProductionActivationJournal,
     markProductionDatabasePromoted,
     markProductionRollbackRequired,
+    markProductionSnapshotPrepared,
 } from "./productionActivationJournal.ts";
 import {
     commitProductionActivationState,
@@ -84,6 +86,7 @@ export interface ProductionReleaseActivationDependencies {
 export interface ProductionReleaseActivationTestHooks {
     readonly afterActivationCommit?: () => Promise<void> | void;
     readonly afterActivationJournalClear?: () => Promise<void> | void;
+    readonly afterServicesStopped?: () => Promise<void> | void;
 }
 
 interface ActiveArtifacts {
@@ -194,8 +197,7 @@ async function verifyCandidateArtifacts(
 function journalFor(
     transitionId: string,
     activation: ProductionActivationState,
-    candidate: ActiveArtifacts,
-    snapshot: Awaited<ReturnType<typeof runDatabaseSnapshotMaintenance>>
+    candidate: ActiveArtifacts
 ): ProductionActivationTransition {
     return parseProductionActivationTransition({
         candidate: {
@@ -203,18 +205,23 @@ function journalFor(
             runtimeRevision: candidate.runtime.identity.revision,
         },
         formatVersion: 1,
-        phase: "prepared",
+        phase: "service-stop-requested",
         previousActivation: activation.record ?? null,
-        previousDatabase:
-            snapshot.state === "absent"
-                ? { state: "absent" }
-                : {
-                      manifest: snapshot.manifest,
-                      sourceDatabase: snapshot.sourceDatabase,
-                      state: "present",
-                  },
+        previousDatabase: { state: "unrecorded" },
         transitionId,
     });
+}
+
+function previousDatabaseForSnapshot(
+    snapshot: Awaited<ReturnType<typeof runDatabaseSnapshotMaintenance>>
+): ProductionActivationPreviousDatabase {
+    return snapshot.state === "absent"
+        ? { state: "absent" }
+        : {
+              manifest: snapshot.manifest,
+              sourceDatabase: snapshot.sourceDatabase,
+              state: "present",
+          };
 }
 
 function nextActivationRecord(
@@ -337,20 +344,41 @@ async function rollbackTransition(
         activation.record,
         journal.previousActivation
     );
+    if (
+        journal.phase === "service-stop-requested" &&
+        (candidateCommitted || !previousAuthoritative)
+    ) {
+        throw activationError();
+    }
     if (!candidateCommitted && !previousAuthoritative) throw activationError();
 
-    const candidate = await loadExactArtifacts(
-        paths,
-        journal.candidate.releaseId,
-        journal.candidate.runtimeRevision,
-        dependencies
-    );
     const previous = journal.previousActivation
         ? await loadActiveArtifacts(paths, journal.previousActivation, dependencies)
         : undefined;
-    const stopOwner = candidateCommitted ? candidate : (previous ?? candidate);
+    const stopOwner =
+        candidateCommitted || !previous
+            ? await loadExactArtifacts(
+                  paths,
+                  journal.candidate.releaseId,
+                  journal.candidate.runtimeRevision,
+                  dependencies
+              )
+            : previous;
     await dependencies.services.prepare(stopOwner.release, stopOwner.runtime);
     await dependencies.services.stop();
+    if (journal.phase === "service-stop-requested") {
+        await discardOrphanDatabaseTransitionWorkspace(
+            lease,
+            paths,
+            journal.transitionId
+        );
+        if (previous) {
+            await prepareAndStartServices(dependencies.services, previous);
+            await dependencies.services.verifyReady(previous.release, previous.runtime);
+        }
+        await clearProductionActivationJournal(lease, paths, journal);
+        return activation;
+    }
     const recovery = await inspectDatabaseTransitionRecovery(lease, paths, journal);
     if (recovery.state === "promoted") {
         await restorePreviousDatabase(
@@ -447,7 +475,13 @@ async function activateRelease(
     try {
         const stopOwner = previous ?? candidate;
         await dependencies.services.prepare(stopOwner.release, stopOwner.runtime);
+        journal = await createProductionActivationJournal(
+            lease,
+            paths,
+            journalFor(transitionId, activation, candidate)
+        );
         await dependencies.services.stop();
+        await dependencies.testHooks?.afterServicesStopped?.();
         const snapshotOwner = previous ?? candidate;
         const snapshot = await runDatabaseSnapshotMaintenance(
             lease,
@@ -458,10 +492,11 @@ async function activateRelease(
             previous ? "present" : "absent",
             dependencies.maintenance
         );
-        journal = await createProductionActivationJournal(
+        journal = await markProductionSnapshotPrepared(
             lease,
             paths,
-            journalFor(transitionId, activation, candidate, snapshot)
+            journal,
+            previousDatabaseForSnapshot(snapshot)
         );
         workspace = await prepareDatabaseTransitionWorkspace(
             lease,

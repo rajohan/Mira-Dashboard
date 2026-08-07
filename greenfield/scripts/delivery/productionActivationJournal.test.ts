@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readdir, rm, stat, unlink } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -12,6 +12,7 @@ import {
     loadProductionActivationJournal,
     markProductionDatabasePromoted,
     markProductionRollbackRequired,
+    markProductionSnapshotPrepared,
 } from "./productionActivationJournal.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
@@ -47,36 +48,50 @@ async function fixture() {
     return { paths, state };
 }
 
-function absentTransition(transitionId: string): ProductionActivationTransition {
+function stopRequestedTransition(transitionId: string): ProductionActivationTransition {
     return {
         candidate: {
             releaseId: "a".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
         formatVersion: 1,
-        phase: "prepared",
+        phase: "service-stop-requested",
         previousActivation: null,
-        previousDatabase: { state: "absent" },
+        previousDatabase: { state: "unrecorded" },
         transitionId,
     };
 }
 
 describe("production activation journal", () => {
-    test("durably advances prepared to database-promoted and clears exactly", async () => {
+    test("durably advances service stop through rollback and clears exactly", async () => {
         const { paths } = await fixture();
         await withDeploymentLease(paths.stateDirectory, async (lease) => {
             expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
-            const prepared = await createProductionActivationJournal(
+            const requested = await createProductionActivationJournal(
                 lease,
                 paths,
-                absentTransition(Bun.randomUUIDv7())
+                stopRequestedTransition(Bun.randomUUIDv7())
+            );
+            const loadedRequested = await loadProductionActivationJournal(lease, paths);
+            expect(loadedRequested?.phase).toBe("service-stop-requested");
+            const prepared = await markProductionSnapshotPrepared(
+                lease,
+                paths,
+                requested,
+                { state: "absent" }
             );
             const loadedPrepared = await loadProductionActivationJournal(lease, paths);
             expect(loadedPrepared?.phase).toBe("prepared");
             const promoted = await markProductionDatabasePromoted(lease, paths, prepared);
             expect(promoted.phase).toBe("database-promoted");
+            const staleStage = path.join(
+                paths.stateDirectory,
+                `.activation-transition-${promoted.transitionId}.json`
+            );
+            await writeFile(staleStage, "partial", { mode: 0o600 });
             const rollback = await markProductionRollbackRequired(lease, paths, promoted);
             expect(rollback.phase).toBe("rollback-required");
+            expect(await stat(staleStage).catch(() => null)).toBeNull();
             await clearProductionActivationJournal(lease, paths, rollback);
             expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
         });
@@ -88,21 +103,24 @@ describe("production activation journal", () => {
             const first = await createProductionActivationJournal(
                 lease,
                 paths,
-                absentTransition(Bun.randomUUIDv7())
+                stopRequestedTransition(Bun.randomUUIDv7())
             );
             const competingFailure = await rejectionError(
                 createProductionActivationJournal(
                     lease,
                     paths,
-                    absentTransition(Bun.randomUUIDv7())
+                    stopRequestedTransition(Bun.randomUUIDv7())
                 )
             );
             expect(competingFailure.message).toBe(
                 "Production activation journal update failed"
             );
-            const promoted = await markProductionDatabasePromoted(lease, paths, first);
+            const prepared = await markProductionSnapshotPrepared(lease, paths, first, {
+                state: "absent",
+            });
+            const promoted = await markProductionDatabasePromoted(lease, paths, prepared);
             const staleFailure = await rejectionError(
-                markProductionDatabasePromoted(lease, paths, first)
+                markProductionDatabasePromoted(lease, paths, prepared)
             );
             expect(staleFailure.message).toBe(
                 "Production activation journal update failed"
@@ -118,13 +136,42 @@ describe("production activation journal", () => {
         });
     });
 
+    test("preserves an invalid stale stage and fails closed", async () => {
+        const { paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const requested = await createProductionActivationJournal(
+                lease,
+                paths,
+                stopRequestedTransition(Bun.randomUUIDv7())
+            );
+            const staleStage = path.join(
+                paths.stateDirectory,
+                `.activation-transition-${requested.transitionId}.json`
+            );
+            await writeFile(staleStage, "partial", { mode: 0o600 });
+            await chmod(staleStage, 0o640);
+
+            const failure = await rejectionError(
+                markProductionSnapshotPrepared(lease, paths, requested, {
+                    state: "absent",
+                })
+            );
+
+            expect(failure.message).toBe("Production activation journal update failed");
+            const staleStatus = await stat(staleStage);
+            const journal = await loadProductionActivationJournal(lease, paths);
+            expect(staleStatus.mode & 0o777).toBe(0o640);
+            expect(journal?.phase).toBe("service-stop-requested");
+        });
+    });
+
     test("fails closed when an opened journal entry disappears after reading", async () => {
         const { paths } = await fixture();
         await withDeploymentLease(paths.stateDirectory, async (lease) => {
             await createProductionActivationJournal(
                 lease,
                 paths,
-                absentTransition(Bun.randomUUIDv7())
+                stopRequestedTransition(Bun.randomUUIDv7())
             );
             const failure = await rejectionError(
                 loadProductionActivationJournal(lease, paths, {

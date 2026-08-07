@@ -8,6 +8,7 @@ import {
     type ProductionActivationRecord,
 } from "../../src/shared/productionActivationRecord.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
+import { removeStalePrivateStateStage } from "./privateStateStageFile.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 
 const activationStateFailureMessage = "Production activation state update failed";
@@ -277,10 +278,17 @@ async function writeAndCommitStagedRecord(
     record: ProductionActivationRecord,
     expectedDevice: bigint
 ): Promise<void> {
+    const stageName = path.basename(stageFile);
     let handle: FileHandle | undefined;
     let stageOwned = false;
     let failed = false;
     try {
+        await removeStalePrivateStateStage({
+            directoryHandle: stateHandle,
+            expectedDevice,
+            maximumBytes: maximumActivationBytes,
+            stageName,
+        });
         handle = await open(
             stageFile,
             constants.O_CREAT |

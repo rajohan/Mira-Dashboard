@@ -14,9 +14,11 @@ import {
     createVerifiedDatabaseSnapshot,
     type DatabaseSnapshotResult,
 } from "../../src/server/database/runtime/databaseSnapshot.ts";
+import { parseProductionActivationTransition } from "../../src/shared/productionActivationTransition.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import {
     discardDatabaseTransitionWorkspace,
+    inspectDatabaseTransitionRecovery,
     prepareDatabaseTransitionWorkspace,
     prepareDatabaseRollbackCandidate,
     promoteDatabaseTransitionCandidate,
@@ -165,6 +167,7 @@ describe("database transition filesystem", () => {
                 transitionId,
                 "present"
             );
+            if (previous.state !== "present") throw new Error("Expected snapshot");
             const workspace = await prepareDatabaseTransitionWorkspace(
                 lease,
                 paths,
@@ -198,6 +201,7 @@ describe("database transition filesystem", () => {
                 transitionId,
                 "present"
             );
+            if (previous.state !== "present") throw new Error("Expected snapshot");
             const workspace = await prepareDatabaseTransitionWorkspace(
                 lease,
                 paths,
@@ -213,10 +217,51 @@ describe("database transition filesystem", () => {
             );
 
             await prepareDatabaseRollbackCandidate(promoted, workspace);
-            await maintainCandidate(workspace.candidateDirectory, initialReleaseId);
-            const rollbackCandidate = await verifyDatabaseTransitionCandidate(workspace);
-            await restorePromotedDatabaseState(lease, paths, promoted, rollbackCandidate);
-            await discardDatabaseTransitionWorkspace(lease, paths, workspace);
+            const recovery = await inspectDatabaseTransitionRecovery(
+                lease,
+                paths,
+                parseProductionActivationTransition({
+                    candidate: {
+                        releaseId: candidateReleaseId,
+                        runtimeRevision: "c".repeat(40),
+                    },
+                    formatVersion: 1,
+                    phase: "rollback-required",
+                    previousActivation: {
+                        current: {
+                            releaseId: initialReleaseId,
+                            runtimeRevision: "c".repeat(40),
+                        },
+                        formatVersion: 1,
+                        previous: null,
+                        transitionId: Bun.randomUUIDv7(),
+                    },
+                    previousDatabase: {
+                        manifest: previous.manifest,
+                        sourceDatabase: previous.sourceDatabase,
+                        state: "present",
+                    },
+                    transitionId,
+                })
+            );
+            if (recovery.state !== "promoted") {
+                throw new Error("Expected promoted recovery state");
+            }
+            await prepareDatabaseRollbackCandidate(recovery.promoted, recovery.workspace);
+            await maintainCandidate(
+                recovery.workspace.candidateDirectory,
+                initialReleaseId
+            );
+            const rollbackCandidate = await verifyDatabaseTransitionCandidate(
+                recovery.workspace
+            );
+            await restorePromotedDatabaseState(
+                lease,
+                paths,
+                recovery.promoted,
+                rollbackCandidate
+            );
+            await discardDatabaseTransitionWorkspace(lease, paths, recovery.workspace);
         });
 
         const restored = new Database(

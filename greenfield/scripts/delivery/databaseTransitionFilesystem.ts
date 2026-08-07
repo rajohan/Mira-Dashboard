@@ -44,6 +44,12 @@ const destinationFlags =
 const workspaceBrand: unique symbol = Symbol("DatabaseTransitionWorkspace");
 const candidateBrand: unique symbol = Symbol("VerifiedDatabaseCandidate");
 const promotedBrand: unique symbol = Symbol("PromotedDatabaseState");
+const allowedCandidateFiles = new Set([
+    databaseFileName,
+    `${databaseFileName}-journal`,
+    `${databaseFileName}-shm`,
+    `${databaseFileName}-wal`,
+]);
 
 interface FileIdentity {
     readonly ctimeNs: bigint;
@@ -239,6 +245,37 @@ async function revalidateDirectory(directory: OpenedDirectory): Promise<void> {
     ) {
         throw transitionFailure();
     }
+}
+
+async function clearOwnedCandidateFiles(candidate: OpenedDirectory): Promise<void> {
+    if (typeof process.getuid !== "function") throw transitionFailure();
+    const descriptorRoot = `/proc/self/fd/${candidate.handle.fd}`;
+    const entries = await readdir(descriptorRoot);
+    if (
+        entries.length > allowedCandidateFiles.size ||
+        entries.some((entry) => !allowedCandidateFiles.has(entry))
+    ) {
+        throw transitionFailure();
+    }
+    for (const entry of entries) {
+        const anchoredEntry = path.join(descriptorRoot, entry);
+        const status = await lstat(anchoredEntry, { bigint: true });
+        if (
+            !status.isFile() ||
+            status.isSymbolicLink() ||
+            status.nlink !== 1n ||
+            status.uid !== BigInt(process.getuid()) ||
+            status.dev !== candidate.identity.dev ||
+            (status.mode & 0o7777n) !== 0o600n
+        ) {
+            throw transitionFailure();
+        }
+        await unlink(anchoredEntry);
+    }
+    await candidate.handle.sync();
+    const remainingEntries = await readdir(descriptorRoot);
+    if (remainingEntries.length > 0) throw transitionFailure();
+    await revalidateDirectory(candidate);
 }
 
 async function requireMissing(candidate: string): Promise<void> {
@@ -498,40 +535,7 @@ async function removeOwnedWorkspace(
                     state.identity.dev,
                     candidatePath
                 );
-                const allowedCandidateFiles = new Set([
-                    databaseFileName,
-                    `${databaseFileName}-journal`,
-                    `${databaseFileName}-shm`,
-                    `${databaseFileName}-wal`,
-                ]);
-                const candidateEntries = await readdir(
-                    `/proc/self/fd/${candidate.handle.fd}`
-                );
-                if (
-                    candidateEntries.length > allowedCandidateFiles.size ||
-                    candidateEntries.some((entry) => !allowedCandidateFiles.has(entry))
-                ) {
-                    throw transitionFailure();
-                }
-                for (const entry of candidateEntries) {
-                    const anchoredEntry = path.join(
-                        `/proc/self/fd/${candidate.handle.fd}`,
-                        entry
-                    );
-                    const status = await lstat(anchoredEntry, { bigint: true });
-                    if (
-                        !status.isFile() ||
-                        status.isSymbolicLink() ||
-                        status.nlink !== 1n ||
-                        status.uid !== BigInt(process.getuid()) ||
-                        status.dev !== state.identity.dev ||
-                        (status.mode & 0o7777n) !== 0o600n
-                    ) {
-                        throw transitionFailure();
-                    }
-                    await unlink(anchoredEntry);
-                }
-                await candidate.handle.sync();
+                await clearOwnedCandidateFiles(candidate);
                 if (!(await closeHandle(candidate.handle))) {
                     throw transitionFailure();
                 }
@@ -793,10 +797,7 @@ export async function prepareDatabaseRollbackCandidate(
     const candidate = await openPrivateDirectory(workspace.candidateDirectory);
     let failed = false;
     try {
-        const candidateEntries = await readdir(workspace.candidateDirectory);
-        if (candidateEntries.length > 0) {
-            throw transitionFailure();
-        }
+        await clearOwnedCandidateFiles(candidate);
         await copyVerifiedSnapshot(
             workspace.previous,
             workspace.candidateDatabase,
@@ -978,6 +979,9 @@ function previousFromJournal(
     paths: PreparedProductionDeliveryPaths,
     journal: ProductionActivationTransition
 ): PublishedDatabaseSnapshotResult {
+    if (journal.previousDatabase.state === "unrecorded") {
+        throw transitionFailure();
+    }
     if (journal.previousDatabase.state === "absent") {
         return Object.freeze({
             state: "absent" as const,
@@ -1012,7 +1016,7 @@ async function pathPresence(candidate: string): Promise<boolean> {
  * Inspects a crash-interrupted journal and reconstructs only filesystem-proven state.
  * @param lease Active wider deployment lease.
  * @param paths Exact project-local production paths.
- * @param journal Durable prepared or database-promoted activation journal.
+ * @param journal Durable snapshot-paired activation journal.
  * @returns Whether promotion occurred, with branded recovery tokens when it did.
  */
 export async function inspectDatabaseTransitionRecovery(
@@ -1034,9 +1038,8 @@ export async function inspectDatabaseTransitionRecovery(
     const candidateDirectory = path.join(root, "candidate");
     const candidateDatabase = path.join(candidateDirectory, databaseFileName);
     const liveDatabase = path.join(paths.stateDirectory, databaseFileName);
-    const [rootPresent, candidatePresent, livePresent] = await Promise.all([
+    const [rootPresent, livePresent] = await Promise.all([
         pathPresence(root),
-        pathPresence(candidateDatabase),
         pathPresence(liveDatabase),
     ]);
     const liveStatus = livePresent
@@ -1053,7 +1056,7 @@ export async function inspectDatabaseTransitionRecovery(
             transitionId: journal.transitionId,
         });
     }
-    if (!rootPresent || candidatePresent || !liveStatus) {
+    if (!rootPresent || !liveStatus) {
         throw transitionFailure();
     }
     const promotedIdentity = fileIdentity(liveStatus);
