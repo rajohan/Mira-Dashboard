@@ -7,6 +7,7 @@ import { createDashboardTrpcClient } from "./api/trpcClient.ts";
 import { DashboardBrowserApplication } from "./application.tsx";
 import { authStatusQueryKey } from "./auth/authQueries.ts";
 import { createDashboardBrowserCollections } from "./data/dashboardCollections.ts";
+import { notificationLatestQueryKey } from "./notifications/notificationQueries.ts";
 import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
 import { noOpDashboardRealtimeClient } from "./test/realtime.ts";
@@ -25,6 +26,7 @@ describe("Dashboard browser application", () => {
             createMemoryHistory({ initialEntries: ["/"] })
         );
         let touchCalls = 0;
+        let notificationCalls = 0;
         const trpcClient = createDashboardTrpcClient({
             mutation(path, input) {
                 expect(path).toBe("auth.touch");
@@ -32,9 +34,18 @@ describe("Dashboard browser application", () => {
                 touchCalls += 1;
                 return Promise.resolve({ lastSeenAtMs: timestampMs });
             },
-            query(path) {
+            query(path, input) {
+                if (path === "notifications.list") {
+                    expect(input).toEqual({ limit: 100 });
+                    notificationCalls += 1;
+                    return Promise.resolve({
+                        notifications: [],
+                        readCount: 0,
+                        unreadCount: 0,
+                    });
+                }
                 if (path !== "auth.status") {
-                    return Promise.reject(new TypeError("Unexpected query"));
+                    return Promise.reject(new TypeError(`Unexpected query: ${path}`));
                 }
                 return Promise.resolve({
                     session: {
@@ -44,7 +55,8 @@ describe("Dashboard browser application", () => {
                         expiresAtMs: timestampMs + 86_400_000,
                         id: "a".repeat(32),
                         isCurrent: true,
-                        lastSeenAtMs: timestampMs - 61_000,
+                        lastSeenAtMs:
+                            touchCalls === 0 ? timestampMs - 61_000 : timestampMs,
                         userAgent: "Dashboard browser test",
                     },
                     state: "authenticated",
@@ -80,13 +92,21 @@ describe("Dashboard browser application", () => {
             expect(
                 screen.getByRole("status", { name: "Application status" }).textContent
             ).toContain("Application shell ready");
-            expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
             await waitFor(() => expect(touchCalls).toBe(1));
+            await waitFor(() => expect(notificationCalls).toBe(1));
             expect(queryClient.getQueryData(authStatusQueryKey)).toMatchObject({
                 session: { lastSeenAtMs: timestampMs },
                 state: "authenticated",
                 user: { username: "operator" },
             });
+            expect(queryClient.getQueryData(notificationLatestQueryKey)).toEqual({
+                notifications: [],
+                readCount: 0,
+                unreadCount: 0,
+            });
+            expect(
+                screen.getByRole("button", { name: "Notifications, none unread" })
+            ).toBeTruthy();
         } finally {
             view.unmount();
             await collections.cleanup();

@@ -9,19 +9,23 @@ import { createDashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import { createDashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { DashboardCollectionsProvider } from "../data/dashboardCollectionsContext.tsx";
+import { AuthenticatedBrowserCacheBoundary } from "./AuthenticatedBrowserCacheBoundary.tsx";
 import { AuthenticatedSessionActivity } from "./AuthenticatedSessionActivity.tsx";
 import { authStatusQueryKey } from "./authQueries.ts";
 
 const { render, waitFor } = await import("@testing-library/react");
 
-function authenticatedStatus(lastSeenAtMs: number): AuthStatus {
+function authenticatedStatus(
+    lastSeenAtMs: number,
+    sessionId = "a".repeat(32)
+): AuthStatus {
     return {
         session: {
             authenticatedAtMs: lastSeenAtMs,
             authMethod: "password",
             createdAtMs: lastSeenAtMs,
             expiresAtMs: lastSeenAtMs + 86_400_000,
-            id: "a".repeat(32),
+            id: sessionId,
             isCurrent: true,
             lastSeenAtMs,
             userAgent: "Dashboard browser test",
@@ -35,14 +39,17 @@ function authenticatedStatus(lastSeenAtMs: number): AuthStatus {
 }
 
 describe("authenticated browser activity", () => {
-    test("touches stale activity once, refreshes the cache, and removes listeners", async () => {
+    test("uses a fresh post-touch status request and ignores the cancelled pre-touch result", async () => {
         const queryClient = createDashboardQueryClient();
         const staleLastSeenAtMs = Date.now() - 61_000;
         const touchedAtMs = staleLastSeenAtMs + 60_000;
         const staleStatus = authenticatedStatus(staleLastSeenAtMs);
-        const statusRefresh = Promise.withResolvers<unknown>();
+        const currentStatus = authenticatedStatus(Date.now(), "b".repeat(32));
+        const preTouchStatus = Promise.withResolvers<unknown>();
+        const postTouchStatus = Promise.withResolvers<unknown>();
         queryClient.setQueryData(authStatusQueryKey, staleStatus);
         let mutationCalls = 0;
+        let statusQueryCalls = 0;
         const client = createDashboardTrpcClient({
             mutation(path, input) {
                 expect(path).toBe("auth.touch");
@@ -52,7 +59,12 @@ describe("authenticated browser activity", () => {
             },
             query(path) {
                 expect(path).toBe("auth.status");
-                return statusRefresh.promise;
+                statusQueryCalls += 1;
+                if (statusQueryCalls === 1) return preTouchStatus.promise;
+                if (statusQueryCalls === 2) return postTouchStatus.promise;
+                return Promise.reject(
+                    new TypeError(`Unexpected auth.status request ${statusQueryCalls}`)
+                );
             },
         });
         const collections = createDashboardBrowserCollections(queryClient, client);
@@ -65,19 +77,11 @@ describe("authenticated browser activity", () => {
                 </DashboardCollectionsProvider>
             </QueryClientProvider>
         );
-        let unmounted = false;
 
         try {
-            act(() => {
-                document.dispatchEvent(new Event("pointerdown"));
-            });
             await waitFor(() => expect(mutationCalls).toBe(1));
-            expect(
-                queryClient.getQueryData<AuthStatus>(authStatusQueryKey)
-            ).toMatchObject({
-                session: { lastSeenAtMs: touchedAtMs },
-                state: "authenticated",
-            });
+            await waitFor(() => expect(statusQueryCalls).toBe(2));
+            expect(queryClient.getQueryData(authStatusQueryKey)).toEqual(staleStatus);
 
             act(() => {
                 document.dispatchEvent(new Event("keydown"));
@@ -86,22 +90,128 @@ describe("authenticated browser activity", () => {
             expect(mutationCalls).toBe(1);
 
             await act(async () => {
-                statusRefresh.resolve(authenticatedStatus(touchedAtMs));
-                await statusRefresh.promise;
+                postTouchStatus.resolve(currentStatus);
+                await postTouchStatus.promise;
             });
             await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+            expect(queryClient.getQueryData(authStatusQueryKey)).toEqual(currentStatus);
 
-            rendered.unmount();
-            unmounted = true;
-            queryClient.setQueryData(
-                authStatusQueryKey,
-                authenticatedStatus(staleLastSeenAtMs)
-            );
-            document.dispatchEvent(new Event("pointerdown"));
-            expect(mutationCalls).toBe(1);
+            await act(async () => {
+                preTouchStatus.resolve(staleStatus);
+                await preTouchStatus.promise;
+            });
+            expect(queryClient.getQueryData(authStatusQueryKey)).toEqual(currentStatus);
         } finally {
-            statusRefresh.resolve(authenticatedStatus(touchedAtMs));
-            if (!unmounted) rendered.unmount();
+            preTouchStatus.resolve(staleStatus);
+            postTouchStatus.resolve(currentStatus);
+            rendered.unmount();
+            await collections.cleanup();
+            queryClient.clear();
+        }
+    });
+
+    test("reconciles auth.status on window focus and visible document changes", async () => {
+        const queryClient = createDashboardQueryClient();
+        const currentStatus = authenticatedStatus(Date.now());
+        queryClient.setQueryData(authStatusQueryKey, currentStatus);
+        let mutationCalls = 0;
+        let statusQueryCalls = 0;
+        const client = createDashboardTrpcClient({
+            mutation(path) {
+                mutationCalls += 1;
+                return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+            },
+            query(path) {
+                expect(path).toBe("auth.status");
+                statusQueryCalls += 1;
+                return Promise.resolve(currentStatus);
+            },
+        });
+        const collections = createDashboardBrowserCollections(queryClient, client);
+        const rendered = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardCollectionsProvider collections={collections}>
+                    <DashboardTrpcProvider client={client}>
+                        <AuthenticatedSessionActivity />
+                    </DashboardTrpcProvider>
+                </DashboardCollectionsProvider>
+            </QueryClientProvider>
+        );
+
+        try {
+            await waitFor(() => expect(statusQueryCalls).toBe(1));
+            await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+            act(() => {
+                globalThis.dispatchEvent(new Event("focus"));
+            });
+            await waitFor(() => expect(statusQueryCalls).toBe(2));
+            await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+            expect(document.visibilityState).toBe("visible");
+            act(() => {
+                document.dispatchEvent(new Event("visibilitychange"));
+            });
+            await waitFor(() => expect(statusQueryCalls).toBe(3));
+            await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+            expect(mutationCalls).toBe(0);
+        } finally {
+            rendered.unmount();
+            await collections.cleanup();
+            queryClient.clear();
+        }
+    });
+
+    test("discovers a cross-tab login while the cached status is anonymous", async () => {
+        const queryClient = createDashboardQueryClient();
+        const anonymousStatus = { state: "anonymous" } satisfies AuthStatus;
+        const authenticated = authenticatedStatus(Date.now());
+        let currentStatus: AuthStatus = anonymousStatus;
+        let statusQueryCalls = 0;
+        queryClient.setQueryData(authStatusQueryKey, anonymousStatus);
+        const client = createDashboardTrpcClient({
+            mutation(path) {
+                return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+            },
+            query(path) {
+                expect(path).toBe("auth.status");
+                statusQueryCalls += 1;
+                return Promise.resolve(currentStatus);
+            },
+        });
+        const collections = createDashboardBrowserCollections(queryClient, client);
+        const rendered = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardCollectionsProvider collections={collections}>
+                    <DashboardTrpcProvider client={client}>
+                        <AuthenticatedBrowserCacheBoundary>
+                            <AuthenticatedSessionActivity />
+                        </AuthenticatedBrowserCacheBoundary>
+                    </DashboardTrpcProvider>
+                </DashboardCollectionsProvider>
+            </QueryClientProvider>
+        );
+
+        try {
+            await waitFor(() => expect(statusQueryCalls).toBeGreaterThanOrEqual(1));
+            await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+            const anonymousCollections = collections.agents;
+            currentStatus = authenticated;
+
+            act(() => {
+                globalThis.dispatchEvent(new Event("focus"));
+            });
+
+            await waitFor(() =>
+                expect(queryClient.getQueryData(authStatusQueryKey)).toEqual(
+                    authenticated
+                )
+            );
+            await waitFor(() =>
+                expect(collections.agents).not.toBe(anonymousCollections)
+            );
+        } finally {
+            rendered.unmount();
             await collections.cleanup();
             queryClient.clear();
         }
@@ -186,7 +296,9 @@ describe("authenticated browser activity", () => {
             <QueryClientProvider client={queryClient}>
                 <DashboardCollectionsProvider collections={collections}>
                     <DashboardTrpcProvider client={client}>
-                        <AuthenticatedSessionActivity />
+                        <AuthenticatedBrowserCacheBoundary>
+                            <AuthenticatedSessionActivity />
+                        </AuthenticatedBrowserCacheBoundary>
                     </DashboardTrpcProvider>
                 </DashboardCollectionsProvider>
             </QueryClientProvider>

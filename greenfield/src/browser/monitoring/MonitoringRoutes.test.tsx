@@ -19,6 +19,7 @@ import { createDashboardBrowserCollections } from "../data/dashboardCollections.
 import type { DashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
+import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -170,6 +171,9 @@ class MonitoringRouteTransport implements DashboardTrpcTransport {
         switch (path) {
             case "auth.status": {
                 return Promise.resolve(this.authStatus);
+            }
+            case "notifications.list": {
+                return Promise.resolve(emptyNotificationListResult);
             }
             case "reports.list": {
                 if (this.reportListFailuresRemaining > 0) {

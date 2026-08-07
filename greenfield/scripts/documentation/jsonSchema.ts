@@ -53,8 +53,10 @@ import {
     resolvedIncidentTimesAreConsistent,
 } from "../../src/contracts/monitoring.ts";
 import {
+    bulkNotificationContinuationIsConsistent,
     newestNotificationOrderIsStable,
     notificationInputIncidentReferenceIsConsistent,
+    notificationPageMaximum,
     notificationPageCursorIsConsistent,
 } from "../../src/contracts/notifications.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
@@ -514,6 +516,35 @@ export function convertContractSchema(
                         ...jsonSchema,
                         $comment:
                             "Live Valibot validation additionally limits the combined TOTP and WebAuthn possession-factor inventory to four.",
+                    };
+                }
+                if (
+                    valibotAction.type === "check" &&
+                    requirement === bulkNotificationContinuationIsConsistent
+                ) {
+                    const existingAllOfValue: unknown = Reflect.get(jsonSchema, "allOf");
+                    const existingAllOf: readonly unknown[] = Array.isArray(
+                        existingAllOfValue
+                    )
+                        ? (existingAllOfValue as unknown[])
+                        : [];
+                    const continuationSchema: Record<string, unknown> = {
+                        if: {
+                            properties: { remaining: { const: true } },
+                            required: ["remaining"],
+                        },
+                    };
+                    Reflect.set(continuationSchema, "then", {
+                        properties: {
+                            affectedCount: {
+                                const: notificationPageMaximum,
+                            },
+                        },
+                        required: ["affectedCount"],
+                    });
+                    return {
+                        ...jsonSchema,
+                        allOf: [...existingAllOf, continuationSchema],
                     };
                 }
                 if (valibotAction.type === "check") {

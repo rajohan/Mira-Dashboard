@@ -5,11 +5,10 @@ import { useEffect } from "react";
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { classifyDashboardBrowserFailure } from "../api/trpcError.ts";
-import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
 import {
     authStatusQueryKey,
     authStatusQueryOptions,
-    resetAuthenticatedBrowserCache,
+    publishAuthenticationStatus,
 } from "./authQueries.ts";
 
 const browserSessionTouchThrottleMs = minutesToMilliseconds(1);
@@ -38,22 +37,6 @@ function activityTouchIsDue(
     );
 }
 
-function updateCachedSessionActivity(
-    status: AuthStatus | undefined,
-    lastSeenAtMs: number
-): AuthStatus | undefined {
-    if (
-        status?.state !== "authenticated" ||
-        status.session.lastSeenAtMs >= lastSeenAtMs
-    ) {
-        return status;
-    }
-    return {
-        ...status,
-        session: { ...status.session, lastSeenAtMs },
-    };
-}
-
 /**
  * Records explicit activity for an authenticated browser without write-amplifying
  * high-frequency DOM events.
@@ -61,30 +44,28 @@ function updateCachedSessionActivity(
  */
 export function AuthenticatedSessionActivity() {
     const client = useDashboardTrpcClient();
-    const collections = useDashboardBrowserCollections();
     const queryClient = useQueryClient();
     const status = useQuery(authStatusQueryOptions(client));
     const authenticatedSessionId =
         status.data?.state === "authenticated" ? status.data.session.id : undefined;
 
     useEffect(() => {
-        if (authenticatedSessionId === undefined) return;
         let active = true;
         let inFlight = false;
+        let statusRefreshInFlight = false;
         let lastAttemptAtMs: number | undefined;
         let requestController: AbortController | undefined;
 
         async function touchSession(controller: AbortController): Promise<void> {
             try {
-                const result = await client.mutation(
-                    "auth.touch",
-                    {},
-                    { signal: controller.signal }
-                );
+                await client.mutation("auth.touch", {}, { signal: controller.signal });
                 if (!active) return;
-                queryClient.setQueryData<AuthStatus>(authStatusQueryKey, (status) =>
-                    updateCachedSessionActivity(status, result.lastSeenAtMs)
-                );
+                await queryClient.cancelQueries({
+                    exact: true,
+                    queryKey: authStatusQueryKey,
+                });
+                if (!active) return;
+                await queryClient.fetchQuery(authStatusQueryOptions(client));
             } catch (error: unknown) {
                 if (
                     active &&
@@ -93,7 +74,7 @@ export function AuthenticatedSessionActivity() {
                 ) {
                     await queryClient.cancelQueries();
                     if (active) {
-                        await resetAuthenticatedBrowserCache(queryClient, collections, {
+                        await publishAuthenticationStatus(queryClient, {
                             state: "anonymous",
                         });
                     }
@@ -105,7 +86,7 @@ export function AuthenticatedSessionActivity() {
         }
 
         function requestTouch(): void {
-            if (inFlight) return;
+            if (inFlight || statusRefreshInFlight) return;
             const nowMs = Date.now();
             const status = queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
             if (!activityTouchIsDue(status, nowMs, lastAttemptAtMs)) return;
@@ -117,25 +98,61 @@ export function AuthenticatedSessionActivity() {
             void touchSession(controller);
         }
 
-        function requestTouchWhenVisible(): void {
-            if (document.visibilityState === "visible") requestTouch();
+        async function reconcileAuthenticationStatus(): Promise<void> {
+            if (statusRefreshInFlight || inFlight) return;
+            statusRefreshInFlight = true;
+            let touchAfterReconciliation = false;
+            try {
+                await queryClient.refetchQueries({
+                    exact: true,
+                    queryKey: authStatusQueryKey,
+                    type: "active",
+                });
+                if (!active) return;
+                const queryState =
+                    queryClient.getQueryState<AuthStatus>(authStatusQueryKey);
+                if (queryState?.status !== "success") return;
+                const currentStatus =
+                    queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+                if (
+                    currentStatus?.state !== "authenticated" ||
+                    currentStatus.session.id !== authenticatedSessionId
+                )
+                    return;
+                touchAfterReconciliation = true;
+            } finally {
+                statusRefreshInFlight = false;
+            }
+            if (touchAfterReconciliation) requestTouch();
         }
 
-        requestTouchWhenVisible();
-        for (const eventName of authenticatedActivityEvents) {
+        function reconcileAuthenticationWhenVisible(): void {
+            if (document.visibilityState === "visible") {
+                void reconcileAuthenticationStatus();
+            }
+        }
+
+        function reconcileAuthenticationOnFocus(): void {
+            void reconcileAuthenticationStatus();
+        }
+
+        if (authenticatedSessionId !== undefined) {
+            requestTouch();
+            for (const eventName of authenticatedActivityEvents) {
+                document.addEventListener(
+                    eventName,
+                    requestTouch,
+                    passiveActivityListenerOptions
+                );
+            }
             document.addEventListener(
-                eventName,
+                "scroll",
                 requestTouch,
-                passiveActivityListenerOptions
+                capturedPassiveActivityListenerOptions
             );
         }
-        document.addEventListener(
-            "scroll",
-            requestTouch,
-            capturedPassiveActivityListenerOptions
-        );
-        document.addEventListener("visibilitychange", requestTouchWhenVisible);
-        window.addEventListener("focus", requestTouch);
+        document.addEventListener("visibilitychange", reconcileAuthenticationWhenVisible);
+        window.addEventListener("focus", reconcileAuthenticationOnFocus);
 
         return () => {
             active = false;
@@ -144,10 +161,13 @@ export function AuthenticatedSessionActivity() {
                 document.removeEventListener(eventName, requestTouch);
             }
             document.removeEventListener("scroll", requestTouch, true);
-            document.removeEventListener("visibilitychange", requestTouchWhenVisible);
-            window.removeEventListener("focus", requestTouch);
+            document.removeEventListener(
+                "visibilitychange",
+                reconcileAuthenticationWhenVisible
+            );
+            window.removeEventListener("focus", reconcileAuthenticationOnFocus);
         };
-    }, [authenticatedSessionId, client, collections, queryClient]);
+    }, [authenticatedSessionId, client, queryClient]);
 
     return null;
 }

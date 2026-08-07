@@ -198,12 +198,37 @@ export const bulkNotificationInputSchema = v.strictObject({
     filters: v.optional(v.omit(notificationFiltersSchema, ["readState"]), {}),
 });
 
+/** @returns Whether a continuing server batch contains the full bounded page. */
+export function bulkNotificationContinuationIsConsistent(
+    result: Readonly<{
+        affectedCount: number;
+        completedAtMs: number;
+        remaining: boolean;
+    }>
+): boolean {
+    return !result.remaining || result.affectedCount === notificationPageMaximum;
+}
+
 /** Stable bounded bulk-action acknowledgement. */
-export const bulkNotificationResultSchema = v.strictObject({
-    affectedCount: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
-    completedAtMs: notificationTimestampSchema,
-    remaining: v.boolean(),
-});
+export const bulkNotificationResultSchema = v.pipe(
+    v.strictObject({
+        affectedCount: v.pipe(
+            v.number(),
+            v.safeInteger(),
+            v.minValue(0),
+            v.maxValue(
+                notificationPageMaximum,
+                "Notification bulk result exceeds one bounded page"
+            )
+        ),
+        completedAtMs: notificationTimestampSchema,
+        remaining: v.boolean(),
+    }),
+    v.check(
+        bulkNotificationContinuationIsConsistent,
+        "A continuing notification bulk result must contain one full page"
+    )
+);
 
 /** Stable single-notification deletion acknowledgement. */
 export const deleteNotificationResultSchema = v.strictObject({

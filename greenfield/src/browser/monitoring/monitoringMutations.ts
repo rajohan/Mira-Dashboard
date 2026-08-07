@@ -1,9 +1,4 @@
-import {
-    type InfiniteData,
-    type QueryClient,
-    useMutation,
-    useQueryClient,
-} from "@tanstack/react-query";
+import { type InfiniteData, type QueryClient, useMutation } from "@tanstack/react-query";
 
 import type { ListReportsResult } from "../../contracts/reports.ts";
 import type {
@@ -11,6 +6,7 @@ import type {
     DashboardProcedureOutput,
 } from "../api/trpcClient.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import {
     refreshReportQueries,
     reportDetailQueryKey,
@@ -45,21 +41,25 @@ export function removeReportFromCachedLists(queryClient: QueryClient, id: string
  */
 export function useDeleteReportMutation(onDeleted: () => void) {
     const client = useDashboardTrpcClient();
-    const queryClient = useQueryClient();
+    const boundary = useAuthenticatedMutationBoundary();
     return useMutation<
         DashboardProcedureOutput<"reports.delete">,
         Error,
         DashboardProcedureInput<"reports.delete">
     >({
-        mutationFn: (input) => client.mutation("reports.delete", input),
+        mutationFn: (input) =>
+            boundary.run((signal) =>
+                client.mutation("reports.delete", input, { signal })
+            ),
         onSuccess: async (result) => {
+            if (!boundary.completionIsCurrent()) return;
             onDeleted();
-            removeReportFromCachedLists(queryClient, result.id);
-            queryClient.removeQueries({
+            removeReportFromCachedLists(boundary.queryClient, result.id);
+            boundary.queryClient.removeQueries({
                 exact: true,
                 queryKey: reportDetailQueryKey(result.id),
             });
-            await refreshReportQueries(queryClient);
+            await refreshReportQueries(boundary.queryClient);
         },
     });
 }

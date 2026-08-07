@@ -1,8 +1,11 @@
 import { useForm } from "@tanstack/react-form";
+import { useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
 import { passwordChangeInputSchema } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { authStatusQueryKey, publishAuthenticationStatus } from "../auth/authQueries.ts";
 import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
@@ -26,13 +29,25 @@ interface PasswordChangeFormProps {
  */
 export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps) {
     const client = useDashboardTrpcClient();
+    const queryClient = useQueryClient();
     const form = useForm({
         defaultValues: { currentPassword: "", newPassword: "" },
         onSubmit: async ({ formApi, value }) => {
             await complete(async () => {
-                await client.mutation("auth.changePassword", value);
+                const cachedStatus =
+                    queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+                if (cachedStatus?.state !== "authenticated") {
+                    throw new TypeError(
+                        "Password change requires an authenticated cache owner"
+                    );
+                }
+                const result = await client.mutation("auth.changePassword", value);
                 formApi.setFieldValue("currentPassword", "");
                 formApi.setFieldValue("newPassword", "");
+                await publishAuthenticationStatus(queryClient, {
+                    ...cachedStatus,
+                    session: result.session,
+                });
             }, "Password changed and other sessions revoked.");
         },
         validators: { onSubmit: passwordChangeInputSchema },

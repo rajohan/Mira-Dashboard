@@ -2,9 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
-import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
-import { resetAuthenticatedBrowserCache } from "./authQueries.ts";
+import { publishAuthenticationStatus } from "./authQueries.ts";
 
 /**
  * Runs one login mutation at a time and promotes successful authentication state.
@@ -12,14 +11,13 @@ import { resetAuthenticatedBrowserCache } from "./authQueries.ts";
  */
 export function useAuthenticationAction() {
     const client = useDashboardTrpcClient();
-    const collections = useDashboardBrowserCollections();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const action = useExclusiveDashboardAction();
 
     async function refreshAuthenticationStatus() {
         const status = await client.query("auth.status", {});
-        await resetAuthenticatedBrowserCache(queryClient, collections, status);
+        await publishAuthenticationStatus(queryClient, status);
         return status;
     }
 
@@ -32,7 +30,9 @@ export function useAuthenticationAction() {
                     await refreshAuthenticationStatus();
                 } catch {
                     try {
-                        await resetAuthenticatedBrowserCache(queryClient, collections);
+                        await publishAuthenticationStatus(queryClient, {
+                            state: "anonymous",
+                        });
                     } catch {
                         // Preserve the original authentication operation failure.
                     }
