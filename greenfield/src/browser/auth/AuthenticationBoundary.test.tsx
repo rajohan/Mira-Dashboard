@@ -12,6 +12,7 @@ import {
 import { DashboardBrowserApplication } from "../application.tsx";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
+import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import { authStatusQueryKey } from "./authQueries.ts";
 
 const { render, screen } = await import("@testing-library/react");
@@ -84,6 +85,7 @@ describe("authenticated route boundary", () => {
             render(
                 <DashboardBrowserApplication
                     queryClient={queryClient}
+                    realtimeClient={noOpDashboardRealtimeClient}
                     router={createDashboardRouter(
                         createMemoryHistory({ initialEntries: ["/"] })
                     )}

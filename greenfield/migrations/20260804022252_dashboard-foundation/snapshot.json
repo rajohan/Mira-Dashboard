@@ -1,10 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "7c296db8-4e4b-4ecd-a214-72e9e88165c3",
-  "prevIds": [
-    "00000000-0000-0000-0000-000000000000"
-  ],
+  "id": "7f6021f7-3f3d-4d7f-ab30-5ccdf723711c",
+  "prevIds": [],
   "ddl": [
     {
       "name": "audit_events",
@@ -64,6 +62,30 @@
     },
     {
       "name": "schema_migrations",
+      "entityType": "tables"
+    },
+    {
+      "name": "task_automation_profiles",
+      "entityType": "tables"
+    },
+    {
+      "name": "task_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "task_labels",
+      "entityType": "tables"
+    },
+    {
+      "name": "task_notification_outbox",
+      "entityType": "tables"
+    },
+    {
+      "name": "task_updates",
+      "entityType": "tables"
+    },
+    {
+      "name": "tasks",
       "entityType": "tables"
     },
     {
@@ -1413,6 +1435,426 @@
       "table": "schema_migrations"
     },
     {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cron_job_id",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "kind",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "recurring",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "schedule_summary",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_target",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "thinking",
+      "entityType": "columns",
+      "table": "task_automation_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "actor_id",
+      "entityType": "columns",
+      "table": "task_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "actor_kind",
+      "entityType": "columns",
+      "table": "task_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "task_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_type",
+      "entityType": "columns",
+      "table": "task_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "task_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'{}'",
+      "generated": null,
+      "name": "payload_json",
+      "entityType": "columns",
+      "table": "task_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "task_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "label",
+      "entityType": "columns",
+      "table": "task_labels"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "task_labels"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "attempt_count",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "available_at",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "delivered_at",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_expires_at",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_owner",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "message",
+      "entityType": "columns",
+      "table": "task_notification_outbox"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "author_id",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "author_kind",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "message_markdown",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task_id",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "task_updates"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "assignee",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "body_markdown",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "priority",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "title",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "tasks"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -1954,6 +2396,66 @@
     },
     {
       "columns": [
+        "task_id"
+      ],
+      "tableTo": "tasks",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_task_automation_profiles_task_id_tasks_id_fk",
+      "entityType": "fks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "columns": [
+        "task_id"
+      ],
+      "tableTo": "tasks",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_task_labels_task_id_tasks_id_fk",
+      "entityType": "fks",
+      "table": "task_labels"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "tableTo": "task_events",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_task_notification_outbox_event_id_task_events_id_fk",
+      "entityType": "fks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "columns": [
+        "task_id"
+      ],
+      "tableTo": "tasks",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_task_updates_task_id_tasks_id_fk",
+      "entityType": "fks",
+      "table": "task_updates"
+    },
+    {
+      "columns": [
         "user_id"
       ],
       "tableTo": "users",
@@ -2006,6 +2508,16 @@
       "name": "automation_principal_capabilities_pk",
       "entityType": "pks",
       "table": "automation_principal_capabilities"
+    },
+    {
+      "columns": [
+        "task_id",
+        "label"
+      ],
+      "nameExplicit": true,
+      "name": "task_labels_pk",
+      "entityType": "pks",
+      "table": "task_labels"
     },
     {
       "columns": [
@@ -2131,6 +2643,51 @@
       "nameExplicit": false,
       "name": "schema_migrations_pk",
       "table": "schema_migrations",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "task_id"
+      ],
+      "nameExplicit": false,
+      "name": "task_automation_profiles_pk",
+      "table": "task_automation_profiles",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "task_events_pk",
+      "table": "task_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "nameExplicit": false,
+      "name": "task_notification_outbox_pk",
+      "table": "task_notification_outbox",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "task_updates_pk",
+      "table": "task_updates",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "tasks_pk",
+      "table": "tasks",
       "entityType": "pks"
     },
     {
@@ -2812,6 +3369,182 @@
     {
       "columns": [
         {
+          "value": "cron_job_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "task_automation_profiles_cron_job_id_unique",
+      "entityType": "indexes",
+      "table": "task_automation_profiles"
+    },
+    {
+      "columns": [
+        {
+          "value": "task_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "task_events_task_created_id_idx",
+      "entityType": "indexes",
+      "table": "task_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "label",
+          "isExpression": false
+        },
+        {
+          "value": "task_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "task_labels_label_task_idx",
+      "entityType": "indexes",
+      "table": "task_labels"
+    },
+    {
+      "columns": [
+        {
+          "value": "delivered_at",
+          "isExpression": false
+        },
+        {
+          "value": "available_at",
+          "isExpression": false
+        },
+        {
+          "value": "lease_expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "event_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "task_notification_outbox_eligible_idx",
+      "entityType": "indexes",
+      "table": "task_notification_outbox"
+    },
+    {
+      "columns": [
+        {
+          "value": "task_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "task_updates_task_created_id_idx",
+      "entityType": "indexes",
+      "table": "task_updates"
+    },
+    {
+      "columns": [
+        {
+          "value": "updated_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "tasks_updated_id_idx",
+      "entityType": "indexes",
+      "table": "tasks"
+    },
+    {
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "priority",
+          "isExpression": false
+        },
+        {
+          "value": "updated_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "tasks_status_priority_updated_id_idx",
+      "entityType": "indexes",
+      "table": "tasks"
+    },
+    {
+      "columns": [
+        {
+          "value": "assignee",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "updated_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "tasks_assignee_status_updated_id_idx",
+      "entityType": "indexes",
+      "table": "tasks"
+    },
+    {
+      "columns": [
+        {
           "value": "user_id",
           "isExpression": false
         },
@@ -3248,7 +3981,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('notifications:read', 'reports:read')",
+      "value": "\"capability\" IN ('notifications:read', 'reports:read', 'tasks:read', 'tasks:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"
@@ -3462,6 +4195,228 @@
       "name": "schema_migrations_release_id_check",
       "entityType": "checks",
       "table": "schema_migrations"
+    },
+    {
+      "value": "length(\"cron_job_id\") BETWEEN 1 AND 200 AND instr(\"cron_job_id\", char(0)) = 0 AND length(trim(\"cron_job_id\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"cron_job_id\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
+      "name": "task_automation_profiles_cron_job_id_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "\"kind\" = 'openclaw-cron'",
+      "name": "task_automation_profiles_kind_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "\"model\" IS NULL OR (length(\"model\") BETWEEN 1 AND 200 AND instr(\"model\", char(0)) = 0 AND length(trim(\"model\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"model\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*'))",
+      "name": "task_automation_profiles_model_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "\"recurring\" IN (0, 1)",
+      "name": "task_automation_profiles_recurring_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "\"schedule_summary\" IS NULL OR (length(\"schedule_summary\") BETWEEN 1 AND 500 AND instr(\"schedule_summary\", char(0)) = 0 AND length(trim(\"schedule_summary\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"schedule_summary\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*'))",
+      "name": "task_automation_profiles_schedule_summary_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "\"session_target\" IS NULL OR (length(\"session_target\") BETWEEN 1 AND 200 AND instr(\"session_target\", char(0)) = 0 AND length(trim(\"session_target\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"session_target\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*'))",
+      "name": "task_automation_profiles_session_target_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "length(\"task_id\") = 36 AND instr(\"task_id\", char(0)) = 0 AND length(replace(\"task_id\", '-', '')) = 32 AND replace(\"task_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"task_id\", 9, 1) = '-' AND substr(\"task_id\", 14, 1) = '-' AND substr(\"task_id\", 15, 1) = '7' AND substr(\"task_id\", 19, 1) = '-' AND substr(\"task_id\", 20, 1) GLOB '[89ab]' AND substr(\"task_id\", 24, 1) = '-'",
+      "name": "task_automation_profiles_task_id_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "\"thinking\" IS NULL OR (length(\"thinking\") BETWEEN 1 AND 200 AND instr(\"thinking\", char(0)) = 0 AND length(trim(\"thinking\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"thinking\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*'))",
+      "name": "task_automation_profiles_thinking_check",
+      "entityType": "checks",
+      "table": "task_automation_profiles"
+    },
+    {
+      "value": "(\"actor_kind\" = 'user' AND length(\"actor_id\") = 36 AND instr(\"actor_id\", char(0)) = 0 AND length(replace(\"actor_id\", '-', '')) = 32 AND replace(\"actor_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"actor_id\", 9, 1) = '-' AND substr(\"actor_id\", 14, 1) = '-' AND substr(\"actor_id\", 15, 1) = '7' AND substr(\"actor_id\", 19, 1) = '-' AND substr(\"actor_id\", 20, 1) GLOB '[89ab]' AND substr(\"actor_id\", 24, 1) = '-') OR (\"actor_kind\" = 'automation' AND length(\"actor_id\") BETWEEN 1 AND 64 AND instr(\"actor_id\", char(0)) = 0 AND \"actor_id\" = lower(\"actor_id\") AND substr(\"actor_id\", 1, 1) GLOB '[a-z0-9]' AND \"actor_id\" NOT GLOB '*[^a-z0-9._-]*')",
+      "name": "task_events_actor_check",
+      "entityType": "checks",
+      "table": "task_events"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "task_events_created_at_check",
+      "entityType": "checks",
+      "table": "task_events"
+    },
+    {
+      "value": "\"event_type\" IN ('assigned', 'created', 'deleted', 'moved', 'progress-added', 'progress-deleted', 'progress-updated', 'updated')",
+      "name": "task_events_event_type_check",
+      "entityType": "checks",
+      "table": "task_events"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "task_events_id_check",
+      "entityType": "checks",
+      "table": "task_events"
+    },
+    {
+      "value": "length(CAST(\"payload_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"payload_json\") THEN json_type(\"payload_json\") = 'object' ELSE 0 END",
+      "name": "task_events_payload_json_check",
+      "entityType": "checks",
+      "table": "task_events"
+    },
+    {
+      "value": "length(\"task_id\") = 36 AND instr(\"task_id\", char(0)) = 0 AND length(replace(\"task_id\", '-', '')) = 32 AND replace(\"task_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"task_id\", 9, 1) = '-' AND substr(\"task_id\", 14, 1) = '-' AND substr(\"task_id\", 15, 1) = '7' AND substr(\"task_id\", 19, 1) = '-' AND substr(\"task_id\", 20, 1) GLOB '[89ab]' AND substr(\"task_id\", 24, 1) = '-'",
+      "name": "task_events_task_id_check",
+      "entityType": "checks",
+      "table": "task_events"
+    },
+    {
+      "value": "length(\"label\") BETWEEN 1 AND 64 AND instr(\"label\", char(0)) = 0 AND length(trim(\"label\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"label\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
+      "name": "task_labels_label_check",
+      "entityType": "checks",
+      "table": "task_labels"
+    },
+    {
+      "value": "length(\"task_id\") = 36 AND instr(\"task_id\", char(0)) = 0 AND length(replace(\"task_id\", '-', '')) = 32 AND replace(\"task_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"task_id\", 9, 1) = '-' AND substr(\"task_id\", 14, 1) = '-' AND substr(\"task_id\", 15, 1) = '7' AND substr(\"task_id\", 19, 1) = '-' AND substr(\"task_id\", 20, 1) GLOB '[89ab]' AND substr(\"task_id\", 24, 1) = '-'",
+      "name": "task_labels_task_id_check",
+      "entityType": "checks",
+      "table": "task_labels"
+    },
+    {
+      "value": "\"attempt_count\" BETWEEN 0 AND 9007199254740991",
+      "name": "task_notification_outbox_attempt_count_check",
+      "entityType": "checks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "value": "\"available_at\" BETWEEN 0 AND 8640000000000000 AND \"available_at\" >= \"created_at\"",
+      "name": "task_notification_outbox_available_at_check",
+      "entityType": "checks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "task_notification_outbox_created_at_check",
+      "entityType": "checks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "value": "\"delivered_at\" IS NULL OR (\"delivered_at\" BETWEEN 0 AND 8640000000000000 AND \"delivered_at\" >= \"created_at\")",
+      "name": "task_notification_outbox_delivered_at_check",
+      "entityType": "checks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "value": "length(\"event_id\") = 36 AND instr(\"event_id\", char(0)) = 0 AND length(replace(\"event_id\", '-', '')) = 32 AND replace(\"event_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"event_id\", 9, 1) = '-' AND substr(\"event_id\", 14, 1) = '-' AND substr(\"event_id\", 15, 1) = '7' AND substr(\"event_id\", 19, 1) = '-' AND substr(\"event_id\", 20, 1) GLOB '[89ab]' AND substr(\"event_id\", 24, 1) = '-'",
+      "name": "task_notification_outbox_event_id_check",
+      "entityType": "checks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "value": "(\"lease_owner\" IS NULL AND \"lease_expires_at\" IS NULL) OR (\"delivered_at\" IS NULL AND \"lease_owner\" IS NOT NULL AND length(\"lease_owner\") = 36 AND instr(\"lease_owner\", char(0)) = 0 AND length(replace(\"lease_owner\", '-', '')) = 32 AND replace(\"lease_owner\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"lease_owner\", 9, 1) = '-' AND substr(\"lease_owner\", 14, 1) = '-' AND substr(\"lease_owner\", 15, 1) = '7' AND substr(\"lease_owner\", 19, 1) = '-' AND substr(\"lease_owner\", 20, 1) GLOB '[89ab]' AND substr(\"lease_owner\", 24, 1) = '-' AND \"lease_expires_at\" IS NOT NULL AND \"lease_expires_at\" BETWEEN 0 AND 8640000000000000)",
+      "name": "task_notification_outbox_lease_check",
+      "entityType": "checks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "value": "length(\"message\") BETWEEN 1 AND 2048 AND instr(\"message\", char(0)) = 0 AND length(trim(\"message\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"message\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"message\" AS BLOB)) <= 2048",
+      "name": "task_notification_outbox_message_check",
+      "entityType": "checks",
+      "table": "task_notification_outbox"
+    },
+    {
+      "value": "(\"author_kind\" = 'user' AND length(\"author_id\") = 36 AND instr(\"author_id\", char(0)) = 0 AND length(replace(\"author_id\", '-', '')) = 32 AND replace(\"author_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"author_id\", 9, 1) = '-' AND substr(\"author_id\", 14, 1) = '-' AND substr(\"author_id\", 15, 1) = '7' AND substr(\"author_id\", 19, 1) = '-' AND substr(\"author_id\", 20, 1) GLOB '[89ab]' AND substr(\"author_id\", 24, 1) = '-') OR (\"author_kind\" = 'automation' AND length(\"author_id\") BETWEEN 1 AND 64 AND instr(\"author_id\", char(0)) = 0 AND \"author_id\" = lower(\"author_id\") AND substr(\"author_id\", 1, 1) GLOB '[a-z0-9]' AND \"author_id\" NOT GLOB '*[^a-z0-9._-]*')",
+      "name": "task_updates_author_check",
+      "entityType": "checks",
+      "table": "task_updates"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "task_updates_id_check",
+      "entityType": "checks",
+      "table": "task_updates"
+    },
+    {
+      "value": "length(\"message_markdown\") BETWEEN 1 AND 20000 AND instr(\"message_markdown\", char(0)) = 0 AND length(trim(\"message_markdown\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0",
+      "name": "task_updates_message_markdown_check",
+      "entityType": "checks",
+      "table": "task_updates"
+    },
+    {
+      "value": "length(\"task_id\") = 36 AND instr(\"task_id\", char(0)) = 0 AND length(replace(\"task_id\", '-', '')) = 32 AND replace(\"task_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"task_id\", 9, 1) = '-' AND substr(\"task_id\", 14, 1) = '-' AND substr(\"task_id\", 15, 1) = '7' AND substr(\"task_id\", 19, 1) = '-' AND substr(\"task_id\", 20, 1) GLOB '[89ab]' AND substr(\"task_id\", 24, 1) = '-'",
+      "name": "task_updates_task_id_check",
+      "entityType": "checks",
+      "table": "task_updates"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"created_at\"",
+      "name": "task_updates_time_check",
+      "entityType": "checks",
+      "table": "task_updates"
+    },
+    {
+      "value": "\"version\" BETWEEN 1 AND 9007199254740991",
+      "name": "task_updates_version_check",
+      "entityType": "checks",
+      "table": "task_updates"
+    },
+    {
+      "value": "\"assignee\" IS NULL OR \"assignee\" IN ('mira-2026', 'rajohan')",
+      "name": "tasks_assignee_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "\"body_markdown\" IS NULL OR (length(\"body_markdown\") BETWEEN 1 AND 100000 AND instr(\"body_markdown\", char(0)) = 0 AND length(trim(\"body_markdown\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)",
+      "name": "tasks_body_markdown_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "tasks_id_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "\"priority\" IN ('low', 'medium', 'high')",
+      "name": "tasks_priority_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "\"status\" IN ('todo', 'in-progress', 'blocked', 'done')",
+      "name": "tasks_status_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "length(\"title\") BETWEEN 1 AND 240 AND instr(\"title\", char(0)) = 0 AND length(trim(\"title\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"title\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')",
+      "name": "tasks_title_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"created_at\"",
+      "name": "tasks_time_check",
+      "entityType": "checks",
+      "table": "tasks"
+    },
+    {
+      "value": "\"version\" BETWEEN 1 AND 9007199254740991",
+      "name": "tasks_version_check",
+      "entityType": "checks",
+      "table": "tasks"
     },
     {
       "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",

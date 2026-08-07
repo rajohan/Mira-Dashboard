@@ -12,7 +12,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 0 — Evidence and qualification      | Complete                             | All eight mandatory spikes pass on exact Bun revision `17d6843606d76620cb55d31424d7fb0aed51c367`: build, transport, cross-process SQLite/outbox, Drizzle/Bun SQLite, browser data, chat batching, shutdown, and capped resources. Source-derived parity and the OpenClaw source audit pass as additional evidence.                                                           |
 | 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle. |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                          |
-| 3 — Core operator domains           | Started                              | Monitoring transaction/schema foundations exist; task, agent, report, incident, notification, schedule/job, cache/metrics procedures and browser parity are not complete.                                                                                                                                                                                                    |
+| 3 — Core operator domains           | Started                              | The task domain and `/tasks` parity slice are implemented with durable history, realtime invalidation, and browser workflows. Agent, report, incident, notification, schedule/job, cache/metrics, overview, and worker-domain parity remain open.                                                                                                                            |
 | 4 — Gateway and chat                | Not started                          | The Phase 2 verifier is one-shot only. Persistent native Gateway lifecycle, current-protocol re-audit, sessions, chat journal/recovery, attachments, and frontend remain open.                                                                                                                                                                                               |
 | 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                             |
@@ -236,10 +236,11 @@ closes a phase; dated entries below provide the evidence, not a second status so
   hashes canonical JSON for immutable run idempotency. Bounded JSON objects reject cycles,
   non-JSON values, sparse arrays, excessive depth, and payloads over 64 KiB; report
   bodies and problem counts have separate explicit limits.
-- The current `Bun.serve` boundary rejects every request body above 64 KiB before the tRPC Fetch
-  adapter parses it. The monitoring submission API is not exposed yet; before it is, its serialized
-  worst case must fit that ceiling or use a separately qualified bounded raw/streaming route. The
-  process-wide allowance is not silently raised to accommodate a hypothetical future payload.
+- The `Bun.serve` boundary now has a reviewed 640 KiB outer ceiling for maximum task-content
+  requests, while the default tRPC profile remains 64 KiB. The monitoring submission API is not
+  exposed yet; before it is, its serialized worst case must fit a specifically reviewed
+  per-procedure ceiling or use a separately qualified bounded raw/streaming route. The default
+  allowance is not silently raised to accommodate a hypothetical future payload.
 - The synchronous transaction core and narrow Drizzle repository execute every accepted snapshot
   inside one SQLite `IMMEDIATE` transaction. The transaction inserts the immutable report and monitor run,
   creates or updates incidents, records one immutable observation per run and incident, resolves
@@ -426,9 +427,10 @@ closes a phase; dated entries below provide the evidence, not a second status so
   future state-changing auth procedures from inheriting a shared stale request context or public
   status reads from becoming one-request database amplification. Exact Origin and Fetch Metadata checks still run before
   authentication or lifecycle work. Any simultaneous bearer and Dashboard-cookie credentials are
-  rejected before context creation. Auth request bodies have a 16 KiB pre-parse ceiling, every
-  current request has a Bun-level 64 KiB ceiling, and every application-handled tRPC success,
-  error, and raw auth rejection uses `Cache-Control: no-store`. A trusted reverse proxy owns the
+  rejected before context creation. Auth request bodies have a 16 KiB pre-parse ceiling, WebAuthn
+  receives 32 KiB, and ordinary procedures retain 64 KiB beneath the 640 KiB Bun listener ceiling
+  required by reviewed task-content profiles. Every application-handled tRPC success, error, and
+  raw auth rejection uses `Cache-Control: no-store`. A trusted reverse proxy owns the
   total body-read deadline because Bun buffers request bodies before invoking the Fetch handler;
   the production composition is hard-bound to `127.0.0.1` so remote access cannot bypass that
   ingress. The listener uses a 10-second general idle timeout; after its body is fully bounded, an
@@ -782,3 +784,38 @@ closes a phase; dated entries below provide the evidence, not a second status so
 
 This completes Phase 1 only. Phase 3–6 domains, persistent Gateway/chat, privileged adapters,
 full-browser parity, production rehearsal, cutover, and legacy deletion remain open.
+
+### 2026-08-07 — Phase 3 task domain and browser slice
+
+- A normalized task aggregate now owns tasks, canonical labels, optional automation profiles,
+  progress updates, and an append-only task-event history. Immediate admitted transactions keep
+  every aggregate mutation, audit record, and realtime outbox event atomic; version checks reject
+  stale edits and status movement without replaying a started callback.
+- Eleven typed task procedures cover list/detail, create/update/delete, assign/move, and progress
+  add/update/delete/list. Effect services preserve typed domain failures, Valibot validates every
+  boundary and persisted record, capability policy separates task reads from writes, and task
+  mutations publish bounded realtime invalidations.
+- Exact procedure metadata assigns 640 KiB only to task create/content update and 128 KiB only to
+  progress add/update; all other task procedures retain the 64 KiB default. Canonical first-party
+  serialization of every maximum contract value fits its profile, while unknown and malformed task
+  procedure names cannot inherit either larger allowance.
+- Mira-relevant task events also create one redacted `task_notification_outbox` intent in the same
+  transaction. The queue preserves legacy create/update/assignment/movement/progress/deletion
+  semantics, suppresses `openclaw-task-tracking` self-notifications, hides task titles from other
+  automations, labels retained task fields as untrusted data, and uses the task-event ID as the
+  stable Gateway idempotency key. The Effect worker claims one delivery per lease, aborts a stalled
+  send before its lease can expire, clamps settlement timestamps to the row's creation and claim
+  times across clock regressions, and only acknowledges or releases work while it still owns a
+  live lease. No greenfield process is activated in production before final cutover, and that
+  cutover remains gated on composing the Phase 4 persistent authenticated Gateway client rather
+  than reusing the one-shot bootstrap verifier. Task intents therefore cannot accumulate in
+  production without their consumer.
+- `/tasks` provides the reviewed four-column operator layout, server-side search and
+  assignee/recurring filters, accessible create/edit/detail/progress dialogs, and status movement
+  through `@dnd-kit/react`. Shared Headless UI controls, TanStack Form, TanStack Query, and the
+  existing reusable Dashboard presentation components own browser behavior rather than local
+  control implementations. Labels use one lossless line per value so commas round-trip, and hidden
+  automation drafts are validated only while their relationship is enabled.
+- The reviewed parity inventory now marks the 11 task operations and `/tasks` route implemented.
+  This closes only the task portion of Phase 3. Agent, report, incident, notification, job,
+  monitoring API, overview, cache/metrics, and real worker execution remain explicit gates.

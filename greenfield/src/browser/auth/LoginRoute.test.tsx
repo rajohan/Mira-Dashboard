@@ -15,6 +15,7 @@ import {
 import { DashboardBrowserApplication } from "../application.tsx";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
+import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -97,6 +98,7 @@ function renderAuthenticationRoute(
     render(
         <DashboardBrowserApplication
             queryClient={queryClient}
+            realtimeClient={noOpDashboardRealtimeClient}
             router={router}
             trpcClient={createDashboardTrpcClient(transport)}
             webAuthnClient={options.webAuthnClient ?? unexpectedWebAuthnClient}

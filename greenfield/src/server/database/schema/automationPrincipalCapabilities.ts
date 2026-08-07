@@ -18,7 +18,7 @@ export const automationPrincipalCapabilities = sqliteTable(
     (table) => [
         check(
             "automation_principal_capabilities_capability_check",
-            sql`${table.capability} IN ('notifications:read', 'reports:read')`
+            sql`${table.capability} IN ('notifications:read', 'reports:read', 'tasks:read', 'tasks:write')`
         ),
         check(
             "automation_principal_capabilities_granted_at_check",

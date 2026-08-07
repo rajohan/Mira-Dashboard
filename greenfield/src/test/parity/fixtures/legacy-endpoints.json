@@ -117,7 +117,7 @@
             "purpose": "Deletes a task and its updates/events.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.delete"],
                 "phase": "phase-3"
@@ -130,7 +130,7 @@
             "purpose": "Deletes a task update.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.deleteProgress"],
                 "phase": "phase-3"
@@ -956,7 +956,7 @@
             "purpose": "Lists local tasks.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.list"],
                 "phase": "phase-3"
@@ -969,7 +969,7 @@
             "purpose": "Reads one task.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.get"],
                 "phase": "phase-3"
@@ -982,7 +982,7 @@
             "purpose": "Lists task progress updates.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.listUpdates"],
                 "phase": "phase-3"
@@ -1049,7 +1049,7 @@
             "purpose": "Updates title/body/labels/automation.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.update"],
                 "phase": "phase-3"
@@ -1062,7 +1062,7 @@
             "purpose": "Edits a task update.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.updateProgress"],
                 "phase": "phase-3"
@@ -1895,7 +1895,7 @@
             "purpose": "Creates a task.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.create"],
                 "phase": "phase-3"
@@ -1908,7 +1908,7 @@
             "purpose": "Assigns or unassigns a task.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.assign"],
                 "phase": "phase-3"
@@ -1921,7 +1921,7 @@
             "purpose": "Moves a task between status columns.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.move"],
                 "phase": "phase-3"
@@ -1934,7 +1934,7 @@
             "purpose": "Adds a Markdown progress update.",
             "section": "Tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["tasks.addUpdate"],
                 "phase": "phase-3"

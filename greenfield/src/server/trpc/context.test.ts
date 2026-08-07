@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { createTestTaskService } from "../domains/tasks/testSupport/service.ts";
 import { readAuthenticationHttpCredentials } from "../rawHttp/authenticationCredentials.ts";
 import { generateOpaqueToken } from "../shared/opaqueToken.ts";
 import {
@@ -61,6 +62,7 @@ describe("tRPC request context", () => {
             requestId: "request-context-1",
             responseHeaders,
             securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
+            taskService: createTestTaskService(),
         });
 
         expect(observedCredential).toEqual({ kind: "anonymous" });
@@ -117,6 +119,7 @@ describe("tRPC request context", () => {
             requestId: "request-context-2",
             responseHeaders: new Headers(),
             securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
+            taskService: createTestTaskService(),
         });
 
         expect(context.userAgent).toBeUndefined();
@@ -154,6 +157,7 @@ describe("tRPC request context", () => {
                 requestId: "request-context-3",
                 responseHeaders: new Headers(),
                 securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
+                taskService: createTestTaskService(),
             });
         } catch (error) {
             failure = error;

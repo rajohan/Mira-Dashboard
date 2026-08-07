@@ -1,0 +1,101 @@
+{
+  "$id": "urn:mira-dashboard:tasks.updateProgress.output",
+  "type": "object",
+  "properties": {
+    "author": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            },
+            "kind": {
+              "const": "automation"
+            }
+          },
+          "required": [
+            "id",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "kind": {
+              "const": "user"
+            }
+          },
+          "required": [
+            "id",
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "createdAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "id": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "messageMarkdown": {
+      "type": "string",
+      "maxLength": 20000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        }
+      ]
+    },
+    "taskId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "updatedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "author",
+    "createdAtMs",
+    "id",
+    "messageMarkdown",
+    "taskId",
+    "updatedAtMs",
+    "version"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires progress update timestamps not to precede creation.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

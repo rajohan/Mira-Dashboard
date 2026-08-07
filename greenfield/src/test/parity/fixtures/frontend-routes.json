@@ -145,7 +145,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "login",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/login",
                 "phase": "phase-2"
             }
@@ -241,7 +241,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "tasks",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/tasks",
                 "phase": "phase-3"
             }

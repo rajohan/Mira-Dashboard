@@ -23,6 +23,15 @@ import {
 import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
 import { listSecurityAuditEventsResultSchema } from "../../src/contracts/securityAudit.ts";
 import {
+    taskDetailSchema,
+    taskLabelInputSchema,
+    taskTitleSchema,
+} from "../../src/contracts/taskModel.ts";
+import {
+    listTasksResultSchema,
+    updateTaskInputSchema,
+} from "../../src/contracts/tasks.ts";
+import {
     webAuthnAuthenticationResponseSchema,
     webAuthnTransportListSchema,
 } from "../../src/contracts/webauthn.ts";
@@ -90,8 +99,10 @@ describe("contract JSON Schema conversion", () => {
                 "output"
             )
         ).toMatchObject({
-            items: { enum: ["notifications:read", "reports:read"] },
-            maxItems: 2,
+            items: {
+                enum: ["notifications:read", "reports:read", "tasks:read", "tasks:write"],
+            },
+            maxItems: 4,
             type: "array",
             uniqueItems: true,
         });
@@ -212,6 +223,38 @@ describe("contract JSON Schema conversion", () => {
 
         expect(document).toContain("strict newest-first audit-event ordering");
         expect(document).toContain("audit continuation cursor");
+    });
+
+    test("documents task bounds, canonicalization, and runtime relationships", () => {
+        const titleDocument = JSON.stringify(
+            convertContractSchema(taskTitleSchema, "test.taskTitle", "input")
+        );
+        expect(titleDocument).toContain("canonical outer whitespace");
+        expect(titleDocument).toContain("maxLength");
+
+        expect(
+            convertContractSchema(taskLabelInputSchema, "test.taskLabels", "input")
+        ).toMatchObject({
+            maxItems: 20,
+            type: "array",
+            uniqueItems: true,
+        });
+
+        expect(
+            convertContractSchema(updateTaskInputSchema, "test.updateTask", "input")
+        ).toMatchObject({
+            properties: { patch: { minProperties: 1 } },
+        });
+
+        const detailDocument = JSON.stringify(
+            convertContractSchema(taskDetailSchema, "test.taskDetail", "output")
+        );
+        expect(detailDocument).toContain("timestamps not to precede creation");
+        const pageDocument = JSON.stringify(
+            convertContractSchema(listTasksResultSchema, "test.taskPage", "output")
+        );
+        expect(pageDocument).toContain("strict newest-first task ordering");
+        expect(pageDocument).toContain("task continuation cursor");
     });
 
     test("documents the exact TOTP factor-label predicate", () => {

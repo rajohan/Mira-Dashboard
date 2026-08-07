@@ -49,7 +49,12 @@ export interface ProcedureTransportContract {
     /** Bun idle-timeout profile used while the procedure is active. */
     handler: "authentication" | "default" | "long-lived";
     /** Raw request-body budget selected before authentication and parsing. */
-    requestBody: "authentication" | "default" | "webauthn";
+    requestBody:
+        | "authentication"
+        | "default"
+        | "task-content"
+        | "task-progress"
+        | "webauthn";
 }
 
 /** Metadata for one controlled tRPC procedure. */

@@ -13,6 +13,7 @@ import {
     securityAuditRouter,
 } from "../domains/security/securityAuditProcedures.ts";
 import { systemProcedureNames, systemRouter } from "../domains/system/procedures.ts";
+import { taskProcedureNames, taskRouter } from "../domains/tasks/procedures.ts";
 import { router } from "./trpc.ts";
 
 function namespacedProcedureNames(
@@ -30,6 +31,7 @@ export const appRouter = router({
     events: eventsRouter,
     securityAudit: securityAuditRouter,
     system: systemRouter,
+    tasks: taskRouter,
 });
 
 /** First-party procedure inventory produced by the same route records as the root router. */
@@ -40,6 +42,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("events", eventsProcedureNames),
     ...namespacedProcedureNames("securityAudit", securityAuditProcedureNames),
     ...namespacedProcedureNames("system", systemProcedureNames),
+    ...namespacedProcedureNames("tasks", taskProcedureNames),
 ]);
 
 /** Type-only root API contract consumed by TypeScript clients. */

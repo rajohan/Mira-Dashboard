@@ -14,7 +14,8 @@
         "enum": [
           "monitoring.incidents",
           "monitoring.notifications",
-          "monitoring.reports"
+          "monitoring.reports",
+          "tasks.records"
         ],
         "type": "string"
       },

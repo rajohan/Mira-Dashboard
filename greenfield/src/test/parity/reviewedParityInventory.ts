@@ -106,9 +106,7 @@ export function assertGreenfieldRegistryMatchesReviewed(
     }
 }
 
-/**
- * Verifies that implemented targets exist and that later-phase work is never marked implemented.
- */
+/** Verifies that every implemented server target exists in the live registries. */
 export function assertGreenfieldTargetAccounting(
     reviewed: ReviewedParityInventory,
     procedureContracts: readonly ProcedureContractIdentity[],
@@ -121,17 +119,6 @@ export function assertGreenfieldTargetAccounting(
     for (const endpoint of reviewed.legacyEndpoints.endpoints) {
         const { target } = endpoint;
         if (target.kind === "reviewed-removal") continue;
-        if (
-            target.delivery === "implemented" &&
-            (target.phase === "phase-3" ||
-                target.phase === "phase-4" ||
-                target.phase === "phase-5" ||
-                target.phase === "phase-6")
-        ) {
-            throw new Error(
-                `Later-phase target for ${endpoint.id} cannot be marked implemented`
-            );
-        }
         if (target.kind === "procedure" && target.delivery === "implemented") {
             for (const name of target.names) {
                 if (!procedureNames.has(name)) {
@@ -148,6 +135,24 @@ export function assertGreenfieldTargetAccounting(
                     `Implemented target ${targetKey} for ${endpoint.id} is not registered`
                 );
             }
+        }
+    }
+}
+
+/** Verifies that every implemented browser target exists in the live route registry. */
+export function assertGreenfieldFrontendTargetAccounting(
+    reviewed: ReviewedParityInventory,
+    routePaths: readonly string[]
+): void {
+    const registeredPaths = new Set(routePaths);
+    for (const route of reviewed.frontend.routes) {
+        if (
+            route.target.delivery === "implemented" &&
+            !registeredPaths.has(route.target.path)
+        ) {
+            throw new Error(
+                `Implemented browser target ${route.target.path} is not registered`
+            );
         }
     }
 }

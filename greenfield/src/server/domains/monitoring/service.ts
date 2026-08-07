@@ -3,7 +3,6 @@ import {
     compareAsc,
     differenceInMilliseconds,
     getTime,
-    hoursToMilliseconds,
     minutesToMilliseconds,
     toDate,
 } from "date-fns";
@@ -18,6 +17,7 @@ import {
     isDatabaseRuntimeWriteUnavailableError,
     type DatabaseRuntimeWriteUnavailableError,
 } from "../../database/runtime/databaseErrors.ts";
+import { defaultRealtimeRetentionMilliseconds } from "../realtime/retention.ts";
 import {
     MonitoringSnapshotValidationError,
     normalizeMonitoringSnapshot,
@@ -35,7 +35,6 @@ export { monitoringRealtimeTopics } from "./realtimeEvents.ts";
 export { MonitoringSnapshotValidationError } from "./normalization.ts";
 
 const TaggedErrorClass = Schema.TaggedError;
-const defaultRealtimeRetentionMilliseconds = hoursToMilliseconds(168);
 const maximumSnapshotFutureSkewMilliseconds = minutesToMilliseconds(5);
 const realtimeRetentionSchema = positiveSafeIntegerSchema(
     "Monitoring realtime retention must be a positive integer"

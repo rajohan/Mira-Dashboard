@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import {
+    boundedControlSafeTextSchema,
     boundedNonBlankTextSchema,
     fullCommitShaSchema,
     lowercaseSha256Schema,
@@ -86,6 +87,16 @@ describe("shared scalar validation", () => {
         for (const value of ["", " ", "abc", "😀😀😀", "a\0"]) {
             expect(v.safeParse(schema, value).success).toBeFalse();
         }
+    });
+
+    test("rejects hidden control and format characters in operator-facing text", () => {
+        const schema = boundedControlSafeTextSchema(8);
+
+        expect(v.parse(schema, "Roadmap")).toBe("Roadmap");
+        expect(v.parse(schema, "😀😀😀😀😀😀😀😀")).toBe("😀😀😀😀😀😀😀😀");
+        expect(v.safeParse(schema, "Road\nmap").success).toBeFalse();
+        expect(v.safeParse(schema, "Road\u200Bmap").success).toBeFalse();
+        expect(v.safeParse(schema, "         ").success).toBeFalse();
     });
 
     test("uses a caller-supplied operational error message", () => {

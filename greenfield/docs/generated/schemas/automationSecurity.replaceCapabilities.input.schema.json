@@ -18,11 +18,13 @@
       "items": {
         "enum": [
           "notifications:read",
-          "reports:read"
+          "reports:read",
+          "tasks:read",
+          "tasks:write"
         ],
         "type": "string"
       },
-      "maxItems": 2,
+      "maxItems": 4,
       "uniqueItems": true
     }
   },

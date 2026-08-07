@@ -45,6 +45,12 @@ const expectedTables: string[] = [
     "realtime_events",
     "reports",
     "schema_migrations",
+    "task_automation_profiles",
+    "task_events",
+    "task_labels",
+    "task_notification_outbox",
+    "task_updates",
+    "tasks",
     "user_recovery_codes",
     "user_totp_factors",
     "user_webauthn_credentials",
@@ -106,6 +112,10 @@ describe("database migration graph", () => {
             "schema_migrations_reject_replace",
             "schema_migrations_reject_update",
             "schema_migrations_reject_delete",
+            "task_events_validate_payload",
+            "task_events_reject_replace",
+            "task_events_reject_update",
+            "task_events_reject_delete",
         ]) {
             expect(foundationSql).toContain(`CREATE TRIGGER ${trigger}`);
         }
@@ -139,6 +149,13 @@ describe("database migration graph", () => {
             expect(tableDefinitions.find((row) => row.name === "audit_events")?.wr).toBe(
                 1
             );
+            expect(tableDefinitions.find((row) => row.name === "task_events")?.wr).toBe(
+                1
+            );
+            expect(
+                tableDefinitions.find((row) => row.name === "task_notification_outbox")
+                    ?.wr
+            ).toBe(1);
             const textPrimaryKeys = database.sqlite
                 .query<TextPrimaryKeyRow, []>(`
                     SELECT

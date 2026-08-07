@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { dashboardRoutePaths } from "../../browser/lib/dashboardRoutes.ts";
 import {
     procedureContracts,
     rawHttpContracts,
@@ -13,6 +14,7 @@ import {
 } from "./parityInventorySchemas.ts";
 import {
     assertGreenfieldRegistryMatchesReviewed,
+    assertGreenfieldFrontendTargetAccounting,
     assertGreenfieldTargetAccounting,
     loadReviewedParityInventory,
 } from "./reviewedParityInventory.ts";
@@ -32,7 +34,7 @@ function countByPhase(
 }
 
 describe("reviewed pre-cutover parity inventory", () => {
-    test("keeps the immutable browser-route design input complete", async () => {
+    test("keeps the reviewed browser-route inventory complete", async () => {
         const { frontend } = await loadReviewedParityInventory();
 
         expect(frontend.routes).toHaveLength(16);
@@ -48,8 +50,10 @@ describe("reviewed pre-cutover parity inventory", () => {
                 .map((route) => route.navigationPosition)
         ).toEqual(Array.from({ length: 15 }, (_, index) => index));
         expect(
-            frontend.routes.every((route) => route.target.delivery === "planned")
-        ).toBeTrue();
+            frontend.routes
+                .filter((route) => route.target.delivery === "implemented")
+                .map(({ path }) => path)
+        ).toEqual(["/login", "/tasks"]);
         expect(countByPhase(frontend.routes)).toEqual({
             "phase-2": 1,
             "phase-3": 5,
@@ -97,6 +101,9 @@ describe("reviewed pre-cutover parity inventory", () => {
                 rawHttpContracts
             )
         ).not.toThrow();
+        expect(() =>
+            assertGreenfieldFrontendTargetAccounting(reviewed, dashboardRoutePaths)
+        ).not.toThrow();
 
         const missingContract = structuredClone(reviewed);
         const implementedProcedure = missingContract.legacyEndpoints.endpoints.find(
@@ -113,6 +120,18 @@ describe("reviewed pre-cutover parity inventory", () => {
                 procedureContracts,
                 rawHttpContracts
             )
+        ).toThrow("is not registered");
+
+        const missingRoute = structuredClone(reviewed);
+        const implementedRoute = missingRoute.frontend.routes.find(
+            ({ target }) => target.delivery === "implemented"
+        );
+        if (implementedRoute === undefined) {
+            throw new Error("Reviewed fixture has no implemented browser target");
+        }
+        implementedRoute.target.path = "/missing";
+        expect(() =>
+            assertGreenfieldFrontendTargetAccounting(missingRoute, dashboardRoutePaths)
         ).toThrow("is not registered");
     });
 

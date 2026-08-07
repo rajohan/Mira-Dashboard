@@ -29,6 +29,8 @@ import { createRequestAuthenticator } from "../server/domains/security/requestAu
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
 import { createSecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import { createSecurityAuditLifecycleRepository } from "../server/domains/security/securityAuditLifecycleRepository.ts";
+import { createTaskRepository } from "../server/domains/tasks/repository.ts";
+import { createTaskService } from "../server/domains/tasks/service.ts";
 import {
     type WebConfiguration,
     parseWebConfiguration,
@@ -79,6 +81,7 @@ export interface DashboardServerOptions extends Omit<
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
     | "securityAuditLifecycle"
+    | "taskService"
 > {
     readonly applicationRuntime: DashboardApplicationRuntime;
     readonly authenticationLeaseDurationMs?: number;
@@ -239,6 +242,13 @@ export async function createDashboardServer(
             repository: createSecurityAuditLifecycleRepository(database),
             sessionIdleDurationMs: options.sessionIdleDurationMs,
         });
+        const taskNow = options.now;
+        const taskService = createTaskService({
+            ...(taskNow === undefined ? {} : { nowMs: () => taskNow().getTime() }),
+            repository: createTaskRepository(database, databaseRuntime),
+            wakeEventPump: () =>
+                options.applicationRuntime.services.realtimeEvents.wake(),
+        });
         const serverOptions: ServerOptions = {
             applicationRuntime: options.applicationRuntime,
             authenticateCredential: (credential) =>
@@ -254,6 +264,7 @@ export async function createDashboardServer(
             port: options.port,
             readiness: options.readiness,
             securityAuditLifecycle,
+            taskService,
             trustedProxyAddresses: options.trustedProxyAddresses,
         };
         serverOwnsRuntimeCleanup = true;

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { monitoringRealtimeTopics } from "../../src/contracts/monitoringRealtime.ts";
 import { realtimeSubscriptionMaximumTopics } from "../../src/contracts/realtime.ts";
+import { taskRealtimeTopic } from "../../src/contracts/taskRealtime.ts";
 import { buildDocumentationArtifacts } from "./artifacts.ts";
 
 const packageManifest = {
@@ -117,23 +118,32 @@ describe("generated contract documentation", () => {
         const realtimeInputSchema = JSON.parse(
             artifacts.get("schemas/events.stream.input.schema.json") ?? "null"
         ) as unknown;
-        expect(realtimeInputSchema).toMatchObject({
-            additionalProperties: false,
-            properties: {
-                topics: {
-                    items: {
-                        enum: Object.values(monitoringRealtimeTopics),
+        expect(realtimeInputSchema).toEqual(
+            expect.objectContaining({
+                additionalProperties: false,
+                properties: expect.objectContaining({
+                    lastEventId: expect.objectContaining({
+                        default: "0",
                         type: "string",
+                    }),
+                    topics: {
+                        items: {
+                            enum: [
+                                ...Object.values(monitoringRealtimeTopics),
+                                taskRealtimeTopic,
+                            ],
+                            type: "string",
+                        },
+                        maxItems: realtimeSubscriptionMaximumTopics,
+                        minItems: 1,
+                        type: "array",
+                        uniqueItems: true,
                     },
-                    maxItems: realtimeSubscriptionMaximumTopics,
-                    minItems: 1,
-                    type: "array",
-                    uniqueItems: true,
-                },
-            },
-            required: ["topics"],
-            type: "object",
-        });
+                }),
+                required: ["topics"],
+                type: "object",
+            })
+        );
         expect(artifacts.get("packages-and-runtime.md")).toContain(
             "`@valibot/to-json-schema` | `1.7.1` | `1.7.1` | development"
         );

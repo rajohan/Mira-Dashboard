@@ -369,10 +369,14 @@ the sanitized `500` response; that diagnostic does not replace or duplicate the 
 outcome. For SSE the response-created event marks
 successful dispatch, not stream termination; close/cancel/error observability remains part of the
 browser/realtime lifecycle slice. Client cancellation is informational and carries neither a
-failure fingerprint nor a server-error outcome. Bun's outer 64 KiB pre-dispatch body ceiling
-remains a transport safeguard and may reject before application correlation exists. The raw tRPC
-handler receives the generated ID and resolves direct-client provenance against the exact
-trusted-proxy allowlist before context construction. `createContext` then authenticates the
+failure fingerprint nor a server-error outcome. Bun's outer 640 KiB pre-dispatch body ceiling
+supports the largest reviewed task-content request and may reject before application correlation
+exists. The raw tRPC boundary selects exact registered-procedure ceilings before parsing or
+authentication: 16 KiB for authentication, 32 KiB for WebAuthn, 64 KiB by default, 128 KiB for
+task progress, and 640 KiB for task create/content update. Unknown procedures retain the default
+ceiling, while unknown authentication-namespace procedures retain the stricter authentication
+profile. The raw handler receives the generated ID and resolves direct-client provenance against
+the exact trusted-proxy allowlist before context construction. `createContext` then authenticates the
 already parsed session or automation credential and establishes identity plus audit correlation
 once. Reusable procedure builders are limited to:
 

@@ -2,13 +2,14 @@ import { Link } from "@tanstack/react-router";
 import type { MouseEventHandler, ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
+import type { DashboardNavigationPath } from "../lib/dashboardRoutes.ts";
 
 interface NavigationLinkProps {
     readonly active: boolean;
     readonly children: ReactNode;
     readonly className?: string;
     readonly onClick?: MouseEventHandler<HTMLAnchorElement>;
-    readonly to: "/" | "/account-security";
+    readonly to: DashboardNavigationPath;
 }
 
 /**

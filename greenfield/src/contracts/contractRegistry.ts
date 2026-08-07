@@ -10,6 +10,7 @@ import {
 } from "./registry.ts";
 import { securityAuditProcedureContracts } from "./securityAudit.ts";
 import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
+import { taskProcedureContracts } from "./tasks.ts";
 
 /** Implemented tRPC procedure metadata used by runtime wiring and docs. */
 const registeredProcedureContracts = [
@@ -19,6 +20,7 @@ const registeredProcedureContracts = [
     eventsStreamContract,
     ...securityAuditProcedureContracts,
     ...systemProcedureContracts,
+    ...taskProcedureContracts,
 ] as const satisfies readonly ProcedureContract[];
 
 /** Exact registered procedure union used by environment-neutral typed clients. */

@@ -157,6 +157,62 @@
                     "topic"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "entityType": {
+                      "const": "task"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "enum": [
+                        "created",
+                        "deleted",
+                        "updated"
+                      ],
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 36,
+                          "maxLength": 36,
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "tasks.records"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },

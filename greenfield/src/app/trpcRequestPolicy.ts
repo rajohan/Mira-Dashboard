@@ -3,10 +3,14 @@ import type { ProcedureContract } from "../contracts/registry.ts";
 
 /** Stable path mounted by the application tRPC Fetch adapter. */
 export const trpcEndpoint = "/trpc";
-/** Bun-level ceiling applied before the Fetch handler is invoked. */
-export const serverRequestBodyMaximumBytes = 64 * 1024;
 /** Default raw body ceiling for non-authentication tRPC procedures. */
-export const trpcRequestBodyMaximumBytes = serverRequestBodyMaximumBytes;
+export const trpcRequestBodyMaximumBytes = 64 * 1024;
+/** Raw body ceiling for task create and content-update procedures. */
+export const taskContentRequestBodyMaximumBytes = 640 * 1024;
+/** Raw body ceiling for task progress create and update procedures. */
+export const taskProgressRequestBodyMaximumBytes = 128 * 1024;
+/** Bun-level ceiling applied before the Fetch handler is invoked. */
+export const serverRequestBodyMaximumBytes = taskContentRequestBodyMaximumBytes;
 /** Raw body ceiling for authentication and account-security procedures. */
 export const authenticationRequestBodyMaximumBytes = 16 * 1024;
 /** Raw body ceiling for bounded WebAuthn authentication responses. */
@@ -28,6 +32,20 @@ function procedureNamespace(name: string): string | undefined {
     return separator <= 0 ? undefined : name.slice(0, separator);
 }
 
+function usesAuthenticationTransport(contract: ProcedureContract): boolean {
+    return (
+        contract.transport.handler === "authentication" ||
+        usesAuthenticationRequestBody(contract)
+    );
+}
+
+function usesAuthenticationRequestBody(contract: ProcedureContract): boolean {
+    return (
+        contract.transport.requestBody === "authentication" ||
+        contract.transport.requestBody === "webauthn"
+    );
+}
+
 function buildProcedureContractIndex(contracts: readonly ProcedureContract[]): {
     readonly authenticationNamespaces: ReadonlySet<string>;
     readonly contractsByName: ReadonlyMap<string, ProcedureContract>;
@@ -39,10 +57,7 @@ function buildProcedureContractIndex(contracts: readonly ProcedureContract[]): {
             throw new Error(`Duplicate tRPC procedure contract: ${contract.name}`);
         }
         contractsByName.set(contract.name, contract);
-        if (
-            contract.transport.handler === "authentication" ||
-            contract.transport.requestBody !== "default"
-        ) {
+        if (usesAuthenticationTransport(contract)) {
             const namespace = procedureNamespace(contract.name);
             if (namespace === undefined) {
                 throw new Error(
@@ -58,7 +73,7 @@ function buildProcedureContractIndex(contracts: readonly ProcedureContract[]): {
             namespace !== undefined &&
             authenticationNamespaces.has(namespace) &&
             (contract.transport.handler !== "authentication" ||
-                contract.transport.requestBody === "default")
+                !usesAuthenticationRequestBody(contract))
         ) {
             throw new Error(
                 `Authentication procedure namespace has inconsistent transport policy: ${namespace}`
@@ -71,27 +86,47 @@ function buildProcedureContractIndex(contracts: readonly ProcedureContract[]): {
 const { authenticationNamespaces, contractsByName } =
     buildProcedureContractIndex(procedureContracts);
 
-function encodedPathContainsAuthenticationNamespace(encodedProcedures: string): boolean {
-    const normalized = encodedProcedures
-        .replaceAll(/%2c/giu, ",")
-        .replaceAll(/%2e/giu, ".")
-        .toLowerCase();
+// Mirrors the Fetch adapter's single leading/trailing slash normalization pass.
+function trimAdapterSlashes(path: string): string {
+    const withoutLeadingSlash = path.startsWith("/") ? path.slice(1) : path;
+    return withoutLeadingSlash.endsWith("/")
+        ? withoutLeadingSlash.slice(0, -1)
+        : withoutLeadingSlash;
+}
+
+function encodedAdapterProcedurePath(pathname: string): string {
+    const normalizedPathname = trimAdapterSlashes(pathname);
+    const normalizedEndpoint = trimAdapterSlashes(trpcEndpoint);
+    return trimAdapterSlashes(normalizedPathname.slice(normalizedEndpoint.length));
+}
+
+// Decodes valid byte escapes without hiding a namespace behind another invalid escape.
+function bestEffortDecodePercentEscapes(encodedPath: string): string {
+    return encodedPath.replaceAll(/%([\da-f]{2})/giu, (_escape, hexadecimal: string) =>
+        String.fromCodePoint(Number.parseInt(hexadecimal, 16))
+    );
+}
+
+function encodedPathContainsAuthenticationNamespace(
+    encodedProcedures: string,
+    isBatchRequest: boolean
+): boolean {
+    const normalized = bestEffortDecodePercentEscapes(encodedProcedures).toLowerCase();
     const normalizedNamespaces = [...authenticationNamespaces].map((namespace) =>
         namespace.toLowerCase()
     );
-    return normalized
-        .split(",")
-        .some((procedure) =>
-            normalizedNamespaces.some((namespace) =>
-                procedure.replace(/\/+$/u, "").startsWith(`${namespace}.`)
-            )
-        );
+    const procedures = isBatchRequest ? normalized.split(",") : [normalized];
+    return procedures.some((procedure) =>
+        normalizedNamespaces.some((namespace) => procedure.startsWith(`${namespace}.`))
+    );
 }
 
 function effectivePolicy(input: {
     readonly containsAuthenticationProcedure: boolean;
     readonly containsForbiddenBatchProcedure: boolean;
     readonly containsLongLivedProcedure: boolean;
+    readonly containsTaskContentProcedure: boolean;
+    readonly containsTaskProgressProcedure: boolean;
     readonly containsWebAuthnProcedure: boolean;
     readonly isBatchRequest: boolean;
 }): TrpcRequestPolicy {
@@ -104,6 +139,12 @@ function effectivePolicy(input: {
     const handlerPolicy =
         handlerIdleTimeoutSeconds === undefined ? {} : { handlerIdleTimeoutSeconds };
     let requestBodyMaximumBytes = trpcRequestBodyMaximumBytes;
+    if (input.containsTaskContentProcedure) {
+        requestBodyMaximumBytes = taskContentRequestBodyMaximumBytes;
+    }
+    if (input.containsTaskProgressProcedure) {
+        requestBodyMaximumBytes = taskProgressRequestBodyMaximumBytes;
+    }
     if (input.containsAuthenticationProcedure) {
         requestBodyMaximumBytes = authenticationRequestBodyMaximumBytes;
     }
@@ -133,15 +174,18 @@ export function isTrpcRequestPath(pathname: string): boolean {
  * @returns Effective pre-context request policy.
  */
 export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
-    const encodedProcedures = url.pathname.slice(`${trpcEndpoint}/`.length);
+    const encodedProcedures = encodedAdapterProcedurePath(url.pathname);
     const isBatchRequest = url.searchParams.get("batch") === "1";
     try {
-        const procedures = decodeURIComponent(encodedProcedures)
-            .split(",")
-            .map((procedure) => procedure.replace(/\/+$/u, ""));
+        const decodedProcedures = decodeURIComponent(encodedProcedures);
+        const procedures = isBatchRequest
+            ? decodedProcedures.split(",")
+            : [decodedProcedures];
         let containsAuthenticationProcedure = false;
         let containsForbiddenBatchProcedure = false;
         let containsLongLivedProcedure = false;
+        let containsTaskContentProcedure = false;
+        let containsTaskProgressProcedure = false;
         let containsWebAuthnProcedure = false;
         for (const procedure of procedures) {
             const contract = contractsByName.get(procedure);
@@ -152,6 +196,10 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
                     contract.transport.batching === "forbidden";
                 containsLongLivedProcedure ||=
                     contract.transport.handler === "long-lived";
+                containsTaskContentProcedure ||=
+                    contract.transport.requestBody === "task-content";
+                containsTaskProgressProcedure ||=
+                    contract.transport.requestBody === "task-progress";
                 containsWebAuthnProcedure ||=
                     contract.transport.requestBody === "webauthn";
                 continue;
@@ -166,16 +214,20 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
             containsAuthenticationProcedure,
             containsForbiddenBatchProcedure,
             containsLongLivedProcedure,
+            containsTaskContentProcedure,
+            containsTaskProgressProcedure,
             containsWebAuthnProcedure,
             isBatchRequest,
         });
     } catch {
         const containsAuthenticationProcedure =
-            encodedPathContainsAuthenticationNamespace(encodedProcedures);
+            encodedPathContainsAuthenticationNamespace(encodedProcedures, isBatchRequest);
         return effectivePolicy({
             containsAuthenticationProcedure,
             containsForbiddenBatchProcedure: containsAuthenticationProcedure,
             containsLongLivedProcedure: false,
+            containsTaskContentProcedure: false,
+            containsTaskProgressProcedure: false,
             containsWebAuthnProcedure: false,
             isBatchRequest,
         });
