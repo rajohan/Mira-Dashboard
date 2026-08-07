@@ -863,5 +863,8 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   realtime invalidations atomic.
 - Generated procedure and realtime documentation now comes from the same Valibot contracts. The
   reviewed parity inventory marks all six notification and four report legacy operations
-  implemented; incident reads and complete monitoring ingestion are net-new. Browser workflows,
-  schedules/jobs, overview, cache/metrics, and real worker execution remain open Phase 3 gates.
+  implemented; incident reads and complete monitoring ingestion are net-new. Incident-generation
+  notifications retain a forward deep link to the immediately stacked authenticated `/incidents`
+  reader rather than choosing one arbitrary observation report; greenfield stays inactive until
+  the complete cutover stack lands. Browser workflows, schedules/jobs, overview, cache/metrics,
+  and real worker execution remain open Phase 3 gates.

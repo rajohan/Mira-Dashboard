@@ -218,6 +218,63 @@ describe("monitoring catalog service", () => {
         ).toBe(2);
     });
 
+    test("rejects notification references to a nonexistent incident generation", async () => {
+        const fixture = await openCatalog();
+        const ingestion = serviceFor(fixture.database);
+        await submitSnapshot(
+            ingestion,
+            snapshot({
+                completedAtMs: 1000,
+                problems: [problem("filesystem")],
+                run: 1,
+            })
+        );
+        const incidentPage = await Effect.runPromise(
+            fixture.service.listIncidents({ limit: 10 })
+        );
+        const incident = incidentPage.incidents[0]!;
+        const notificationId = uuid(502);
+        const notificationCountBefore = fixture.database.sqlite
+            .query<{ count: number }, []>("SELECT count(*) AS count FROM notifications")
+            .get()!.count;
+        const eventCountBefore = fixture.database.sqlite
+            .query<{ count: number }, []>("SELECT count(*) AS count FROM realtime_events")
+            .get()!.count;
+
+        const failure = await Effect.runPromise(
+            Effect.flip(
+                fixture.service.upsertNotification({
+                    id: notificationId,
+                    incidentGeneration: incident.generation + 1,
+                    incidentId: incident.id,
+                    kind: "monitoring.incident",
+                    message: "References a nonexistent generation",
+                    occurredAtMs: 2000,
+                    severity: "warning",
+                    title: "Invalid incident generation",
+                })
+            )
+        );
+
+        expect(failure).toBeInstanceOf(MonitoringCatalogNotFoundError);
+        expect(failure).toMatchObject({ id: incident.id, resource: "incident" });
+        expect(fixture.repository.findNotification(notificationId)).toBeUndefined();
+        expect(
+            fixture.database.sqlite
+                .query<{ count: number }, []>(
+                    "SELECT count(*) AS count FROM notifications"
+                )
+                .get()!.count
+        ).toBe(notificationCountBefore);
+        expect(
+            fixture.database.sqlite
+                .query<{ count: number }, []>(
+                    "SELECT count(*) AS count FROM realtime_events"
+                )
+                .get()!.count
+        ).toBe(eventCountBefore);
+    });
+
     test("does not turn an event-pump wake failure into a failed catalog commit", async () => {
         const fixture = await openCatalog({
             wakeEventPump: () => Promise.reject(new Error("pump unavailable")),

@@ -246,6 +246,22 @@ describe("monitoring procedures", () => {
                     services
                 )
             );
+            const incidentPage = await reader.incidents.list({ limit: 10 });
+            const incident = incidentPage.incidents[0]!;
+            await expectTrpcCode(
+                () =>
+                    producer.notifications.upsert({
+                        id: uuid(201),
+                        incidentGeneration: incident.generation + 1,
+                        incidentId: incident.id,
+                        kind: "test",
+                        message: "References a nonexistent incident generation",
+                        occurredAtMs: 2000,
+                        severity: "warning",
+                        title: "Missing incident generation",
+                    }),
+                "NOT_FOUND"
+            );
             await expectTrpcCode(
                 () => reader.reports.get({ id: uuid(999_998) }),
                 "NOT_FOUND"

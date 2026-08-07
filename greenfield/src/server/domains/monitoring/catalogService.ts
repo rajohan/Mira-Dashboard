@@ -650,7 +650,11 @@ export function createMonitoringCatalogService(
                         input.incidentId !== undefined &&
                         input.incidentGeneration !== undefined
                     ) {
-                        if (unit.findIncident(input.incidentId) === undefined) {
+                        const incident = unit.findIncident(input.incidentId);
+                        if (
+                            incident === undefined ||
+                            incident.generation !== input.incidentGeneration
+                        ) {
                             throw notFound("incident", input.incidentId);
                         }
                         const related = unit.findIncidentNotification(
