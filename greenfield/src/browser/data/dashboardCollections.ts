@@ -14,10 +14,16 @@ export interface DashboardBrowserCollections {
 }
 
 async function cleanupAgentCollections(collections: AgentCollections): Promise<void> {
-    await Promise.all([
+    const results = await Promise.allSettled([
         collections.definitions.cleanup(),
         collections.statuses.cleanup(),
     ]);
+    const failures = results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : []
+    );
+    if (failures.length > 0) {
+        throw new AggregateError(failures, "Agent collection cleanup failed");
+    }
 }
 
 /**
@@ -57,8 +63,11 @@ export function createDashboardBrowserCollections(
                     throw new TypeError("Dashboard collections are cleaned up");
                 }
                 const previousAgents = agents;
-                await cleanupAgentCollections(previousAgents);
-                agents = createAgentCollections(queryClient, trpcClient);
+                try {
+                    await cleanupAgentCollections(previousAgents);
+                } finally {
+                    agents = createAgentCollections(queryClient, trpcClient);
+                }
             });
         },
     });

@@ -31,7 +31,11 @@ export function useAuthenticationAction() {
                 try {
                     await refreshAuthenticationStatus();
                 } catch {
-                    await resetAuthenticatedBrowserCache(queryClient, collections);
+                    try {
+                        await resetAuthenticatedBrowserCache(queryClient, collections);
+                    } catch {
+                        // Preserve the original authentication operation failure.
+                    }
                 }
                 throw error;
             }

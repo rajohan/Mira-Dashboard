@@ -31,7 +31,7 @@ export function useRealtimeQueryInvalidation({
             if (refreshTimer !== undefined) return;
             refreshTimer = setTimeout(() => {
                 refreshTimer = undefined;
-                void refreshQueries(queryClient);
+                void refreshQueries(queryClient).catch(() => {});
             }, refreshDelayMs);
         };
         const startFallbackRefresh = () => {

@@ -131,7 +131,9 @@ function statusFromRecord(agentId: string, record?: AgentTaskRunRecord): AgentSt
 
 function listStatuses(repository: AgentRepository): ListAgentStatusesResult {
     return repository.withReadTransaction((reader) => {
-        const agentIds = dashboardAgentConfiguration.agents.map(({ id }) => id);
+        const agentIds = dashboardAgentConfiguration.agents
+            .map(({ id }) => id)
+            .toSorted();
         const activeRuns = reader.listActiveRuns(agentIds);
         if (activeRuns.length > agentIds.length) {
             throw new Error("Agent active-run count is outside its budget");

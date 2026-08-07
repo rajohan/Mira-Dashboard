@@ -202,4 +202,37 @@ describe("task realtime invalidation", () => {
             jest.useRealTimers();
         }
     });
+
+    test("contains a rejected cache refresh inside the invalidation boundary", async () => {
+        jest.useFakeTimers();
+        try {
+            const queryClient = createDashboardQueryClient();
+            const realtimeClient = new ControlledRealtimeClient();
+            let refreshCount = 0;
+            Reflect.set(queryClient, "invalidateQueries", () => {
+                refreshCount += 1;
+                return Promise.reject(new TypeError("cache refresh failed"));
+            });
+            const view = render(
+                <QueryClientProvider client={queryClient}>
+                    <DashboardRealtimeProvider client={realtimeClient}>
+                        <TaskRealtimeProbe />
+                    </DashboardRealtimeProvider>
+                </QueryClientProvider>
+            );
+
+            await act(async () => {
+                realtimeClient.requireResync();
+                jest.advanceTimersByTime(taskRealtimeRefreshDelayMs);
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+            expect(refreshCount).toBe(1);
+
+            view.unmount();
+            queryClient.clear();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
 });

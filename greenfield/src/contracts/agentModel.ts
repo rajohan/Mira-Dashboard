@@ -92,7 +92,10 @@ export const agentConfigurationSchema = v.strictObject({
     agents: agentDefinitionListSchema,
 });
 
-const agentTimestampSchema = timestampMillisecondsSchema("Agent timestamp is invalid");
+/** Shared timestamp policy for agent status, task history, and cursors. */
+export const agentTimestampSchema = timestampMillisecondsSchema(
+    "Agent timestamp is invalid"
+);
 
 const idleAgentStatusSchema = v.strictObject({
     agentId: agentIdSchema,

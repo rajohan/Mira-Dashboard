@@ -46,7 +46,7 @@ export function AgentsRoute() {
         configuration.isReady && statuses.isReady && history.data !== undefined;
 
     const refresh = () => {
-        void Promise.all([
+        void Promise.allSettled([
             collections.definitions.utils.refetch(),
             collections.statuses.utils.refetch(),
             history.refetch(),

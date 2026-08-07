@@ -76,7 +76,7 @@ function AgentStatusCard({ agent, status }: AgentStatusCardProps) {
                     <div className="min-w-0">
                         <Heading
                             id={`agent-${agent.id}-heading`}
-                            level={2}
+                            level={3}
                             size="subsection"
                         >
                             {agent.displayName}

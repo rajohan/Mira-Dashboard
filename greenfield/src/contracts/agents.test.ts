@@ -5,6 +5,7 @@ import * as v from "valibot";
 import {
     agentProcedureContracts,
     agentTaskHistoryPageDefault,
+    agentTaskHistoryPageMaximum,
     listAgentTaskHistoryInputSchema,
     listAgentTaskHistoryResultSchema,
     listAgentStatusesResultSchema,
@@ -76,6 +77,26 @@ describe("agent procedure contracts", () => {
         expect(v.parse(listAgentTaskHistoryInputSchema, {})).toEqual({
             limit: agentTaskHistoryPageDefault,
         });
+        expect(
+            v.safeParse(listAgentTaskHistoryInputSchema, {
+                limit: agentTaskHistoryPageMaximum + 1,
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(listAgentTaskHistoryResultSchema, {
+                nextCursor: { id: secondRunId, startedAtMs: 2000 },
+                runs: [
+                    {
+                        agentId: "main",
+                        id: firstRunId,
+                        lastActivityAtMs: 1000,
+                        startedAtMs: 1000,
+                        status: "active",
+                        task: "Newer task",
+                    },
+                ],
+            }).success
+        ).toBeFalse();
         expect(
             v.safeParse(listAgentTaskHistoryResultSchema, {
                 runs: [

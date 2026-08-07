@@ -199,7 +199,9 @@ describe("Dashboard agents route", () => {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Agents" })
         ).toBeTruthy();
-        expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+        expect(
+            await screen.findByRole("heading", { level: 3, name: "Mira" })
+        ).toBeTruthy();
         expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
         expect(screen.getByText("unavailable")).toBeTruthy();
         expect(screen.getByRole("table", { name: "Agent task history" })).toBeTruthy();

@@ -1,6 +1,5 @@
 import * as v from "valibot";
 
-import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
 import { hasUniqueArrayItems } from "../shared/validation.ts";
 import {
     type AgentStatus,
@@ -8,6 +7,7 @@ import {
     agentConfigurationSchema,
     agentIdSchema,
     agentStatusSchema,
+    agentTimestampSchema,
     agentTaskRunIdSchema,
     agentTaskRunSchema,
     agentCurrentTaskSchema,
@@ -21,7 +21,6 @@ export const agentTaskHistoryPageDefault = 50;
 /** Hard agent-task history budget for one response. */
 export const agentTaskHistoryPageMaximum = 100;
 
-const agentTimestampSchema = timestampMillisecondsSchema("Agent timestamp is invalid");
 export const emptyAgentInputSchema = v.strictObject({});
 
 /** Exact configured-agent lookup request. */
