@@ -22,9 +22,12 @@ export interface AuthenticationBoundaryProps {
  */
 export function AuthenticationBoundary({ children }: AuthenticationBoundaryProps) {
     const client = useDashboardTrpcClient();
-    const status = useQuery(authStatusQueryOptions(client));
+    const status = useQuery({
+        ...authStatusQueryOptions(client),
+        refetchOnMount: "always",
+    });
 
-    if (status.isPending) {
+    if (!status.isFetchedAfterMount || status.fetchStatus !== "idle") {
         return (
             <output aria-label="Authentication status" className="text-primary-300">
                 Checking your session…
@@ -50,7 +53,7 @@ export function AuthenticationBoundary({ children }: AuthenticationBoundaryProps
             </Card>
         );
     }
-    if (status.data.state !== "authenticated") {
+    if (status.data?.state !== "authenticated") {
         return <Navigate replace to="/login" />;
     }
     return children;

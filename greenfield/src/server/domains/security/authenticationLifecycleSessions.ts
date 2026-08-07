@@ -172,6 +172,7 @@ export function createAuthenticationSessionOperations(
                 if (access === "step-up-required") {
                     return { status: "step-up-required" as const };
                 }
+                unit.deletePendingLoginsForUser(identity.userId);
                 const revokedSessions = unit.deleteAllSessions(identity.userId);
                 if (revokedSessions > 0) {
                     context.audit(unit, {

@@ -4,6 +4,7 @@ import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWr
 import type { AuthenticationRateLimitKind } from "../../database/schema/authRateLimitBuckets.ts";
 import { DrizzleAuthenticationRateLimitStore } from "./authenticationRateLimitStore.ts";
 import { DrizzleBrowserSessionStore } from "./browserSessionStore.ts";
+import { DrizzlePendingLoginStore } from "./pendingLoginStore.ts";
 import {
     DrizzleSecurityAuditStore,
     type SecurityAuditWriter,
@@ -51,6 +52,7 @@ export interface AuthenticationLifecycleUnitOfWork
     countUsers(): number;
     deleteAllSessions(userId: string): number;
     deleteOtherSessions(userId: string, retainedSessionId: string): number;
+    deletePendingLoginsForUser(userId: string): number;
     deleteRateLimitBuckets(kind: AuthenticationRateLimitKind): number;
     deleteSession(userId: string, sessionId: string): boolean;
     insertUser(input: SecurityUserInsert): SecurityUserRecord;
@@ -83,12 +85,14 @@ export interface AuthenticationLifecycleRepository {
 
 class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycleUnitOfWork {
     readonly #auditEvents: DrizzleSecurityAuditStore;
+    readonly #pendingLogins: DrizzlePendingLoginStore;
     readonly #rateLimits: DrizzleAuthenticationRateLimitStore;
     readonly #sessions: DrizzleBrowserSessionStore;
     readonly #users: DrizzleSecurityUserStore;
 
     constructor(transaction: SecurityTransaction) {
         this.#auditEvents = new DrizzleSecurityAuditStore(transaction);
+        this.#pendingLogins = new DrizzlePendingLoginStore(transaction);
         this.#rateLimits = new DrizzleAuthenticationRateLimitStore(transaction);
         this.#sessions = new DrizzleBrowserSessionStore(transaction);
         this.#users = new DrizzleSecurityUserStore(transaction);
@@ -104,6 +108,10 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
 
     deleteOtherSessions(userId: string, retainedSessionId: string): number {
         return this.#sessions.deleteOtherSessions(userId, retainedSessionId);
+    }
+
+    deletePendingLoginsForUser(userId: string): number {
+        return this.#pendingLogins.deleteAllForUser(userId);
     }
 
     deleteRateLimitBucket(bucketKey: string): void {

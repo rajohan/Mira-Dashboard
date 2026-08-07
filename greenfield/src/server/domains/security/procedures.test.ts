@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import { TRPCError } from "@trpc/server";
 
-import { dashboardPendingLoginCookieName } from "../../rawHttp/authenticationCredentials.ts";
+import {
+    dashboardPendingLoginCookieName,
+    dashboardSessionCookieName,
+} from "../../rawHttp/authenticationCredentials.ts";
 import { generateOpaqueToken } from "../../shared/opaqueToken.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
@@ -310,7 +313,7 @@ describe("authentication procedures", () => {
         expect(responseHeaders.get("set-cookie")).toBeNull();
     });
 
-    test("keeps the retained cookie for other-session revocation and clears it for all", async () => {
+    test("keeps retained credentials and clears both cookies after valid all-session output", async () => {
         const otherHeaders = new Headers();
         const otherContext = await createTestRequestContext(
             createTestSessionAuthentication([]),
@@ -328,6 +331,7 @@ describe("authentication procedures", () => {
         expect(otherHeaders.get("set-cookie")).toBeNull();
 
         const allHeaders = new Headers();
+        const pendingLogin = generateOpaqueToken("pending-login");
         const allContext = await createTestRequestContext(
             createTestSessionAuthentication([]),
             createTestApplicationRuntime(),
@@ -335,13 +339,45 @@ describe("authentication procedures", () => {
                 authenticationLifecycle: createTestAuthenticationLifecycleService({
                     revokeAllSessions: () => Promise.resolve({ revokedSessions: 3 }),
                 }),
+                request: new Request("http://localhost/trpc/auth.revokeAllSessions", {
+                    headers: {
+                        cookie: `${dashboardPendingLoginCookieName}=${pendingLogin.token}`,
+                    },
+                }),
                 responseHeaders: allHeaders,
             }
         );
         expect(await appRouter.createCaller(allContext).auth.revokeAllSessions()).toEqual(
             { revokedSessions: 3 }
         );
-        expect(allHeaders.get("set-cookie")).toContain("Max-Age=0");
+        const clearedCookies = allHeaders.getSetCookie();
+        expect(clearedCookies).toHaveLength(2);
+        expect(clearedCookies).toEqual([
+            expect.stringContaining(`${dashboardSessionCookieName}=; Max-Age=0`),
+            expect.stringContaining(`${dashboardPendingLoginCookieName}=; Max-Age=0`),
+        ]);
+
+        const invalidHeaders = new Headers();
+        const invalidRevokeAll = (() =>
+            Promise.resolve({
+                revokedSessions: -1,
+            })) as unknown as AuthenticationLifecycleService["revokeAllSessions"];
+        const invalidContext = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    revokeAllSessions: invalidRevokeAll,
+                }),
+                responseHeaders: invalidHeaders,
+            }
+        );
+        expect(
+            await captureFailure(() =>
+                appRouter.createCaller(invalidContext).auth.revokeAllSessions()
+            )
+        ).toBeInstanceOf(Error);
+        expect(invalidHeaders.get("set-cookie")).toBeNull();
     });
 
     test("handles policy and identity races for bulk session revocation", async () => {

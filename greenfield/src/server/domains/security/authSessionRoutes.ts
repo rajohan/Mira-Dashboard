@@ -11,6 +11,7 @@ import {
     sessionRevokeInputSchema,
 } from "../../../contracts/auth.ts";
 import { emptyInputSchema } from "../../../contracts/system.ts";
+import { appendClearedPendingLoginCookie } from "../../rawHttp/pendingLoginCookie.ts";
 import {
     appendClearedDashboardSessionCookie,
     appendDashboardSessionCookie,
@@ -108,6 +109,7 @@ export const authSessionRoutes = {
             );
             if (result === undefined) {
                 appendClearedDashboardSessionCookie(ctx.responseHeaders);
+                appendClearedPendingLoginCookie(ctx.responseHeaders);
                 throw new TRPCError({
                     code: "UNAUTHORIZED",
                     message: "Authentication state changed; sign in again",
@@ -119,8 +121,10 @@ export const authSessionRoutes = {
                     "Recent password or multi-factor authentication is required"
                 );
             }
+            const output = v.parse(authSessionsRevokeResultSchema, result);
             appendClearedDashboardSessionCookie(ctx.responseHeaders);
-            return v.parse(authSessionsRevokeResultSchema, result);
+            appendClearedPendingLoginCookie(ctx.responseHeaders);
+            return output;
         }),
     revokeOtherSessions: sessionProcedure
         .input(emptyInputSchema)

@@ -266,6 +266,29 @@ describe("authentication lifecycle sessions", () => {
                     `Expected login creation, received ${replacement.status}`
                 );
             }
+            harness.database.sqlite.run(
+                `INSERT INTO auth_pending_logins (
+                    allows_recovery,
+                    allows_totp,
+                    allows_webauthn,
+                    authentication_version,
+                    created_at,
+                    expires_at,
+                    id,
+                    password_verified_at,
+                    replaced_session_id,
+                    user_id,
+                    validator_hash
+                ) VALUES (1, 0, 0, 1, 1000, 2000, ?, 1000, ?, ?, ?)`,
+                ["c".repeat(32), replacement.session.id, created.user.id, "d".repeat(64)]
+            );
+            expect(
+                harness.database.sqlite
+                    .query<{ count: number }, []>(
+                        "SELECT count(*) AS count FROM auth_pending_logins"
+                    )
+                    .get()
+            ).toEqual({ count: 1 });
             expect(
                 await harness.service.revokeAllSessions(identity, {
                     clientSourceId: "client-source-1",
@@ -276,6 +299,13 @@ describe("authentication lifecycle sessions", () => {
                 harness.database.sqlite
                     .query<{ count: number }, []>(
                         "SELECT count(*) AS count FROM auth_sessions"
+                    )
+                    .get()
+            ).toEqual({ count: 0 });
+            expect(
+                harness.database.sqlite
+                    .query<{ count: number }, []>(
+                        "SELECT count(*) AS count FROM auth_pending_logins"
                     )
                     .get()
             ).toEqual({ count: 0 });
