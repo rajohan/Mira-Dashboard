@@ -1,8 +1,17 @@
 import { useForm } from "@tanstack/react-form";
 import { ShieldCheck } from "lucide-react";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
 import { passwordChangeInputSchema } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import {
+    authStatusQueryKey,
+    publishAuthenticationStatusIfCurrent,
+} from "../auth/authQueries.ts";
+import {
+    AuthenticatedMutationExpiredError,
+    useAuthenticatedMutationBoundary,
+} from "../auth/useAuthenticatedMutationBoundary.ts";
 import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
@@ -26,13 +35,36 @@ interface PasswordChangeFormProps {
  */
 export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps) {
     const client = useDashboardTrpcClient();
+    const mutationBoundary = useAuthenticatedMutationBoundary();
+    const queryClient = mutationBoundary.queryClient;
     const form = useForm({
         defaultValues: { currentPassword: "", newPassword: "" },
         onSubmit: async ({ formApi, value }) => {
             await complete(async () => {
-                await client.mutation("auth.changePassword", value);
+                const cachedStatus =
+                    queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
+                if (cachedStatus?.state !== "authenticated") {
+                    throw new TypeError(
+                        "Password change requires an authenticated cache owner"
+                    );
+                }
+                const mutation = await mutationBoundary.run(async (signal, isActive) => ({
+                    isActive,
+                    result: await client.mutation("auth.changePassword", value, {
+                        signal,
+                    }),
+                }));
                 formApi.setFieldValue("currentPassword", "");
                 formApi.setFieldValue("newPassword", "");
+                const published = await publishAuthenticationStatusIfCurrent(
+                    queryClient,
+                    {
+                        ...cachedStatus,
+                        session: mutation.result.session,
+                    },
+                    mutation.isActive
+                );
+                if (!published) throw new AuthenticatedMutationExpiredError();
             }, "Password changed and other sessions revoked.");
         },
         validators: { onSubmit: passwordChangeInputSchema },

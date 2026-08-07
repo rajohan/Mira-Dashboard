@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 
 import type {
     DashboardMutationName,
@@ -6,6 +6,7 @@ import type {
     DashboardProcedureOutput,
 } from "../api/trpcClient.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import {
     refreshTaskLists,
     refreshTaskQueries,
@@ -22,14 +23,18 @@ type TaskMutationName = Extract<DashboardMutationName, `tasks.${string}`>;
  */
 export function useTaskMutation<TName extends TaskMutationName>(name: TName) {
     const client = useDashboardTrpcClient();
-    const queryClient = useQueryClient();
+    const boundary = useAuthenticatedMutationBoundary();
     return useMutation<
         DashboardProcedureOutput<TName>,
         Error,
         DashboardProcedureInput<TName>
     >({
-        mutationFn: (input) => client.mutation(name, input),
-        onSuccess: async () => refreshTaskQueries(queryClient),
+        mutationFn: (input) =>
+            boundary.run((signal) => client.mutation(name, input, { signal })),
+        onSuccess: async () => {
+            if (!boundary.completionIsCurrent()) return;
+            await refreshTaskQueries(boundary.queryClient);
+        },
     });
 }
 
@@ -40,21 +45,24 @@ export function useTaskMutation<TName extends TaskMutationName>(name: TName) {
  */
 export function useDeleteTaskMutation(onDeleted: () => void) {
     const client = useDashboardTrpcClient();
-    const queryClient = useQueryClient();
+    const boundary = useAuthenticatedMutationBoundary();
     return useMutation<
         DashboardProcedureOutput<"tasks.delete">,
         Error,
         DashboardProcedureInput<"tasks.delete">
     >({
-        mutationFn: (input) => client.mutation("tasks.delete", input),
+        mutationFn: (input) =>
+            boundary.run((signal) => client.mutation("tasks.delete", input, { signal })),
         onSuccess: async (result) => {
+            if (!boundary.completionIsCurrent()) return;
             onDeleted();
-            await refreshTaskLists(queryClient);
-            queryClient.removeQueries({
+            await refreshTaskLists(boundary.queryClient);
+            if (!boundary.completionIsCurrent()) return;
+            boundary.queryClient.removeQueries({
                 exact: true,
                 queryKey: taskDetailQueryKey(result.id),
             });
-            queryClient.removeQueries({
+            boundary.queryClient.removeQueries({
                 exact: true,
                 queryKey: taskProgressQueryKey(result.id),
             });

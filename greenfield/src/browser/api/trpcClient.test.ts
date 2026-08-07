@@ -62,14 +62,21 @@ describe("Dashboard browser tRPC client", () => {
         expect(calls).toEqual([{ input: {}, kind: "mutation", path: "auth.logout" }]);
     });
 
-    test("loads report and incident reader contracts on demand", async () => {
+    test("loads monitoring reader contracts on demand", async () => {
         const reportCalls: TransportCall[] = [];
         const incidentCalls: TransportCall[] = [];
+        const notificationCalls: TransportCall[] = [];
         const reportClient = createDashboardTrpcClient(
             createRecordingTransport({ reports: [] }, reportCalls)
         );
         const incidentClient = createDashboardTrpcClient(
             createRecordingTransport({ incidents: [] }, incidentCalls)
+        );
+        const notificationClient = createDashboardTrpcClient(
+            createRecordingTransport(
+                { notifications: [], readCount: 0, unreadCount: 0 },
+                notificationCalls
+            )
         );
 
         expect(await reportClient.query("reports.list", { limit: 50 })).toEqual({
@@ -78,11 +85,17 @@ describe("Dashboard browser tRPC client", () => {
         expect(await incidentClient.query("incidents.list", { limit: 50 })).toEqual({
             incidents: [],
         });
+        expect(
+            await notificationClient.query("notifications.list", { limit: 100 })
+        ).toEqual({ notifications: [], readCount: 0, unreadCount: 0 });
         expect(reportCalls).toEqual([
             { input: { limit: 50 }, kind: "query", path: "reports.list" },
         ]);
         expect(incidentCalls).toEqual([
             { input: { limit: 50 }, kind: "query", path: "incidents.list" },
+        ]);
+        expect(notificationCalls).toEqual([
+            { input: { limit: 100 }, kind: "query", path: "notifications.list" },
         ]);
     });
 

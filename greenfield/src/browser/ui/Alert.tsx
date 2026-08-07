@@ -21,6 +21,7 @@ const alertStyle = Object.freeze({
 
 interface AlertProps {
     readonly className?: string;
+    readonly focusOnError?: boolean;
     readonly message: string | undefined;
     readonly variant?: keyof typeof alertStyle;
 }
@@ -29,11 +30,18 @@ interface AlertProps {
  * Renders and focuses important asynchronous feedback.
  * @returns An alert/status region, or nothing when no message exists.
  */
-export function Alert({ className, message, variant = "error" }: AlertProps) {
+export function Alert({
+    className,
+    focusOnError = true,
+    message,
+    variant = "error",
+}: AlertProps) {
     const element = useRef<HTMLDivElement>(null);
     useEffect(() => {
-        if (message !== undefined && variant === "error") element.current?.focus();
-    }, [message, variant]);
+        if (focusOnError && message !== undefined && variant === "error") {
+            element.current?.focus();
+        }
+    }, [focusOnError, message, variant]);
     if (message === undefined) return null;
     const style = alertStyle[variant];
     return (

@@ -5,24 +5,33 @@ import {
     type AgentCollections,
 } from "../agents/agentCollections.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
+import {
+    createNotificationCollection,
+    type NotificationCollection,
+} from "../notifications/notificationCollection.ts";
 
 /** Browser-owned normalized collections and their explicit lifetime/reset boundaries. */
 export interface DashboardBrowserCollections {
     readonly agents: AgentCollections;
+    readonly notifications: NotificationCollection;
     readonly cleanup: () => Promise<void>;
     readonly reset: () => Promise<void>;
 }
 
-async function cleanupAgentCollections(collections: AgentCollections): Promise<void> {
+async function cleanupCollections(
+    agents: AgentCollections,
+    notifications: NotificationCollection
+): Promise<void> {
     const results = await Promise.allSettled([
-        collections.definitions.cleanup(),
-        collections.statuses.cleanup(),
+        agents.definitions.cleanup(),
+        agents.statuses.cleanup(),
+        notifications.cleanup(),
     ]);
     const failures = results.flatMap((result) =>
         result.status === "rejected" ? [result.reason] : []
     );
     if (failures.length > 0) {
-        throw new AggregateError(failures, "Agent collection cleanup failed");
+        throw new AggregateError(failures, "Dashboard collection cleanup failed");
     }
 }
 
@@ -37,6 +46,7 @@ export function createDashboardBrowserCollections(
     trpcClient: DashboardTrpcClient
 ): DashboardBrowserCollections {
     let agents = createAgentCollections(queryClient, trpcClient);
+    let notifications = createNotificationCollection(queryClient, trpcClient);
     let cleaned = false;
     let pendingOperation = Promise.resolve();
 
@@ -50,11 +60,14 @@ export function createDashboardBrowserCollections(
         get agents() {
             return agents;
         },
+        get notifications() {
+            return notifications;
+        },
         async cleanup(): Promise<void> {
             await enqueue(async () => {
                 if (cleaned) return;
                 cleaned = true;
-                await cleanupAgentCollections(agents);
+                await cleanupCollections(agents, notifications);
             });
         },
         async reset(): Promise<void> {
@@ -63,10 +76,18 @@ export function createDashboardBrowserCollections(
                     throw new TypeError("Dashboard collections are cleaned up");
                 }
                 const previousAgents = agents;
+                const previousNotifications = notifications;
                 try {
-                    await cleanupAgentCollections(previousAgents);
+                    await cleanupCollections(
+                        previousAgents,
+                        previousNotifications
+                    );
                 } finally {
                     agents = createAgentCollections(queryClient, trpcClient);
+                    notifications = createNotificationCollection(
+                        queryClient,
+                        trpcClient
+                    );
                 }
             });
         },

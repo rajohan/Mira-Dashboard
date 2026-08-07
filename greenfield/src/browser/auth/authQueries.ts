@@ -5,6 +5,193 @@ import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import type { DashboardBrowserCollections } from "../data/dashboardCollections.ts";
 
 export const authStatusQueryKey = ["auth", "status"] as const;
+const authenticatedBrowserCacheGenerations = new WeakMap<QueryClient, number>();
+const authenticatedMutationControllers = new WeakMap<QueryClient, Set<AbortController>>();
+interface AuthenticationStatusTransition {
+    readonly completion: Promise<unknown>;
+}
+
+const authenticationStatusTransitions = new WeakMap<
+    QueryClient,
+    AuthenticationStatusTransition
+>();
+
+async function runAuthenticationStatusTransition<TResult>(
+    queryClient: QueryClient,
+    operation: () => Promise<TResult>
+): Promise<TResult> {
+    const previousTransition = authenticationStatusTransitions.get(queryClient);
+    const completion = (async () => {
+        try {
+            await previousTransition?.completion;
+        } catch {
+            // A later resolved identity must still be publishable after a failed transition.
+        }
+        return operation();
+    })();
+    const transition: AuthenticationStatusTransition = { completion };
+    authenticationStatusTransitions.set(queryClient, transition);
+    try {
+        return await completion;
+    } finally {
+        if (authenticationStatusTransitions.get(queryClient) === transition) {
+            authenticationStatusTransitions.delete(queryClient);
+        }
+    }
+}
+
+/** @returns Stable auth-boundary identity without volatile session activity metadata. */
+export function authStatusCacheIdentity(status: AuthStatus): string {
+    switch (status.state) {
+        case "authenticated": {
+            return `authenticated:${status.user.id}:${status.session.id}`;
+        }
+        case "pending-mfa": {
+            return `pending-mfa:${status.pendingLogin.username}:${status.pendingLogin.expiresAtMs}`;
+        }
+        default: {
+            return status.state;
+        }
+    }
+}
+
+/** @returns Monotonic generation changed before every authenticated cache reset. */
+export function authenticatedBrowserCacheGeneration(queryClient: QueryClient): number {
+    return authenticatedBrowserCacheGenerations.get(queryClient) ?? 0;
+}
+
+/**
+ * Registers transport cancellation under the current authenticated cache owner.
+ * @returns Cleanup for the exact registered controller.
+ */
+export function registerAuthenticatedMutationController(
+    queryClient: QueryClient,
+    controller: AbortController
+): () => void {
+    const controllers =
+        authenticatedMutationControllers.get(queryClient) ?? new Set<AbortController>();
+    controllers.add(controller);
+    authenticatedMutationControllers.set(queryClient, controllers);
+    return () => {
+        controllers.delete(controller);
+        if (
+            controllers.size === 0 &&
+            authenticatedMutationControllers.get(queryClient) === controllers
+        ) {
+            authenticatedMutationControllers.delete(queryClient);
+        }
+    };
+}
+
+function abortAuthenticatedMutations(queryClient: QueryClient): void {
+    const controllers = authenticatedMutationControllers.get(queryClient);
+    if (controllers === undefined) return;
+    authenticatedMutationControllers.delete(queryClient);
+    for (const controller of controllers) controller.abort();
+}
+
+/**
+ * Publishes a resolved authentication identity for the root cache boundary after
+ * cancelling any older auth.status request that could overwrite it.
+ */
+export async function publishAuthenticationStatus(
+    queryClient: QueryClient,
+    status: AuthStatus
+): Promise<void> {
+    await runAuthenticationStatusTransition(queryClient, async () => {
+        await queryClient.cancelQueries({
+            exact: true,
+            queryKey: authStatusQueryKey,
+        });
+        queryClient.setQueryData(authStatusQueryKey, status);
+    });
+}
+
+/**
+ * Publishes an authentication identity only while the captured cache owner remains
+ * current at the serialized write point.
+ * @returns Whether the guarded status was published.
+ */
+export async function publishAuthenticationStatusIfCurrent(
+    queryClient: QueryClient,
+    status: AuthStatus,
+    isCurrent: () => boolean
+): Promise<boolean> {
+    return runAuthenticationStatusTransition(queryClient, async () => {
+        if (!isCurrent()) return false;
+        await queryClient.cancelQueries({
+            exact: true,
+            queryKey: authStatusQueryKey,
+        });
+        if (!isCurrent()) return false;
+        queryClient.setQueryData(authStatusQueryKey, status);
+        return true;
+    });
+}
+
+function beginAuthenticatedBrowserCacheReset(queryClient: QueryClient): void {
+    authenticatedBrowserCacheGenerations.set(
+        queryClient,
+        authenticatedBrowserCacheGeneration(queryClient) + 1
+    );
+    abortAuthenticatedMutations(queryClient);
+    queryClient.getMutationCache().clear();
+}
+
+function finishAuthenticatedBrowserCacheReset(queryClient: QueryClient): void {
+    authenticatedBrowserCacheGenerations.set(
+        queryClient,
+        authenticatedBrowserCacheGeneration(queryClient) + 1
+    );
+    abortAuthenticatedMutations(queryClient);
+    queryClient.getMutationCache().clear();
+}
+
+function isAuthenticationStatusQuery(queryKey: readonly unknown[]): boolean {
+    return (
+        queryKey.length === authStatusQueryKey.length &&
+        queryKey.every((value, index) => value === authStatusQueryKey[index])
+    );
+}
+
+async function clearAuthenticatedBrowserData(
+    queryClient: QueryClient,
+    collections: DashboardBrowserCollections
+): Promise<void> {
+    beginAuthenticatedBrowserCacheReset(queryClient);
+    try {
+        await queryClient.cancelQueries({
+            predicate: (query) => !isAuthenticationStatusQuery(query.queryKey),
+        });
+    } finally {
+        try {
+            await collections.reset();
+        } finally {
+            try {
+                for (const query of queryClient.getQueryCache().getAll()) {
+                    if (isAuthenticationStatusQuery(query.queryKey)) continue;
+                    queryClient.removeQueries({
+                        exact: true,
+                        queryKey: query.queryKey,
+                    });
+                }
+            } finally {
+                finishAuthenticatedBrowserCacheReset(queryClient);
+            }
+        }
+    }
+}
+
+/**
+ * Clears private browser state while retaining whichever auth.status value is current
+ * when the serialized reset completes.
+ */
+export async function resetAuthenticatedBrowserDataPreservingAuth(
+    queryClient: QueryClient,
+    collections: DashboardBrowserCollections
+): Promise<void> {
+    await clearAuthenticatedBrowserData(queryClient, collections);
+}
 
 /**
  * Defines the sole cache entry for non-secret browser authentication state.
@@ -31,24 +218,29 @@ export async function resetAuthenticatedBrowserCache(
     collections: DashboardBrowserCollections,
     status?: AuthStatus
 ): Promise<void> {
+    const authenticationQueryAtStart = queryClient.getQueryCache().find({
+        exact: true,
+        queryKey: authStatusQueryKey,
+    });
+    const authenticationUpdateCountAtStart =
+        authenticationQueryAtStart?.state.dataUpdateCount;
     try {
-        await collections.reset();
+        await clearAuthenticatedBrowserData(queryClient, collections);
     } finally {
-        if (status === undefined) {
-            queryClient.clear();
-        } else {
-            for (const query of queryClient.getQueryCache().getAll()) {
-                if (
-                    query.queryKey.length === authStatusQueryKey.length &&
-                    query.queryKey.every(
-                        (value, index) => value === authStatusQueryKey[index]
-                    )
-                ) {
-                    continue;
-                }
-                queryClient.removeQueries({ exact: true, queryKey: query.queryKey });
+        const currentAuthenticationQuery = queryClient.getQueryCache().find({
+            exact: true,
+            queryKey: authStatusQueryKey,
+        });
+        const authenticationIsUnchanged =
+            currentAuthenticationQuery === authenticationQueryAtStart &&
+            currentAuthenticationQuery?.state.dataUpdateCount ===
+                authenticationUpdateCountAtStart;
+        if (authenticationIsUnchanged) {
+            if (status === undefined) {
+                queryClient.clear();
+            } else {
+                await publishAuthenticationStatus(queryClient, status);
             }
-            queryClient.setQueryData(authStatusQueryKey, status);
         }
     }
 }

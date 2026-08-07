@@ -27,7 +27,9 @@ import {
 } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
+import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { taskQueryKey } from "./taskQueries.ts";
 
 const { render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -156,6 +158,9 @@ class TaskTransport implements DashboardTrpcTransport {
             case "auth.status": {
                 return Promise.resolve(authenticatedStatus);
             }
+            case "notifications.list": {
+                return Promise.resolve(emptyNotificationListResult);
+            }
             case "tasks.get": {
                 const id =
                     typeof input === "object" && input !== null && "id" in input
@@ -277,7 +282,7 @@ describe("Dashboard task route", () => {
                         level: 2,
                         name: "Progress",
                     }) !== null &&
-                    queryClient.isFetching() === 0 &&
+                    queryClient.isFetching({ queryKey: taskQueryKey }) === 0 &&
                     queryClient.isMutating() === 0
                 ) {
                     break;
@@ -296,7 +301,7 @@ describe("Dashboard task route", () => {
                 (call) => call.kind === "mutation" && call.path === "tasks.create"
             )?.input
         ).toMatchObject({ assignee: "mira-2026" });
-        expect(queryClient.isFetching()).toBe(0);
+        expect(queryClient.isFetching({ queryKey: taskQueryKey })).toBe(0);
         expect(queryClient.isMutating()).toBe(0);
         expect(screen.getByRole("heading", { level: 2, name: "Progress" })).toBeTruthy();
         expect(screen.getAllByText("Browser-created task")).toHaveLength(2);
@@ -323,7 +328,7 @@ describe("Dashboard task route", () => {
             for (let attempt = 0; attempt < 50; attempt += 1) {
                 if (
                     screen.queryByText("Task browser flow verified") !== null &&
-                    queryClient.isFetching() === 0 &&
+                    queryClient.isFetching({ queryKey: taskQueryKey }) === 0 &&
                     queryClient.isMutating() === 0
                 ) {
                     break;
@@ -338,7 +343,10 @@ describe("Dashboard task route", () => {
         await act(async () => {
             screen.getByRole("button", { name: "Delete task" }).click();
             for (let attempt = 0; attempt < 50; attempt += 1) {
-                if (queryClient.isFetching() === 0 && queryClient.isMutating() === 0) {
+                if (
+                    queryClient.isFetching({ queryKey: taskQueryKey }) === 0 &&
+                    queryClient.isMutating() === 0
+                ) {
                     break;
                 }
                 await new Promise((resolve) => setTimeout(resolve, 0));
