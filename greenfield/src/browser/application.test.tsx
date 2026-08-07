@@ -9,22 +9,26 @@ import { authStatusQueryKey } from "./auth/authQueries.ts";
 import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
 
-const { render, screen } = await import("@testing-library/react");
+const { render, screen, waitFor } = await import("@testing-library/react");
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
     authenticate: () => Promise.reject(new TypeError("Unexpected authentication")),
     register: () => Promise.reject(new TypeError("Unexpected registration")),
 });
 
 describe("Dashboard browser application", () => {
-    test("renders the accessible overview through the real providers and router", async () => {
+    test("renders the overview and owns throttled authenticated activity", async () => {
         const timestampMs = Date.now();
         const queryClient = createDashboardQueryClient();
         const router = createDashboardRouter(
             createMemoryHistory({ initialEntries: ["/"] })
         );
+        let touchCalls = 0;
         const trpcClient = createDashboardTrpcClient({
-            mutation() {
-                return Promise.reject(new TypeError("Unexpected mutation"));
+            mutation(path, input) {
+                expect(path).toBe("auth.touch");
+                expect(input).toEqual({});
+                touchCalls += 1;
+                return Promise.resolve({ lastSeenAtMs: timestampMs });
             },
             query(path) {
                 if (path !== "auth.status") {
@@ -38,7 +42,7 @@ describe("Dashboard browser application", () => {
                         expiresAtMs: timestampMs + 86_400_000,
                         id: "a".repeat(32),
                         isCurrent: true,
-                        lastSeenAtMs: timestampMs,
+                        lastSeenAtMs: timestampMs - 61_000,
                         userAgent: "Dashboard browser test",
                     },
                     state: "authenticated",
@@ -72,7 +76,9 @@ describe("Dashboard browser application", () => {
                 screen.getByRole("status", { name: "Application status" }).textContent
             ).toContain("Application shell ready");
             expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
+            await waitFor(() => expect(touchCalls).toBe(1));
             expect(queryClient.getQueryData(authStatusQueryKey)).toMatchObject({
+                session: { lastSeenAtMs: timestampMs },
                 state: "authenticated",
                 user: { username: "operator" },
             });

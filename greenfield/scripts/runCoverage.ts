@@ -32,8 +32,6 @@ export function createCoverageTestArguments(
     partition: CoveragePartition
 ): readonly string[] {
     const coverageArguments = [
-        "--reporter",
-        "dots",
         "--coverage",
         "--coverage-reporter",
         "lcov",

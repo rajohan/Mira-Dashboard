@@ -7,8 +7,6 @@ describe("coverage runner", () => {
         const arguments_ = createCoverageTestArguments("/tmp/coverage-output", "bun");
 
         expect(arguments_).toEqual([
-            "--reporter",
-            "dots",
             "--coverage",
             "--coverage-reporter",
             "lcov",
@@ -25,8 +23,6 @@ describe("coverage runner", () => {
         const arguments_ = createCoverageTestArguments("/tmp/coverage-output", "browser");
 
         expect(arguments_).toEqual([
-            "--reporter",
-            "dots",
             "--coverage",
             "--coverage-reporter",
             "lcov",

@@ -107,6 +107,11 @@ describe("authentication contracts", () => {
                 authProcedureContracts.find((contract) => contract.name === name)?.access
             ).toEqual({ kind: "pending-login" });
         }
+        expect(
+            authProcedureContracts.find(
+                (contract) => contract.name === "auth.loginWebAuthn"
+            )?.transport.requestBody
+        ).toBe("webauthn");
     });
 
     test("requires recent proof before revoking a browser session", () => {

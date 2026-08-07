@@ -222,6 +222,42 @@ describe("Dashboard login route", () => {
         expect(cachedBrowserData(queryClient)).not.toContain(code);
     });
 
+    test("resyncs pending MFA state when a failed proof clears its cookie", async () => {
+        const transport = new AuthenticationTransport({
+            pendingLogin,
+            state: "pending-mfa",
+        });
+        transport.mutationHandler = (path, input) => {
+            expect(path).toBe("auth.loginTotp");
+            expect(input).toEqual({ code: "123456" });
+            transport.status = { state: "anonymous" };
+            return Promise.reject(
+                Object.assign(new Error("Pending login expired"), {
+                    data: { code: "UNAUTHORIZED" },
+                })
+            );
+        };
+        renderAuthenticationRoute(transport);
+        const userActions = userEvent.setup();
+
+        await screen.findByRole("heading", {
+            level: 1,
+            name: "Multi-factor authentication",
+        });
+        await userActions.type(screen.getByLabelText("Authenticator code"), "123456");
+        await userActions.click(screen.getByRole("button", { name: "Verify code" }));
+
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Sign in" })
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("heading", {
+                level: 1,
+                name: "Multi-factor authentication",
+            })
+        ).toBeNull();
+    });
+
     test("completes recovery-code login without caching the proof", async () => {
         const transport = new AuthenticationTransport({
             pendingLogin,

@@ -293,8 +293,35 @@ describe("production release activation", () => {
             expect(await readdir(paths.stateDirectory)).not.toContain(
                 "activation-transition.json"
             );
+        });
+    });
 
-            services.rejectReadyReleaseId = undefined;
+    test("restores the previous release and database after a partial candidate start", async () => {
+        const sourceReleases = await Promise.all([
+            localReleaseFixture(firstReleaseId),
+            localReleaseFixture(secondReleaseId),
+        ]);
+        const { projectRoot, runtimeSource } = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource
+            );
+            const services = new TestServiceController();
+            const dependencies = activationDependencies(services, fixtures.probeRuntime);
+            const initial = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.first,
+                    fixtures.runtime,
+                    dependencies
+                )
+            );
             services.rejectStartReleaseId = secondReleaseId;
             const partialStartFailure = await rejectionError(
                 Effect.runPromise(
@@ -315,6 +342,11 @@ describe("production release activation", () => {
                 "Production release activation failed"
             );
             expect(activationAfterPartialStart.record).toEqual(initial);
+            expect(
+                readMigrationReleaseId(
+                    path.join(paths.stateDirectory, "mira-dashboard.db")
+                )
+            ).toBe(firstReleaseId);
             expect(services.events.slice(-9)).toEqual([
                 `prepare:${firstReleaseId}`,
                 "stop",
@@ -326,6 +358,9 @@ describe("production release activation", () => {
                 `start:${firstReleaseId}`,
                 `ready:${firstReleaseId}`,
             ]);
+            expect(await readdir(paths.stateDirectory)).not.toContain(
+                "activation-transition.json"
+            );
         });
     });
 

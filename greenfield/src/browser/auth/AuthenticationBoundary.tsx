@@ -17,6 +17,7 @@ export interface AuthenticationBoundaryProps {
 
 /**
  * Gates protected browser routes on current server-authenticated session state.
+ * The application root separately owns throttled explicit session activity writes.
  * @returns Protected content, a bounded loading/error state, or a login redirect.
  */
 export function AuthenticationBoundary({ children }: AuthenticationBoundaryProps) {

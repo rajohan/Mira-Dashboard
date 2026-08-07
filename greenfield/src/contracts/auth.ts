@@ -294,6 +294,10 @@ const authenticationMutationTransport = {
     handler: "authentication",
     requestBody: "authentication",
 } as const;
+const webAuthnAuthenticationMutationTransport = {
+    ...authenticationMutationTransport,
+    requestBody: "webauthn",
+} as const;
 
 /** Implemented browser authentication procedure metadata. */
 export const authProcedureContracts = [
@@ -390,7 +394,7 @@ export const authProcedureContracts = [
         outputSchemaId: "auth.loginWebAuthn.output",
         summary:
             "Consumes a pending login and WebAuthn challenge to create the browser session.",
-        transport: authenticationMutationTransport,
+        transport: webAuthnAuthenticationMutationTransport,
     },
     {
         access: publicAccess,

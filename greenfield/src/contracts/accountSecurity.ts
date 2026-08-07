@@ -421,6 +421,10 @@ const authenticationMutationTransport = {
     handler: "authentication",
     requestBody: "authentication",
 } as const;
+const webAuthnAuthenticationMutationTransport = {
+    ...authenticationMutationTransport,
+    requestBody: "webauthn",
+} as const;
 
 /** Implemented account-security procedure metadata. */
 export const accountSecurityProcedureContracts = [
@@ -522,7 +526,7 @@ export const accountSecurityProcedureContracts = [
         output: webAuthnStepUpResultSchema,
         outputSchemaId: "accountSecurity.stepUpWebAuthn.output",
         summary: "Consumes a WebAuthn challenge and rotates the verified session.",
-        transport: authenticationMutationTransport,
+        transport: webAuthnAuthenticationMutationTransport,
     },
     {
         access: factorEnrollmentAccess,
@@ -591,7 +595,7 @@ export const accountSecurityProcedureContracts = [
         outputSchemaId: "accountSecurity.confirmWebAuthnEnrollment.output",
         summary:
             "Verifies and stores a WebAuthn credential, enabling MFA when it is first.",
-        transport: authenticationMutationTransport,
+        transport: webAuthnAuthenticationMutationTransport,
     },
     {
         access: recentMfaAccess,
