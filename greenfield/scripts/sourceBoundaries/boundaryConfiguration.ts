@@ -61,6 +61,7 @@ const reviewedTypeScriptConfigurations: Readonly<
         exclude: ["node_modules"],
         extends: "./tsconfig.json",
         files: [
+            "node_modules/@testing-library/jest-dom/types/bun.d.ts",
             "node_modules/bun-types/test.d.ts",
             "src/test/types/bunCanaryMatchers.d.ts",
         ],

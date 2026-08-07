@@ -8,6 +8,10 @@ import {
     accountSecurityRouter,
 } from "../domains/security/mfa/procedures.ts";
 import { authProcedureNames, authRouter } from "../domains/security/procedures.ts";
+import {
+    securityAuditProcedureNames,
+    securityAuditRouter,
+} from "../domains/security/securityAuditProcedures.ts";
 import { systemProcedureNames, systemRouter } from "../domains/system/procedures.ts";
 import { router } from "./trpc.ts";
 
@@ -24,6 +28,7 @@ export const appRouter = router({
     auth: authRouter,
     automationSecurity: automationSecurityRouter,
     events: eventsRouter,
+    securityAudit: securityAuditRouter,
     system: systemRouter,
 });
 
@@ -33,6 +38,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("auth", authProcedureNames),
     ...namespacedProcedureNames("automationSecurity", automationSecurityProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
+    ...namespacedProcedureNames("securityAudit", securityAuditProcedureNames),
     ...namespacedProcedureNames("system", systemProcedureNames),
 ]);
 

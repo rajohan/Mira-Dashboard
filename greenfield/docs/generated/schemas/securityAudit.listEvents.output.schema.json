@@ -1,0 +1,314 @@
+{
+  "$id": "urn:mira-dashboard:securityAudit.listEvents.output",
+  "type": "object",
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "actor": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "const": "anonymous"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "authenticatorId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                  },
+                  "kind": {
+                    "const": "automation"
+                  }
+                },
+                "required": [
+                  "authenticatorId",
+                  "id",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000]*$"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "const": "system"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "authenticatorId": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 32,
+                    "pattern": "^[0-9a-f]{32}$"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36,
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "kind": {
+                    "const": "user"
+                  }
+                },
+                "required": [
+                  "authenticatorId",
+                  "id",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36,
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "addedCapabilities": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "notifications:read",
+                    "reports:read"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 2,
+                "uniqueItems": true
+              },
+              "method": {
+                "enum": [
+                  "password",
+                  "recovery",
+                  "totp",
+                  "webauthn"
+                ],
+                "type": "string"
+              },
+              "pendingMfa": {
+                "type": "boolean"
+              },
+              "predecessorCredentialId": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36,
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "reason": {
+                "enum": [
+                  "gateway_unavailable",
+                  "identity_changed",
+                  "invalid_credentials",
+                  "invalid_current_password",
+                  "invalid_gateway",
+                  "recovery_invalid",
+                  "recovery_pending_invalid",
+                  "totp_invalid",
+                  "totp_pending_invalid",
+                  "webauthn_configuration_mismatch",
+                  "webauthn_invalid",
+                  "webauthn_pending_invalid"
+                ],
+                "type": "string"
+              },
+              "removedCapabilities": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "notifications:read",
+                    "reports:read"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 2,
+                "uniqueItems": true
+              },
+              "replacementCredentialId": {
+                "type": "string",
+                "minLength": 36,
+                "maxLength": 36,
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "revoked": {
+                "type": "boolean"
+              },
+              "revokedCredentials": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "revokedSessions": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "occurredAtMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8640000000000000
+          },
+          "outcome": {
+            "enum": [
+              "accepted",
+              "attempted",
+              "cancelled",
+              "denied",
+              "failed",
+              "succeeded"
+            ],
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              }
+            ]
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1,
+                "pattern": "\\S",
+                "allOf": [
+                  {
+                    "pattern": "^[^\\u0000]*$"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "action",
+          "actor",
+          "id",
+          "metadata",
+          "occurredAtMs",
+          "outcome",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 50,
+      "$comment": "Live Valibot validation additionally requires strict newest-first audit-event ordering by occurrence timestamp and ID."
+    },
+    "nextCursor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "occurredAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        }
+      },
+      "required": [
+        "id",
+        "occurredAtMs"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "events"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires an audit continuation cursor to identify the returned last event.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

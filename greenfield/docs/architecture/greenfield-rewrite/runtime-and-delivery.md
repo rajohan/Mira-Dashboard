@@ -55,8 +55,8 @@ environment against the exact candidate binary:
    transactions, prepared-statement disposal, backup, restore, and process termination.
 5. Frontend build tests for HTML imports, Tailwind, React Compiler, lazy chunks, CSP, source
    maps, cache hashes, precompression, and bundle budgets.
-6. `bun test --isolate` tests for fake timers, leaked handles, deterministic shutdown, and
-   bounded concurrency.
+6. Same-process Bun tests for fake timers, leaked handles, deterministic shutdown, and
+   bounded concurrency, with explicit teardown after every test.
 
 The historical 2026-08-06 Phase 0 qualification round passed on exact revision
 `17d6843606d76620cb55d31424d7fb0aed51c367`: its then-current dedicated typecheck and full evidence
@@ -330,7 +330,7 @@ Additional safeguards:
 - no unbounded `Promise.all` over files, containers, tests, sessions, or API results;
 - server-side pagination or cursors for every append-only history;
 - run the Bun and browser type-aware lint partitions sequentially on the VPS;
-- cap Bun test concurrency and isolate tests that leak global runtime state; and
+- cap Bun test concurrency and require deterministic same-process cleanup of global state; and
 - record cgroup OOM/limit exits as failed jobs with an actionable message.
 
 ## Build, Test, and Quality Tooling
@@ -340,8 +340,8 @@ Additional safeguards:
 The exact naming may change as product areas arrive. The future-root package exposes one
 `typecheck` gate over the root solution; focused browser and Bun child checks may remain as
 developer aliases. There are no per-domain, server, worker, script, or qualification TypeScript
-projects. `check:boundaries` and `test:boundaries` enforce the finer source roles. Retained Phase 0
-mechanisms run through the ordinary integration, parity, or audit suites. Product and
+projects. `check:boundaries` enforces the finer source roles. Retained Phase 0 mechanisms run
+through the ordinary Bun test graph. Product and
 cross-process integration tests live under `src/`; a focused test of a repository script may
 remain colocated with that script.
 
@@ -351,13 +351,9 @@ build                   deterministic browser and server/worker artifacts
 typecheck               root TypeScript solution (browser + Bun), no emit
 lint                    oxlint type-aware rules and type-check diagnostics, partitioned by runtime
 format / format:check   oxfmt
-test:unit               pure domain and utility tests
-test:database           temporary SQLite repository/migration tests
-test:contracts          tRPC caller, raw HTTP registry, schema, and docs tests
-test:realtime           SSE/outbox/reconnect/race/backpressure tests
-test:frontend           Happy DOM + Testing Library behavior tests
-test:integration        Bun server/worker/Gateway fixture tests
-test:parity             named current-feature acceptance suite
+test                    Bun graph followed by browser graph
+test:bun                scripts, server, worker, contracts, integration, and parity tests
+test:browser            Happy DOM + Testing Library behavior tests
 test:coverage           all tests + 85% executable-source line gate and LCOV
 docs:generate/check     deterministic generated documentation
 verify                  sequential local gate with explicit resource caps

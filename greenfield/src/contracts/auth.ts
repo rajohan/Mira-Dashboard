@@ -255,6 +255,10 @@ export const authSessionRevokeResultSchema = v.strictObject({
     revoked: v.boolean(),
 });
 
+export const authSessionsRevokeResultSchema = v.strictObject({
+    revokedSessions: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+});
+
 export const passwordChangeResultSchema = v.strictObject({
     revokedSessions: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
     session: authSessionSummarySchema,
@@ -289,6 +293,10 @@ const authenticationMutationTransport = {
     batching: "forbidden",
     handler: "authentication",
     requestBody: "authentication",
+} as const;
+const webAuthnAuthenticationMutationTransport = {
+    ...authenticationMutationTransport,
+    requestBody: "webauthn",
 } as const;
 
 /** Implemented browser authentication procedure metadata. */
@@ -386,7 +394,7 @@ export const authProcedureContracts = [
         outputSchemaId: "auth.loginWebAuthn.output",
         summary:
             "Consumes a pending login and WebAuthn challenge to create the browser session.",
-        transport: authenticationMutationTransport,
+        transport: webAuthnAuthenticationMutationTransport,
     },
     {
         access: publicAccess,
@@ -440,6 +448,34 @@ export const authProcedureContracts = [
         output: authSessionRevokeResultSchema,
         outputSchemaId: "auth.revokeSession.output",
         summary: "Revokes one browser session owned by the current user.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: sessionMutationAccess,
+        domain: "auth",
+        errorReasons: ["step_up_required"],
+        errors: ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+        input: emptyInputSchema,
+        inputSchemaId: "auth.revokeOtherSessions.input",
+        kind: "mutation",
+        name: "auth.revokeOtherSessions",
+        output: authSessionsRevokeResultSchema,
+        outputSchemaId: "auth.revokeOtherSessions.output",
+        summary: "Revokes every browser session except the current session.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: sessionMutationAccess,
+        domain: "auth",
+        errorReasons: ["step_up_required"],
+        errors: ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+        input: emptyInputSchema,
+        inputSchemaId: "auth.revokeAllSessions.input",
+        kind: "mutation",
+        name: "auth.revokeAllSessions",
+        output: authSessionsRevokeResultSchema,
+        outputSchemaId: "auth.revokeAllSessions.output",
+        summary: "Revokes every browser session, including the current session.",
         transport: authenticationMutationTransport,
     },
     {

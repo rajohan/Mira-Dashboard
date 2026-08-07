@@ -9,6 +9,8 @@ export const serverRequestBodyMaximumBytes = 64 * 1024;
 export const trpcRequestBodyMaximumBytes = serverRequestBodyMaximumBytes;
 /** Raw body ceiling for authentication and account-security procedures. */
 export const authenticationRequestBodyMaximumBytes = 16 * 1024;
+/** Raw body ceiling for bounded WebAuthn authentication responses. */
+export const webAuthnRequestBodyMaximumBytes = 32 * 1024;
 /** Maximum procedure count accepted by the tRPC adapter in one request. */
 export const trpcMaximumBatchSize = 8;
 /** Idle budget for bounded authentication cryptography and upstream verification. */
@@ -39,7 +41,7 @@ function buildProcedureContractIndex(contracts: readonly ProcedureContract[]): {
         contractsByName.set(contract.name, contract);
         if (
             contract.transport.handler === "authentication" ||
-            contract.transport.requestBody === "authentication"
+            contract.transport.requestBody !== "default"
         ) {
             const namespace = procedureNamespace(contract.name);
             if (namespace === undefined) {
@@ -56,7 +58,7 @@ function buildProcedureContractIndex(contracts: readonly ProcedureContract[]): {
             namespace !== undefined &&
             authenticationNamespaces.has(namespace) &&
             (contract.transport.handler !== "authentication" ||
-                contract.transport.requestBody !== "authentication")
+                contract.transport.requestBody === "default")
         ) {
             throw new Error(
                 `Authentication procedure namespace has inconsistent transport policy: ${namespace}`
@@ -90,6 +92,7 @@ function effectivePolicy(input: {
     readonly containsAuthenticationProcedure: boolean;
     readonly containsForbiddenBatchProcedure: boolean;
     readonly containsLongLivedProcedure: boolean;
+    readonly containsWebAuthnProcedure: boolean;
     readonly isBatchRequest: boolean;
 }): TrpcRequestPolicy {
     let handlerIdleTimeoutSeconds: number | undefined;
@@ -100,12 +103,17 @@ function effectivePolicy(input: {
     }
     const handlerPolicy =
         handlerIdleTimeoutSeconds === undefined ? {} : { handlerIdleTimeoutSeconds };
+    let requestBodyMaximumBytes = trpcRequestBodyMaximumBytes;
+    if (input.containsAuthenticationProcedure) {
+        requestBodyMaximumBytes = authenticationRequestBodyMaximumBytes;
+    }
+    if (input.containsWebAuthnProcedure) {
+        requestBodyMaximumBytes = webAuthnRequestBodyMaximumBytes;
+    }
     return Object.freeze({
         ...handlerPolicy,
         rejectsBatch: input.isBatchRequest && input.containsForbiddenBatchProcedure,
-        requestBodyMaximumBytes: input.containsAuthenticationProcedure
-            ? authenticationRequestBodyMaximumBytes
-            : trpcRequestBodyMaximumBytes,
+        requestBodyMaximumBytes,
     });
 }
 
@@ -134,6 +142,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
         let containsAuthenticationProcedure = false;
         let containsForbiddenBatchProcedure = false;
         let containsLongLivedProcedure = false;
+        let containsWebAuthnProcedure = false;
         for (const procedure of procedures) {
             const contract = contractsByName.get(procedure);
             if (contract !== undefined) {
@@ -143,6 +152,8 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
                     contract.transport.batching === "forbidden";
                 containsLongLivedProcedure ||=
                     contract.transport.handler === "long-lived";
+                containsWebAuthnProcedure ||=
+                    contract.transport.requestBody === "webauthn";
                 continue;
             }
             const namespace = procedureNamespace(procedure);
@@ -155,6 +166,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
             containsAuthenticationProcedure,
             containsForbiddenBatchProcedure,
             containsLongLivedProcedure,
+            containsWebAuthnProcedure,
             isBatchRequest,
         });
     } catch {
@@ -164,6 +176,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
             containsAuthenticationProcedure,
             containsForbiddenBatchProcedure: containsAuthenticationProcedure,
             containsLongLivedProcedure: false,
+            containsWebAuthnProcedure: false,
             isBatchRequest,
         });
     }

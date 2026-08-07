@@ -96,6 +96,14 @@
         },
         {
             "kind": "mutation",
+            "name": "auth.revokeAllSessions"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.revokeOtherSessions"
+        },
+        {
+            "kind": "mutation",
             "name": "auth.revokeSession"
         },
         {
@@ -145,6 +153,10 @@
         {
             "kind": "subscription",
             "name": "events.stream"
+        },
+        {
+            "kind": "query",
+            "name": "securityAudit.listEvents"
         },
         {
             "kind": "query",

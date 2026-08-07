@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import {
+    boundedNonBlankTextSchema,
     fullCommitShaSchema,
     lowercaseSha256Schema,
     lowercaseUuidV7Schema,
@@ -73,6 +74,17 @@ describe("shared scalar validation", () => {
         }
         for (const value of ["b".repeat(39), "B".repeat(40), "g".repeat(40), 1]) {
             expect(v.safeParse(commitSha, value).success).toBeFalse();
+        }
+    });
+
+    test("bounds persistence text by Unicode code points and rejects unsafe text", () => {
+        const schema = boundedNonBlankTextSchema(2);
+
+        for (const value of ["a", "ab", "😀", "😀😀"]) {
+            expect(v.parse(schema, value)).toBe(value);
+        }
+        for (const value of ["", " ", "abc", "😀😀😀", "a\0"]) {
+            expect(v.safeParse(schema, value).success).toBeFalse();
         }
     });
 

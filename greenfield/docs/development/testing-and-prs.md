@@ -43,7 +43,7 @@ policy.
 
 Browser tests are checked by the browser graph with DOM/JSX and the narrow `bun:test` declaration.
 All remaining tests are included by the Bun graph. Every `*.test.ts(x)`, `*.spec.ts(x)`,
-`__tests__/`, and `testSupport/` file must therefore remain type-checked.
+`__tests__/`, `test/`, and `testSupport/` file must therefore remain type-checked.
 
 ## Test ownership
 
@@ -51,8 +51,10 @@ Keep a module's tests beside that module. If one production module needs multipl
 suites, use `<module><Concern>.test.ts` rather than creating an omnibus suite.
 
 - Put reusable executable helpers in the owning module's `testSupport/` directory.
+- Keep browser-wide setup and self-contained browser build fixtures under `src/browser/test/`.
 - Put genuinely cross-domain server harnesses in `src/server/test/support/`.
-- Reserve `fixtures/` for immutable payloads and reviewed evidence.
+- Reserve `fixtures/` for immutable payloads, reviewed evidence, and self-contained build inputs;
+  never put reusable helper logic there.
 - Put cross-module contracts in `src/server/test/contracts/`.
 - Put composition-root behavior in `src/server/test/system/`.
 - Keep executable repository audits and tools under `scripts/`. Tests that directly verify one
@@ -68,11 +70,12 @@ and additionally fails an otherwise green suite when output contains a React mis
 warning, an unconfigured React act environment warning, or a Bun panic/crash banner. Do not bypass
 that runner in repository test scripts.
 
-The browser suite preloads only the Happy DOM globals and React act-environment marker it needs;
-the tests themselves remain in the browser TypeScript graph. The product-shell test renders the
-real QueryClient, router, accessible route, and error-boundary composition. Build tests separately
-exercise the actual HTML entrypoint, React Compiler, Tailwind, code splitting, compression, CSP
-policy, and bundle budgets.
+Every suite preloads the process-private test root and mock cleanup. The browser suite additionally
+preloads Happy DOM, Testing Library matchers and cleanup, the React act-environment marker, and the
+Headless UI animation mock. Browser tests and their support remain in the browser TypeScript graph.
+The product-shell test renders the real QueryClient, router, accessible route, and error-boundary
+composition. Build tests separately exercise the actual HTML entrypoint, React Compiler, Tailwind,
+code splitting, compression, CSP policy, and bundle budgets.
 
 ## Lint and boundaries
 

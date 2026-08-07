@@ -97,12 +97,13 @@ function sameSnapshot(
 async function processLockMayStillBeInitializing(
     lockPath: string,
     failureMessage: string,
-    contents: string | undefined
+    contents: string | undefined,
+    observedMutation: boolean
 ): Promise<boolean> {
     // O_EXCL publishes the pathname before the owner can finish its bounded record.
     // A newline terminates every complete record, so completed malformed data must
     // fail immediately while only a secure incomplete publication receives grace.
-    if (contents?.endsWith("\n")) return false;
+    if (!observedMutation && contents?.endsWith("\n")) return false;
     let status: BigIntStats;
     try {
         status = await lstat(lockPath, { bigint: true });
@@ -167,6 +168,7 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
 > {
     let handle: FileHandle;
     let contents: string | undefined;
+    let observedMutation = false;
     try {
         handle = await open(options.lockPath, lockReadFlags);
     } catch (error) {
@@ -174,20 +176,32 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
         throw processLockFailure(options.failureMessage);
     }
     try {
-        const before = snapshot(
-            await handle.stat({ bigint: true }),
-            options.failureMessage
-        );
+        const beforeStatus = await handle.stat({ bigint: true });
+        if (beforeStatus.nlink === 0n) return undefined;
+        const before = snapshot(beforeStatus, options.failureMessage);
         contents = await handle.readFile("utf8");
-        const after = snapshot(
-            await handle.stat({ bigint: true }),
-            options.failureMessage
-        );
+        const afterStatus = await handle.stat({ bigint: true });
+        if (afterStatus.nlink === 0n) return undefined;
+        const after = snapshot(afterStatus, options.failureMessage);
+        if (!sameSnapshot(before, after)) {
+            observedMutation = true;
+            throw processLockFailure(options.failureMessage);
+        }
         if (
-            !sameSnapshot(before, after) ||
+            !contents.endsWith("\n") ||
             Buffer.byteLength(contents) > maximumProcessLockBytes
         ) {
             throw processLockFailure(options.failureMessage);
+        }
+        let pathStatus: BigIntStats;
+        try {
+            pathStatus = await lstat(options.lockPath, { bigint: true });
+        } catch (error) {
+            if (errorCode(error) === "ENOENT") return undefined;
+            throw processLockFailure(options.failureMessage);
+        }
+        if (!sameSnapshot(after, snapshot(pathStatus, options.failureMessage))) {
+            return undefined;
         }
         const parsed: unknown = JSON.parse(contents);
         return Object.freeze({
@@ -199,7 +213,8 @@ async function readProcessLock(options: ExclusiveProcessLockOptions): Promise<
             await processLockMayStillBeInitializing(
                 options.lockPath,
                 options.failureMessage,
-                contents
+                contents,
+                observedMutation
             )
         ) {
             return undefined;
