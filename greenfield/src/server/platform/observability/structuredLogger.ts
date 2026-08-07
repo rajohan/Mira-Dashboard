@@ -112,6 +112,7 @@ const structuredEventComponents = Object.freeze({
     "http.request.failed": "http",
     "http.response.created": "http",
     "realtime.runner.failed": "realtime-event-pump",
+    "realtime.wake.failed": "realtime-event-pump",
     "runtime.logger.connected": "application-runtime",
     "runtime.start_failed": "runtime",
     "runtime.started": "runtime",

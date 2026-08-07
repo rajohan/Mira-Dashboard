@@ -6,7 +6,10 @@ import {
     contractAuthenticationErrorReasons,
     type ContractAuthenticationErrorReason,
 } from "../../contracts/registry.ts";
-import type { ApplicationCapability } from "../../contracts/security.ts";
+import type {
+    ApplicationCapability,
+    AuthenticatedPrincipal,
+} from "../../contracts/security.ts";
 import type { RequestContext } from "./context.ts";
 import {
     applyProcedureExpectedErrorPolicy,
@@ -148,6 +151,26 @@ export function capabilityProcedure(capability: ApplicationCapability) {
                 code: "FORBIDDEN",
                 message: "Required application capability is not granted",
             });
+        }
+        return next({ ctx });
+    });
+}
+
+/**
+ * Builds a capability-scoped procedure restricted to one authenticated principal kind.
+ * @param capability Registered application capability required by the procedure.
+ * @param kind Exact authenticated principal kind allowed through the boundary.
+ * @param message Safe rejection message exposed to callers of the procedure.
+ * @returns Authenticated procedure builder narrowed to the expected principal kind.
+ */
+export function principalKindProcedure(
+    capability: ApplicationCapability,
+    kind: AuthenticatedPrincipal["kind"],
+    message: string
+) {
+    return capabilityProcedure(capability).use(({ ctx, next }) => {
+        if (ctx.principal.kind !== kind) {
+            throw new TRPCError({ code: "FORBIDDEN", message });
         }
         return next({ ctx });
     });

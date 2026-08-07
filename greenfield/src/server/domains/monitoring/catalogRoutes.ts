@@ -1,5 +1,3 @@
-import { TRPCError } from "@trpc/server";
-
 import {
     getIncidentInputSchema,
     listIncidentsInputSchema,
@@ -27,34 +25,22 @@ import {
     listReportsResultSchema,
     upsertReportInputSchema,
 } from "../../../contracts/reports.ts";
-import { capabilityProcedure } from "../../trpc/trpc.ts";
+import { capabilityProcedure, principalKindProcedure } from "../../trpc/trpc.ts";
 import { runMonitoringEffect } from "./routeEffects.ts";
 
 const incidentReadProcedure = capabilityProcedure("reports:read");
 const notificationReadProcedure = capabilityProcedure("notifications:read");
 const reportReadProcedure = capabilityProcedure("reports:read");
 const reportWriteProcedure = capabilityProcedure("reports:write");
-const notificationProducerProcedure = capabilityProcedure("notifications:write").use(
-    ({ ctx, next }) => {
-        if (ctx.principal.kind !== "automation") {
-            throw new TRPCError({
-                code: "FORBIDDEN",
-                message: "An automation principal is required",
-            });
-        }
-        return next({ ctx });
-    }
+const notificationProducerProcedure = principalKindProcedure(
+    "notifications:write",
+    "automation",
+    "An automation principal is required"
 );
-const notificationSessionWriteProcedure = capabilityProcedure("notifications:write").use(
-    ({ ctx, next }) => {
-        if (ctx.principal.kind !== "session") {
-            throw new TRPCError({
-                code: "FORBIDDEN",
-                message: "A browser session is required",
-            });
-        }
-        return next({ ctx });
-    }
+const notificationSessionWriteProcedure = principalKindProcedure(
+    "notifications:write",
+    "session",
+    "A browser session is required"
 );
 
 /** Capability-scoped incident lifecycle read routes. */

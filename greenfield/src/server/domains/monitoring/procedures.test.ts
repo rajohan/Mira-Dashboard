@@ -144,6 +144,7 @@ describe("monitoring procedures", () => {
                         "notifications:read",
                         "notifications:write",
                         "reports:read",
+                        "reports:write",
                     ]),
                     createTestApplicationRuntime(),
                     services
@@ -157,6 +158,18 @@ describe("monitoring procedures", () => {
                 bodyMarkdown: "# Health at 1000",
                 id: submission.reportId,
             });
+            expect(
+                await session.reports.upsert({
+                    bodyMarkdown: "# Manual report",
+                    id: uuid(150),
+                    kind: "manual",
+                    metadata: {},
+                    occurredAtMs: 2000,
+                    source: "browser",
+                    status: "ok",
+                    title: "Manual report",
+                })
+            ).toMatchObject({ id: uuid(150), source: "browser" });
 
             const incidents = await session.incidents.list({ limit: 10 });
             expect(incidents.incidents).toHaveLength(1);

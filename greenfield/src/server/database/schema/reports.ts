@@ -24,6 +24,7 @@ export const reports = sqliteTable(
             sql`CASE WHEN json_valid(${table.metadataJson}) THEN json_type(${table.metadataJson}) = 'object' ELSE 0 END`
         ),
         check("reports_status_check", sql`${table.status} IN ('error', 'ok', 'warning')`),
+        index("reports_occurred_id_idx").on(table.occurredAt, table.id),
         index("reports_kind_occurred_id_idx").on(table.kind, table.occurredAt, table.id),
         index("reports_source_job_occurred_id_idx").on(
             table.source,

@@ -1,7 +1,7 @@
 import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
-import { hasUniqueArrayItems } from "../shared/validation.ts";
+import { enumFilterSchema, uniqueFilterSchema } from "./filterSchemas.ts";
 import {
     type IncidentSummary,
     incidentRecordSchema,
@@ -30,33 +30,6 @@ const incidentLimitSchema = v.pipe(
     v.maxValue(incidentPageMaximum, "Incident page limit is outside its budget")
 );
 
-function uniqueFilterSchema<
-    TOutput extends string,
-    TSchema extends v.GenericSchema<string, TOutput>,
->(item: TSchema, label: string) {
-    return v.pipe(
-        v.array(item, `${label} filter is invalid`),
-        v.minLength(1, `${label} filter cannot be empty`),
-        v.maxLength(incidentFilterMaximum, `${label} filter is outside its budget`),
-        v.check(hasUniqueArrayItems<TOutput>, `${label} filter values must be unique`)
-    );
-}
-
-function enumFilterSchema<const TValues extends readonly [string, ...string[]]>(
-    values: TValues,
-    label: string
-) {
-    return v.pipe(
-        v.array(v.picklist(values, `${label} value is invalid`)),
-        v.minLength(1, `${label} filter cannot be empty`),
-        v.maxLength(incidentFilterMaximum, `${label} filter is outside its budget`),
-        v.check(
-            hasUniqueArrayItems<TValues[number]>,
-            `${label} filter values must be unique`
-        )
-    );
-}
-
 /** Stable newest-first incident cursor. */
 export const incidentCursorSchema = v.strictObject({
     id: monitoringRecordIdSchema,
@@ -65,12 +38,22 @@ export const incidentCursorSchema = v.strictObject({
 
 /** Bounded filters supported by incident lifecycle reads. */
 export const incidentListFiltersSchema = v.strictObject({
-    kinds: v.optional(uniqueFilterSchema(monitoringKindSchema, "Incident kind")),
-    monitorKeys: v.optional(
-        uniqueFilterSchema(monitoringMonitorKeySchema, "Incident monitor")
+    kinds: v.optional(
+        uniqueFilterSchema(monitoringKindSchema, "Incident kind", incidentFilterMaximum)
     ),
-    severities: v.optional(enumFilterSchema(monitoringSeverities, "Incident severity")),
-    states: v.optional(enumFilterSchema(["active", "resolved"], "Incident state")),
+    monitorKeys: v.optional(
+        uniqueFilterSchema(
+            monitoringMonitorKeySchema,
+            "Incident monitor",
+            incidentFilterMaximum
+        )
+    ),
+    severities: v.optional(
+        enumFilterSchema(monitoringSeverities, "Incident severity", incidentFilterMaximum)
+    ),
+    states: v.optional(
+        enumFilterSchema(["active", "resolved"], "Incident state", incidentFilterMaximum)
+    ),
 });
 
 /** One stable keyset-paginated incident request. */

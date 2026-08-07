@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
 import { hasUniqueArrayItems } from "../shared/validation.ts";
+import { uniqueFilterSchema } from "./filterSchemas.ts";
 import {
     type ReportSummary,
     monitoringJsonObjectSchema,
@@ -35,18 +36,6 @@ const reportLimitSchema = v.pipe(
     v.maxValue(reportPageMaximum, "Report page limit is outside its budget")
 );
 
-function uniqueFilterSchema<
-    TOutput extends string,
-    TSchema extends v.GenericSchema<string, TOutput>,
->(item: TSchema, label: string) {
-    return v.pipe(
-        v.array(item, `${label} filter is invalid`),
-        v.minLength(1, `${label} filter cannot be empty`),
-        v.maxLength(reportFilterMaximum, `${label} filter is outside its budget`),
-        v.check(hasUniqueArrayItems<TOutput>, `${label} filter values must be unique`)
-    );
-}
-
 /** Stable newest-first report cursor. */
 export const reportCursorSchema = v.strictObject({
     id: monitoringRecordIdSchema,
@@ -55,12 +44,22 @@ export const reportCursorSchema = v.strictObject({
 
 /** Bounded filters supported by the immutable report catalog. */
 export const reportListFiltersSchema = v.strictObject({
-    kinds: v.optional(uniqueFilterSchema(monitoringKindSchema, "Report kind")),
+    kinds: v.optional(
+        uniqueFilterSchema(monitoringKindSchema, "Report kind", reportFilterMaximum)
+    ),
     sourceJobIds: v.optional(
-        uniqueFilterSchema(monitoringReportSourceJobIdSchema, "Report source-job")
+        uniqueFilterSchema(
+            monitoringReportSourceJobIdSchema,
+            "Report source-job",
+            reportFilterMaximum
+        )
     ),
     sources: v.optional(
-        uniqueFilterSchema(monitoringReportSourceSchema, "Report source")
+        uniqueFilterSchema(
+            monitoringReportSourceSchema,
+            "Report source",
+            reportFilterMaximum
+        )
     ),
     statuses: v.optional(
         v.pipe(

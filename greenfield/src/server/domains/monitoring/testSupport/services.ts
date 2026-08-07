@@ -3,8 +3,11 @@ import { Effect } from "effect";
 import { MonitoringCatalogService } from "../catalogService.ts";
 import { MonitoringService } from "../service.ts";
 
-function unexpectedMonitoringServiceCall(): Effect.Effect<never> {
-    return Effect.die(new Error("Test monitoring service received an unexpected call"));
+function unexpectedMonitoringServiceCall(method: string): () => Effect.Effect<never> {
+    return () =>
+        Effect.die(
+            new Error(`Test monitoring service received an unexpected call: ${method}`)
+        );
 }
 
 /**
@@ -16,18 +19,20 @@ export function createTestMonitoringCatalogService(
     overrides: Partial<MonitoringCatalogService["Service"]> = {}
 ): MonitoringCatalogService["Service"] {
     return MonitoringCatalogService.of({
-        clearReadNotifications: unexpectedMonitoringServiceCall,
-        deleteNotification: unexpectedMonitoringServiceCall,
-        deleteReport: unexpectedMonitoringServiceCall,
-        getIncident: unexpectedMonitoringServiceCall,
-        getReport: unexpectedMonitoringServiceCall,
-        listIncidents: unexpectedMonitoringServiceCall,
-        listNotifications: unexpectedMonitoringServiceCall,
-        listReports: unexpectedMonitoringServiceCall,
-        markAllNotificationsRead: unexpectedMonitoringServiceCall,
-        markNotificationRead: unexpectedMonitoringServiceCall,
-        upsertNotification: unexpectedMonitoringServiceCall,
-        upsertReport: unexpectedMonitoringServiceCall,
+        clearReadNotifications: unexpectedMonitoringServiceCall("clearReadNotifications"),
+        deleteNotification: unexpectedMonitoringServiceCall("deleteNotification"),
+        deleteReport: unexpectedMonitoringServiceCall("deleteReport"),
+        getIncident: unexpectedMonitoringServiceCall("getIncident"),
+        getReport: unexpectedMonitoringServiceCall("getReport"),
+        listIncidents: unexpectedMonitoringServiceCall("listIncidents"),
+        listNotifications: unexpectedMonitoringServiceCall("listNotifications"),
+        listReports: unexpectedMonitoringServiceCall("listReports"),
+        markAllNotificationsRead: unexpectedMonitoringServiceCall(
+            "markAllNotificationsRead"
+        ),
+        markNotificationRead: unexpectedMonitoringServiceCall("markNotificationRead"),
+        upsertNotification: unexpectedMonitoringServiceCall("upsertNotification"),
+        upsertReport: unexpectedMonitoringServiceCall("upsertReport"),
         ...overrides,
     });
 }
@@ -41,7 +46,7 @@ export function createTestMonitoringService(
     overrides: Partial<MonitoringService["Service"]> = {}
 ): MonitoringService["Service"] {
     return MonitoringService.of({
-        submitCompleteSnapshot: unexpectedMonitoringServiceCall,
+        submitCompleteSnapshot: unexpectedMonitoringServiceCall("submitCompleteSnapshot"),
         ...overrides,
     });
 }

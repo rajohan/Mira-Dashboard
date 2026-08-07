@@ -144,15 +144,26 @@ function effectivePolicy(input: {
     }
     const handlerPolicy =
         handlerIdleTimeoutSeconds === undefined ? {} : { handlerIdleTimeoutSeconds };
+    // Ordinary body profiles are allowances and compose by maximum. Authentication
+    // profiles below remain intentional restrictive ceilings for their namespaces.
     let requestBodyMaximumBytes = trpcRequestBodyMaximumBytes;
     if (input.containsMonitoringProcedure) {
-        requestBodyMaximumBytes = monitoringRequestBodyMaximumBytes;
+        requestBodyMaximumBytes = Math.max(
+            requestBodyMaximumBytes,
+            monitoringRequestBodyMaximumBytes
+        );
     }
     if (input.containsTaskContentProcedure) {
-        requestBodyMaximumBytes = taskContentRequestBodyMaximumBytes;
+        requestBodyMaximumBytes = Math.max(
+            requestBodyMaximumBytes,
+            taskContentRequestBodyMaximumBytes
+        );
     }
     if (input.containsTaskProgressProcedure) {
-        requestBodyMaximumBytes = taskProgressRequestBodyMaximumBytes;
+        requestBodyMaximumBytes = Math.max(
+            requestBodyMaximumBytes,
+            taskProgressRequestBodyMaximumBytes
+        );
     }
     if (input.containsAuthenticationProcedure) {
         requestBodyMaximumBytes = authenticationRequestBodyMaximumBytes;

@@ -592,12 +592,15 @@ CREATE INDEX `incident_observations_incident_observed_id_idx` ON `incident_obser
 CREATE INDEX `incident_observations_run_idx` ON `incident_observations` (`monitor_run_id`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `incidents_monitor_fingerprint_unique` ON `incidents` (`monitor_key`,`fingerprint`);--> statement-breakpoint
 CREATE INDEX `incidents_active_monitor_seen_idx` ON `incidents` (`monitor_key`,`last_seen_at`) WHERE "incidents"."state" = 'active';--> statement-breakpoint
+CREATE INDEX `incidents_last_seen_id_idx` ON `incidents` (`last_seen_at`,`id`);--> statement-breakpoint
 CREATE INDEX `monitor_runs_monitor_completed_id_idx` ON `monitor_runs` (`monitor_key`,`completed_at`,`id`) WHERE "monitor_runs"."complete_snapshot" = 1 AND "monitor_runs"."state" = 'succeeded';--> statement-breakpoint
 CREATE UNIQUE INDEX `notifications_incident_generation_channel_unique` ON `notifications` (`incident_id`,`incident_generation`,`channel`) WHERE "notifications"."incident_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `notifications_unread_occurred_idx` ON `notifications` (`occurred_at`) WHERE "notifications"."read_at" IS NULL;--> statement-breakpoint
 CREATE INDEX `notifications_report_id_idx` ON `notifications` (`report_id`);--> statement-breakpoint
+CREATE INDEX `notifications_occurred_id_idx` ON `notifications` (`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `realtime_events_expires_id_idx` ON `realtime_events` (`expires_at`,`id`);--> statement-breakpoint
 CREATE INDEX `realtime_events_topic_id_idx` ON `realtime_events` (`topic`,`id`);--> statement-breakpoint
+CREATE INDEX `reports_occurred_id_idx` ON `reports` (`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_kind_occurred_id_idx` ON `reports` (`kind`,`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_source_job_occurred_id_idx` ON `reports` (`source`,`source_job_id`,`occurred_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `user_recovery_codes_user_selector_unique` ON `user_recovery_codes` (`user_id`,`selector`);--> statement-breakpoint

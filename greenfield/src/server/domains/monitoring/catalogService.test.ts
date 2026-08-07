@@ -39,7 +39,7 @@ describe("monitoring catalog service", () => {
         overrides: {
             nowMs?: () => number;
             realtimeRetentionMs?: number;
-            wakeEventPump?: () => void;
+            wakeEventPump?: () => Promise<void> | void;
         } = {}
     ) {
         database = await openFreshMigratedDatabase();
@@ -216,6 +216,29 @@ describe("monitoring catalog service", () => {
                 )
                 .get()!.count
         ).toBe(2);
+    });
+
+    test("does not turn an event-pump wake failure into a failed catalog commit", async () => {
+        const fixture = await openCatalog({
+            wakeEventPump: () => Promise.reject(new Error("pump unavailable")),
+        });
+        const reportId = uuid(750);
+
+        const report = await Effect.runPromise(
+            fixture.service.upsertReport({
+                bodyMarkdown: "# Durable before wake",
+                id: reportId,
+                kind: "health",
+                metadata: {},
+                occurredAtMs: 5000,
+                source: "dashboard",
+                status: "ok",
+                title: "Durable before wake",
+            })
+        );
+
+        expect(report.id).toBe(reportId);
+        expect(fixture.repository.findReport(reportId)).toBeDefined();
     });
 
     test("rejects producer timestamps outside realtime retention atomically", async () => {
@@ -489,6 +512,92 @@ describe("monitoring catalog service", () => {
             .all()
             .map((row) => row.occurredAtMs);
         expect(deletionEventTimes).toEqual([10_000, 10_000, 10_000, 10_000]);
+    });
+
+    test("invalidates one notification snapshot after a bounded report cascade", async () => {
+        const fixture = await openCatalog();
+        const reportId = uuid(2900);
+        await Effect.runPromise(
+            fixture.service.upsertReport({
+                bodyMarkdown: "# Cascade report",
+                id: reportId,
+                kind: "health",
+                metadata: {},
+                occurredAtMs: 5000,
+                source: "dashboard",
+                status: "ok",
+                title: "Cascade report",
+            })
+        );
+        const linkedNotificationIds = [uuid(2901), uuid(2902)] as const;
+        const unrelatedNotificationId = uuid(2903);
+        for (const [id, linkedReportId] of [
+            [linkedNotificationIds[0], reportId],
+            [linkedNotificationIds[1], reportId],
+            [unrelatedNotificationId, undefined],
+        ] as const) {
+            await Effect.runPromise(
+                fixture.service.upsertNotification({
+                    id,
+                    kind: "report-link",
+                    message: "Report notification",
+                    occurredAtMs: 6000,
+                    ...(linkedReportId === undefined ? {} : { reportId: linkedReportId }),
+                    severity: "info",
+                    source: "dashboard",
+                    title: "Linked report",
+                })
+            );
+        }
+        const eventIdBeforeDelete = fixture.database.sqlite
+            .query<{ id: number }, []>(
+                "SELECT id FROM realtime_events ORDER BY id DESC LIMIT 1"
+            )
+            .get()!.id;
+
+        await Effect.runPromise(fixture.service.deleteReport({ id: reportId }));
+
+        for (const id of linkedNotificationIds) {
+            expect(fixture.repository.findNotification(id)).toBeUndefined();
+        }
+        expect(
+            fixture.repository.findNotification(unrelatedNotificationId)
+        ).toBeDefined();
+        expect(
+            fixture.database.sqlite
+                .query<
+                    {
+                        entityId: string;
+                        entityType: string;
+                        operation: string;
+                        topic: string;
+                    },
+                    [number]
+                >(`
+                    SELECT
+                        entity_id AS entityId,
+                        entity_type AS entityType,
+                        operation,
+                        topic
+                    FROM realtime_events
+                    WHERE id > ?
+                    ORDER BY id
+                `)
+                .all(eventIdBeforeDelete)
+        ).toEqual([
+            {
+                entityId: reportId,
+                entityType: "notification",
+                operation: "snapshot-required",
+                topic: "monitoring.notifications",
+            },
+            {
+                entityId: reportId,
+                entityType: "report",
+                operation: "deleted",
+                topic: "monitoring.reports",
+            },
+        ]);
     });
 
     test("rejects report deletion before an unbounded notification cascade", async () => {

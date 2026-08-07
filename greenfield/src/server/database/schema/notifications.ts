@@ -60,5 +60,6 @@ export const notifications = sqliteTable(
             .on(table.occurredAt)
             .where(sql`${table.readAt} IS NULL`),
         index("notifications_report_id_idx").on(table.reportId),
+        index("notifications_occurred_id_idx").on(table.occurredAt, table.id),
     ]
 );

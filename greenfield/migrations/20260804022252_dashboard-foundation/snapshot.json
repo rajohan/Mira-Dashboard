@@ -3471,6 +3471,24 @@
     {
       "columns": [
         {
+          "value": "last_seen_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "incidents_last_seen_id_idx",
+      "entityType": "indexes",
+      "table": "incidents"
+    },
+    {
+      "columns": [
+        {
           "value": "monitor_key",
           "isExpression": false
         },
@@ -3543,6 +3561,24 @@
     {
       "columns": [
         {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "notifications_occurred_id_idx",
+      "entityType": "indexes",
+      "table": "notifications"
+    },
+    {
+      "columns": [
+        {
           "value": "expires_at",
           "isExpression": false
         },
@@ -3575,6 +3611,24 @@
       "name": "realtime_events_topic_id_idx",
       "entityType": "indexes",
       "table": "realtime_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "reports_occurred_id_idx",
+      "entityType": "indexes",
+      "table": "reports"
     },
     {
       "columns": [

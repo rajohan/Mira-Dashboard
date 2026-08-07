@@ -849,9 +849,10 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   immediate-write admission, domain clock, and post-commit realtime wake path with the report,
   incident, and notification catalogs.
 - Twelve catalog procedures provide keyset-paginated incident, notification, and report reads;
-  immutable report and notification producer upserts; session-owned notification read/delete
-  actions; and bounded report deletion. Exact `reports:*` and `notifications:*` capabilities and
-  principal-kind middleware keep browser-session actions separate from automation ingestion.
+  immutable report upserts for scoped browser sessions or automation callers; automation-only
+  notification producer upserts; session-owned notification read/delete actions; and bounded
+  report deletion. Exact `reports:*` and `notifications:*` capabilities and principal-kind
+  middleware keep browser-session actions separate from automation-only ingestion.
 - Complete snapshots and report upserts have a qualified 640 KiB transport profile plus a stricter
   512 KiB semantic aggregate budget. Each embedded JSON object retains its separate 64 KiB budget.
   Exact registered procedure matching prevents unknown, malformed, or batched names from inheriting

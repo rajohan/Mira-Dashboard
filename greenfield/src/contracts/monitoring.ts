@@ -172,7 +172,11 @@ export const completeMonitoringSnapshotInputSchema = v.pipe(
     )
 );
 
-/** Compact durable outbox payload used to invalidate one changed entity. */
+/**
+ * Compact durable outbox payload used to invalidate changed catalog state.
+ * For `snapshot-required`, the id is causal correlation only; consumers refetch the
+ * topic's complete snapshot instead of resolving it as one entity identity.
+ */
 export const monitoringChangePayloadSchema = v.strictObject({
     id: boundedNonBlankStringSchema(200),
 });
@@ -256,32 +260,46 @@ type ResolvedIncident = v.InferOutput<typeof resolvedIncidentSchema>;
 type ActiveIncidentSummary = v.InferOutput<typeof activeIncidentSummarySchema>;
 type ResolvedIncidentSummary = v.InferOutput<typeof resolvedIncidentSummarySchema>;
 
+function activeIncidentLifecycleTimesAreConsistent(incident: {
+    readonly firstSeenAtMs: number;
+    readonly lastSeenAtMs: number;
+}): boolean {
+    return incident.lastSeenAtMs >= incident.firstSeenAtMs;
+}
+
+function resolvedIncidentLifecycleTimesAreConsistent(incident: {
+    readonly firstSeenAtMs: number;
+    readonly lastSeenAtMs: number;
+    readonly resolvedAtMs: number;
+}): boolean {
+    return (
+        activeIncidentLifecycleTimesAreConsistent(incident) &&
+        incident.resolvedAtMs >= incident.lastSeenAtMs
+    );
+}
+
 /** @returns Whether an active incident's observations are monotonic. */
 export function activeIncidentTimesAreConsistent(incident: ActiveIncident): boolean {
-    return incident.lastSeenAtMs >= incident.firstSeenAtMs;
+    return activeIncidentLifecycleTimesAreConsistent(incident);
 }
 
 /** @returns Whether a resolved incident's lifecycle timestamps are monotonic. */
 export function resolvedIncidentTimesAreConsistent(incident: ResolvedIncident): boolean {
-    return (
-        incident.lastSeenAtMs >= incident.firstSeenAtMs &&
-        incident.resolvedAtMs >= incident.lastSeenAtMs
-    );
+    return resolvedIncidentLifecycleTimesAreConsistent(incident);
 }
 
+/** @returns Whether an active incident summary's observations are monotonic. */
 export function activeIncidentSummaryTimesAreConsistent(
     incident: ActiveIncidentSummary
 ): boolean {
-    return incident.lastSeenAtMs >= incident.firstSeenAtMs;
+    return activeIncidentLifecycleTimesAreConsistent(incident);
 }
 
+/** @returns Whether a resolved incident summary's lifecycle is monotonic. */
 export function resolvedIncidentSummaryTimesAreConsistent(
     incident: ResolvedIncidentSummary
 ): boolean {
-    return (
-        incident.lastSeenAtMs >= incident.firstSeenAtMs &&
-        incident.resolvedAtMs >= incident.lastSeenAtMs
-    );
+    return resolvedIncidentLifecycleTimesAreConsistent(incident);
 }
 
 /** Complete public incident lifecycle record. */

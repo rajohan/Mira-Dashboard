@@ -251,17 +251,28 @@ export async function createDashboardServer(
             sessionIdleDurationMs: options.sessionIdleDurationMs,
         });
         const domainNow = options.now;
+        const wakeEventPump = async (): Promise<void> => {
+            try {
+                await options.applicationRuntime.services.realtimeEvents.wake();
+            } catch (error) {
+                options.applicationRuntime.logger.warn({
+                    component: "realtime-event-pump",
+                    event: "realtime.wake.failed",
+                    failure: error,
+                    outcome: "server-error",
+                });
+                throw error;
+            }
+        };
         const agentService = createAgentService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: createAgentRepository(database, databaseRuntime),
-            wakeEventPump: () =>
-                options.applicationRuntime.services.realtimeEvents.wake(),
+            wakeEventPump,
         });
         const taskService = createTaskService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: createTaskRepository(database, databaseRuntime),
-            wakeEventPump: () =>
-                options.applicationRuntime.services.realtimeEvents.wake(),
+            wakeEventPump,
         });
         const monitoringRepository = createMonitoringRepository(
             database,
@@ -270,14 +281,12 @@ export async function createDashboardServer(
         const monitoringService = createMonitoringService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: monitoringRepository,
-            wakeEventPump: () =>
-                options.applicationRuntime.services.realtimeEvents.wake(),
+            wakeEventPump,
         });
         const monitoringCatalogService = createMonitoringCatalogService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: monitoringRepository,
-            wakeEventPump: () =>
-                options.applicationRuntime.services.realtimeEvents.wake(),
+            wakeEventPump,
         });
         const serverOptions: ServerOptions = {
             agentService,

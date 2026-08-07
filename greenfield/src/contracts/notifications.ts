@@ -1,7 +1,7 @@
 import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
-import { hasUniqueArrayItems } from "../shared/validation.ts";
+import { enumFilterSchema, uniqueFilterSchema } from "./filterSchemas.ts";
 import {
     type NotificationRecord,
     monitoringKindSchema,
@@ -33,33 +33,6 @@ const notificationLimitSchema = v.pipe(
     v.maxValue(notificationPageMaximum, "Notification page limit is outside its budget")
 );
 
-function uniqueFilterSchema<
-    TOutput extends string,
-    TSchema extends v.GenericSchema<string, TOutput>,
->(item: TSchema, label: string) {
-    return v.pipe(
-        v.array(item, `${label} filter is invalid`),
-        v.minLength(1, `${label} filter cannot be empty`),
-        v.maxLength(notificationFilterMaximum, `${label} filter is outside its budget`),
-        v.check(hasUniqueArrayItems<TOutput>, `${label} filter values must be unique`)
-    );
-}
-
-function enumFilterSchema<const TValues extends readonly [string, ...string[]]>(
-    values: TValues,
-    label: string
-) {
-    return v.pipe(
-        v.array(v.picklist(values, `${label} value is invalid`)),
-        v.minLength(1, `${label} filter cannot be empty`),
-        v.maxLength(notificationFilterMaximum, `${label} filter is outside its budget`),
-        v.check(
-            hasUniqueArrayItems<TValues[number]>,
-            `${label} filter values must be unique`
-        )
-    );
-}
-
 /** Stable newest-first notification cursor. */
 export const notificationCursorSchema = v.strictObject({
     id: monitoringRecordIdSchema,
@@ -69,16 +42,30 @@ export const notificationCursorSchema = v.strictObject({
 /** Bounded notification filters shared by reads and bulk actions. */
 export const notificationFiltersSchema = v.strictObject({
     incidentId: v.optional(monitoringRecordIdSchema),
-    kinds: v.optional(uniqueFilterSchema(monitoringKindSchema, "Notification kind")),
+    kinds: v.optional(
+        uniqueFilterSchema(
+            monitoringKindSchema,
+            "Notification kind",
+            notificationFilterMaximum
+        )
+    ),
     readState: v.optional(
         v.picklist(["all", "read", "unread"], "Notification read state is invalid"),
         "all"
     ),
     severities: v.optional(
-        enumFilterSchema(monitoringSeverities, "Notification severity")
+        enumFilterSchema(
+            monitoringSeverities,
+            "Notification severity",
+            notificationFilterMaximum
+        )
     ),
     sources: v.optional(
-        uniqueFilterSchema(monitoringReportSourceSchema, "Notification source")
+        uniqueFilterSchema(
+            monitoringReportSourceSchema,
+            "Notification source",
+            notificationFilterMaximum
+        )
     ),
 });
 
