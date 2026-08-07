@@ -1,9 +1,21 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
 import { Outlet, useLocation } from "@tanstack/react-router";
-import { Bot, Home, ListTodo, Menu, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import {
+    Bot,
+    Home,
+    ListTodo,
+    Menu,
+    Newspaper,
+    ShieldCheck,
+    X,
+    type LucideIcon,
+} from "lucide-react";
 import { useState } from "react";
 
-import type { DashboardNavigationPath } from "../lib/dashboardRoutes.ts";
+import type {
+    DashboardAuthenticatedPath,
+    DashboardNavigationPath,
+} from "../lib/dashboardRoutes.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { NavigationLink } from "../ui/NavigationLink.tsx";
@@ -18,8 +30,16 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: Home, label: "Dashboard", to: "/" },
     { icon: Bot, label: "Agents", to: "/agents" },
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
+    { icon: Newspaper, label: "Reports", to: "/reports" },
     { icon: ShieldCheck, label: "Account security", to: "/account-security" },
 ]);
+const routeTitles: readonly Pick<NavigationItem, "label" | "to">[] = Object.freeze([
+    ...navigationItems,
+]);
+const authenticatedRouteTitles: readonly {
+    readonly label: string;
+    readonly to: DashboardAuthenticatedPath;
+}[] = Object.freeze([...routeTitles, { label: "Incidents", to: "/incidents" }]);
 
 interface NavigationProps {
     readonly currentPath: string;
@@ -99,7 +119,7 @@ export function DashboardShell() {
     }
 
     const currentTitle =
-        navigationItems.find((item) => item.to === location.pathname)?.label ??
+        authenticatedRouteTitles.find((item) => item.to === location.pathname)?.label ??
         "Mira Dashboard";
     return (
         <div className="bg-primary-900 text-primary-50 flex h-full overflow-hidden">
