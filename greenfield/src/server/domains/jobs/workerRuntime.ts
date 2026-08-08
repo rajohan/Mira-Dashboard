@@ -179,6 +179,16 @@ export function createSystemJobWorkerSideEffects(
                 targetType: "schedule",
             });
         },
+        forScheduleEvent(input: JobWorkerSideEffectInput) {
+            return createJobRealtimeSideEffects({
+                occurredAt: input.at,
+                realtime: {
+                    id: input.targetId,
+                    kind: "schedule",
+                    operation: "updated",
+                },
+            });
+        },
     });
 }
 

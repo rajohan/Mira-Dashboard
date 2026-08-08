@@ -31,6 +31,7 @@ const runtimeOptions: DashboardWorkerRuntimeOptions = {
         forRun: () => noSideEffects,
         forRunEvent: () => noSideEffects,
         forSchedule: () => noSideEffects,
+        forScheduleEvent: () => noSideEffects,
     },
     workerInstanceId: Bun.randomUUIDv7(),
 };
@@ -151,6 +152,24 @@ describe("Dashboard worker runtime", () => {
                     entityId: eventRunId,
                     operation: "updated",
                     topic: "jobs.runs",
+                }),
+            ],
+        });
+        const scheduleId = "system.worker-smoke";
+        expect(
+            sideEffects.forScheduleEvent({
+                action: "jobs.run.succeeded",
+                at,
+                outcome: "succeeded",
+                targetId: scheduleId,
+            })
+        ).toEqual({
+            auditEvents: [],
+            realtimeEvents: [
+                expect.objectContaining({
+                    entityId: scheduleId,
+                    operation: "updated",
+                    topic: "schedules.records",
                 }),
             ],
         });

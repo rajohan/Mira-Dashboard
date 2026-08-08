@@ -12,6 +12,7 @@ import {
     jobSchedulePollScanLimit,
     type JobWorkerCoordinatorOptions,
     type JobWorkerSideEffectFactory,
+    type JobWorkerSideEffectInput,
 } from "./coordinator.ts";
 import type {
     JobDisableIntentRecord,
@@ -44,6 +45,7 @@ const sideEffects: JobWorkerSideEffectFactory = Object.freeze({
     forRun: () => noSideEffects,
     forRunEvent: () => noSideEffects,
     forSchedule: () => noSideEffects,
+    forScheduleEvent: () => noSideEffects,
 });
 
 function deferred<T>() {
@@ -185,6 +187,7 @@ interface RepositoryFixtureOptions {
     readonly reconciliationFailure?: Error;
     readonly registrationFailure?: Error;
     readonly settlementAt?: Date;
+    readonly settlementRun?: JobRunRecord;
 }
 
 function repositoryFixture(options: RepositoryFixtureOptions = {}) {
@@ -195,6 +198,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const expiryEligibility: boolean[] = [];
     const expiryNextRuns: Date[] = [];
     const settlements: Array<Parameters<JobRepository["settleClaim"]>[0]> = [];
+    const settlementSideEffects: JobMutationSideEffects[] = [];
     const claims = [
         ...(options.claims ?? (options.claim === undefined ? [] : [options.claim])),
     ];
@@ -299,10 +303,10 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
             settlements.push(input);
             events.push(`settle:${input.outcome.kind}`);
             const settled = {
-                ...claimedRun(input.workerId),
+                ...(options.settlementRun ?? claimedRun(input.workerId)),
                 updatedAt: options.settlementAt ?? at,
             };
-            input.sideEffectsForRun(settled);
+            settlementSideEffects.push(input.sideEffectsForRun(settled));
             return Promise.resolve({
                 kind: "settled" as const,
                 run: settled,
@@ -325,6 +329,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         expiryNextRuns,
         repository,
         settlements,
+        settlementSideEffects,
     };
 }
 
@@ -551,6 +556,7 @@ describe("durable job worker coordinator", () => {
                 });
             },
             forSchedule: () => noSideEffects,
+            forScheduleEvent: () => noSideEffects,
         };
         const coordinator = createJobWorkerCoordinator({
             ...coordinatorOptions(fixture.repository, workerId),
@@ -587,6 +593,143 @@ describe("durable job worker coordinator", () => {
                         topic: "jobs.runs",
                     }),
                 ],
+            },
+        ]);
+    });
+
+    test("invalidates the schedule projection in the settlement transaction", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const scheduleId = "system.worker-smoke";
+        const run: JobRunRecord = {
+            ...claimedRun(workerId),
+            scheduledForAt: at,
+            scheduledJobId: scheduleId,
+            scheduledJobVersion: 1,
+            triggerType: "schedule",
+        };
+        const settlementRun: JobRunRecord = {
+            ...run,
+            finishedAt: at,
+            heartbeatAt: null,
+            leaseExpiresAt: null,
+            leaseOwnerId: null,
+            leaseToken: null,
+            resultJson: "{}",
+            state: "succeeded",
+            stateVersion: run.stateVersion + 1,
+        };
+        const fixture = repositoryFixture({
+            claim: { kind: "claimed", run },
+            settlementRun,
+        });
+        const recordingSideEffects: JobWorkerSideEffectFactory = {
+            ...sideEffects,
+            forRun: (input) =>
+                createJobRealtimeSideEffects({
+                    occurredAt: input.at,
+                    realtime: {
+                        id: input.targetId,
+                        kind: "run",
+                        operation: "updated",
+                    },
+                }),
+            forScheduleEvent: (input) =>
+                createJobRealtimeSideEffects({
+                    occurredAt: input.at,
+                    realtime: {
+                        id: input.targetId,
+                        kind: "schedule",
+                        operation: "updated",
+                    },
+                }),
+        };
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            sideEffects: recordingSideEffects,
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.settlements.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.settlementSideEffects).toEqual([
+            {
+                auditEvents: [],
+                realtimeEvents: [
+                    expect.objectContaining({
+                        entityId: run.id,
+                        topic: "jobs.runs",
+                    }),
+                    expect.objectContaining({
+                        entityId: scheduleId,
+                        topic: "schedules.records",
+                    }),
+                ],
+            },
+        ]);
+    });
+
+    test("classifies a repository-normalized shutdown cancellation", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId, "test.shutdown-cancellation-race");
+        const cancelledAt = new Date(at.getTime() + 1000);
+        const settlementRun: JobRunRecord = {
+            ...run,
+            cancelRequestedAt: cancelledAt,
+            cancelRequestedById: Bun.randomUUIDv7(),
+            cancelRequestedByKind: "user",
+            finishedAt: cancelledAt,
+            heartbeatAt: null,
+            leaseExpiresAt: null,
+            leaseOwnerId: null,
+            leaseToken: null,
+            state: "cancelled",
+            stateVersion: run.stateVersion + 2,
+            terminalCode: "cancel-requested",
+            terminalMessage: "The job action was cancelled.",
+            updatedAt: cancelledAt,
+        };
+        const fixture = repositoryFixture({
+            claim: { kind: "claimed", run },
+            settlementAt: cancelledAt,
+            settlementRun,
+        });
+        const observed: JobWorkerSideEffectInput[] = [];
+        const baseRegistration = jobActionRegistrations.at(0);
+        if (baseRegistration === undefined) throw new Error("Missing smoke action");
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            findAction: (actionKey) =>
+                actionKey === run.actionKey
+                    ? {
+                          ...baseRegistration,
+                          actionKey: run.actionKey,
+                          execute: () => Effect.never,
+                      }
+                    : undefined,
+            sideEffects: {
+                ...sideEffects,
+                forRun: (input) => {
+                    observed.push(input);
+                    return noSideEffects;
+                },
+            },
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.events.includes("read-cancellation"));
+        await coordinator.dispose();
+
+        expect(fixture.settlements[0]?.outcome).toMatchObject({
+            kind: "failed",
+            terminalCode: "worker-shutdown",
+        });
+        expect(observed).toEqual([
+            {
+                action: "jobs.run.cancelled",
+                at: cancelledAt,
+                outcome: "cancelled",
+                targetId: run.id,
             },
         ]);
     });

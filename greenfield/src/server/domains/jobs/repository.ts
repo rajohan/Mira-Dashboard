@@ -603,6 +603,24 @@ function terminalStateForOutcome(
     }
 }
 
+function effectiveSettlementOutcome(
+    run: JobRunRecord,
+    requested: JobClaimOutcome
+): JobClaimOutcome {
+    if (
+        run.cancelRequestedAt === null ||
+        requested.kind === "cancelled" ||
+        requested.kind === "succeeded"
+    ) {
+        return requested;
+    }
+    return {
+        kind: "cancelled",
+        terminalCode: "cancel-requested",
+        terminalMessage: "The job action was cancelled.",
+    };
+}
+
 class DrizzleJobReader implements JobRepositoryReader {
     protected readonly database: JobPersistenceDatabase;
 
@@ -1990,22 +2008,22 @@ class DrizzleJobWriter extends DrizzleJobReader {
         const run = this.#findFencedRun(input);
         if (run === undefined) return { kind: "lost-claim" };
         const at = maximumDate(run.updatedAt, input.at);
+        const outcome = effectiveSettlementOutcome(run, input.outcome);
         const canRetry =
-            input.outcome.kind === "failed" &&
-            input.outcome.retryAt !== undefined &&
+            outcome.kind === "failed" &&
+            outcome.retryAt !== undefined &&
             run.retrySafe &&
-            run.attemptCount < run.attemptLimit &&
-            run.cancelRequestedAt === null;
+            run.attemptCount < run.attemptLimit;
         if (canRetry) {
             const retryAt = maximumDate(
                 at,
-                requiredRow(input.outcome.retryAt, "retry timestamp")
+                requiredRow(outcome.retryAt, "retry timestamp")
             );
             this.#touchRunForEvent(run, at);
             this.#appendEvent(run.id, {
                 attempt: run.attemptCount,
                 kind: "failed",
-                message: boundedStructuralMessage(input.outcome.terminalMessage),
+                message: boundedStructuralMessage(outcome.terminalMessage),
                 occurredAt: at,
                 workerInstanceId: input.workerId,
             });
@@ -2041,7 +2059,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
         }
 
         this.#releaseResources(run, input.workerId, input.leaseToken);
-        const state = terminalStateForOutcome(input.outcome);
+        const state = terminalStateForOutcome(outcome);
         const row = this.#transaction
             .update(jobRuns)
             .set({
@@ -2050,18 +2068,12 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 leaseExpiresAt: null,
                 leaseOwnerId: null,
                 leaseToken: null,
-                resultJson:
-                    input.outcome.kind === "succeeded" ? input.outcome.resultJson : null,
+                resultJson: outcome.kind === "succeeded" ? outcome.resultJson : null,
                 state,
                 stateVersion: run.stateVersion + 1,
-                terminalCode:
-                    input.outcome.kind === "succeeded"
-                        ? null
-                        : input.outcome.terminalCode,
+                terminalCode: outcome.kind === "succeeded" ? null : outcome.terminalCode,
                 terminalMessage:
-                    input.outcome.kind === "succeeded"
-                        ? null
-                        : input.outcome.terminalMessage,
+                    outcome.kind === "succeeded" ? null : outcome.terminalMessage,
                 updatedAt: at,
             })
             .where(this.#claimFence(input))
@@ -2071,10 +2083,10 @@ class DrizzleJobWriter extends DrizzleJobReader {
         this.#appendEvent(run.id, {
             attempt: run.attemptCount,
             kind: state,
-            ...(input.outcome.kind === "succeeded"
+            ...(outcome.kind === "succeeded"
                 ? {}
                 : {
-                      message: boundedStructuralMessage(input.outcome.terminalMessage),
+                      message: boundedStructuralMessage(outcome.terminalMessage),
                   }),
             occurredAt: at,
             workerInstanceId: input.workerId,

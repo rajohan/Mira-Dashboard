@@ -1055,6 +1055,178 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("settles a durable cancellation that races worker shutdown as cancelled", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const run = queuedRun(34, {
+            requestedById: "job-scheduler",
+            requestedByKind: "system",
+            resourceKeysJson: '["database"]',
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+            triggerType: "system",
+        });
+        const leaseToken = uuid(134);
+        const shutdownOutcome = {
+            kind: "failed" as const,
+            retryAt: new Date(21_000),
+            terminalCode: "worker-shutdown",
+            terminalMessage: "The worker stopped before the action completed.",
+        };
+        try {
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(run),
+                run,
+            });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(3000),
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken,
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: run.id } });
+            expect(
+                await repository.cancelRun({
+                    ...noSideEffects,
+                    actor: { id: userId, kind: "user" },
+                    at: new Date(20_000),
+                    id: run.id,
+                    terminalCode: "cancelled/operator-request",
+                    terminalMessage: "Cancelled by the operator.",
+                })
+            ).toMatchObject({ kind: "requested" });
+
+            let rolledBackSideEffectRun:
+                | NonNullable<ReturnType<typeof repository.findRun>>
+                | undefined;
+            const rejectedSettlement = repository.settleClaim({
+                at: new Date(6000),
+                leaseToken,
+                outcome: shutdownOutcome,
+                runId: run.id,
+                sideEffectsForRun: (settled) => {
+                    rolledBackSideEffectRun = settled;
+                    throw new Error("reject settlement side effects");
+                },
+                workerId: workerOneId,
+            });
+            expect(rejectedSettlement).rejects.toThrow("reject settlement side effects");
+            await rejectedSettlement.catch(() => {});
+            expect(rolledBackSideEffectRun).toMatchObject({
+                finishedAt: new Date(20_000),
+                state: "cancelled",
+                terminalCode: "cancel-requested",
+                terminalMessage: "The job action was cancelled.",
+                updatedAt: new Date(20_000),
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                cancelRequestedAt: new Date(20_000),
+                eventCount: 3,
+                finishedAt: null,
+                leaseToken,
+                state: "running",
+                updatedAt: new Date(20_000),
+            });
+            expect(
+                database.orm
+                    .select({ value: count() })
+                    .from(resourceLeases)
+                    .where(eq(resourceLeases.jobRunId, run.id))
+                    .get()?.value
+            ).toBe(1);
+
+            let committedSideEffectRun:
+                | NonNullable<ReturnType<typeof repository.findRun>>
+                | undefined;
+            expect(
+                await repository.settleClaim({
+                    at: new Date(6000),
+                    leaseToken,
+                    outcome: shutdownOutcome,
+                    runId: run.id,
+                    sideEffectsForRun: (settled) => {
+                        committedSideEffectRun = settled;
+                        return noSideEffects;
+                    },
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({
+                kind: "settled",
+                run: {
+                    eventCount: 4,
+                    finishedAt: new Date(20_000),
+                    state: "cancelled",
+                    terminalCode: "cancel-requested",
+                    terminalMessage: "The job action was cancelled.",
+                    updatedAt: new Date(20_000),
+                },
+            });
+            expect(committedSideEffectRun).toMatchObject({ state: "cancelled" });
+            expect(
+                repository
+                    .listRunEvents({ limit: 10, runId: run.id })
+                    .map(({ kind, message, occurredAt }) => ({
+                        kind,
+                        message,
+                        occurredAt,
+                    }))
+            ).toEqual([
+                {
+                    kind: "cancelled",
+                    message: "The job action was cancelled.",
+                    occurredAt: new Date(20_000),
+                },
+                {
+                    kind: "cancel-requested",
+                    message: null,
+                    occurredAt: new Date(20_000),
+                },
+                { kind: "claimed", message: null, occurredAt: new Date(3000) },
+                {
+                    kind: "queued",
+                    message: null,
+                    occurredAt: run.queuedAt,
+                },
+            ]);
+            expect(
+                database.orm
+                    .select({ value: count() })
+                    .from(resourceLeases)
+                    .where(eq(resourceLeases.jobRunId, run.id))
+                    .get()?.value
+            ).toBe(0);
+
+            let staleSideEffectCalled = false;
+            expect(
+                await repository.settleClaim({
+                    at: new Date(20_001),
+                    leaseToken,
+                    outcome: shutdownOutcome,
+                    runId: run.id,
+                    sideEffectsForRun: () => {
+                        staleSideEffectCalled = true;
+                        return noSideEffects;
+                    },
+                    workerId: workerOneId,
+                })
+            ).toEqual({ kind: "lost-claim" });
+            expect(staleSideEffectCalled).toBe(false);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("claims runnable work after a full page of resource-conflicted runs", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(

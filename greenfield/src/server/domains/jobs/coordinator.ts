@@ -82,6 +82,7 @@ export interface JobWorkerSideEffectFactory {
     forRun(input: JobWorkerSideEffectInput): JobMutationSideEffects;
     forRunEvent(input: JobWorkerSideEffectInput): JobMutationSideEffects;
     forSchedule(input: JobWorkerSideEffectInput): JobMutationSideEffects;
+    forScheduleEvent(input: JobWorkerSideEffectInput): JobMutationSideEffects;
 }
 
 export interface JobWorkerCoordinatorTimings {
@@ -247,6 +248,43 @@ function mergeSideEffects(
     });
 }
 
+function settlementMutationOutcome(run: JobRunRecord): JobWorkerMutationOutcome {
+    if (run.state === "cancelled") return "cancelled";
+    if (run.state === "succeeded") return "succeeded";
+    return "failed";
+}
+
+function settlementSideEffects(
+    factory: JobWorkerSideEffectFactory,
+    requestedAction: string,
+    requestedOutcome: JobClaimOutcome,
+    settled: JobRunRecord
+): JobMutationSideEffects {
+    const outcome = settlementMutationOutcome(settled);
+    const action =
+        settled.state === "cancelled" && requestedOutcome.kind !== "cancelled"
+            ? "jobs.run.cancelled"
+            : requestedAction;
+    return mergeSideEffects([
+        factory.forRun({
+            action,
+            at: settled.updatedAt,
+            outcome,
+            targetId: settled.id,
+        }),
+        ...(settled.scheduledJobId === null
+            ? []
+            : [
+                  factory.forScheduleEvent({
+                      action,
+                      at: settled.updatedAt,
+                      outcome,
+                      targetId: settled.scheduledJobId,
+                  }),
+              ]),
+    ]);
+}
+
 function scheduleInsert(
     registration: JobActionRegistration,
     at: Date
@@ -399,12 +437,6 @@ function executionOutcome(
     );
 }
 
-function sideEffectOutcome(outcome: JobClaimOutcome): JobWorkerMutationOutcome {
-    if (outcome.kind === "succeeded") return "succeeded";
-    if (outcome.kind === "cancelled") return "cancelled";
-    return "failed";
-}
-
 function normalizeCoordinatorFailure(error: unknown): Error {
     return error instanceof Error
         ? error
@@ -486,22 +518,23 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
     const registration = options.findAction(run.actionKey);
     if (registration === undefined) {
         const at = new Date(options.nowMs());
+        const outcome = {
+            kind: "failed",
+            terminalCode: "action-unavailable",
+            terminalMessage: "This release does not implement the queued action.",
+        } as const satisfies JobClaimOutcome;
         await options.repository.settleClaim({
             at,
             leaseToken,
-            outcome: {
-                kind: "failed",
-                terminalCode: "action-unavailable",
-                terminalMessage: "This release does not implement the queued action.",
-            },
+            outcome,
             runId: run.id,
             sideEffectsForRun: (settled) =>
-                options.sideEffects.forRun({
-                    action: "jobs.run.action-unavailable",
-                    at: settled.updatedAt,
-                    outcome: "failed",
-                    targetId: run.id,
-                }),
+                settlementSideEffects(
+                    options.sideEffects,
+                    "jobs.run.action-unavailable",
+                    outcome,
+                    settled
+                ),
             workerId: options.workerInstanceId,
         });
         return;
@@ -645,12 +678,12 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
         outcome,
         runId: run.id,
         sideEffectsForRun: (settled) =>
-            options.sideEffects.forRun({
-                action: `jobs.run.${outcome.kind}`,
-                at: settled.updatedAt,
-                outcome: sideEffectOutcome(outcome),
-                targetId: run.id,
-            }),
+            settlementSideEffects(
+                options.sideEffects,
+                `jobs.run.${outcome.kind}`,
+                outcome,
+                settled
+            ),
         workerId: options.workerInstanceId,
     });
 }
@@ -925,12 +958,12 @@ export function createJobWorkerCoordinator(
                 outcome,
                 runId: claim.run.id,
                 sideEffectsForRun: (settled) =>
-                    options.sideEffects.forRun({
-                        action: `jobs.run.${outcome.kind}`,
-                        at: settled.updatedAt,
-                        outcome: sideEffectOutcome(outcome),
-                        targetId: claim.run.id,
-                    }),
+                    settlementSideEffects(
+                        options.sideEffects,
+                        `jobs.run.${outcome.kind}`,
+                        outcome,
+                        settled
+                    ),
                 workerId: options.workerInstanceId,
             });
             return;
