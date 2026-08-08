@@ -148,6 +148,7 @@ interface RepositoryFixtureOptions {
     ) => JobAppendEventResult;
     readonly cancellationRequested?: boolean;
     readonly claim?: JobClaimResult;
+    readonly claimGate?: Promise<void>;
     readonly dueSchedules?: readonly ScheduledJobRecord[];
     readonly expiringSchedule?: ScheduledJobRecord;
     readonly expiryGate?: Promise<void>;
@@ -177,12 +178,13 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
                 worker: workerRecord(input.workerId, "draining"),
             });
         },
-        claimNextRun(input) {
+        async claimNextRun(input) {
             const result = claim ?? ({ kind: "empty" } as const);
             claim = undefined;
             events.push(`claim:${result.kind}`);
             if (result.kind === "claimed") input.sideEffectsForClaim(result.run);
-            return Promise.resolve(result);
+            if (options.claimGate !== undefined) await options.claimGate;
+            return result;
         },
         enqueueNextDueSchedule(input) {
             enqueues.push(input);
@@ -317,6 +319,29 @@ describe("durable job worker coordinator", () => {
             fixture.events.indexOf("stop")
         );
         expect(await coordinator.completion).toBeUndefined();
+    });
+
+    test("stops the claim monitor immediately after a fast action finishes", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId);
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const options = coordinatorOptions(fixture.repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...options,
+            timings: {
+                ...options.timings,
+                cancellationPollMs: 60_000,
+            },
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.settlements.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.settlements).toHaveLength(1);
+        expect(fixture.settlements[0]?.outcome.kind).toBe("succeeded");
+        expect(fixture.events).not.toContain("read-cancellation");
+        expect(fixture.events).not.toContain("renew");
     });
 
     test("anchors claim renewal to the durable clamped heartbeat", async () => {
@@ -632,6 +657,55 @@ describe("durable job worker coordinator", () => {
                 ? fixture.settlements[0].outcome.retryAt
                 : undefined
         ).toBeInstanceOf(Date);
+        expect(fixture.events.indexOf("drain")).toBeLessThan(
+            fixture.events.indexOf("settle:failed")
+        );
+        expect(fixture.events.indexOf("settle:failed")).toBeLessThan(
+            fixture.events.indexOf("stop")
+        );
+    });
+
+    test("settles a claim that resolves after worker draining begins", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId, "test.deferred-claim");
+        const claimGate = deferred<void>();
+        const fixture = repositoryFixture({
+            claim: { kind: "claimed", run },
+            claimGate: claimGate.promise,
+        });
+        const baseRegistration = jobActionRegistrations.at(0);
+        if (baseRegistration === undefined) throw new Error("Missing smoke action");
+        let executions = 0;
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            actionKey: run.actionKey,
+            execute: () => {
+                executions += 1;
+                return Effect.succeed({});
+            },
+        };
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.events.includes("claim:claimed"));
+        const disposal = coordinator.dispose();
+        await waitUntil(() => fixture.events.includes("drain"));
+
+        expect(fixture.settlements).toHaveLength(0);
+        expect(fixture.events).not.toContain("stop");
+        claimGate.resolve();
+        await disposal;
+
+        expect(fixture.settlements).toHaveLength(1);
+        expect(executions).toBe(0);
+        expect(fixture.settlements[0]?.outcome).toMatchObject({
+            kind: "failed",
+            terminalCode: "worker-shutdown",
+        });
         expect(fixture.events.indexOf("drain")).toBeLessThan(
             fixture.events.indexOf("settle:failed")
         );

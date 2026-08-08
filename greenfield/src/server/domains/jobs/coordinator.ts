@@ -821,12 +821,37 @@ export function createJobWorkerCoordinator(
                 }),
             workerId: options.workerInstanceId,
         });
-        throwIfAborted(signal);
-        if (claim.kind === "worker-unavailable") {
-            throw new Error("Job worker cannot claim durable work");
-        }
         if (claim.kind !== "claimed") {
+            throwIfAborted(signal);
+            if (claim.kind === "worker-unavailable") {
+                throw new Error("Job worker cannot claim durable work");
+            }
             await waitFor(timings.idlePollMs, signal);
+            return;
+        }
+        if (signal.aborted) {
+            const shutdownAt = new Date(nowMs());
+            const outcome = actionFailureOutcome(
+                claim.run,
+                shutdownAt,
+                true,
+                "worker-shutdown",
+                "The worker stopped before the action completed."
+            );
+            await options.repository.settleClaim({
+                at: shutdownAt,
+                leaseToken,
+                outcome,
+                runId: claim.run.id,
+                sideEffectsForRun: (settled) =>
+                    options.sideEffects.forRun({
+                        action: `jobs.run.${outcome.kind}`,
+                        at: settled.updatedAt,
+                        outcome: sideEffectOutcome(outcome),
+                        targetId: claim.run.id,
+                    }),
+                workerId: options.workerInstanceId,
+            });
             return;
         }
         activeExecution = executeClaim({
