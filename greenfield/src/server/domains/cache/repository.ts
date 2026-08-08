@@ -275,11 +275,11 @@ export function createCacheRepository(
         runTransaction(callback, { behavior: "deferred" });
 
     return Object.freeze({
-        commitAttempt(input: CacheAttemptCommitInput) {
+        async commitAttempt(input: CacheAttemptCommitInput) {
             const outcome = validateAttemptOutcome(input.outcome);
             const keys = attemptKeys(outcome);
             const authority = cacheAttemptAuthority(keys);
-            return writeAdmission.run((markTransactionStarted) =>
+            const result = await writeAdmission.run((markTransactionStarted) =>
                 runTransaction(
                     (transaction): JobCacheAttemptWriteResult => {
                         markTransactionStarted();
@@ -358,6 +358,7 @@ export function createCacheRepository(
                     { behavior: "immediate" }
                 )
             );
+            return result;
         },
         findEntry(key: string) {
             v.parse(cacheEntryKeySchema, key);

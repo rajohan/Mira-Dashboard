@@ -357,19 +357,20 @@ describe("cache repository", () => {
         const fixture = await runningClaim();
         try {
             const outcome = successOutcome();
-            expect(() =>
-                fixture.cache.commitAttempt({
-                    at: new Date(3000),
-                    attempt: fixture.run.attemptCount,
-                    leaseToken: fixture.leaseToken,
-                    outcome: {
-                        ...outcome,
-                        entries: [outcome.entries[0]!, outcome.entries[0]!],
-                    },
-                    runId: fixture.run.id,
-                    workerId: fixture.workerId,
-                })
-            ).toThrow("Cache provider entry group contains duplicate keys");
+            const rejected = fixture.cache.commitAttempt({
+                at: new Date(3000),
+                attempt: fixture.run.attemptCount,
+                leaseToken: fixture.leaseToken,
+                outcome: {
+                    ...outcome,
+                    entries: [outcome.entries[0]!, outcome.entries[0]!],
+                },
+                runId: fixture.run.id,
+                workerId: fixture.workerId,
+            });
+            expect(rejected).rejects.toThrow(
+                "Cache provider entry group contains duplicate keys"
+            );
             expect(fixture.cache.findEntry("system.host")).toBeUndefined();
             expect(
                 fixture.database.orm
