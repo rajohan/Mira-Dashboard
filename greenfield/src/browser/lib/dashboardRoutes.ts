@@ -4,6 +4,7 @@ export const dashboardRoutePaths = Object.freeze([
     "/account-security",
     "/agents",
     "/incidents",
+    "/jobs",
     "/login",
     "/reports",
     "/tasks",
