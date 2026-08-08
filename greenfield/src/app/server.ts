@@ -3,6 +3,7 @@ import * as v from "valibot";
 
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
 import type { AgentService } from "../server/domains/agents/service.ts";
+import type { CacheService } from "../server/domains/cache/service.ts";
 import type { JobService } from "../server/domains/jobs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
@@ -134,6 +135,7 @@ export interface ServerOptions {
     readonly authenticateCredential: AuthenticateCredential;
     /** Explicit public browser origin when TLS terminates at a trusted proxy. */
     readonly browserOrigin?: string;
+    readonly cacheService: CacheService["Service"];
     /** Manifest-indexed browser artifacts and controlled SPA navigation. */
     readonly frontendAssets?: FrontendAssetHandler;
     /** Graceful request-drain budget before active connections are forced closed. */
@@ -183,6 +185,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             authenticationLifecycle: options.authenticationLifecycle,
             automationSecurityLifecycle: options.automationSecurityLifecycle,
             browserOrigin,
+            cacheService: options.cacheService,
             mfaAccountLifecycle: options.mfaAccountLifecycle,
             mfaLoginLifecycle: options.mfaLoginLifecycle,
             jobService: options.jobService,

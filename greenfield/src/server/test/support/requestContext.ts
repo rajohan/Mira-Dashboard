@@ -7,6 +7,8 @@ import type {
 } from "../../../contracts/security.ts";
 import type { AgentService } from "../../domains/agents/service.ts";
 import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
+import type { CacheService } from "../../domains/cache/service.ts";
+import { createTestCacheService } from "../../domains/cache/testSupport/service.ts";
 import type { JobService } from "../../domains/jobs/service.ts";
 import { createTestJobService } from "../../domains/jobs/testSupport/service.ts";
 import type { MonitoringCatalogService } from "../../domains/monitoring/catalogService.ts";
@@ -394,6 +396,7 @@ export interface TestServerSecurityServices {
     readonly authenticateCredential: AuthenticateCredential;
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
+    readonly cacheService: CacheService["Service"];
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
@@ -422,6 +425,7 @@ export function createTestServerSecurityServices(
         automationSecurityLifecycle:
             overrides.automationSecurityLifecycle ??
             createTestAutomationSecurityLifecycleService(),
+        cacheService: overrides.cacheService ?? createTestCacheService(),
         mfaAccountLifecycle:
             overrides.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:
@@ -513,6 +517,7 @@ export function createTestRequestContext(
         readonly authenticationClientSourceId?: string;
         readonly authenticationLifecycle?: AuthenticationLifecycleService;
         readonly automationSecurityLifecycle?: AutomationSecurityLifecycleService;
+        readonly cacheService?: CacheService["Service"];
         readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
         readonly mfaLoginLifecycle?: MfaLoginLifecycleService;
         readonly jobService?: JobService["Service"];
@@ -539,6 +544,7 @@ export function createTestRequestContext(
             options.automationSecurityLifecycle ??
             createTestAutomationSecurityLifecycleService(),
         authenticateCredential: () => createTestAuthenticationResolution(authentication),
+        cacheService: options.cacheService ?? createTestCacheService(),
         mfaAccountLifecycle:
             options.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:

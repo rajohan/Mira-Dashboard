@@ -35,10 +35,10 @@ import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import { isDatabaseRuntimeWriteUnavailableError } from "../../database/runtime/databaseErrors.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
-    type JobActionRegistration,
-    findJobActionRegistration,
+    type JobActionDefinition,
+    findJobActionDefinition,
     isRegisteredJobSchedule,
-    jobActionRegistrations,
+    jobActionDefinitions,
 } from "./actionRegistry.ts";
 import {
     JobConflictError,
@@ -46,6 +46,7 @@ import {
     type JobOperationError,
     JobValidationError,
 } from "./errors.ts";
+import { preflightManualEnqueue } from "./manualEnqueue.ts";
 import {
     type JobRunRecord,
     toJobRunEvent,
@@ -367,11 +368,11 @@ function durableRunMutationSideEffects(
     });
 }
 
-function scheduleInsertShape(registration: JobActionRegistration, at: Date) {
-    const schedule = buildRegisteredSchedule(registration, at);
+function scheduleInsertShape(definition: JobActionDefinition, at: Date) {
+    const schedule = buildRegisteredSchedule(definition, at);
     if (schedule === undefined) {
         throw new JobValidationError({
-            id: registration.scheduleId,
+            id: definition.scheduleId,
             reason: "next-occurrence-unavailable",
             resource: "schedule",
         });
@@ -473,8 +474,33 @@ export function createJobService(
             ),
         runSchedule: (principal, input) =>
             mutationEffect(async () => {
+                const actor = principalActor(principal);
+                const enqueueSha256 = sha256Hex(
+                    JSON.stringify({
+                        procedure: "schedules.run",
+                        scheduleId: input.id,
+                        triggerType: "manual",
+                        version: 1,
+                    })
+                );
+                const replay = preflightManualEnqueue(dependencies.repository, {
+                    enqueueSha256,
+                    idempotencyKey: input.idempotencyKey,
+                    requestedById: actor.id,
+                    requestedByKind: actor.kind,
+                });
+                if (replay.kind === "idempotency-mismatch") {
+                    throw new JobConflictError({
+                        id: input.id,
+                        reason: "idempotency-mismatch",
+                        resource: "schedule",
+                    });
+                }
+                if (replay.kind === "replayed") {
+                    return toJobRunSummary(replay.run);
+                }
                 const { schedule } = readSchedule(dependencies.repository, input.id);
-                const registration = findJobActionRegistration(schedule.actionKey);
+                const registration = findJobActionDefinition(schedule.actionKey);
                 if (!isRegisteredJobSchedule(schedule.id, schedule.actionKey)) {
                     throw new JobConflictError({
                         id: input.id,
@@ -491,7 +517,6 @@ export function createJobService(
                 }
                 const at = operationTime(nowMs, [schedule.updatedAt]);
                 const runId = generateId();
-                const actor = principalActor(principal);
                 const runSideEffects = mutationSideEffects(generateId, {
                     action: "jobs.run.enqueue",
                     actor: principalAuditActor(principal),
@@ -534,14 +559,7 @@ export function createJobService(
                         cancelRequestedById: null,
                         cancelRequestedByKind: null,
                         displayName: schedule.name,
-                        enqueueSha256: sha256Hex(
-                            JSON.stringify({
-                                procedure: "schedules.run",
-                                scheduleId: schedule.id,
-                                triggerType: "manual",
-                                version: 1,
-                            })
-                        ),
+                        enqueueSha256,
                         finishedAt: null,
                         firstStartedAt: null,
                         heartbeatAt: null,
@@ -858,8 +876,8 @@ export async function reconcileJobSchedules(
             terminalMessage:
                 "Cancelled because the schedule was retired from the action registry",
         },
-        schedules: jobActionRegistrations.map((registration) =>
-            scheduleInsertShape(registration, at)
+        schedules: jobActionDefinitions.map((definition) =>
+            scheduleInsertShape(definition, at)
         ),
         sideEffectsForSchedule: (schedule) =>
             mutationSideEffects(generateId, {

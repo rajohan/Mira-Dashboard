@@ -11,6 +11,7 @@ export { authSessions } from "./authSessions.ts";
 export { automationCredentials } from "./automationCredentials.ts";
 export { automationPrincipalCapabilities } from "./automationPrincipalCapabilities.ts";
 export { automationPrincipals } from "./automationPrincipals.ts";
+export { cacheEntries } from "./cacheEntries.ts";
 export { incidentObservations } from "./incidentObservations.ts";
 export { incidents } from "./incidents.ts";
 export { jobDisableIntents } from "./jobDisableIntents.ts";

@@ -5,6 +5,8 @@ import { Redacted } from "effect";
 
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
+import { createCacheRepository } from "../server/domains/cache/repository.ts";
+import { createCacheService } from "../server/domains/cache/service.ts";
 import { createJobRepository } from "../server/domains/jobs/repository.ts";
 import {
     createJobService,
@@ -88,6 +90,7 @@ export interface DashboardServerOptions extends Omit<
     | "authenticationLifecycle"
     | "automationSecurityLifecycle"
     | "browserOrigin"
+    | "cacheService"
     | "hostname"
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
@@ -291,6 +294,12 @@ export async function createDashboardServer(
             repository: jobRepository,
             wakeEventPump,
         });
+        const cacheService = createCacheService({
+            cacheRepository: createCacheRepository(database, databaseRuntime),
+            jobRepository,
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            wakeEventPump,
+        });
         const monitoringRepository = createMonitoringRepository(
             database,
             databaseRuntime
@@ -313,6 +322,7 @@ export async function createDashboardServer(
             authenticationLifecycle,
             automationSecurityLifecycle,
             browserOrigin,
+            cacheService,
             frontendAssets: options.frontendAssets,
             gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
             hostname: "127.0.0.1",

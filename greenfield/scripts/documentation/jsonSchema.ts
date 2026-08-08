@@ -38,6 +38,16 @@ import {
     rotatedAutomationCredentialResultIsConsistent,
 } from "../../src/contracts/automationSecurity.ts";
 import {
+    cacheEntryIsConsistent,
+    cacheEntryMetadataFitsBudget,
+    cacheEntryPayloadFitsBudget,
+    cacheEntryStatusIsConsistent,
+    cacheStatusEntriesAreCanonical,
+    cacheStatusResultIsConsistent,
+    systemHostCapacityIsConsistent,
+} from "../../src/contracts/cache.ts";
+import { cacheRealtimeIdentityMatches } from "../../src/contracts/cacheRealtime.ts";
+import {
     incidentPageCursorIsConsistent,
     newestIncidentOrderIsStable,
 } from "../../src/contracts/incidents.ts";
@@ -154,6 +164,38 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${securityLabelControl
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        cacheEntryPayloadFitsBudget,
+        "Live Valibot validation additionally limits the serialized cache payload to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        cacheEntryMetadataFitsBudget,
+        "Live Valibot validation additionally limits serialized cache metadata to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        systemHostCapacityIsConsistent,
+        "Live Valibot validation additionally requires free host capacity not to exceed total capacity.",
+    ],
+    [
+        cacheEntryIsConsistent,
+        "Live Valibot validation additionally requires cache projection, attempt, failure, and freshness fields to agree.",
+    ],
+    [
+        cacheEntryStatusIsConsistent,
+        "Live Valibot validation additionally requires payload-free cache status fields to agree.",
+    ],
+    [
+        cacheStatusEntriesAreCanonical,
+        "Live Valibot validation additionally requires strict ascending cache-key order.",
+    ],
+    [
+        cacheStatusResultIsConsistent,
+        "Live Valibot validation additionally requires cache totals, truncation, snapshot timestamps, and freshness relative to the snapshot clock to agree.",
+    ],
+    [
+        cacheRealtimeIdentityMatches,
+        "Live Valibot validation additionally requires the realtime entity and compact cache key to match exactly.",
+    ],
     [
         agentDefinitionsHaveUniqueIds,
         "Live Valibot validation additionally requires every reviewed agent ID to be unique.",

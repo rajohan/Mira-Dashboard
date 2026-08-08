@@ -714,6 +714,7 @@ const scheduleSummaryObjectSchema = v.strictObject({
     enabled: v.boolean("Schedule enabled state is invalid"),
     id: scheduleIdSchema,
     latestRun: v.optional(jobRunSummarySchema),
+    manualRunAvailable: v.boolean("Schedule manual-run availability is invalid"),
     name: jobDisplayNameSchema,
     nextRunAtMs: v.optional(jobTimestampSchema),
     priority: jobPrioritySchema,

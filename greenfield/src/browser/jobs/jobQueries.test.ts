@@ -71,6 +71,7 @@ function schedule(id: string, enabled = true): ScheduleSummary {
         description: "Checks the worker without host mutation.",
         enabled,
         id,
+        manualRunAvailable: true,
         name: "Worker smoke",
         ...(enabled ? { nextRunAtMs: timestampMs + 60_000 } : {}),
         priority: 0,

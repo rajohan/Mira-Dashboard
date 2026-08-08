@@ -15,6 +15,7 @@ function schedule(id: string, index: number): ScheduleSummary {
         description: "Checks the durable worker.",
         enabled: index % 2 === 0,
         id,
+        manualRunAvailable: true,
         name: `Worker smoke ${index}`,
         ...(index % 2 === 0 ? { nextRunAtMs: 120_000 } : {}),
         priority: 0,

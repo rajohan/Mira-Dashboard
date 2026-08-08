@@ -199,6 +199,15 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
+    "cache.getEntry": ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
+    "cache.getStatus": ["FORBIDDEN", "UNAUTHORIZED"],
+    "cache.refreshEntry": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
+        "UNAUTHORIZED",
+    ],
     "events.stream": [
         "BAD_REQUEST",
         "FORBIDDEN",

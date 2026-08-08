@@ -6,6 +6,7 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { listAutomationPrincipalsResultSchema } from "../contracts/automationSecurity.ts";
+import { cacheStatusResultSchema } from "../contracts/cache.ts";
 import { jobRunSummarySchema } from "../contracts/jobModel.ts";
 import { listJobRunsResultSchema } from "../contracts/jobs.ts";
 import {
@@ -301,12 +302,34 @@ describe("Dashboard security composition", () => {
                 listSchedulesResultSchema,
                 scheduleBody.result?.data?.json
             );
-            expect(schedules.schedules).toHaveLength(1);
+            expect(schedules.schedules.map(({ id }) => id)).toEqual([
+                "cache.system-host",
+                "system.worker-smoke",
+            ]);
             expect(schedules.schedules[0]).toMatchObject({
+                actionKey: "cache.refresh.system-host",
+                enabled: true,
+                id: "cache.system-host",
+            });
+            expect(schedules.schedules[1]).toMatchObject({
                 actionKey: "system.worker-smoke",
                 enabled: false,
                 id: "system.worker-smoke",
             });
+
+            const cacheStatusResponse = await fetch(
+                new URL(`/trpc/cache.getStatus?input=${listInput}`, server.url),
+                { headers }
+            );
+            const cacheStatusBody = (await cacheStatusResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+            expect(cacheStatusResponse.status).toBe(200);
+            expect(cacheStatusBody.error).toBeUndefined();
+            expect(
+                v.parse(cacheStatusResultSchema, cacheStatusBody.result?.data?.json)
+            ).toMatchObject({ entries: [], totalCount: 0, truncated: false });
 
             const idempotencyKey = "cHJvZHVjdGlvbi1odHRwLWNvbXBvc2l0aW9uLWtleS0x";
             const enqueue = () =>

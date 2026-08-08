@@ -207,7 +207,7 @@ queryable lifecycle.
 | Chat replay                   | unique `chat_run_events(chat_run_id, sequence)`                                           |
 | Deployment history            | `deployments(state, updated_at_ms DESC)`                                                  |
 | Docker history                | `docker_update_events(managed_service_id, created_at_ms DESC)`                            |
-| Cache refresh/expiry          | `cache_entries(status, expires_at_ms)`                                                    |
+| Cache refresh/expiry          | `cache_entries(last_attempt_status, expires_at_ms, key)`                                  |
 | Audit cursor                  | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                  |
 
 Primary keys and unique constraints already create indexes; the schema does not add redundant

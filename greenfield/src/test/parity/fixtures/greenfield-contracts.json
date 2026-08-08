@@ -171,6 +171,18 @@
             "name": "automationSecurity.rotateCredential"
         },
         {
+            "kind": "query",
+            "name": "cache.getEntry"
+        },
+        {
+            "kind": "query",
+            "name": "cache.getStatus"
+        },
+        {
+            "kind": "mutation",
+            "name": "cache.refreshEntry"
+        },
+        {
             "kind": "subscription",
             "name": "events.stream"
         },

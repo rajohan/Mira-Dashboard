@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
+import { cacheRealtimeTopic } from "./cacheRealtime.ts";
 import {
     eventsStreamContract,
     realtimeStreamCapabilities,
@@ -19,6 +20,7 @@ describe("realtime transport contracts", () => {
     test("documents only capabilities required by registered topics", () => {
         expect(realtimeStreamCapabilities).toEqual([
             "agents:read",
+            "cache:read",
             "jobs:read",
             "notifications:read",
             "reports:read",
@@ -89,6 +91,35 @@ describe("realtime transport contracts", () => {
                 id: "1",
             })
         ).toMatchObject({ id: "1" });
+    });
+
+    test("requires matching cache envelope and payload identities", () => {
+        expect(
+            v.parse(realtimeStreamDataSchema, {
+                event: {
+                    entityId: "system.host",
+                    entityType: "cache-entry",
+                    occurredAtMs: 1000,
+                    operation: "updated",
+                    payload: { key: "system.host" },
+                    topic: cacheRealtimeTopic,
+                },
+                kind: "change",
+            })
+        ).toBeDefined();
+        expect(
+            v.safeParse(realtimeStreamDataSchema, {
+                event: {
+                    entityId: "system.host",
+                    entityType: "cache-entry",
+                    occurredAtMs: 1000,
+                    operation: "updated",
+                    payload: { key: "system.other" },
+                    topic: cacheRealtimeTopic,
+                },
+                kind: "change",
+            }).success
+        ).toBeFalse();
     });
 
     test("rejects mismatched durable job entity and payload identities", () => {

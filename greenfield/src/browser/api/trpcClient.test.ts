@@ -169,6 +169,29 @@ describe("Dashboard browser tRPC client", () => {
         ]);
     });
 
+    test("loads cache contracts on demand", async () => {
+        const calls: TransportCall[] = [];
+        const client = createDashboardTrpcClient(
+            createRecordingTransport(
+                {
+                    entries: [],
+                    generatedAtMs: 0,
+                    totalCount: 0,
+                    truncated: false,
+                },
+                calls
+            )
+        );
+
+        expect(await client.query("cache.getStatus", {})).toEqual({
+            entries: [],
+            generatedAtMs: 0,
+            totalCount: 0,
+            truncated: false,
+        });
+        expect(calls).toEqual([{ input: {}, kind: "query", path: "cache.getStatus" }]);
+    });
+
     test("rejects invalid input before transport access", async () => {
         const calls: TransportCall[] = [];
         const client = createDashboardTrpcClient(

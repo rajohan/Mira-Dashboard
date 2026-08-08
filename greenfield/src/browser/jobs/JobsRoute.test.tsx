@@ -142,6 +142,7 @@ function scheduleSummary(
         description: "Checks the durable worker without host mutation.",
         enabled: true,
         id,
+        manualRunAvailable: true,
         name: "Worker smoke",
         nextRunAtMs: timestampMs + 60_000,
         priority: 0,
