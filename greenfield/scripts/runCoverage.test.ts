@@ -1,11 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 
+import {
+    type BrowserTestInventory,
+    createBrowserTestInventory,
+    discoverBrowserTestInventory,
+} from "./runBrowserTests.ts";
 import {
     type CoverageRunnerDependencies,
     createCoveragePartitionPlan,
     createCoverageTestArguments,
     runCoverage,
 } from "./runCoverage.ts";
+
+const browserProjectRoot = path.resolve(import.meta.dir, "..");
 
 const isolatedBrowserCoverageCases = Object.freeze([
     Object.freeze({
@@ -39,6 +47,15 @@ const isolatedBrowserCoverageCases = Object.freeze([
         testPath: "src/browser/jobs/ScheduleDetailStateReplay.test.tsx",
     }),
 ] as const);
+const browserInventory = discoverBrowserTestInventory(browserProjectRoot);
+const injectedBrowserInventory: BrowserTestInventory = createBrowserTestInventory(
+    "/tmp/project",
+    [
+        "src/browser/example.test.ts",
+        "src/browser/jobs/example.test.ts",
+        ...isolatedBrowserCoverageCases.map((testCase) => testCase.testPath),
+    ]
+);
 
 describe("coverage runner", () => {
     test("keeps Bun coverage free of browser globals", () => {
@@ -60,40 +77,73 @@ describe("coverage runner", () => {
         ]);
     });
 
-    test("uses the shared deterministic policy for every browser shard", () => {
-        expect(createCoverageTestArguments("/tmp/coverage-core", "browser-core")).toEqual(
-            [
-                "--coverage",
-                "--coverage-reporter",
-                "lcov",
-                "--coverage-dir",
+    test("uses the shared deterministic policy for every browser shard", async () => {
+        const discoveredTestPathGroups = await Promise.all(
+            ["src/browser/**/*.test.ts", "src/browser/**/*.test.tsx"].map((pattern) =>
+                Array.fromAsync(
+                    new Bun.Glob(pattern).scan({
+                        cwd: browserProjectRoot,
+                        onlyFiles: true,
+                    })
+                )
+            )
+        );
+        const discoveredTestPaths = discoveredTestPathGroups.flat();
+        const testPaths = discoveredTestPaths.toSorted();
+        const isolatedPaths = new Set<string>(
+            isolatedBrowserCoverageCases.map((testCase) => testCase.testPath)
+        );
+        const sharedArguments = [
+            "--preload",
+            "./src/browser/test/setup.ts",
+            "--max-concurrency=1",
+            "--bail=1",
+        ];
+        expect(
+            createCoverageTestArguments(
                 "/tmp/coverage-core",
-                "--preload",
-                "./src/browser/test/setup.ts",
-                "--max-concurrency=1",
-                "--bail=1",
-                "--path-ignore-patterns=src/browser/jobs/**",
-                "src/browser",
-            ]
-        );
-        expect(createCoverageTestArguments("/tmp/coverage-jobs", "browser-jobs")).toEqual(
-            [
-                "--coverage",
-                "--coverage-reporter",
-                "lcov",
-                "--coverage-dir",
+                "browser-core",
+                browserInventory
+            )
+        ).toEqual([
+            "--coverage",
+            "--coverage-reporter",
+            "lcov",
+            "--coverage-dir",
+            "/tmp/coverage-core",
+            ...sharedArguments,
+            ...testPaths
+                .filter((testPath) => !testPath.startsWith("src/browser/jobs/"))
+                .map((testPath) => path.resolve(browserProjectRoot, testPath)),
+        ]);
+        expect(
+            createCoverageTestArguments(
                 "/tmp/coverage-jobs",
-                "--preload",
-                "./src/browser/test/setup.ts",
-                "--max-concurrency=1",
-                "--bail=1",
-                "--path-ignore-patterns=src/browser/jobs/{ScheduleDetailForm.test.tsx,ScheduleDetailStateDisable.test.tsx,ScheduleDetailStateErrors.test.tsx,ScheduleDetailStateVersion.test.tsx,ScheduleDetailStateCopy.test.tsx,ScheduleDetailStateReplay.test.tsx}",
-                "src/browser/jobs",
-            ]
-        );
+                "browser-jobs",
+                browserInventory
+            )
+        ).toEqual([
+            "--coverage",
+            "--coverage-reporter",
+            "lcov",
+            "--coverage-dir",
+            "/tmp/coverage-jobs",
+            ...sharedArguments,
+            ...testPaths
+                .filter(
+                    (testPath) =>
+                        testPath.startsWith("src/browser/jobs/") &&
+                        !isolatedPaths.has(testPath)
+                )
+                .map((testPath) => path.resolve(browserProjectRoot, testPath)),
+        ]);
         for (const testCase of isolatedBrowserCoverageCases) {
             expect(
-                createCoverageTestArguments(testCase.outputDirectory, testCase.partition)
+                createCoverageTestArguments(
+                    testCase.outputDirectory,
+                    testCase.partition,
+                    browserInventory
+                )
             ).toEqual([
                 "--coverage",
                 "--coverage-reporter",
@@ -104,7 +154,7 @@ describe("coverage runner", () => {
                 "./src/browser/test/setup.ts",
                 "--max-concurrency=1",
                 "--bail=1",
-                testCase.testPath,
+                path.resolve(browserProjectRoot, testCase.testPath),
             ]);
         }
     });
@@ -116,6 +166,7 @@ describe("coverage runner", () => {
         const writes: string[][] = [];
         const checks: string[][] = [];
         const logs: string[] = [];
+        let discoveryCalls = 0;
         const dependencies: CoverageRunnerDependencies = {
             checkReport: (...arguments_) => {
                 checks.push(arguments_.map(String));
@@ -126,6 +177,11 @@ describe("coverage runner", () => {
                 });
             },
             coverageDirectory: "/tmp/coverage",
+            discoverBrowserTests: (receivedProjectRoot) => {
+                discoveryCalls += 1;
+                expect(receivedProjectRoot).toBe("/tmp/project");
+                return injectedBrowserInventory;
+            },
             log: (message) => logs.push(message),
             mergeReports: (reportPaths, reportPattern) => {
                 mergedInventories.push([...reportPaths]);
@@ -148,13 +204,18 @@ describe("coverage runner", () => {
         };
 
         expect(await runCoverage(dependencies)).toBe(0);
+        expect(discoveryCalls).toBe(1);
 
         const plans = createCoveragePartitionPlan("/tmp/coverage");
         expect(calls).toEqual([
             ["reset", "/tmp/coverage"],
             ...plans.map((plan) => [
                 "test",
-                ...createCoverageTestArguments(plan.outputDirectory, plan.name),
+                ...createCoverageTestArguments(
+                    plan.outputDirectory,
+                    plan.name,
+                    injectedBrowserInventory
+                ),
                 "/tmp/project",
             ]),
         ]);
@@ -174,6 +235,7 @@ describe("coverage runner", () => {
                 return Promise.reject(new Error("coverage policy must not run"));
             },
             coverageDirectory: "/tmp/coverage",
+            discoverBrowserTests: () => injectedBrowserInventory,
             log: () => {
                 throw new Error("coverage summary must not be logged");
             },

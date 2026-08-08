@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import path from "node:path";
 
 import {
+    type BrowserTestInventory,
     type BrowserTestPartition,
     browserTestPartitionForPath,
     browserTestPartitionOwnsPath,
     browserTestPartitions,
     createBrowserTestArguments,
+    createBrowserTestInventory,
+    discoverBrowserTestInventory,
     runBrowserTestShards,
 } from "./runBrowserTests.ts";
 
@@ -36,34 +39,71 @@ const isolatedJobTestOwners: ReadonlyMap<string, BrowserTestPartition> = Object.
         ],
     ] as const)
 );
+const injectedInventory: BrowserTestInventory = createBrowserTestInventory(
+    "/tmp/project",
+    [
+        "src/browser/example.test.ts",
+        "src/browser/jobs/example.test.ts",
+        ...isolatedJobTestOwners.keys(),
+    ]
+);
 
 describe("browser test shard runner", () => {
-    test("builds exact, isolated, deterministic shard arguments", () => {
-        expect(createBrowserTestArguments("core")).toEqual([
-            "--preload",
-            "./src/browser/test/setup.ts",
-            "--max-concurrency=1",
-            "--bail=1",
-            "--path-ignore-patterns=src/browser/jobs/**",
-            "src/browser",
-        ]);
-        expect(createBrowserTestArguments("jobs")).toEqual([
-            "--preload",
-            "./src/browser/test/setup.ts",
-            "--max-concurrency=1",
-            "--bail=1",
-            "--path-ignore-patterns=src/browser/jobs/{ScheduleDetailForm.test.tsx,ScheduleDetailStateDisable.test.tsx,ScheduleDetailStateErrors.test.tsx,ScheduleDetailStateVersion.test.tsx,ScheduleDetailStateCopy.test.tsx,ScheduleDetailStateReplay.test.tsx}",
-            "src/browser/jobs",
-        ]);
-        for (const [testPath, owner] of isolatedJobTestOwners) {
-            expect(createBrowserTestArguments(owner)).toEqual([
+    test("builds exact, isolated, deterministic shard arguments", async () => {
+        const discoveredTestPathGroups = await Promise.all(
+            ["src/browser/**/*.test.ts", "src/browser/**/*.test.tsx"].map((pattern) =>
+                Array.fromAsync(
+                    new Bun.Glob(pattern).scan({
+                        cwd: projectRoot,
+                        onlyFiles: true,
+                    })
+                )
+            )
+        );
+        const discoveredTestPaths = discoveredTestPathGroups.flat();
+        const testPaths = discoveredTestPaths.toSorted();
+        const inventory = discoverBrowserTestInventory(projectRoot);
+        const partitionPaths: string[] = [];
+        for (const partition of browserTestPartitions) {
+            const ownedPaths = testPaths.filter((testPath) =>
+                browserTestPartitionOwnsPath(partition.name, testPath)
+            );
+            expect(createBrowserTestArguments(partition.name, inventory)).toEqual([
                 "--preload",
                 "./src/browser/test/setup.ts",
                 "--max-concurrency=1",
                 "--bail=1",
-                testPath,
+                ...ownedPaths.map((testPath) => path.resolve(projectRoot, testPath)),
             ]);
+            partitionPaths.push(...ownedPaths);
         }
+        expect(partitionPaths.toSorted()).toEqual(testPaths);
+        expect(new Set(partitionPaths).size).toBe(testPaths.length);
+        expect(
+            createBrowserTestArguments("core", inventory).some((argument) =>
+                argument.startsWith("--path-ignore-patterns=")
+            )
+        ).toBeFalse();
+    });
+
+    test("rejects invalid, duplicate, or incomplete inventories before execution", () => {
+        expect(() =>
+            createBrowserTestInventory("/tmp/project", ["src/server/example.test.ts"])
+        ).toThrow("Invalid discovered browser-test path");
+        expect(() =>
+            createBrowserTestInventory("/tmp/project", [
+                "src/browser/../server/example.test.ts",
+            ])
+        ).toThrow("Invalid discovered browser-test path");
+        expect(() =>
+            createBrowserTestInventory("/tmp/project", [
+                "src/browser/example.test.ts",
+                "./src/browser/example.test.ts",
+            ])
+        ).toThrow("duplicate paths");
+        expect(() =>
+            createBrowserTestInventory("/tmp/project", ["src/browser/example.test.ts"])
+        ).toThrow("partition has no discovered files");
     });
 
     test("assigns every discovered browser test to exactly one shard", async () => {
@@ -99,7 +139,13 @@ describe("browser test shard runner", () => {
 
     test("runs fresh shards sequentially and stops on the first failure", async () => {
         const calls: string[][] = [];
+        let discoveryCalls = 0;
         const exitCode = await runBrowserTestShards({
+            discoverTests: (receivedProjectRoot) => {
+                discoveryCalls += 1;
+                expect(receivedProjectRoot).toBe("/tmp/project");
+                return injectedInventory;
+            },
             projectRoot: "/tmp/project",
             runTests: (arguments_, receivedProjectRoot) => {
                 calls.push([...arguments_, receivedProjectRoot]);
@@ -108,15 +154,17 @@ describe("browser test shard runner", () => {
         });
 
         expect(exitCode).toBe(17);
+        expect(discoveryCalls).toBe(1);
         expect(calls).toEqual([
-            [...createBrowserTestArguments("core"), "/tmp/project"],
-            [...createBrowserTestArguments("jobs"), "/tmp/project"],
+            [...createBrowserTestArguments("core", injectedInventory), "/tmp/project"],
+            [...createBrowserTestArguments("jobs", injectedInventory), "/tmp/project"],
         ]);
     });
 
     test("runs every later shard only after the previous shard passes", async () => {
         const calls: string[][] = [];
         const exitCode = await runBrowserTestShards({
+            discoverTests: () => injectedInventory,
             projectRoot: "/tmp/project",
             runTests: (arguments_, receivedProjectRoot) => {
                 calls.push([...arguments_, receivedProjectRoot]);
@@ -126,10 +174,10 @@ describe("browser test shard runner", () => {
 
         expect(exitCode).toBe(0);
         expect(calls).toEqual([
-            [...createBrowserTestArguments("core"), "/tmp/project"],
-            [...createBrowserTestArguments("jobs"), "/tmp/project"],
+            [...createBrowserTestArguments("core", injectedInventory), "/tmp/project"],
+            [...createBrowserTestArguments("jobs", injectedInventory), "/tmp/project"],
             ...[...isolatedJobTestOwners.values()].map((partition) => [
-                ...createBrowserTestArguments(partition),
+                ...createBrowserTestArguments(partition, injectedInventory),
                 "/tmp/project",
             ]),
         ]);

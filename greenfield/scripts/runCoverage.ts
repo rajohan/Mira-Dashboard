@@ -9,8 +9,10 @@ import {
     requiredLineCoveragePercent,
 } from "./checkCoverage.ts";
 import {
+    type BrowserTestInventory,
     type BrowserTestPartition,
     createBrowserTestArguments,
+    discoverBrowserTestInventory,
 } from "./runBrowserTests.ts";
 import { runTestSuite } from "./runTestSuite.ts";
 
@@ -57,6 +59,7 @@ export interface CoverageRunnerDependencies {
         projectRoot: string
     ) => Promise<LineCoverageSummary>;
     readonly coverageDirectory: string;
+    readonly discoverBrowserTests: (projectRoot: string) => BrowserTestInventory;
     readonly log: (message: string) => void;
     readonly mergeReports: (
         reportPaths: readonly string[],
@@ -107,11 +110,13 @@ export function createCoveragePartitionPlan(
  * Builds the exact Bun test arguments used by the coverage gate.
  * @param outputDirectory Directory where Bun writes coverage artifacts.
  * @param partition Runtime partition whose tests and preload policy are selected.
+ * @param browserInventory Shared exact-path inventory for browser partitions.
  * @returns Complete arguments after `bun test`.
  */
 export function createCoverageTestArguments(
     outputDirectory: string,
-    partition: CoveragePartition
+    partition: CoveragePartition,
+    browserInventory?: BrowserTestInventory
 ): readonly string[] {
     const coverageArguments = [
         "--coverage",
@@ -121,8 +126,12 @@ export function createCoverageTestArguments(
         outputDirectory,
     ];
     if (partition !== "bun") {
+        if (browserInventory === undefined) {
+            throw new TypeError("Browser coverage requires a discovered test inventory");
+        }
         return createBrowserTestArguments(
             coverageBrowserPartitions[partition],
+            browserInventory,
             coverageArguments
         );
     }
@@ -176,6 +185,7 @@ async function writeCoverageReport(filePath: string, coverage: string): Promise<
 const defaultDependencies: CoverageRunnerDependencies = Object.freeze({
     checkReport: checkCoverageFile,
     coverageDirectory,
+    discoverBrowserTests: discoverBrowserTestInventory,
     log: (message: string) => console.log(message),
     mergeReports: mergeCoverageReports,
     projectRoot,
@@ -192,12 +202,17 @@ const defaultDependencies: CoverageRunnerDependencies = Object.freeze({
 export async function runCoverage(
     dependencies: CoverageRunnerDependencies = defaultDependencies
 ): Promise<number> {
+    const browserInventory = dependencies.discoverBrowserTests(dependencies.projectRoot);
     await dependencies.resetDirectory(dependencies.coverageDirectory);
 
     const plans = createCoveragePartitionPlan(dependencies.coverageDirectory);
     for (const plan of plans) {
         const testExitCode = await dependencies.runTests(
-            createCoverageTestArguments(plan.outputDirectory, plan.name),
+            createCoverageTestArguments(
+                plan.outputDirectory,
+                plan.name,
+                browserInventory
+            ),
             dependencies.projectRoot
         );
         if (testExitCode !== 0) return testExitCode;

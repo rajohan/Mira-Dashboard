@@ -5,7 +5,10 @@ import { runTestSuite } from "./runTestSuite.ts";
 const projectRoot = path.resolve(import.meta.dir, "..");
 const browserTestPreload = "./src/browser/test/setup.ts";
 const browserJobsRoot = "src/browser/jobs";
-const browserJobsIgnorePattern = `${browserJobsRoot}/**`;
+const browserTestGlobs = Object.freeze([
+    "src/browser/**/*.test.ts",
+    "src/browser/**/*.test.tsx",
+] as const);
 const isolatedJobTestDefinitions = Object.freeze([
     Object.freeze({
         name: "schedule-detail-form",
@@ -35,9 +38,6 @@ const isolatedJobTestDefinitions = Object.freeze([
 const isolatedJobTestPaths: readonly string[] = Object.freeze(
     isolatedJobTestDefinitions.map((definition) => definition.testRoot)
 );
-const isolatedJobTestIgnorePattern = `${browserJobsRoot}/{${isolatedJobTestDefinitions
-    .map((definition) => path.basename(definition.testRoot))
-    .join(",")}}`;
 
 /** Independently executed browser-test process. */
 export type BrowserTestPartition =
@@ -57,6 +57,7 @@ export const browserTestPartitions = Object.freeze([
 
 /** Injectable process boundary used by the browser shard orchestrator. */
 export interface BrowserTestRunnerDependencies {
+    readonly discoverTests: (projectRoot: string) => BrowserTestInventory;
     readonly projectRoot: string;
     readonly runTests: (
         arguments_: readonly string[],
@@ -65,12 +66,26 @@ export interface BrowserTestRunnerDependencies {
 }
 
 const defaultDependencies: BrowserTestRunnerDependencies = Object.freeze({
+    discoverTests: discoverBrowserTestInventory,
     projectRoot,
     runTests: runTestSuite,
 });
 
+/** One immutable browser-test inventory discovered before any child process starts. */
+export interface BrowserTestInventory {
+    readonly projectRoot: string;
+    readonly testPaths: readonly string[];
+}
+
 function normalizeBrowserTestPath(filePath: string): string | undefined {
     const normalizedPath = filePath.replaceAll("\\", "/").replace(/^\.\//u, "");
+    if (
+        normalizedPath.includes("\0") ||
+        path.posix.isAbsolute(normalizedPath) ||
+        path.posix.normalize(normalizedPath) !== normalizedPath
+    ) {
+        return undefined;
+    }
     if (!normalizedPath.startsWith("src/browser/")) return undefined;
     return /\.test\.tsx?$/u.test(normalizedPath) ? normalizedPath : undefined;
 }
@@ -117,13 +132,82 @@ export function browserTestPartitionForPath(
 }
 
 /**
+ * Validates and freezes one repository-relative browser-test inventory.
+ * @param inventoryProjectRoot Repository root used to resolve exact Bun paths.
+ * @param filePaths Discovered repository-relative browser test paths.
+ * @returns Sorted, uniquely owned paths bound to the supplied root.
+ */
+export function createBrowserTestInventory(
+    inventoryProjectRoot: string,
+    filePaths: Iterable<string>
+): BrowserTestInventory {
+    const normalizedPaths = [...filePaths].map((filePath) => {
+        const normalizedPath = normalizeBrowserTestPath(filePath);
+        if (normalizedPath === undefined) {
+            throw new TypeError(`Invalid discovered browser-test path: ${filePath}`);
+        }
+        return normalizedPath;
+    });
+    const uniquePaths = new Set(normalizedPaths);
+    if (uniquePaths.size !== normalizedPaths.length) {
+        throw new TypeError("Browser-test discovery returned duplicate paths");
+    }
+
+    const discoveredPaths = [...uniquePaths].toSorted();
+    for (const filePath of discoveredPaths) {
+        const ownerCount = browserTestPartitions.filter((partition) =>
+            browserTestPartitionOwnsPath(partition.name, filePath)
+        ).length;
+        if (ownerCount !== 1) {
+            throw new TypeError(
+                `Discovered browser test must have exactly one owner: ${filePath}`
+            );
+        }
+    }
+    for (const partition of browserTestPartitions) {
+        if (
+            !discoveredPaths.some((filePath) =>
+                browserTestPartitionOwnsPath(partition.name, filePath)
+            )
+        ) {
+            throw new TypeError(
+                `Browser-test partition has no discovered files: ${partition.name}`
+            );
+        }
+    }
+    return Object.freeze({
+        projectRoot: path.resolve(inventoryProjectRoot),
+        testPaths: Object.freeze(discoveredPaths),
+    });
+}
+
+/**
+ * Discovers one stable browser-test inventory from an injected repository root.
+ * @param inventoryProjectRoot Repository root to scan.
+ * @returns Validated inventory reused by every browser shard.
+ */
+export function discoverBrowserTestInventory(
+    inventoryProjectRoot: string
+): BrowserTestInventory {
+    const discoveredPaths = browserTestGlobs.flatMap((pattern) => [
+        ...new Bun.Glob(pattern).scanSync({
+            cwd: inventoryProjectRoot,
+            onlyFiles: true,
+        }),
+    ]);
+    return createBrowserTestInventory(inventoryProjectRoot, discoveredPaths);
+}
+
+/**
  * Builds the exact Bun test arguments for one isolated browser process.
  * @param partition Browser-test process to execute.
+ * @param inventory Stable exact-path inventory shared across every process.
  * @param leadingArguments Optional Bun test flags placed before shared browser flags.
  * @returns Complete arguments after `bun test`.
  */
 export function createBrowserTestArguments(
     partition: BrowserTestPartition,
+    inventory: BrowserTestInventory,
     leadingArguments: readonly string[] = []
 ): readonly string[] {
     const partitionDefinition = browserTestPartitions.find(
@@ -140,12 +224,19 @@ export function createBrowserTestArguments(
         "--max-concurrency=1",
         "--bail=1",
     ];
-    if (partition === "core") {
-        arguments_.push(`--path-ignore-patterns=${browserJobsIgnorePattern}`);
-    } else if (partition === "jobs") {
-        arguments_.push(`--path-ignore-patterns=${isolatedJobTestIgnorePattern}`);
+    const partitionTestPaths = inventory.testPaths.filter((filePath) =>
+        browserTestPartitionOwnsPath(partition, filePath)
+    );
+    if (partitionTestPaths.length === 0) {
+        throw new TypeError(
+            `Browser-test partition has no discovered files: ${partition}`
+        );
     }
-    arguments_.push(partitionDefinition.testRoot);
+    arguments_.push(
+        ...partitionTestPaths.map((filePath) =>
+            path.resolve(inventory.projectRoot, filePath)
+        )
+    );
     return Object.freeze(arguments_);
 }
 
@@ -157,9 +248,10 @@ export function createBrowserTestArguments(
 export async function runBrowserTestShards(
     dependencies: BrowserTestRunnerDependencies = defaultDependencies
 ): Promise<number> {
+    const inventory = dependencies.discoverTests(dependencies.projectRoot);
     for (const partition of browserTestPartitions) {
         const exitCode = await dependencies.runTests(
-            createBrowserTestArguments(partition.name),
+            createBrowserTestArguments(partition.name, inventory),
             dependencies.projectRoot
         );
         if (exitCode !== 0) return exitCode;
