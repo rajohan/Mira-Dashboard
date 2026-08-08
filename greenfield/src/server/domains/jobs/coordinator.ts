@@ -254,17 +254,13 @@ function settlementMutationOutcome(run: JobRunRecord): JobWorkerMutationOutcome 
     return "failed";
 }
 
-function settlementSideEffects(
+function durableRunTransitionSideEffects(
     factory: JobWorkerSideEffectFactory,
     requestedAction: string,
-    requestedOutcome: JobClaimOutcome,
     settled: JobRunRecord
 ): JobMutationSideEffects {
     const outcome = settlementMutationOutcome(settled);
-    const action =
-        settled.state === "cancelled" && requestedOutcome.kind !== "cancelled"
-            ? "jobs.run.cancelled"
-            : requestedAction;
+    const action = settled.state === "cancelled" ? "jobs.run.cancelled" : requestedAction;
     return mergeSideEffects([
         factory.forRun({
             action,
@@ -529,10 +525,9 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
             outcome,
             runId: run.id,
             sideEffectsForRun: (settled) =>
-                settlementSideEffects(
+                durableRunTransitionSideEffects(
                     options.sideEffects,
                     "jobs.run.action-unavailable",
-                    outcome,
                     settled
                 ),
             workerId: options.workerInstanceId,
@@ -678,10 +673,9 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
         outcome,
         runId: run.id,
         sideEffectsForRun: (settled) =>
-            settlementSideEffects(
+            durableRunTransitionSideEffects(
                 options.sideEffects,
                 `jobs.run.${outcome.kind}`,
-                outcome,
                 settled
             ),
         workerId: options.workerInstanceId,
@@ -897,12 +891,11 @@ export function createJobWorkerCoordinator(
             limit: jobExpiredClaimRecoveryLimit,
             retryAt: (run) => retryAt(run, at),
             sideEffectsForRun: (run) =>
-                options.sideEffects.forRun({
-                    action: "jobs.run.lease-expired",
-                    at: run.updatedAt,
-                    outcome: "failed",
-                    targetId: run.id,
-                }),
+                durableRunTransitionSideEffects(
+                    options.sideEffects,
+                    "jobs.run.lease-expired",
+                    run
+                ),
         });
         throwIfAborted(signal);
         const leaseToken = generateId();
@@ -958,10 +951,9 @@ export function createJobWorkerCoordinator(
                 outcome,
                 runId: claim.run.id,
                 sideEffectsForRun: (settled) =>
-                    settlementSideEffects(
+                    durableRunTransitionSideEffects(
                         options.sideEffects,
                         `jobs.run.${outcome.kind}`,
-                        outcome,
                         settled
                     ),
                 workerId: options.workerInstanceId,

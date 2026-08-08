@@ -185,6 +185,7 @@ interface RepositoryFixtureOptions {
     readonly expiryResults?: readonly ExpireDisableIntentResult[];
     readonly heartbeatFailure?: Error;
     readonly reconciliationFailure?: Error;
+    readonly recoveredRuns?: readonly JobRunRecord[];
     readonly registrationFailure?: Error;
     readonly settlementAt?: Date;
     readonly settlementRun?: JobRunRecord;
@@ -197,11 +198,13 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const enqueues: DueScheduleEnqueueInput[] = [];
     const expiryEligibility: boolean[] = [];
     const expiryNextRuns: Date[] = [];
+    const recoverySideEffects: JobMutationSideEffects[] = [];
     const settlements: Array<Parameters<JobRepository["settleClaim"]>[0]> = [];
     const settlementSideEffects: JobMutationSideEffects[] = [];
     const claims = [
         ...(options.claims ?? (options.claim === undefined ? [] : [options.claim])),
     ];
+    let recoveredRuns = [...(options.recoveredRuns ?? [])];
     const eventRun = claims.find((result) => result.kind === "claimed")?.run;
     let dueSchedules = [...(options.dueSchedules ?? [])];
     const repository = {
@@ -283,8 +286,13 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
                 ? Promise.resolve([])
                 : Promise.reject(options.reconciliationFailure);
         },
-        recoverExpiredClaims() {
-            return Promise.resolve([]);
+        recoverExpiredClaims(input) {
+            const recovered = recoveredRuns;
+            recoveredRuns = [];
+            recoverySideEffects.push(
+                ...recovered.map((run) => input.sideEffectsForRun(run))
+            );
+            return Promise.resolve(recovered);
         },
         registerWorker(input) {
             events.push("register");
@@ -327,6 +335,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         events,
         expiryEligibility,
         expiryNextRuns,
+        recoverySideEffects,
         repository,
         settlements,
         settlementSideEffects,
@@ -666,6 +675,118 @@ describe("durable job worker coordinator", () => {
                     }),
                 ],
             },
+        ]);
+    });
+
+    test("invalidates scheduled retry and cancellation recoveries atomically", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const scheduleId = "system.worker-smoke";
+        const retryRun: JobRunRecord = {
+            ...claimedRun(workerId),
+            availableAt: new Date(at.getTime() + 1000),
+            heartbeatAt: null,
+            leaseExpiresAt: null,
+            leaseOwnerId: null,
+            leaseToken: null,
+            scheduledForAt: at,
+            scheduledJobId: scheduleId,
+            scheduledJobVersion: 1,
+            state: "queued",
+            stateVersion: 3,
+            triggerType: "schedule",
+        };
+        const cancelledAt = new Date(at.getTime() + 2000);
+        const cancelledRun: JobRunRecord = {
+            ...retryRun,
+            availableAt: at,
+            cancelRequestedAt: cancelledAt,
+            cancelRequestedById: Bun.randomUUIDv7(),
+            cancelRequestedByKind: "user",
+            finishedAt: cancelledAt,
+            id: Bun.randomUUIDv7(),
+            state: "cancelled",
+            stateVersion: 4,
+            terminalCode: "job/cancel-requested",
+            terminalMessage: "The run was cancelled after its worker lease expired.",
+            updatedAt: cancelledAt,
+        };
+        const fixture = repositoryFixture({ recoveredRuns: [retryRun, cancelledRun] });
+        const runTransitions: JobWorkerSideEffectInput[] = [];
+        const scheduleTransitions: JobWorkerSideEffectInput[] = [];
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            sideEffects: {
+                ...sideEffects,
+                forRun: (input) => {
+                    runTransitions.push(input);
+                    return createJobRealtimeSideEffects({
+                        occurredAt: input.at,
+                        realtime: {
+                            id: input.targetId,
+                            kind: "run",
+                            operation: "updated",
+                        },
+                    });
+                },
+                forScheduleEvent: (input) => {
+                    scheduleTransitions.push(input);
+                    return createJobRealtimeSideEffects({
+                        occurredAt: input.at,
+                        realtime: {
+                            id: input.targetId,
+                            kind: "schedule",
+                            operation: "updated",
+                        },
+                    });
+                },
+            },
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.recoverySideEffects.length === 2);
+        await coordinator.dispose();
+
+        expect(runTransitions).toEqual([
+            {
+                action: "jobs.run.lease-expired",
+                at: retryRun.updatedAt,
+                outcome: "failed",
+                targetId: retryRun.id,
+            },
+            {
+                action: "jobs.run.cancelled",
+                at: cancelledAt,
+                outcome: "cancelled",
+                targetId: cancelledRun.id,
+            },
+        ]);
+        expect(scheduleTransitions).toEqual([
+            {
+                action: "jobs.run.lease-expired",
+                at: retryRun.updatedAt,
+                outcome: "failed",
+                targetId: scheduleId,
+            },
+            {
+                action: "jobs.run.cancelled",
+                at: cancelledAt,
+                outcome: "cancelled",
+                targetId: scheduleId,
+            },
+        ]);
+        expect(
+            fixture.recoverySideEffects.map(({ realtimeEvents }) =>
+                realtimeEvents.map(({ entityId, topic }) => ({ entityId, topic }))
+            )
+        ).toEqual([
+            [
+                { entityId: retryRun.id, topic: "jobs.runs" },
+                { entityId: scheduleId, topic: "schedules.records" },
+            ],
+            [
+                { entityId: cancelledRun.id, topic: "jobs.runs" },
+                { entityId: scheduleId, topic: "schedules.records" },
+            ],
         ]);
     });
 

@@ -1734,6 +1734,28 @@ describe("durable jobs repository", () => {
                 })
             ).toMatchObject({ kind: "claimed", run: { attemptCount: 1 } });
 
+            const rejectedRecovery = repository.recoverExpiredClaims({
+                at: new Date(6000),
+                retryAt: () => new Date(7000),
+                sideEffectsForRun: () => {
+                    throw new Error("reject recovery side effects");
+                },
+            });
+            expect(rejectedRecovery).rejects.toThrow("reject recovery side effects");
+            await rejectedRecovery.catch(() => {});
+            expect(repository.findRun(run.id)).toMatchObject({
+                eventCount: 2,
+                leaseToken: uuid(81),
+                state: "running",
+            });
+            expect(
+                database.orm
+                    .select({ value: count() })
+                    .from(resourceLeases)
+                    .where(eq(resourceLeases.jobRunId, run.id))
+                    .get()?.value
+            ).toBe(1);
+
             const recovered = await repository.recoverExpiredClaims({
                 at: new Date(6000),
                 retryAt: () => new Date(7000),
