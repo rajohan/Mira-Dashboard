@@ -45,11 +45,17 @@ const release: RuntimeRelease = Object.freeze({
 function processFixture(
     initializationFailure?: Error,
     runtimeFailure?: Error,
-    runtimeStopsUnexpectedly = false
+    runtimeStopsUnexpectedly = false,
+    waitForForceDuringDisposal = false
 ) {
     const events: string[] = [];
     const logLines: string[] = [];
     const forceSignals: Array<AbortSignal | undefined> = [];
+    const forceController = new AbortController();
+    let resolveDisposalStarted: (() => void) | undefined;
+    const disposalStarted = new Promise<void>((resolve) => {
+        resolveDisposalStarted = resolve;
+    });
     let resolveCompletion: (() => void) | undefined;
     let rejectCompletion: ((error: unknown) => void) | undefined;
     const completion = new Promise<void>((resolve, reject) => {
@@ -75,16 +81,32 @@ function processFixture(
         dispose() {
             events.push("signals-dispose");
         },
-        forceSignal: new AbortController().signal,
-        termination: runtimeStopsUnexpectedly
-            ? new Promise<"SIGTERM">(() => {})
-            : Promise.resolve("SIGTERM" as const),
+        forceSignal: forceController.signal,
+        termination:
+            runtimeFailure !== undefined || runtimeStopsUnexpectedly
+                ? new Promise<"SIGTERM">(() => {})
+                : Promise.resolve("SIGTERM" as const),
     });
     const runtime: DashboardWorkerRuntime = Object.freeze({
         completion,
         dispose(forceSignal?: AbortSignal) {
             events.push("runtime-dispose");
             forceSignals.push(forceSignal);
+            resolveDisposalStarted?.();
+            if (waitForForceDuringDisposal) {
+                if (forceSignal === undefined) {
+                    return Promise.reject(
+                        new Error("Runtime cleanup did not receive the force signal")
+                    );
+                }
+                if (!forceSignal.aborted) {
+                    return new Promise<void>((resolve) => {
+                        forceSignal.addEventListener("abort", () => resolve(), {
+                            once: true,
+                        });
+                    });
+                }
+            }
             resolveCompletion?.();
             return Promise.resolve();
         },
@@ -127,7 +149,14 @@ function processFixture(
             return Promise.resolve(layout);
         },
     } satisfies DashboardWorkerProcessDependencies);
-    return { dependencies, events, forceSignals, logLines };
+    return {
+        dependencies,
+        disposalStarted,
+        events,
+        forceController,
+        forceSignals,
+        logLines,
+    };
 }
 
 const processOptions = Object.freeze({
@@ -199,6 +228,30 @@ describe("Dashboard worker process", () => {
         };
         expect(fatal.event).toBe("runtime.start_failed");
         expect(JSON.stringify(fatal)).not.toContain("private coordinator failure");
+    });
+
+    test("allows a second signal to force runtime-failure cleanup", async () => {
+        const failure = new Error("private coordinator failure");
+        const fixture = processFixture(undefined, failure, false, true);
+        const execution = runDashboardWorkerProcess(processOptions, fixture.dependencies);
+
+        await fixture.disposalStarted;
+        expect(
+            await Promise.race([
+                execution.then(
+                    () => "settled" as const,
+                    () => "settled" as const
+                ),
+                Bun.sleep(10).then(() => "waiting" as const),
+            ])
+        ).toBe("waiting");
+
+        fixture.forceController.abort(
+            new DOMException("Forced process shutdown requested", "AbortError")
+        );
+
+        expect(await execution.catch((error: unknown) => error)).toBe(failure);
+        expect(fixture.forceSignals).toEqual([fixture.forceController.signal]);
     });
 
     test("fails closed when the durable runtime resolves before a signal", async () => {

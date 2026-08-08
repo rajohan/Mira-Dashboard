@@ -1,4 +1,4 @@
-import { getTime, max as maximumDate, toDate } from "date-fns";
+import { getTime, max as maximumDate, subMilliseconds, toDate } from "date-fns";
 import { Context, Data, Effect } from "effect";
 import * as v from "valibot";
 
@@ -7,6 +7,7 @@ import {
     type JobWorkerControl,
     type ScheduleConfiguration,
     type ScheduleSummary,
+    jobWorkerFreshnessMs,
     jobTimestampSchema,
 } from "../../../contracts/jobModel.ts";
 import {
@@ -36,6 +37,7 @@ import { sha256Hex } from "../../shared/crypto.ts";
 import {
     type JobActionRegistration,
     findJobActionRegistration,
+    isRegisteredJobSchedule,
     jobActionRegistrations,
 } from "./actionRegistry.ts";
 import {
@@ -193,8 +195,15 @@ function readSchedule(
     return relation;
 }
 
-function listRuns(repository: JobRepository, input: ListJobRunsInput): ListJobRunsResult {
-    const snapshot = repository.listRunsWithQueueState(input);
+function listRuns(
+    repository: JobRepository,
+    input: ListJobRunsInput,
+    minimumWorkerHeartbeatAt: Date
+): ListJobRunsResult {
+    const snapshot = repository.listRunsWithQueueState({
+        ...input,
+        minimumHeartbeatAt: minimumWorkerHeartbeatAt,
+    });
     const { hasNextPage, page } = pageResult(snapshot.runs, input.limit, toJobRunSummary);
     const queue = snapshot.queue;
     const last = page.at(-1);
@@ -284,6 +293,10 @@ function listScheduleRuns(
 function operationTime(nowMs: () => number, durableDates: readonly Date[]): Date {
     const now = toDate(v.parse(jobTimestampSchema, nowMs()));
     return maximumDate([now, ...durableDates]);
+}
+
+function minimumWorkerHeartbeatAt(nowMs: () => number): Date {
+    return subMilliseconds(operationTime(nowMs, []), jobWorkerFreshnessMs);
 }
 
 function schedulesAreEqual(
@@ -403,7 +416,12 @@ export function createJobService(
             ),
         listRuns: (input) =>
             readEffect(
-                () => listRuns(dependencies.repository, input),
+                () =>
+                    listRuns(
+                        dependencies.repository,
+                        input,
+                        minimumWorkerHeartbeatAt(nowMs)
+                    ),
                 (_error): _error is never => false
             ),
         listScheduleRuns: (input) =>
@@ -420,7 +438,10 @@ export function createJobService(
             mutationEffect(async () => {
                 const { schedule } = readSchedule(dependencies.repository, input.id);
                 const registration = findJobActionRegistration(schedule.actionKey);
-                if (registration?.manualExposure !== "jobs-write") {
+                if (
+                    !isRegisteredJobSchedule(schedule.id, schedule.actionKey) ||
+                    registration?.manualExposure !== "jobs-write"
+                ) {
                     throw new JobConflictError({
                         id: input.id,
                         reason: "action-not-manually-exposed",
@@ -519,7 +540,9 @@ export function createJobService(
             }),
         setClaimingPaused: (principal, input) =>
             mutationEffect(async () => {
-                const current = dependencies.repository.readQueueState().control;
+                const current = dependencies.repository.readQueueState({
+                    minimumHeartbeatAt: minimumWorkerHeartbeatAt(nowMs),
+                }).control;
                 const at = operationTime(nowMs, [current.updatedAt]);
                 const result = await dependencies.repository.setClaimingPaused({
                     actor: principalActor(principal),
@@ -549,6 +572,18 @@ export function createJobService(
         updateSchedule: (principal, input) =>
             mutationEffect(async () => {
                 const current = readSchedule(dependencies.repository, input.id);
+                if (
+                    !isRegisteredJobSchedule(
+                        current.schedule.id,
+                        current.schedule.actionKey
+                    )
+                ) {
+                    throw new JobConflictError({
+                        id: input.id,
+                        reason: "action-unavailable",
+                        resource: "schedule",
+                    });
+                }
                 const at = operationTime(nowMs, [current.schedule.updatedAt]);
                 const replacesActiveDisableIntent =
                     current.activeDisableIntent !== undefined &&
@@ -638,6 +673,8 @@ export function createJobService(
                                           : "replaced",
                               },
                           }),
+                    expectedActiveDisableIntentId:
+                        current.activeDisableIntent?.id ?? null,
                     expectedVersion: input.expectedVersion,
                     id: input.id,
                     ...(input.patch.disableIntent === undefined ||
@@ -749,22 +786,24 @@ export async function reconcileJobSchedules(
     const nowMs = dependencies.nowMs ?? Date.now;
     const at = toDate(v.parse(jobTimestampSchema, nowMs()));
     await dependencies.repository.reconcileSchedules({
+        at,
         schedules: jobActionRegistrations.map((registration) =>
             scheduleInsertShape(registration, at)
         ),
-        ...mutationSideEffects(generateId, {
-            action: "jobs.schedule.reconcile",
-            actor: systemActor,
-            occurredAt: at,
-            outcome: "succeeded",
-            realtime: {
-                id: "schedule-directory",
-                kind: "schedule",
-                operation: "updated",
-            },
-            targetId: "schedule-directory",
-            targetType: "schedule",
-        }),
+        sideEffectsForSchedule: (schedule) =>
+            mutationSideEffects(generateId, {
+                action: "jobs.schedule.reconcile",
+                actor: systemActor,
+                occurredAt: schedule.updatedAt,
+                outcome: "succeeded",
+                realtime: {
+                    id: schedule.id,
+                    kind: "schedule",
+                    operation: "updated",
+                },
+                targetId: schedule.id,
+                targetType: "schedule",
+            }),
     });
     if (dependencies.wakeEventPump !== undefined) {
         try {

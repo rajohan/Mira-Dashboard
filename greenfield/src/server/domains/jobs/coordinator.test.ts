@@ -36,6 +36,7 @@ const noSideEffects = Object.freeze({
 const sideEffects: JobWorkerSideEffectFactory = Object.freeze({
     forQueue: () => noSideEffects,
     forRun: () => noSideEffects,
+    forRunEvent: () => noSideEffects,
     forSchedule: () => noSideEffects,
 });
 
@@ -144,7 +145,7 @@ function intervalSchedule(
 
 interface RepositoryFixtureOptions {
     readonly appendEvent?: (
-        kind: "progress" | "stderr" | "stdout"
+        input: Parameters<JobRepository["appendClaimEvent"]>[0]
     ) => JobAppendEventResult;
     readonly cancellationRequested?: boolean;
     readonly claim?: JobClaimResult;
@@ -162,16 +163,26 @@ interface RepositoryFixtureOptions {
 function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const events: string[] = [];
     const enqueues: DueScheduleEnqueueInput[] = [];
+    const expiryEligibility: boolean[] = [];
     const expiryNextRuns: Date[] = [];
     const settlements: Array<Parameters<JobRepository["settleClaim"]>[0]> = [];
+    const eventRun = options.claim?.kind === "claimed" ? options.claim.run : undefined;
     let claim = options.claim;
     let dueSchedules = [...(options.dueSchedules ?? [])];
     const repository = {
         appendClaimEvent(input) {
             events.push(`append:${input.kind}`);
-            return Promise.resolve(
-                options.appendEvent?.(input.kind) ?? { kind: "dropped" }
-            );
+            const result = options.appendEvent?.(input) ?? { kind: "dropped" };
+            if (
+                eventRun !== undefined &&
+                (result.kind === "appended" || result.kind === "truncated")
+            ) {
+                input.sideEffectsForRun({
+                    ...eventRun,
+                    updatedAt: result.event?.occurredAt ?? eventRun.updatedAt,
+                });
+            }
+            return Promise.resolve(result);
         },
         beginWorkerDrain(input) {
             events.push("drain");
@@ -200,8 +211,12 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
                 throw options.expiryFailure;
             }
             if (options.expiringSchedule !== undefined) {
-                const next = input.nextRunAt(options.expiringSchedule, input.at);
-                if (next !== undefined) expiryNextRuns.push(next);
+                const canReenable = input.canReenableSchedule(options.expiringSchedule);
+                expiryEligibility.push(canReenable);
+                if (canReenable) {
+                    const next = input.nextRunAt(options.expiringSchedule, input.at);
+                    if (next !== undefined) expiryNextRuns.push(next);
+                }
             }
             return [];
         },
@@ -267,7 +282,14 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
             });
         },
     } satisfies JobWorkerCoordinatorOptions["repository"];
-    return { enqueues, events, expiryNextRuns, repository, settlements };
+    return {
+        enqueues,
+        events,
+        expiryEligibility,
+        expiryNextRuns,
+        repository,
+        settlements,
+    };
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
@@ -438,6 +460,10 @@ describe("durable job worker coordinator", () => {
                 observed.push({ action: input.action, at: input.at });
                 return noSideEffects;
             },
+            forRunEvent: (input) => {
+                observed.push({ action: input.action, at: input.at });
+                return noSideEffects;
+            },
             forSchedule: () => noSideEffects,
         };
         const coordinator = createJobWorkerCoordinator({
@@ -506,7 +532,24 @@ describe("durable job worker coordinator", () => {
     test("provides bounded durable progress and output callbacks to actions", async () => {
         const workerId = Bun.randomUUIDv7();
         const run = claimedRun(workerId, "test.progress");
-        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const durableEventAt = new Date(at.getTime() + 20_000);
+        let sequence = 1;
+        const fixture = repositoryFixture({
+            appendEvent: (input) => ({
+                event: {
+                    attempt: run.attemptCount,
+                    jobRunId: run.id,
+                    kind: input.kind,
+                    message: input.message ?? null,
+                    occurredAt: durableEventAt,
+                    progressJson: input.progressJson ?? null,
+                    sequence: sequence++,
+                    workerInstanceId: workerId,
+                },
+                kind: "appended",
+            }),
+            claim: { kind: "claimed", run },
+        });
         const baseRegistration = jobActionRegistrations.at(0);
         if (baseRegistration === undefined) throw new Error("Missing smoke action");
         const registration: JobActionRegistration = {
@@ -521,10 +564,21 @@ describe("durable job worker coordinator", () => {
                     return {};
                 }),
         };
+        const eventInvalidations: Array<{
+            readonly action: string;
+            readonly at: Date;
+        }> = [];
         const coordinator = createJobWorkerCoordinator({
             ...coordinatorOptions(fixture.repository, workerId),
             findAction: (actionKey) =>
                 actionKey === registration.actionKey ? registration : undefined,
+            sideEffects: {
+                ...sideEffects,
+                forRunEvent: (input) => {
+                    eventInvalidations.push({ action: input.action, at: input.at });
+                    return noSideEffects;
+                },
+            },
         });
 
         await coordinator.initialize();
@@ -533,6 +587,10 @@ describe("durable job worker coordinator", () => {
 
         expect(fixture.events).toContain("append:progress");
         expect(fixture.events).toContain("append:stdout");
+        expect(eventInvalidations).toEqual([
+            { action: "jobs.run.event", at: durableEventAt },
+            { action: "jobs.run.event", at: durableEventAt },
+        ]);
         expect(fixture.settlements[0]?.outcome.kind).toBe("succeeded");
     });
 
@@ -925,5 +983,27 @@ describe("durable job worker coordinator", () => {
         await coordinator.dispose();
 
         expect(fixture.expiryNextRuns).toEqual([new Date(at.getTime() + 60_000)]);
+        expect(fixture.expiryEligibility).toEqual([true]);
+    });
+
+    test("does not resume an expired schedule outside the exact registry pair", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const schedule = intervalSchedule({
+            enabled: false,
+            id: "system.worker-smoke-retired",
+            nextRunAt: new Date(at.getTime() + 60_000),
+        });
+        const fixture = repositoryFixture({ expiringSchedule: schedule });
+        const coordinator = createJobWorkerCoordinator(
+            coordinatorOptions(fixture.repository, workerId)
+        );
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.expiryEligibility.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.expiryEligibility.length).toBeGreaterThanOrEqual(1);
+        expect(fixture.expiryEligibility.every((eligible) => !eligible)).toBe(true);
+        expect(fixture.expiryNextRuns).toEqual([]);
     });
 });

@@ -87,6 +87,7 @@ export const jobRunPayloadEventMaximumBytes =
     jobRunOutputMaximumBytes - jobRunAttemptMaximum * jobRunEventMessageMaximumBytes;
 export const jobRunEventProgressMaximumBytes = 16 * 1024;
 export const jobWorkerCapacityMaximum = 16;
+export const jobWorkerFreshnessMs = 30_000;
 export const jobWorkerSummaryMaximum = 32;
 export const jobIdempotencyKeyMinimumLength = 32;
 export const jobIdempotencyKeyMaximumLength = 128;

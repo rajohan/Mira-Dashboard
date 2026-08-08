@@ -6,6 +6,7 @@ import {
     type JobRunResult,
     jobPayloadSchema,
     jobRunResultSchema,
+    jobWorkerFreshnessMs,
 } from "../../../contracts/jobModel.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import { parseJsonText } from "../../../shared/json.ts";
@@ -35,7 +36,6 @@ import { nextScheduleOccurrence } from "./scheduleTime.ts";
 
 export const jobWorkerCapacity = 1;
 export const jobWorkerHeartbeatIntervalMs = 10_000;
-export const jobWorkerFreshnessMs = 30_000;
 export const jobClaimLeaseMs = 120_000;
 export const jobClaimRenewalIntervalMs = 30_000;
 export const jobClaimCancellationPollIntervalMs = 1000;
@@ -77,6 +77,7 @@ export interface JobWorkerSideEffectInput {
 export interface JobWorkerSideEffectFactory {
     forQueue(input: JobWorkerSideEffectInput): JobMutationSideEffects;
     forRun(input: JobWorkerSideEffectInput): JobMutationSideEffects;
+    forRunEvent(input: JobWorkerSideEffectInput): JobMutationSideEffects;
     forSchedule(input: JobWorkerSideEffectInput): JobMutationSideEffects;
 }
 
@@ -575,6 +576,13 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
                   }
                 : { message: parseJobActionOutputMessage(value as string) }),
             runId: run.id,
+            sideEffectsForRun: (updatedRun) =>
+                options.sideEffects.forRunEvent({
+                    action: "jobs.run.event",
+                    at: updatedRun.updatedAt,
+                    outcome: "accepted",
+                    targetId: updatedRun.id,
+                }),
             workerId: options.workerInstanceId,
         });
         if (result.kind === "lost-claim") throw new JobClaimLostError();
@@ -705,6 +713,8 @@ export function createJobWorkerCoordinator(
         const at = new Date(nowMs());
         const expired = await options.repository.expireDisableIntents({
             at,
+            canReenableSchedule: (schedule) =>
+                findAction(schedule.actionKey)?.scheduleId === schedule.id,
             limit: jobDisableIntentExpiryLimit,
             nextRunAt: (schedule, after) => {
                 const next = nextScheduleOccurrence(
@@ -714,10 +724,10 @@ export function createJobWorkerCoordinator(
                 );
                 return next === undefined ? undefined : new Date(next);
             },
-            sideEffectsForSchedule: (schedule) =>
+            sideEffectsForSchedule: (schedule, intent) =>
                 options.sideEffects.forSchedule({
                     action: "schedules.disable-intent-expired",
-                    at: schedule.updatedAt,
+                    at: intent.endedAt ?? schedule.updatedAt,
                     outcome: "accepted",
                     targetId: schedule.id,
                 }),
@@ -870,19 +880,16 @@ export function createJobWorkerCoordinator(
         const schedules = jobActionRegistrations.map((registration) =>
             scheduleInsert(registration, at)
         );
-        const reconciliationSideEffects = mergeSideEffects(
-            schedules.map((schedule) =>
+        await options.repository.reconcileSchedules({
+            at,
+            schedules,
+            sideEffectsForSchedule: (schedule) =>
                 options.sideEffects.forSchedule({
                     action: "schedules.reconcile",
-                    at,
+                    at: schedule.updatedAt,
                     outcome: "accepted",
                     targetId: schedule.id,
-                })
-            )
-        );
-        await options.repository.reconcileSchedules({
-            ...reconciliationSideEffects,
-            schedules,
+                }),
         });
         const worker: WorkerInstanceInsert = {
             capacity: jobWorkerCapacity,

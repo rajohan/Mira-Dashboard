@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
     findJobActionRegistration,
+    isRegisteredJobSchedule,
     parseJobActionOutputMessage,
     parseJobActionProgress,
 } from "./actionRegistry.ts";
@@ -17,6 +18,15 @@ describe("durable job action registry", () => {
             retrySafe: true,
         });
         expect(findJobActionRegistration("system.shell")).toBeUndefined();
+        expect(
+            isRegisteredJobSchedule("system.worker-smoke", "system.worker-smoke")
+        ).toBe(true);
+        expect(
+            isRegisteredJobSchedule("system.worker-smoke-renamed", "system.worker-smoke")
+        ).toBe(false);
+        expect(isRegisteredJobSchedule("system.worker-smoke", "system.shell")).toBe(
+            false
+        );
     });
 
     test("bounds progress and output before persistence", () => {

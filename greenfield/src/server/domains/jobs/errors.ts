@@ -15,6 +15,7 @@ export class JobConflictError extends Data.TaggedError("JobConflictError")<{
     readonly id: string;
     readonly reason:
         | "action-not-manually-exposed"
+        | "action-unavailable"
         | "cancellation-not-supported"
         | "idempotency-mismatch"
         | "run-already-active"

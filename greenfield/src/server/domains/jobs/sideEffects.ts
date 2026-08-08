@@ -49,6 +49,13 @@ export interface CreateJobMutationSideEffectsInput {
     readonly targetType: "job-run" | "job-worker" | "schedule";
 }
 
+/** Realtime-only invalidation input for durable mutations that are their own history. */
+export interface CreateJobRealtimeSideEffectsInput {
+    readonly occurredAt: Date;
+    readonly realtime: JobRealtimeTarget;
+    readonly realtimeRetentionMs?: number;
+}
+
 function createJobRealtimeEvent(
     target: JobRealtimeTarget,
     occurredAt: Date,
@@ -89,6 +96,27 @@ function createJobRealtimeEvent(
 }
 
 /**
+ * Builds a compact realtime invalidation without duplicating a durable domain event in
+ * the security audit log.
+ * @param input Committed transition time and affected jobs-domain target.
+ * @returns Frozen realtime-only side effects for the surrounding transaction.
+ */
+export function createJobRealtimeSideEffects(
+    input: CreateJobRealtimeSideEffectsInput
+): JobMutationSideEffects {
+    return Object.freeze({
+        auditEvents: Object.freeze([]),
+        realtimeEvents: Object.freeze([
+            createJobRealtimeEvent(
+                input.realtime,
+                input.occurredAt,
+                input.realtimeRetentionMs ?? defaultRealtimeRetentionMilliseconds
+            ),
+        ]),
+    });
+}
+
+/**
  * Builds validated rows that a repository appends in the same transaction as state.
  * @param input Redacted audit and compact invalidation description.
  * @returns Immutable side-effect rows for one atomic mutation.
@@ -112,13 +140,13 @@ export function createJobMutationSideEffects(
     const realtimeEvents =
         input.realtime === undefined
             ? []
-            : [
-                  createJobRealtimeEvent(
-                      input.realtime,
-                      input.occurredAt,
-                      input.realtimeRetentionMs ?? defaultRealtimeRetentionMilliseconds
-                  ),
-              ];
+            : createJobRealtimeSideEffects({
+                  occurredAt: input.occurredAt,
+                  realtime: input.realtime,
+                  ...(input.realtimeRetentionMs === undefined
+                      ? {}
+                      : { realtimeRetentionMs: input.realtimeRetentionMs }),
+              }).realtimeEvents;
     return Object.freeze({
         auditEvents: Object.freeze([auditEvent]),
         realtimeEvents: Object.freeze(realtimeEvents),

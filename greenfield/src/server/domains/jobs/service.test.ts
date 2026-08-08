@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { Effect } from "effect";
 
+import { jobWorkerFreshnessMs } from "../../../contracts/jobModel.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import {
@@ -10,7 +11,7 @@ import {
     openAuthenticationTestDatabase,
 } from "../security/testSupport/authentication.ts";
 import { JobConflictError, JobValidationError } from "./errors.ts";
-import type { JobRunEventRecord } from "./records.ts";
+import type { JobRunEventRecord, WorkerInstanceRecord } from "./records.ts";
 import { createJobRepository, type JobRepository } from "./repository.ts";
 import { createJobService, reconcileJobSchedules } from "./service.ts";
 
@@ -222,6 +223,64 @@ describe("durable jobs service", () => {
         }
     });
 
+    test("rejects mutations for a schedule outside the exact action registry pair", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const registered = repository.findSchedule("system.worker-smoke")?.schedule;
+            if (registered === undefined) throw new Error("Missing registered schedule");
+            await repository.reconcileSchedules({
+                at: authenticationTestNow,
+                schedules: [{ ...registered, id: "system.worker-smoke-retired" }],
+                sideEffectsForSchedule: () => ({
+                    auditEvents: [],
+                    realtimeEvents: [],
+                }),
+            });
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+
+            expect(
+                Effect.runPromise(
+                    service.runSchedule(principal, {
+                        id: "system.worker-smoke-retired",
+                        idempotencyKey: "f".repeat(32),
+                    })
+                )
+            ).rejects.toBeInstanceOf(JobConflictError);
+            expect(
+                Effect.runPromise(
+                    service.updateSchedule(principal, {
+                        expectedVersion: 1,
+                        id: "system.worker-smoke-retired",
+                        patch: { disableIntent: null, enabled: true },
+                    })
+                )
+            ).rejects.toBeInstanceOf(JobConflictError);
+            expect(
+                repository.findSchedule("system.worker-smoke-retired")?.schedule
+            ).toMatchObject({ enabled: false, version: 1 });
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
     test("maps a never-cancellable queued schedule run to a declared conflict", async () => {
         const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
         const repository = createJobRepository(
@@ -344,13 +403,43 @@ describe("durable jobs service", () => {
                 sequence: 2,
                 workerInstanceId: "019fdf20-0000-7000-8000-000000000099",
             } satisfies JobRunEventRecord;
-            const listSnapshot = repository.listRunsWithQueueState({ limit: 10 });
+            const listSnapshot = repository.listRunsWithQueueState({
+                limit: 10,
+                minimumHeartbeatAt: new Date(0),
+            });
+            const expectedMinimumHeartbeatAt = new Date(
+                serviceNowMs() - jobWorkerFreshnessMs
+            );
+            const workerStartedAt = new Date(expectedMinimumHeartbeatAt.getTime() - 1000);
+            const workerRecord = (
+                id: string,
+                heartbeatAt: Date
+            ): WorkerInstanceRecord => ({
+                capacity: 1,
+                drainingAt: null,
+                heartbeatAt,
+                id,
+                pid: 1234,
+                releaseId: "a".repeat(40),
+                startedAt: workerStartedAt,
+                state: "online",
+                stoppedAt: null,
+            });
+            const staleWorker = workerRecord(
+                "019fdf20-0000-7000-8000-000000000097",
+                new Date(expectedMinimumHeartbeatAt.getTime() - 1)
+            );
+            const boundaryWorker = workerRecord(
+                "019fdf20-0000-7000-8000-000000000098",
+                expectedMinimumHeartbeatAt
+            );
             let snapshotReads = 0;
             let listSnapshotReads = 0;
             let legacyRunReads = 0;
             let legacyEventReads = 0;
             let legacyListReads = 0;
             let legacyQueueReads = 0;
+            let observedMinimumHeartbeatAt: Date | undefined;
             const interleavedRepository: JobRepository = {
                 ...repository,
                 findRun: () => {
@@ -369,9 +458,22 @@ describe("durable jobs service", () => {
                     legacyListReads += 1;
                     return [];
                 },
-                listRunsWithQueueState: () => {
+                listRunsWithQueueState: (input) => {
                     listSnapshotReads += 1;
-                    return listSnapshot;
+                    observedMinimumHeartbeatAt = input.minimumHeartbeatAt;
+                    return {
+                        ...listSnapshot,
+                        queue: {
+                            ...listSnapshot.queue,
+                            workers: [staleWorker, boundaryWorker]
+                                .filter(
+                                    (worker) =>
+                                        worker.heartbeatAt.getTime() >=
+                                        input.minimumHeartbeatAt.getTime()
+                                )
+                                .map((worker) => ({ activeRunCount: 0, worker })),
+                        },
+                    };
                 },
                 readQueueState: () => {
                     legacyQueueReads += 1;
@@ -392,6 +494,13 @@ describe("durable jobs service", () => {
             expect(detail.events.map(({ sequence }) => sequence)).toEqual([1]);
             expect(detail.run).toMatchObject({ attemptCount: 0, eventCount: 1 });
             expect(listing.runs.map(({ id }) => id)).toEqual([queued.id]);
+            expect(observedMinimumHeartbeatAt).toEqual(expectedMinimumHeartbeatAt);
+            expect(listing.summary.workers.map(({ id }) => id)).toEqual([
+                boundaryWorker.id,
+            ]);
+            expect(listing.summary.workers[0]?.heartbeatAtMs).toBe(
+                expectedMinimumHeartbeatAt.getTime()
+            );
             expect({
                 legacyEventReads,
                 legacyListReads,

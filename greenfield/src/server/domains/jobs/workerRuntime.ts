@@ -15,7 +15,10 @@ import {
     type JobWorkerSideEffectInput,
 } from "./coordinator.ts";
 import { createJobRepository, type JobRepository } from "./repository.ts";
-import { createJobMutationSideEffects } from "./sideEffects.ts";
+import {
+    createJobMutationSideEffects,
+    createJobRealtimeSideEffects,
+} from "./sideEffects.ts";
 
 export interface DashboardWorkerRuntimeOptions {
     readonly database: DatabaseRuntimeLayerOptions;
@@ -148,6 +151,16 @@ export function createSystemJobWorkerSideEffects(
                 },
                 targetId: input.targetId,
                 targetType: "job-run",
+            });
+        },
+        forRunEvent(input: JobWorkerSideEffectInput) {
+            return createJobRealtimeSideEffects({
+                occurredAt: input.at,
+                realtime: {
+                    id: input.targetId,
+                    kind: "run",
+                    operation: "updated",
+                },
             });
         },
         forSchedule(input: JobWorkerSideEffectInput) {

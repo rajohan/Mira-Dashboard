@@ -29,6 +29,7 @@ const runtimeOptions: DashboardWorkerRuntimeOptions = {
     sideEffects: {
         forQueue: () => noSideEffects,
         forRun: () => noSideEffects,
+        forRunEvent: () => noSideEffects,
         forSchedule: () => noSideEffects,
     },
     workerInstanceId: Bun.randomUUIDv7(),
@@ -116,6 +117,7 @@ describe("Dashboard worker runtime", () => {
     test("emits created only for explicit run-creation actions", () => {
         const sideEffects = createSystemJobWorkerSideEffects();
         const at = new Date(1000);
+        const eventRunId = Bun.randomUUIDv7();
 
         for (const action of ["jobs.run.enqueue", "jobs.run.enqueue-scheduled"]) {
             expect(
@@ -135,6 +137,23 @@ describe("Dashboard worker runtime", () => {
                 targetId: Bun.randomUUIDv7(),
             }).realtimeEvents[0]?.operation
         ).toBe("updated");
+        expect(
+            sideEffects.forRunEvent({
+                action: "jobs.run.event",
+                at,
+                outcome: "accepted",
+                targetId: eventRunId,
+            })
+        ).toEqual({
+            auditEvents: [],
+            realtimeEvents: [
+                expect.objectContaining({
+                    entityId: eventRunId,
+                    operation: "updated",
+                    topic: "jobs.runs",
+                }),
+            ],
+        });
     });
 
     test("owns database then coordinator and disposes them in reverse order", async () => {

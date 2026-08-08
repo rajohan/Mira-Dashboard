@@ -163,6 +163,12 @@ const registrationByKey = new Map(
 if (registrationByKey.size !== jobActionRegistrations.length) {
     throw new Error("Job action registry contains duplicate action keys");
 }
+const registrationByScheduleId = new Map(
+    jobActionRegistrations.map((registration) => [registration.scheduleId, registration])
+);
+if (registrationByScheduleId.size !== jobActionRegistrations.length) {
+    throw new Error("Job action registry contains duplicate schedule IDs");
+}
 
 /**
  * Resolves one exact reviewed action.
@@ -173,6 +179,16 @@ export function findJobActionRegistration(
     actionKey: string
 ): JobActionRegistration | undefined {
     return registrationByKey.get(actionKey);
+}
+
+/**
+ * Checks that a durable schedule still belongs to the exact registered action.
+ * @param scheduleId Durable schedule identity.
+ * @param actionKey Durable action identity captured by the schedule.
+ * @returns Whether this release owns the exact schedule/action pair.
+ */
+export function isRegisteredJobSchedule(scheduleId: string, actionKey: string): boolean {
+    return registrationByScheduleId.get(scheduleId)?.actionKey === actionKey;
 }
 
 /**

@@ -166,7 +166,7 @@ export async function runDashboardWorkerProcess(
         failure = normalizeWorkerProcessFailure(error);
         if (runtime) {
             try {
-                await runtime.dispose();
+                await runtime.dispose(termination.forceSignal);
             } catch {
                 // Preserve the initiating process failure.
             }

@@ -5,6 +5,7 @@ import {
     count,
     desc,
     eq,
+    gte,
     gt,
     inArray,
     isNotNull,
@@ -146,8 +147,20 @@ export interface ListDueSchedulesInput {
     readonly limit?: number;
 }
 
-export interface ReconcileSchedulesInput extends JobMutationSideEffects {
+export interface ReadQueueStateInput {
+    readonly minimumHeartbeatAt: Date;
+}
+
+export interface ListJobRunsWithQueueStateInput extends ListJobRunsInput {
+    readonly minimumHeartbeatAt: Date;
+}
+
+export interface ReconcileSchedulesInput {
+    readonly at: Date;
     readonly schedules: readonly ScheduledJobInsert[];
+    readonly sideEffectsForSchedule: (
+        schedule: ScheduledJobRecord
+    ) => JobMutationSideEffects;
 }
 
 export interface EnqueueManualRunInput extends JobMutationSideEffects {
@@ -176,6 +189,7 @@ export interface ScheduleQueuedCancellation {
 export interface UpdateScheduleRepositoryInput extends JobMutationSideEffects {
     readonly at: Date;
     readonly closeActiveIntent?: JobDisableIntentClose;
+    readonly expectedActiveDisableIntentId: string | null;
     readonly expectedVersion: number;
     readonly id: string;
     readonly insertDisableIntent?: JobDisableIntentInsert;
@@ -270,6 +284,7 @@ export interface RecoverExpiredClaimsInput {
 
 export interface ExpireDisableIntentsInput {
     readonly at: Date;
+    readonly canReenableSchedule: (schedule: ScheduledJobRecord) => boolean;
     readonly limit?: number;
     readonly nextRunAt: (schedule: ScheduledJobRecord, after: Date) => Date | undefined;
     readonly sideEffectsForSchedule: (
@@ -280,6 +295,11 @@ export interface ExpireDisableIntentsInput {
 }
 
 export type ExpireDisableIntentResult =
+    | {
+          readonly intent: JobDisableIntentRecord;
+          readonly kind: "left-disabled";
+          readonly schedule: ScheduledJobRecord;
+      }
     | {
           readonly intent: JobDisableIntentRecord;
           readonly kind: "next-occurrence-unavailable";
@@ -330,6 +350,7 @@ export interface AppendClaimEventInput extends ClaimFenceInput {
     readonly kind: "progress" | "stderr" | "stdout";
     readonly message?: string;
     readonly progressJson?: string;
+    readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
 }
 
 export type JobAppendEventResult =
@@ -377,11 +398,11 @@ export interface JobRepositoryReader {
     listDueSchedules(input: ListDueSchedulesInput): ScheduledJobRecord[];
     listRunEvents(input: ListJobRunEventsInput): JobRunEventRecord[];
     listRuns(input: ListJobRunsInput): JobRunRecord[];
-    listRunsWithQueueState(input: ListJobRunsInput): JobRunPageSnapshot;
+    listRunsWithQueueState(input: ListJobRunsWithQueueStateInput): JobRunPageSnapshot;
     listScheduleRuns(input: ListScheduleRunsInput): JobRunRecord[];
     listSchedules(input: ListSchedulesInput): ScheduleRecordWithRelations[];
     readClaimCancellation(input: ClaimFenceInput): JobClaimCancellation;
-    readQueueState(): JobQueueState;
+    readQueueState(input: ReadQueueStateInput): JobQueueState;
 }
 
 /** One run page and queue summary read from the same SQLite snapshot. */
@@ -681,9 +702,11 @@ class DrizzleJobReader implements JobRepositoryReader {
             .map((row) => parseRun(row));
     }
 
-    public listRunsWithQueueState(input: ListJobRunsInput): JobRunPageSnapshot {
+    public listRunsWithQueueState(
+        input: ListJobRunsWithQueueStateInput
+    ): JobRunPageSnapshot {
         return Object.freeze({
-            queue: this.readQueueState(),
+            queue: this.readQueueState(input),
             runs: this.listRuns(input),
         });
     }
@@ -741,7 +764,7 @@ class DrizzleJobReader implements JobRepositoryReader {
             : { cancelRequested: row.cancelRequestedAt !== null, valid: true };
     }
 
-    public readQueueState(): JobQueueState {
+    public readQueueState(input: ReadQueueStateInput): JobQueueState {
         const countRows = this.database
             .select({ state: jobRuns.state, value: count() })
             .from(jobRuns)
@@ -773,7 +796,12 @@ class DrizzleJobReader implements JobRepositoryReader {
         const workerRows = this.database
             .select()
             .from(workerInstances)
-            .where(inArray(workerInstances.state, ["draining", "online"]))
+            .where(
+                and(
+                    inArray(workerInstances.state, ["draining", "online"]),
+                    gte(workerInstances.heartbeatAt, input.minimumHeartbeatAt)
+                )
+            )
             .orderBy(asc(workerInstances.id))
             .limit(workerSummaryMaximum)
             .all()
@@ -919,7 +947,9 @@ class DrizzleJobWriter extends DrizzleJobReader {
 
     public reconcileSchedules(input: ReconcileSchedulesInput): ScheduledJobRecord[] {
         const records: ScheduledJobRecord[] = [];
-        let changed = false;
+        const registeredScheduleIds = new Set(
+            input.schedules.map((schedule) => schedule.id)
+        );
         for (const candidate of input.schedules) {
             const validated = v.parse(scheduledJobInsertSchema, candidate);
             const existing = this.#findScheduleRecord(validated.id);
@@ -929,8 +959,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
                     .values(validated)
                     .returning()
                     .get();
-                records.push(parseSchedule(requiredRow(inserted, "schedule insert")));
-                changed = true;
+                const registered = parseSchedule(
+                    requiredRow(inserted, "schedule insert")
+                );
+                records.push(registered);
+                this.#insertSideEffects(input.sideEffectsForSchedule(registered));
                 continue;
             }
             const metadataChanged =
@@ -974,10 +1007,39 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 )
                 .returning()
                 .get();
-            records.push(parseSchedule(requiredRow(row, "schedule reconciliation")));
-            changed = true;
+            const reconciled = parseSchedule(requiredRow(row, "schedule reconciliation"));
+            records.push(reconciled);
+            this.#insertSideEffects(input.sideEffectsForSchedule(reconciled));
         }
-        if (changed) this.#insertSideEffects(input);
+        const retiredSchedules = this.#transaction
+            .select()
+            .from(scheduledJobs)
+            .where(eq(scheduledJobs.enabled, true))
+            .all()
+            .map((row) => parseSchedule(row))
+            .filter((schedule) => !registeredScheduleIds.has(schedule.id));
+        for (const schedule of retiredSchedules) {
+            const retired = this.#transaction
+                .update(scheduledJobs)
+                .set({
+                    enabled: false,
+                    updatedAt: maximumDate(schedule.updatedAt, input.at),
+                    version: schedule.version + 1,
+                })
+                .where(
+                    and(
+                        eq(scheduledJobs.id, schedule.id),
+                        eq(scheduledJobs.enabled, true),
+                        eq(scheduledJobs.version, schedule.version)
+                    )
+                )
+                .returning()
+                .get();
+            const retiredSchedule = parseSchedule(
+                requiredRow(retired, "removed schedule retirement")
+            );
+            this.#insertSideEffects(input.sideEffectsForSchedule(retiredSchedule));
+        }
         return records;
     }
 
@@ -1016,6 +1078,10 @@ class DrizzleJobWriter extends DrizzleJobReader {
         const current = this.#findScheduleRecord(input.id);
         if (current === undefined) return { kind: "not-found" };
         if (current.version !== input.expectedVersion) {
+            return { kind: "version-changed", schedule: current };
+        }
+        const activeIntent = this.findActiveDisableIntent(input.id);
+        if ((activeIntent?.id ?? null) !== input.expectedActiveDisableIntentId) {
             return { kind: "version-changed", schedule: current };
         }
         const queuedScheduleRun =
@@ -1059,7 +1125,6 @@ class DrizzleJobWriter extends DrizzleJobReader {
             throw new TypeError("Enabled schedule requires one next occurrence");
         }
 
-        const activeIntent = this.findActiveDisableIntent(input.id);
         if (input.closeActiveIntent !== undefined) {
             if (activeIntent === undefined) {
                 throw new Error("Schedule disable-intent closure has no active intent");
@@ -1446,6 +1511,43 @@ class DrizzleJobWriter extends DrizzleJobReader {
             if (schedule.enabled) {
                 throw new Error("Enabled schedule retains an active disable intent");
             }
+            if (!input.canReenableSchedule(schedule)) {
+                const transitionAt = maximumDate(
+                    schedule.updatedAt,
+                    requiredValue(intent.expiresAt, "disable intent expiry"),
+                    input.at
+                );
+                const closedRow = this.#transaction
+                    .update(jobDisableIntents)
+                    .set(
+                        v.parse(jobDisableIntentCloseSchema, {
+                            endedAt: transitionAt,
+                            endedById: input.systemActorId,
+                            endedByKind: "system",
+                            endedReason: "expired",
+                        })
+                    )
+                    .where(
+                        and(
+                            eq(jobDisableIntents.id, intent.id),
+                            isNull(jobDisableIntents.endedAt),
+                            lte(jobDisableIntents.expiresAt, input.at)
+                        )
+                    )
+                    .returning()
+                    .get();
+                const closedIntent = parseDisableIntent(
+                    requiredRow(closedRow, "retired schedule intent closure")
+                );
+                this.#insertSideEffects(
+                    input.sideEffectsForSchedule(schedule, closedIntent)
+                );
+                return {
+                    intent: closedIntent,
+                    kind: "left-disabled" as const,
+                    schedule,
+                };
+            }
             const nextRunAt = input.nextRunAt(schedule, input.at);
             if (nextRunAt === undefined) {
                 return {
@@ -1815,6 +1917,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 occurredAt: at,
                 workerInstanceId: input.workerId,
             });
+            const refreshed = requiredRow(
+                this.findRun(run.id),
+                "truncated event run refresh"
+            );
+            this.#insertSideEffects(input.sideEffectsForRun(refreshed));
             return { event, kind: "truncated" };
         }
         const at = this.#touchRunForEvent(run, input.at);
@@ -1826,6 +1933,8 @@ class DrizzleJobWriter extends DrizzleJobReader {
             progressJson: input.progressJson ?? null,
             workerInstanceId: input.workerId,
         });
+        const refreshed = requiredRow(this.findRun(run.id), "appended event run refresh");
+        this.#insertSideEffects(input.sideEffectsForRun(refreshed));
         return { event, kind: "appended" };
     }
 
@@ -2228,7 +2337,7 @@ export function createJobRepository(
         listRunEvents: (input: ListJobRunEventsInput) =>
             read((reader) => reader.listRunEvents(input)),
         listRuns: (input: ListJobRunsInput) => read((reader) => reader.listRuns(input)),
-        listRunsWithQueueState: (input: ListJobRunsInput) =>
+        listRunsWithQueueState: (input: ListJobRunsWithQueueStateInput) =>
             read((reader) => reader.listRunsWithQueueState(input)),
         listScheduleRuns: (input: ListScheduleRunsInput) =>
             read((reader) => reader.listScheduleRuns(input)),
@@ -2236,7 +2345,8 @@ export function createJobRepository(
             read((reader) => reader.listSchedules(input)),
         readClaimCancellation: (input: ClaimFenceInput) =>
             read((reader) => reader.readClaimCancellation(input)),
-        readQueueState: () => read((reader) => reader.readQueueState()),
+        readQueueState: (input: ReadQueueStateInput) =>
+            read((reader) => reader.readQueueState(input)),
         reconcileSchedules: (input: ReconcileSchedulesInput) =>
             write((writer) => writer.reconcileSchedules(input)),
         recoverExpiredClaims: (input: RecoverExpiredClaimsInput) =>

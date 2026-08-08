@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { createJobMutationSideEffects } from "./sideEffects.ts";
+import {
+    createJobMutationSideEffects,
+    createJobRealtimeSideEffects,
+} from "./sideEffects.ts";
 
 const auditId = "018f6f50-6a9e-7b88-8000-000000000001";
 const runId = "018f6f50-6a9e-7b88-8000-000000000002";
@@ -70,5 +73,28 @@ describe("jobs mutation side effects", () => {
             operation: "snapshot-required",
             topic: "jobs.runs",
         });
+    });
+
+    test("builds realtime-only run invalidation for durable timeline events", () => {
+        const occurredAt = new Date(2000);
+
+        const sideEffects = createJobRealtimeSideEffects({
+            occurredAt,
+            realtime: { id: runId, kind: "run", operation: "updated" },
+        });
+
+        expect(sideEffects.auditEvents).toEqual([]);
+        expect(sideEffects.realtimeEvents).toEqual([
+            {
+                entityId: runId,
+                entityType: "job-run",
+                expiresAt: new Date(604_802_000),
+                occurredAt,
+                operation: "updated",
+                payloadJson: JSON.stringify({ id: runId }),
+                topic: "jobs.runs",
+            },
+        ]);
+        expect(Object.isFrozen(sideEffects.realtimeEvents)).toBeTrue();
     });
 });
