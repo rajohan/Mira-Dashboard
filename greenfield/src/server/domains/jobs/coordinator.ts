@@ -523,7 +523,6 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
 
     const actionController = new AbortController();
     let monitorFailure: unknown;
-    let finished = false;
     const stopAction = (reason: unknown): void => {
         if (!actionController.signal.aborted) actionController.abort(reason);
     };
@@ -537,9 +536,9 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
 
     const monitor = async (): Promise<void> => {
         let renewalDueAt = claimHeartbeatAtMs + options.timings.claimRenewalMs;
-        while (!finished && !actionController.signal.aborted) {
+        while (!actionController.signal.aborted) {
             await waitFor(options.timings.cancellationPollMs, actionController.signal);
-            if (finished || actionController.signal.aborted) return;
+            if (actionController.signal.aborted) return;
             try {
                 const at = new Date(options.nowMs());
                 const cancellation = options.repository.readClaimCancellation({
@@ -630,7 +629,6 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
         // The public settlement below deliberately redacts action defects.
         actionFailure = error;
     } finally {
-        finished = true;
         clearTimeout(timeout);
         options.lifecycleSignal.removeEventListener("abort", lifecycleAbort);
         stopAction(new JobActionFinishedError());
