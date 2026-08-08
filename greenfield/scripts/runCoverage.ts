@@ -8,7 +8,10 @@ import {
     type LineCoverageSummary,
     requiredLineCoveragePercent,
 } from "./checkCoverage.ts";
-import { createBrowserTestArguments } from "./runBrowserTests.ts";
+import {
+    type BrowserTestPartition,
+    createBrowserTestArguments,
+} from "./runBrowserTests.ts";
 import { runTestSuite } from "./runTestSuite.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "..");
@@ -20,8 +23,23 @@ export type CoveragePartition =
     | "browser-core"
     | "browser-jobs"
     | "browser-schedule-detail-form"
-    | "browser-schedule-detail-state"
+    | "browser-schedule-detail-state-copy"
+    | "browser-schedule-detail-state-disable"
+    | "browser-schedule-detail-state-errors"
+    | "browser-schedule-detail-state-replay"
+    | "browser-schedule-detail-state-version"
     | "bun";
+
+const coverageBrowserPartitions = Object.freeze({
+    "browser-core": "core",
+    "browser-jobs": "jobs",
+    "browser-schedule-detail-form": "schedule-detail-form",
+    "browser-schedule-detail-state-copy": "schedule-detail-state-copy",
+    "browser-schedule-detail-state-disable": "schedule-detail-state-disable",
+    "browser-schedule-detail-state-errors": "schedule-detail-state-errors",
+    "browser-schedule-detail-state-replay": "schedule-detail-state-replay",
+    "browser-schedule-detail-state-version": "schedule-detail-state-version",
+} satisfies Readonly<Record<Exclude<CoveragePartition, "bun">, BrowserTestPartition>>);
 
 /** One isolated coverage process and its private artifact paths. */
 export interface CoveragePartitionPlan {
@@ -56,7 +74,7 @@ export interface CoverageRunnerDependencies {
 /**
  * Creates the deterministic coverage process and merge inventory.
  * @param directory Root directory for private and merged LCOV artifacts.
- * @returns Five process plans in execution and merge order.
+ * @returns Nine process plans in execution and merge order.
  */
 export function createCoveragePartitionPlan(
     directory: string
@@ -68,7 +86,11 @@ export function createCoveragePartitionPlan(
                 "browser-core",
                 "browser-jobs",
                 "browser-schedule-detail-form",
-                "browser-schedule-detail-state",
+                "browser-schedule-detail-state-disable",
+                "browser-schedule-detail-state-errors",
+                "browser-schedule-detail-state-version",
+                "browser-schedule-detail-state-copy",
+                "browser-schedule-detail-state-replay",
             ] as const
         ).map((name) => {
             const outputDirectory = path.join(directory, name);
@@ -98,17 +120,11 @@ export function createCoverageTestArguments(
         "--coverage-dir",
         outputDirectory,
     ];
-    if (partition === "browser-core") {
-        return createBrowserTestArguments("core", coverageArguments);
-    }
-    if (partition === "browser-jobs") {
-        return createBrowserTestArguments("jobs", coverageArguments);
-    }
-    if (partition === "browser-schedule-detail-form") {
-        return createBrowserTestArguments("schedule-detail-form", coverageArguments);
-    }
-    if (partition === "browser-schedule-detail-state") {
-        return createBrowserTestArguments("schedule-detail-state", coverageArguments);
+    if (partition !== "bun") {
+        return createBrowserTestArguments(
+            coverageBrowserPartitions[partition],
+            coverageArguments
+        );
     }
     return Object.freeze([
         ...coverageArguments,

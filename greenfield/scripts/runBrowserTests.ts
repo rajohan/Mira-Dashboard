@@ -6,33 +6,50 @@ const projectRoot = path.resolve(import.meta.dir, "..");
 const browserTestPreload = "./src/browser/test/setup.ts";
 const browserJobsRoot = "src/browser/jobs";
 const browserJobsIgnorePattern = `${browserJobsRoot}/**`;
-const scheduleDetailFormTestPath = `${browserJobsRoot}/ScheduleDetailForm.test.tsx`;
-const scheduleDetailStateTestPath = `${browserJobsRoot}/ScheduleDetailState.test.tsx`;
-const scheduleDetailTestPaths: readonly string[] = Object.freeze([
-    scheduleDetailFormTestPath,
-    scheduleDetailStateTestPath,
-]);
-const scheduleDetailIgnorePattern = `${browserJobsRoot}/ScheduleDetail{Form,State}.test.tsx`;
+const isolatedJobTestDefinitions = Object.freeze([
+    Object.freeze({
+        name: "schedule-detail-form",
+        testRoot: `${browserJobsRoot}/ScheduleDetailForm.test.tsx`,
+    }),
+    Object.freeze({
+        name: "schedule-detail-state-disable",
+        testRoot: `${browserJobsRoot}/ScheduleDetailStateDisable.test.tsx`,
+    }),
+    Object.freeze({
+        name: "schedule-detail-state-errors",
+        testRoot: `${browserJobsRoot}/ScheduleDetailStateErrors.test.tsx`,
+    }),
+    Object.freeze({
+        name: "schedule-detail-state-version",
+        testRoot: `${browserJobsRoot}/ScheduleDetailStateVersion.test.tsx`,
+    }),
+    Object.freeze({
+        name: "schedule-detail-state-copy",
+        testRoot: `${browserJobsRoot}/ScheduleDetailStateCopy.test.tsx`,
+    }),
+    Object.freeze({
+        name: "schedule-detail-state-replay",
+        testRoot: `${browserJobsRoot}/ScheduleDetailStateReplay.test.tsx`,
+    }),
+] as const);
+const isolatedJobTestPaths: readonly string[] = Object.freeze(
+    isolatedJobTestDefinitions.map((definition) => definition.testRoot)
+);
+const isolatedJobTestIgnorePattern = `${browserJobsRoot}/{${isolatedJobTestDefinitions
+    .map((definition) => path.basename(definition.testRoot))
+    .join(",")}}`;
 
 /** Independently executed browser-test process. */
 export type BrowserTestPartition =
     | "core"
     | "jobs"
-    | "schedule-detail-form"
-    | "schedule-detail-state";
+    | (typeof isolatedJobTestDefinitions)[number]["name"];
 
 /** Browser-test process metadata in deterministic execution order. */
 export const browserTestPartitions = Object.freeze([
     Object.freeze({ name: "core", testRoot: "src/browser" }),
     Object.freeze({ name: "jobs", testRoot: browserJobsRoot }),
-    Object.freeze({
-        name: "schedule-detail-form",
-        testRoot: scheduleDetailFormTestPath,
-    }),
-    Object.freeze({
-        name: "schedule-detail-state",
-        testRoot: scheduleDetailStateTestPath,
-    }),
+    ...isolatedJobTestDefinitions,
 ] satisfies readonly Readonly<{
     name: BrowserTestPartition;
     testRoot: string;
@@ -70,16 +87,17 @@ export function browserTestPartitionOwnsPath(
 ): boolean {
     const normalizedPath = normalizeBrowserTestPath(filePath);
     if (normalizedPath === undefined) return false;
-    if (partition === "schedule-detail-form") {
-        return normalizedPath === scheduleDetailFormTestPath;
-    }
-    if (partition === "schedule-detail-state") {
-        return normalizedPath === scheduleDetailStateTestPath;
+    const partitionDefinition = browserTestPartitions.find(
+        (candidate) => candidate.name === partition
+    );
+    if (partitionDefinition === undefined) return false;
+    if (partition !== "core" && partition !== "jobs") {
+        return normalizedPath === partitionDefinition.testRoot;
     }
     if (partition === "jobs") {
         return (
             normalizedPath.startsWith(`${browserJobsRoot}/`) &&
-            !scheduleDetailTestPaths.includes(normalizedPath)
+            !isolatedJobTestPaths.includes(normalizedPath)
         );
     }
     return !normalizedPath.startsWith(`${browserJobsRoot}/`);
@@ -125,7 +143,7 @@ export function createBrowserTestArguments(
     if (partition === "core") {
         arguments_.push(`--path-ignore-patterns=${browserJobsIgnorePattern}`);
     } else if (partition === "jobs") {
-        arguments_.push(`--path-ignore-patterns=${scheduleDetailIgnorePattern}`);
+        arguments_.push(`--path-ignore-patterns=${isolatedJobTestIgnorePattern}`);
     }
     arguments_.push(partitionDefinition.testRoot);
     return Object.freeze(arguments_);

@@ -7,6 +7,39 @@ import {
     runCoverage,
 } from "./runCoverage.ts";
 
+const isolatedBrowserCoverageCases = Object.freeze([
+    Object.freeze({
+        outputDirectory: "/tmp/coverage-schedule-detail-form",
+        partition: "browser-schedule-detail-form",
+        testPath: "src/browser/jobs/ScheduleDetailForm.test.tsx",
+    }),
+    Object.freeze({
+        outputDirectory: "/tmp/coverage-schedule-detail-state-disable",
+        partition: "browser-schedule-detail-state-disable",
+        testPath: "src/browser/jobs/ScheduleDetailStateDisable.test.tsx",
+    }),
+    Object.freeze({
+        outputDirectory: "/tmp/coverage-schedule-detail-state-errors",
+        partition: "browser-schedule-detail-state-errors",
+        testPath: "src/browser/jobs/ScheduleDetailStateErrors.test.tsx",
+    }),
+    Object.freeze({
+        outputDirectory: "/tmp/coverage-schedule-detail-state-version",
+        partition: "browser-schedule-detail-state-version",
+        testPath: "src/browser/jobs/ScheduleDetailStateVersion.test.tsx",
+    }),
+    Object.freeze({
+        outputDirectory: "/tmp/coverage-schedule-detail-state-copy",
+        partition: "browser-schedule-detail-state-copy",
+        testPath: "src/browser/jobs/ScheduleDetailStateCopy.test.tsx",
+    }),
+    Object.freeze({
+        outputDirectory: "/tmp/coverage-schedule-detail-state-replay",
+        partition: "browser-schedule-detail-state-replay",
+        testPath: "src/browser/jobs/ScheduleDetailStateReplay.test.tsx",
+    }),
+] as const);
+
 describe("coverage runner", () => {
     test("keeps Bun coverage free of browser globals", () => {
         const arguments_ = createCoverageTestArguments("/tmp/coverage-output", "bun");
@@ -54,47 +87,29 @@ describe("coverage runner", () => {
                 "./src/browser/test/setup.ts",
                 "--max-concurrency=1",
                 "--bail=1",
-                "--path-ignore-patterns=src/browser/jobs/ScheduleDetail{Form,State}.test.tsx",
+                "--path-ignore-patterns=src/browser/jobs/{ScheduleDetailForm.test.tsx,ScheduleDetailStateDisable.test.tsx,ScheduleDetailStateErrors.test.tsx,ScheduleDetailStateVersion.test.tsx,ScheduleDetailStateCopy.test.tsx,ScheduleDetailStateReplay.test.tsx}",
                 "src/browser/jobs",
             ]
         );
-        expect(
-            createCoverageTestArguments(
-                "/tmp/coverage-schedule-detail-form",
-                "browser-schedule-detail-form"
-            )
-        ).toEqual([
-            "--coverage",
-            "--coverage-reporter",
-            "lcov",
-            "--coverage-dir",
-            "/tmp/coverage-schedule-detail-form",
-            "--preload",
-            "./src/browser/test/setup.ts",
-            "--max-concurrency=1",
-            "--bail=1",
-            "src/browser/jobs/ScheduleDetailForm.test.tsx",
-        ]);
-        expect(
-            createCoverageTestArguments(
-                "/tmp/coverage-schedule-detail-state",
-                "browser-schedule-detail-state"
-            )
-        ).toEqual([
-            "--coverage",
-            "--coverage-reporter",
-            "lcov",
-            "--coverage-dir",
-            "/tmp/coverage-schedule-detail-state",
-            "--preload",
-            "./src/browser/test/setup.ts",
-            "--max-concurrency=1",
-            "--bail=1",
-            "src/browser/jobs/ScheduleDetailState.test.tsx",
-        ]);
+        for (const testCase of isolatedBrowserCoverageCases) {
+            expect(
+                createCoverageTestArguments(testCase.outputDirectory, testCase.partition)
+            ).toEqual([
+                "--coverage",
+                "--coverage-reporter",
+                "lcov",
+                "--coverage-dir",
+                testCase.outputDirectory,
+                "--preload",
+                "./src/browser/test/setup.ts",
+                "--max-concurrency=1",
+                "--bail=1",
+                testCase.testPath,
+            ]);
+        }
     });
 
-    test("runs and merges the five private LCOV inventories", async () => {
+    test("runs and merges the nine private LCOV inventories", async () => {
         const calls: string[][] = [];
         const mergedInventories: string[][] = [];
         const mergedPatterns: string[] = [];
