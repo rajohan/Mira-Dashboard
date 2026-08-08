@@ -211,8 +211,8 @@ describe("durable jobs service", () => {
                 version: 3,
             });
             expect(disabled.nextRunAtMs).toBeUndefined();
-            expect(enabled.nextRunAtMs).not.toBe(
-                authenticationTestNow.getTime() + 120_000
+            expect(enabled.nextRunAtMs).toBe(
+                authenticationTestNow.getTime() + 86_400_000
             );
             expect(
                 repository.findSchedule("system.worker-smoke")?.schedule.nextRunAt

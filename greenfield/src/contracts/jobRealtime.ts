@@ -133,27 +133,26 @@ const scheduleRealtimeChangeObjectSchema = v.strictObject({
     topic: scheduleRoutingEntries.topic,
 });
 
+const jobRealtimeIdentityMessage = "Job realtime entity identity is inconsistent";
+
+function withMatchingJobRealtimeIdentity<
+    TSchema extends v.GenericSchema<
+        unknown,
+        { readonly entityId: string; readonly payload: { readonly id: string } }
+    >,
+>(schema: TSchema) {
+    return v.pipe(
+        schema,
+        v.check<v.InferOutput<TSchema>, typeof jobRealtimeIdentityMessage>(
+            jobRealtimeIdentityMatches,
+            jobRealtimeIdentityMessage
+        )
+    );
+}
+
 /** Topic-specific client change schemas built from the producer routing policy. */
 export const jobRealtimeChangeSchemas = [
-    v.pipe(
-        jobRunRealtimeChangeObjectSchema,
-        v.check<
-            v.InferOutput<typeof jobRunRealtimeChangeObjectSchema>,
-            "Job realtime entity identity is inconsistent"
-        >(jobRealtimeIdentityMatches, "Job realtime entity identity is inconsistent")
-    ),
-    v.pipe(
-        jobQueueRealtimeChangeObjectSchema,
-        v.check<
-            v.InferOutput<typeof jobQueueRealtimeChangeObjectSchema>,
-            "Job realtime entity identity is inconsistent"
-        >(jobRealtimeIdentityMatches, "Job realtime entity identity is inconsistent")
-    ),
-    v.pipe(
-        scheduleRealtimeChangeObjectSchema,
-        v.check<
-            v.InferOutput<typeof scheduleRealtimeChangeObjectSchema>,
-            "Job realtime entity identity is inconsistent"
-        >(jobRealtimeIdentityMatches, "Job realtime entity identity is inconsistent")
-    ),
+    withMatchingJobRealtimeIdentity(jobRunRealtimeChangeObjectSchema),
+    withMatchingJobRealtimeIdentity(jobQueueRealtimeChangeObjectSchema),
+    withMatchingJobRealtimeIdentity(scheduleRealtimeChangeObjectSchema),
 ] as const;

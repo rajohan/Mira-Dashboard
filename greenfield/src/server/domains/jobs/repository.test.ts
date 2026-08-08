@@ -168,16 +168,18 @@ describe("durable jobs repository", () => {
             });
 
             const rejectedRun = queuedRun(9, { scheduledJobVersion: 2 });
-            expect(
-                repository.enqueueManualRun({
-                    ...noSideEffects,
-                    queuedEvent: {
-                        ...queuedEvent(rejectedRun),
-                        jobRunId: uuid(99),
-                    },
-                    run: rejectedRun,
-                })
-            ).rejects.toThrow("Queued event does not belong to the inserted manual run");
+            const rejected = repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: {
+                    ...queuedEvent(rejectedRun),
+                    jobRunId: uuid(99),
+                },
+                run: rejectedRun,
+            });
+            expect(rejected).rejects.toThrow(
+                "Queued event does not belong to the inserted manual run"
+            );
+            await rejected.catch(() => {});
             expect(repository.findRun(rejectedRun.id)).toBeUndefined();
 
             const run = queuedRun(10, { scheduledJobVersion: 2 });

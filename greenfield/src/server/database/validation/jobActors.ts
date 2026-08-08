@@ -20,5 +20,7 @@ export function jobActorIdentityIsValid(
         return v.safeParse(automationPrincipalIdSchema, id).success;
     }
     if (kind === "user") return v.safeParse(securityRecordIdSchema, id).success;
-    return v.safeParse(jobActionKeySchema, id).success;
+    // System actor ids intentionally share the bounded lowercase action-key shape.
+    if (kind === "system") return v.safeParse(jobActionKeySchema, id).success;
+    return false;
 }
