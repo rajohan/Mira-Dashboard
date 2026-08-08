@@ -1,6 +1,7 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import { ManagedRuntime } from "effect";
 
+import type { DashboardWorkerRuntime } from "../../../shared/workerRuntime.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import {
     databaseRuntimeLayer,
@@ -100,6 +101,11 @@ async function preservePrimaryFailure(
     throw failure;
 }
 
+const runCreatingActions: ReadonlySet<string> = new Set([
+    "jobs.run.enqueue",
+    "jobs.run.enqueue-scheduled",
+]);
+
 /**
  * Builds required system audit and realtime rows without granting action authority.
  * @param generateId UUIDv7 generator for append-only audit identities.
@@ -136,7 +142,9 @@ export function createSystemJobWorkerSideEffects(
                 realtime: {
                     id: input.targetId,
                     kind: "run",
-                    operation: input.action.includes("enqueue") ? "created" : "updated",
+                    operation: runCreatingActions.has(input.action)
+                        ? "created"
+                        : "updated",
                 },
                 targetId: input.targetId,
                 targetType: "job-run",
@@ -170,7 +178,7 @@ export function createSystemJobWorkerSideEffects(
 export function createDashboardWorkerRuntime(
     options: DashboardWorkerRuntimeOptions,
     dependencies: DashboardWorkerRuntimeDependencies = defaultDependencies
-) {
+): DashboardWorkerRuntime {
     const databaseRuntime = dependencies.createDatabaseRuntime(options.database);
     let coordinator: JobWorkerCoordinator | undefined;
     let initializePromise: Promise<void> | undefined;

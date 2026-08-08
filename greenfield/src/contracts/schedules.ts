@@ -13,6 +13,12 @@ import {
     scheduleSummarySchema,
 } from "./jobModel.ts";
 import {
+    jobMutationTransport,
+    jobQueryTransport,
+    jobReadAccess,
+    jobSessionWriteAccess,
+} from "./jobProcedurePolicies.ts";
+import {
     jobRunCursorSchema,
     jobRunPageDefault,
     jobRunPageMaximum,
@@ -178,37 +184,15 @@ export const listScheduleRunsResultSchema = v.pipe(
     v.check(scheduleRunPageCursorIsConsistent, "Schedule run page cursor is inconsistent")
 );
 
-const scheduleReadAccess = {
-    capabilities: ["jobs:read"],
-    capabilityPolicy: "all",
-    kind: "authenticated",
-} as const;
-const scheduleSessionWriteAccess = {
-    capabilities: ["jobs:write"],
-    capabilityPolicy: "all",
-    kind: "authenticated",
-    principalKinds: ["session"],
-} as const;
 const scheduleRunAccess = {
     capabilities: ["jobs:write"],
     capabilityPolicy: "all",
     kind: "authenticated",
 } as const;
-const queryTransport = {
-    batching: "adapter-default",
-    handler: "default",
-    requestBody: "default",
-} as const;
-const mutationTransport = {
-    batching: "forbidden",
-    handler: "default",
-    requestBody: "default",
-} as const;
-
 /** Dashboard-local schedule inventory, update, and manual-run contracts. */
 export const scheduleProcedureContracts = [
     {
-        access: scheduleReadAccess,
+        access: jobReadAccess,
         domain: "schedules",
         errors: ["FORBIDDEN", "UNAUTHORIZED"],
         input: listSchedulesInputSchema,
@@ -218,10 +202,10 @@ export const scheduleProcedureContracts = [
         output: listSchedulesResultSchema,
         outputSchemaId: "schedules.list.output",
         summary: "Lists the stable code-owned Dashboard schedule directory.",
-        transport: queryTransport,
+        transport: jobQueryTransport,
     },
     {
-        access: scheduleReadAccess,
+        access: jobReadAccess,
         domain: "schedules",
         errors: ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
         input: getScheduleInputSchema,
@@ -231,10 +215,10 @@ export const scheduleProcedureContracts = [
         output: scheduleSummarySchema,
         outputSchemaId: "schedules.get.output",
         summary: "Loads one code-owned schedule and its latest durable run state.",
-        transport: queryTransport,
+        transport: jobQueryTransport,
     },
     {
-        access: scheduleSessionWriteAccess,
+        access: jobSessionWriteAccess,
         domain: "schedules",
         errors: [
             "BAD_REQUEST",
@@ -251,7 +235,7 @@ export const scheduleProcedureContracts = [
         output: scheduleSummarySchema,
         outputSchemaId: "schedules.update.output",
         summary: "Updates one schedule or its explicit disable intent by version.",
-        transport: mutationTransport,
+        transport: jobMutationTransport,
     },
     {
         access: scheduleRunAccess,
@@ -270,10 +254,10 @@ export const scheduleProcedureContracts = [
         output: jobRunSummarySchema,
         outputSchemaId: "schedules.run.output",
         summary: "Enqueues one caller-scoped idempotent manual schedule run.",
-        transport: mutationTransport,
+        transport: jobMutationTransport,
     },
     {
-        access: scheduleReadAccess,
+        access: jobReadAccess,
         domain: "schedules",
         errors: ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
         input: listScheduleRunsInputSchema,
@@ -283,7 +267,7 @@ export const scheduleProcedureContracts = [
         output: listScheduleRunsResultSchema,
         outputSchemaId: "schedules.listRuns.output",
         summary: "Lists stable newest-first durable history for one schedule.",
-        transport: queryTransport,
+        transport: jobQueryTransport,
     },
 ] as const satisfies readonly ProcedureContract[];
 

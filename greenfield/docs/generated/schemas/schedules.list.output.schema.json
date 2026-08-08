@@ -582,7 +582,7 @@
                   "expression": {
                     "type": "string",
                     "maxLength": 200,
-                    "description": "Canonical five-field minute cron; live validation normalizes ASCII whitespace and requires a future occurrence.",
+                    "description": "Five-field minute cron; live validation accepts JAN-DEC month and SUN-SAT weekday aliases, normalizes aliases and ASCII whitespace, and requires a future occurrence.",
                     "minLength": 9,
                     "$comment": "Live Valibot validation additionally requires a valid five-field minute cron with a future occurrence."
                   },

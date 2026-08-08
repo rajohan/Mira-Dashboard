@@ -97,30 +97,63 @@ const jobRealtimeTimestampSchema = timestampMillisecondsSchema(
     "Job realtime timestamp is invalid"
 );
 
+/**
+ * @param event Compact durable-job invalidation envelope.
+ * @returns Whether its routing and payload identities name the same entity.
+ */
+export function jobRealtimeIdentityMatches(event: {
+    readonly entityId: string;
+    readonly payload: { readonly id: string };
+}): boolean {
+    return event.payload.id === event.entityId;
+}
+
+const jobRunRealtimeChangeObjectSchema = v.strictObject({
+    entityId: jobRunIdSchema,
+    entityType: jobRunRoutingEntries.entityType,
+    occurredAtMs: jobRealtimeTimestampSchema,
+    operation: jobRunRoutingEntries.operation,
+    payload: jobChangePayloadSchema,
+    topic: jobRunRoutingEntries.topic,
+});
+const jobQueueRealtimeChangeObjectSchema = v.strictObject({
+    entityId: scheduleIdSchema,
+    entityType: jobQueueRoutingEntries.entityType,
+    occurredAtMs: jobRealtimeTimestampSchema,
+    operation: jobQueueRoutingEntries.operation,
+    payload: jobChangePayloadSchema,
+    topic: jobQueueRoutingEntries.topic,
+});
+const scheduleRealtimeChangeObjectSchema = v.strictObject({
+    entityId: scheduleIdSchema,
+    entityType: scheduleRoutingEntries.entityType,
+    occurredAtMs: jobRealtimeTimestampSchema,
+    operation: scheduleRoutingEntries.operation,
+    payload: jobChangePayloadSchema,
+    topic: scheduleRoutingEntries.topic,
+});
+
 /** Topic-specific client change schemas built from the producer routing policy. */
 export const jobRealtimeChangeSchemas = [
-    v.strictObject({
-        entityId: jobRunIdSchema,
-        entityType: jobRunRoutingEntries.entityType,
-        occurredAtMs: jobRealtimeTimestampSchema,
-        operation: jobRunRoutingEntries.operation,
-        payload: jobChangePayloadSchema,
-        topic: jobRunRoutingEntries.topic,
-    }),
-    v.strictObject({
-        entityId: scheduleIdSchema,
-        entityType: jobQueueRoutingEntries.entityType,
-        occurredAtMs: jobRealtimeTimestampSchema,
-        operation: jobQueueRoutingEntries.operation,
-        payload: jobChangePayloadSchema,
-        topic: jobQueueRoutingEntries.topic,
-    }),
-    v.strictObject({
-        entityId: scheduleIdSchema,
-        entityType: scheduleRoutingEntries.entityType,
-        occurredAtMs: jobRealtimeTimestampSchema,
-        operation: scheduleRoutingEntries.operation,
-        payload: jobChangePayloadSchema,
-        topic: scheduleRoutingEntries.topic,
-    }),
+    v.pipe(
+        jobRunRealtimeChangeObjectSchema,
+        v.check<
+            v.InferOutput<typeof jobRunRealtimeChangeObjectSchema>,
+            "Job realtime entity identity is inconsistent"
+        >(jobRealtimeIdentityMatches, "Job realtime entity identity is inconsistent")
+    ),
+    v.pipe(
+        jobQueueRealtimeChangeObjectSchema,
+        v.check<
+            v.InferOutput<typeof jobQueueRealtimeChangeObjectSchema>,
+            "Job realtime entity identity is inconsistent"
+        >(jobRealtimeIdentityMatches, "Job realtime entity identity is inconsistent")
+    ),
+    v.pipe(
+        scheduleRealtimeChangeObjectSchema,
+        v.check<
+            v.InferOutput<typeof scheduleRealtimeChangeObjectSchema>,
+            "Job realtime entity identity is inconsistent"
+        >(jobRealtimeIdentityMatches, "Job realtime entity identity is inconsistent")
+    ),
 ] as const;

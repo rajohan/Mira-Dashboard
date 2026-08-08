@@ -8,7 +8,7 @@
           "type": "object",
           "properties": {
             "event": {
-              "oneOf": [
+              "anyOf": [
                 {
                   "type": "object",
                   "properties": {
@@ -124,7 +124,8 @@
                     "payload",
                     "topic"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "$comment": "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly."
                 },
                 {
                   "type": "object",
@@ -187,7 +188,8 @@
                     "payload",
                     "topic"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "$comment": "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly."
                 },
                 {
                   "type": "object",
@@ -251,7 +253,8 @@
                     "payload",
                     "topic"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "$comment": "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly."
                 },
                 {
                   "type": "object",

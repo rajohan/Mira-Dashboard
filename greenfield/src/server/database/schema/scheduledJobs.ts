@@ -1,12 +1,19 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+import { canonicalScheduleTimeZones } from "../../../contracts/scheduleTimeZones.ts";
 import { boundedControlSafeTextCheck, timestampMillisecondsCheck } from "./checks.ts";
 import {
     boundedJobKeyCheck,
     boundedJsonArrayCheck,
     boundedJsonObjectCheck,
 } from "./jobChecks.ts";
+
+const canonicalScheduleTimeZoneSql = sql.raw(
+    canonicalScheduleTimeZones
+        .map((timeZone) => `'${timeZone.replaceAll("'", "''")}'`)
+        .join(", ")
+);
 
 /** Dashboard-owned recurring job definitions reconciled against the action registry. */
 export const scheduledJobs = sqliteTable(
@@ -95,7 +102,7 @@ export const scheduledJobs = sqliteTable(
         ),
         check(
             "scheduled_jobs_time_zone_check",
-            sql`${table.timeZone} IS NULL OR (length(${table.timeZone}) BETWEEN 1 AND 64 AND instr(${table.timeZone}, char(0)) = 0)`
+            sql`${table.timeZone} IS NULL OR ${table.timeZone} IN (${canonicalScheduleTimeZoneSql})`
         ),
         check(
             "scheduled_jobs_timeout_check",

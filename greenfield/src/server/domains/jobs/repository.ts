@@ -19,11 +19,10 @@ import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
 
 import {
-    jobRunAttemptMaximum,
     jobRunEventMaximum,
     jobRunEventMessageMaximumBytes,
-    jobRunOutputMaximumBytes,
     jobRunPayloadEventMaximum,
+    jobRunPayloadEventMaximumBytes,
     jobResourceClasses,
     jobResourceKeysSchema,
     jobRunStates,
@@ -188,6 +187,7 @@ export interface UpdateScheduleRepositoryInput extends JobMutationSideEffects {
 }
 
 export type UpdateScheduleRepositoryResult =
+    | { readonly kind: "cancellation-not-supported"; readonly run: JobRunRecord }
     | { readonly kind: "not-found" }
     | { readonly kind: "updated"; readonly schedule: ScheduledJobRecord }
     | { readonly kind: "version-changed"; readonly schedule: ScheduledJobRecord };
@@ -377,10 +377,17 @@ export interface JobRepositoryReader {
     listDueSchedules(input: ListDueSchedulesInput): ScheduledJobRecord[];
     listRunEvents(input: ListJobRunEventsInput): JobRunEventRecord[];
     listRuns(input: ListJobRunsInput): JobRunRecord[];
+    listRunsWithQueueState(input: ListJobRunsInput): JobRunPageSnapshot;
     listScheduleRuns(input: ListScheduleRunsInput): JobRunRecord[];
     listSchedules(input: ListSchedulesInput): ScheduleRecordWithRelations[];
     readClaimCancellation(input: ClaimFenceInput): JobClaimCancellation;
     readQueueState(): JobQueueState;
+}
+
+/** One run page and queue summary read from the same SQLite snapshot. */
+export interface JobRunPageSnapshot {
+    readonly queue: JobQueueState;
+    readonly runs: readonly JobRunRecord[];
 }
 
 export interface JobRepository extends JobRepositoryReader {
@@ -417,8 +424,6 @@ export interface JobRepository extends JobRepositoryReader {
 const claimCandidateMaximum = 32;
 const workerSummaryMaximum = 32;
 const recoveryBatchMaximum = 32;
-const jobPayloadEventByteMaximum =
-    jobRunOutputMaximumBytes - jobRunAttemptMaximum * jobRunEventMessageMaximumBytes;
 const terminalRunStates = new Set<JobRunState>([
     "cancelled",
     "failed",
@@ -674,6 +679,13 @@ class DrizzleJobReader implements JobRepositoryReader {
             .limit(input.limit + 1)
             .all()
             .map((row) => parseRun(row));
+    }
+
+    public listRunsWithQueueState(input: ListJobRunsInput): JobRunPageSnapshot {
+        return Object.freeze({
+            queue: this.readQueueState(),
+            runs: this.listRuns(input),
+        });
     }
 
     public listScheduleRuns(input: ListScheduleRunsInput): JobRunRecord[] {
@@ -971,6 +983,9 @@ class DrizzleJobWriter extends DrizzleJobReader {
 
     public enqueueManualRun(input: EnqueueManualRunInput): EnqueueManualRunResult {
         const run = v.parse(jobRunInsertSchema, input.run);
+        if (input.queuedEvent.jobRunId !== run.id) {
+            throw new Error("Queued event does not belong to the inserted manual run");
+        }
         const existing = this.#findRunByIdempotency(
             run.requestedByKind,
             run.requestedById,
@@ -1003,6 +1018,28 @@ class DrizzleJobWriter extends DrizzleJobReader {
         if (current.version !== input.expectedVersion) {
             return { kind: "version-changed", schedule: current };
         }
+        const queuedScheduleRun =
+            input.patch.enabled === false
+                ? this.#transaction
+                      .select()
+                      .from(jobRuns)
+                      .where(
+                          and(
+                              eq(jobRuns.scheduledJobId, input.id),
+                              eq(jobRuns.triggerType, "schedule"),
+                              eq(jobRuns.state, "queued")
+                          )
+                      )
+                      .get()
+                : undefined;
+        const queuedScheduleRunRecord =
+            queuedScheduleRun === undefined ? undefined : parseRun(queuedScheduleRun);
+        if (queuedScheduleRunRecord?.cancellationPolicy === "never") {
+            return {
+                kind: "cancellation-not-supported",
+                run: queuedScheduleRunRecord,
+            };
+        }
         const transitionAt = maximumDate(current.updatedAt, input.at);
         const scheduleChanges =
             input.patch.schedule === undefined
@@ -1010,9 +1047,12 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 : this.#scheduleColumns(input.patch.schedule);
         const enabled = input.patch.enabled ?? current.enabled;
         let nextRunAt = current.nextRunAt;
-        // Disabling is an operator-state transition, not a cadence reset. Keep the
-        // last cursor dormant so expiry/re-enable can resume the original phase.
-        if (input.patch.enabled !== false && input.patch.nextRunAt !== undefined) {
+        // A pure disable keeps the existing cursor dormant. When the cadence also
+        // changes, retain the service's recalculated cursor for the new phase.
+        if (
+            input.patch.nextRunAt !== undefined &&
+            (input.patch.enabled !== false || input.patch.schedule !== undefined)
+        ) {
             nextRunAt = input.patch.nextRunAt;
         }
         if (enabled && nextRunAt === null) {
@@ -1062,47 +1102,31 @@ class DrizzleJobWriter extends DrizzleJobReader {
             .returning()
             .get();
         if (row === undefined) {
-            const observed = requiredRow(
-                this.#findScheduleRecord(input.id),
-                "schedule conflict read"
+            throw new Error(
+                "Schedule update lost its guarded write after intent changes"
             );
-            return { kind: "version-changed", schedule: observed };
         }
 
-        if (input.patch.enabled === false) {
-            const queued = this.#transaction
-                .select()
-                .from(jobRuns)
-                .where(
-                    and(
-                        eq(jobRuns.scheduledJobId, input.id),
-                        eq(jobRuns.triggerType, "schedule"),
-                        eq(jobRuns.state, "queued")
-                    )
-                )
-                .get();
-            if (queued !== undefined) {
-                if (
-                    input.queuedCancellation === undefined ||
-                    input.queuedCancellationSideEffects === undefined ||
-                    input.insertDisableIntent === undefined
-                ) {
-                    throw new Error(
-                        "Schedule disable requires queued-run cancellation metadata"
-                    );
-                }
-                const queuedRecord = parseRun(queued);
-                const actor: JobActor = {
-                    id: input.insertDisableIntent.createdById,
-                    kind: input.insertDisableIntent.createdByKind,
-                };
-                const cancelled = this.#cancelQueuedRun(
-                    queuedRecord,
-                    actor,
-                    input.queuedCancellation
+        if (input.patch.enabled === false && queuedScheduleRunRecord !== undefined) {
+            if (
+                input.queuedCancellation === undefined ||
+                input.queuedCancellationSideEffects === undefined ||
+                input.insertDisableIntent === undefined
+            ) {
+                throw new Error(
+                    "Schedule disable requires queued-run cancellation metadata"
                 );
-                this.#insertSideEffects(input.queuedCancellationSideEffects(cancelled));
             }
+            const actor: JobActor = {
+                id: input.insertDisableIntent.createdById,
+                kind: input.insertDisableIntent.createdByKind,
+            };
+            const cancelled = this.#cancelQueuedRun(
+                queuedScheduleRunRecord,
+                actor,
+                input.queuedCancellation
+            );
+            this.#insertSideEffects(input.queuedCancellationSideEffects(cancelled));
         }
         this.#insertSideEffects(input);
         return { kind: "updated", schedule: parseSchedule(row) };
@@ -1767,7 +1791,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
         const exhausted =
             run.payloadEventCount >= jobRunPayloadEventMaximum ||
             run.eventCount >= jobRunEventMaximum - 1 ||
-            run.eventBytes + eventBytes > jobPayloadEventByteMaximum;
+            run.eventBytes + eventBytes > jobRunPayloadEventMaximumBytes;
         if (exhausted) {
             const alreadyTruncated =
                 this.#transaction
@@ -2151,6 +2175,8 @@ export function createJobRepository(
     database: SQLiteBunDatabase,
     writeAdmission: ImmediateDatabaseWriteAdmission
 ): JobRepository {
+    // Drizzle exposes the synchronous transaction overload through a conditional
+    // return type that cannot preserve our generic callback without this narrowing.
     const runTransaction = database.transaction.bind(database) as unknown as <T>(
         callback: (transaction: JobTransaction) => T,
         config: { behavior: "deferred" | "immediate" }
@@ -2202,6 +2228,8 @@ export function createJobRepository(
         listRunEvents: (input: ListJobRunEventsInput) =>
             read((reader) => reader.listRunEvents(input)),
         listRuns: (input: ListJobRunsInput) => read((reader) => reader.listRuns(input)),
+        listRunsWithQueueState: (input: ListJobRunsInput) =>
+            read((reader) => reader.listRunsWithQueueState(input)),
         listScheduleRuns: (input: ListScheduleRunsInput) =>
             read((reader) => reader.listScheduleRuns(input)),
         listSchedules: (input: ListSchedulesInput) =>

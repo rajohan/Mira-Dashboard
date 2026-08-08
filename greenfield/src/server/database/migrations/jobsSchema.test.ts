@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { canonicalScheduleTimeZones } from "../../../contracts/scheduleTimeZones.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 
 type TestDatabase = Awaited<ReturnType<typeof openFreshMigratedDatabase>>;
@@ -140,6 +141,22 @@ function insertSchedule(
     );
 }
 
+function insertScheduleDisableIntent(
+    database: TestDatabase,
+    id: string,
+    createdAt: number
+): void {
+    database.sqlite.run(
+        `INSERT INTO job_disable_intents (
+            created_at, created_by_id, created_by_kind, ended_at, ended_by_id,
+            ended_by_kind, ended_reason, expires_at, external_job_id,
+            external_provider, id, reason, scheduled_job_id, target_kind
+        ) VALUES (?, ?, 'user', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?,
+                  'dashboard-schedule')`,
+        [createdAt, userId, id, "Operator maintenance", "system.worker-smoke"]
+    );
+}
+
 function insertQueuedRun(
     database: TestDatabase,
     overrides: Partial<QueuedRunFixture> & Pick<QueuedRunFixture, "id" | "idempotencyKey">
@@ -265,11 +282,14 @@ function insertEvent(
 function expectUsesIndexWithoutTemporarySort(
     database: TestDatabase,
     query: string,
-    indexName: string
+    indexName: string,
+    parameter?: string
 ): void {
-    const plan = database.sqlite
-        .query<QueryPlanRow, []>(`EXPLAIN QUERY PLAN ${query}`)
-        .all();
+    const statement = `EXPLAIN QUERY PLAN ${query}`;
+    const plan =
+        parameter === undefined
+            ? database.sqlite.query<QueryPlanRow, []>(statement).all()
+            : database.sqlite.query<QueryPlanRow, [string]>(statement).all(parameter);
     expect(plan.some(({ detail }) => detail.includes(indexName))).toBeTrue();
     expect(plan.some(({ detail }) => detail.includes("USE TEMP B-TREE"))).toBeFalse();
 }
@@ -342,6 +362,31 @@ describe("jobs baseline schema", () => {
                     timeZone: "UTC",
                 })
             ).toThrow("scheduled_jobs_schedule_shape_check");
+            for (const [index, timeZone] of canonicalScheduleTimeZones.entries()) {
+                insertSchedule(database, {
+                    id: `valid.time-zone.${index}`,
+                    intervalMs: null,
+                    scheduleKind: "daily",
+                    timeOfDay: "09:00",
+                    timeZone,
+                });
+            }
+            for (const [index, timeZone] of [
+                "US/Eastern",
+                "GMT",
+                "+01:00",
+                "local",
+            ].entries()) {
+                expect(() =>
+                    insertSchedule(database, {
+                        id: `invalid.time-zone.${index}`,
+                        intervalMs: null,
+                        scheduleKind: "daily",
+                        timeOfDay: "09:00",
+                        timeZone,
+                    })
+                ).toThrow("scheduled_jobs_time_zone_check");
+            }
             expect(() =>
                 insertSchedule(database, {
                     id: "invalid.resources",
@@ -451,6 +496,68 @@ describe("jobs baseline schema", () => {
                 updated_at: 3000,
                 version: 3,
             });
+
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE scheduled_jobs
+                     SET updated_at = 4000, version = 4
+                     WHERE id = ?`,
+                    ["system.worker-smoke"]
+                )
+            ).toThrow("scheduled_jobs version transition is invalid");
+
+            const originalIntentId = uuid(13);
+            insertScheduleDisableIntent(database, originalIntentId, 3000);
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE scheduled_jobs
+                     SET updated_at = 4000, version = 4
+                     WHERE id = ?`,
+                    ["system.worker-smoke"]
+                )
+            ).toThrow("scheduled_jobs version transition is invalid");
+
+            database.sqlite.run(
+                `UPDATE job_disable_intents
+                 SET ended_at = 4000, ended_by_id = ?, ended_by_kind = 'user',
+                     ended_reason = 'replaced'
+                 WHERE id = ?`,
+                [userId, originalIntentId]
+            );
+            insertScheduleDisableIntent(database, uuid(14), 4000);
+            database.sqlite.run(
+                `UPDATE scheduled_jobs
+                 SET updated_at = 4000, version = 4
+                 WHERE id = ?`,
+                ["system.worker-smoke"]
+            );
+            expect(
+                database.sqlite
+                    .query<
+                        { next_run_at: number; updated_at: number; version: number },
+                        [string]
+                    >(
+                        "SELECT next_run_at, updated_at, version FROM scheduled_jobs WHERE id = ?"
+                    )
+                    .get("system.worker-smoke")
+            ).toEqual({ next_run_at: 121_000, updated_at: 4000, version: 4 });
+
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE scheduled_jobs
+                     SET updated_at = 5000, version = 5
+                     WHERE id = ?`,
+                    ["system.worker-smoke"]
+                )
+            ).toThrow("scheduled_jobs version transition is invalid");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE scheduled_jobs
+                     SET next_run_at = 181000, version = 5
+                     WHERE id = ?`,
+                    ["system.worker-smoke"]
+                )
+            ).toThrow("scheduled_jobs version transition is invalid");
         } finally {
             database.sqlite.close(true);
         }
@@ -786,7 +893,7 @@ describe("jobs baseline schema", () => {
                     occurredAt: 2000,
                     sequence: 1001,
                 })
-            ).toThrow();
+            ).toThrow("job_run_events must follow the parent run lifecycle");
 
             const bytesRunId = uuid(35);
             insertQueuedRun(database, {
@@ -1084,7 +1191,7 @@ describe("jobs baseline schema", () => {
                     `UPDATE resource_leases SET resource_key = 'host.changed'
                      WHERE resource_key = 'host.smoke'`
                 )
-            ).toThrow();
+            ).toThrow("resource_leases renewal is not fenced");
 
             database.sqlite.run(
                 "UPDATE worker_instances SET heartbeat_at = 1500 WHERE id = ?",
@@ -1155,9 +1262,10 @@ describe("jobs baseline schema", () => {
             expectUsesIndexWithoutTemporarySort(
                 database,
                 `SELECT id FROM job_runs
-                 WHERE state = 'running' AND lease_owner_id = '${uuid(50)}'
+                 WHERE state = 'running' AND lease_owner_id = ?
                  ORDER BY id`,
-                "job_runs_running_owner_id_idx"
+                "job_runs_running_owner_id_idx",
+                uuid(50)
             );
             expectUsesIndexWithoutTemporarySort(
                 database,
@@ -1179,13 +1287,13 @@ describe("jobs baseline schema", () => {
                 "resource_leases_expiry_key_idx"
             );
             const eventPlan = database.sqlite
-                .query<QueryPlanRow, []>(`
+                .query<QueryPlanRow, [string]>(`
                     EXPLAIN QUERY PLAN
                     SELECT sequence FROM job_run_events
-                    WHERE job_run_id = '${uuid(51)}'
+                    WHERE job_run_id = ?
                     ORDER BY sequence DESC LIMIT 50
                 `)
-                .all();
+                .all(uuid(51));
             expect(
                 eventPlan.some(({ detail }) => detail.includes("PRIMARY KEY"))
             ).toBeTrue();

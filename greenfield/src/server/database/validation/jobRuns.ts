@@ -27,26 +27,15 @@ import {
     jobVersionSchema,
     scheduleIdSchema,
 } from "../../../contracts/jobModel.ts";
-import {
-    automationPrincipalIdSchema,
-    securityRecordIdSchema,
-} from "../../../contracts/security.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
 import { nonnegativeSafeIntegerSchema } from "../../../shared/validation.ts";
 import { jobRuns } from "../schema/jobRuns.ts";
+import { jobActorIdentityIsValid } from "./jobActors.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 import { sha256TextSchema } from "./securityScalars.ts";
 
 const actorKindSchema = v.picklist(["automation", "system", "user"]);
-
-function actorIsValid(kind: "automation" | "system" | "user", id: string): boolean {
-    if (kind === "automation") {
-        return v.safeParse(automationPrincipalIdSchema, id).success;
-    }
-    if (kind === "user") return v.safeParse(securityRecordIdSchema, id).success;
-    return v.safeParse(jobActionKeySchema, id).success;
-}
 
 function jsonObjectTextSchema(
     maximumBytes: number,
@@ -199,7 +188,7 @@ function cancellationIsConsistent(run: StoredJobRun): boolean {
         !requested ||
         (run.cancelRequestedById !== null &&
             run.cancelRequestedByKind !== null &&
-            actorIsValid(run.cancelRequestedByKind, run.cancelRequestedById))
+            jobActorIdentityIsValid(run.cancelRequestedByKind, run.cancelRequestedById))
     );
 }
 
@@ -250,7 +239,7 @@ function timestampsAreConsistent(run: StoredJobRun): boolean {
 
 function jobRunIsConsistent(run: StoredJobRun): boolean {
     return (
-        actorIsValid(run.requestedByKind, run.requestedById) &&
+        jobActorIdentityIsValid(run.requestedByKind, run.requestedById) &&
         run.payloadEventCount <= run.eventCount &&
         scheduleProvenanceIsConsistent(run) &&
         attemptsAreConsistent(run) &&
@@ -338,7 +327,7 @@ export const jobRunInsertSchema = v.pipe(
             run.resultJson == null &&
             run.terminalCode == null &&
             run.terminalMessage == null &&
-            actorIsValid(run.requestedByKind, run.requestedById) &&
+            jobActorIdentityIsValid(run.requestedByKind, run.requestedById) &&
             run.availableAt.getTime() >= run.queuedAt.getTime() &&
             run.updatedAt.getTime() >= run.queuedAt.getTime() &&
             scheduleProvenanceIsConsistent({

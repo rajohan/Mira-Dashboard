@@ -1,31 +1,16 @@
 import { createInsertSchema, createSelectSchema } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
-import {
-    jobActionKeySchema,
-    jobDescriptionSchema,
-    scheduleIdSchema,
-} from "../../../contracts/jobModel.ts";
-import {
-    automationPrincipalIdSchema,
-    securityRecordIdSchema,
-} from "../../../contracts/security.ts";
+import { jobDescriptionSchema, scheduleIdSchema } from "../../../contracts/jobModel.ts";
 import { boundedNonBlankTextSchema } from "../../../shared/validation.ts";
 import { jobDisableIntents } from "../schema/jobDisableIntents.ts";
+import { jobActorIdentityIsValid } from "./jobActors.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 
 const createdActorKindSchema = v.picklist(["automation", "user"]);
 const endedActorKindSchema = v.picklist(["automation", "system", "user"]);
 const endedReasonSchema = v.picklist(["expired", "re-enabled", "replaced"]);
 const externalJobIdSchema = boundedNonBlankTextSchema(256, "External job id is invalid");
-
-function actorIsValid(kind: "automation" | "system" | "user", id: string): boolean {
-    if (kind === "automation") {
-        return v.safeParse(automationPrincipalIdSchema, id).success;
-    }
-    if (kind === "user") return v.safeParse(securityRecordIdSchema, id).success;
-    return v.safeParse(jobActionKeySchema, id).success;
-}
 
 interface StoredDisableIntent {
     readonly createdAt: Date;
@@ -43,7 +28,7 @@ interface StoredDisableIntent {
 }
 
 function disableIntentIsConsistent(intent: StoredDisableIntent): boolean {
-    if (!actorIsValid(intent.createdByKind, intent.createdById)) return false;
+    if (!jobActorIdentityIsValid(intent.createdByKind, intent.createdById)) return false;
 
     const expiresAt = intent.expiresAt ?? null;
     if (expiresAt !== null && expiresAt.getTime() <= intent.createdAt.getTime()) {
@@ -76,7 +61,7 @@ function disableIntentIsConsistent(intent: StoredDisableIntent): boolean {
         endedById === null ||
         endedByKind === null ||
         endedReason === null ||
-        !actorIsValid(endedByKind, endedById) ||
+        !jobActorIdentityIsValid(endedByKind, endedById) ||
         endedAt.getTime() < intent.createdAt.getTime()
     ) {
         return false;
@@ -155,7 +140,7 @@ export const jobDisableIntentCloseSchema = v.pipe(
     jobDisableIntentCloseObjectSchema,
     v.check(
         (closure) =>
-            actorIsValid(closure.endedByKind, closure.endedById) &&
+            jobActorIdentityIsValid(closure.endedByKind, closure.endedById) &&
             (closure.endedReason !== "expired" || closure.endedByKind === "system"),
         "Job disable-intent closure actor is invalid"
     )

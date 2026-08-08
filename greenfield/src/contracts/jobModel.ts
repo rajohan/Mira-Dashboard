@@ -14,6 +14,7 @@ import {
     nonnegativeSafeIntegerSchema,
     positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
+import { canonicalScheduleTimeZones } from "./scheduleTimeZones.ts";
 import { isCanonicalWebAuthnBase64Url } from "./webauthn.ts";
 
 /** Canonical durable job-run states. */
@@ -81,6 +82,9 @@ export const jobRunPayloadEventMaximum = 967;
 export const jobRunOutputMaximumBytes = 1024 * 1024;
 export const jobRunEventMessageMaximumLength = 4096;
 export const jobRunEventMessageMaximumBytes = 4096;
+/** Payload bytes left after reserving one bounded message for every attempt. */
+export const jobRunPayloadEventMaximumBytes =
+    jobRunOutputMaximumBytes - jobRunAttemptMaximum * jobRunEventMessageMaximumBytes;
 export const jobRunEventProgressMaximumBytes = 16 * 1024;
 export const jobWorkerCapacityMaximum = 16;
 export const jobWorkerSummaryMaximum = 32;
@@ -389,7 +393,7 @@ export const scheduleCronExpressionSchema = v.pipe(
         "Schedule cron expression is invalid"
     ),
     v.description(
-        "Canonical five-field minute cron; live validation normalizes ASCII whitespace and requires a future occurrence."
+        "Five-field minute cron; live validation accepts JAN-DEC month and SUN-SAT weekday aliases, normalizes aliases and ASCII whitespace, and requires a future occurrence."
     ),
     v.transform(normalizeScheduleCronExpression),
     v.minLength(9, "Schedule cron expression is invalid"),
@@ -400,17 +404,14 @@ export const scheduleCronExpressionSchema = v.pipe(
     v.check(scheduleCronExpressionIsValid, "Schedule cron expression is invalid")
 );
 
-const canonicalScheduleTimeZones = new Set<string>([
-    "UTC",
-    ...Intl.supportedValuesOf("timeZone"),
-]);
+const canonicalScheduleTimeZoneSet = new Set(canonicalScheduleTimeZones);
 
 /**
  * @param value Candidate time-zone identifier.
  * @returns Whether it is an explicit canonical IANA identifier or `UTC`.
  */
 export function scheduleTimeZoneIsCanonical(value: string): boolean {
-    return canonicalScheduleTimeZones.has(value);
+    return canonicalScheduleTimeZoneSet.has(value);
 }
 
 export const scheduleTimeZoneSchema = v.pipe(

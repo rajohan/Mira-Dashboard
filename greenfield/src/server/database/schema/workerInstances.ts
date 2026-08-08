@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import {
-    nulFreeTextCheck,
+    lowercaseHexTextCheck,
     timestampMillisecondsCheck,
     uuidV7TextCheck,
 } from "./checks.ts";
@@ -27,7 +27,7 @@ export const workerInstances = sqliteTable(
         check("worker_instances_pid_check", sql`${table.pid} BETWEEN 1 AND 2147483647`),
         check(
             "worker_instances_release_id_check",
-            sql`length(${table.releaseId}) = 40 AND ${nulFreeTextCheck(table.releaseId)} AND ${table.releaseId} = lower(${table.releaseId}) AND ${table.releaseId} NOT GLOB '*[^0-9a-f]*'`
+            lowercaseHexTextCheck(table.releaseId, 40)
         ),
         check(
             "worker_instances_state_check",

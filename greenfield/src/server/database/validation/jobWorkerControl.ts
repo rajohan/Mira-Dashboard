@@ -2,21 +2,11 @@ import { createSelectSchema } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
 import { jobVersionSchema } from "../../../contracts/jobModel.ts";
-import {
-    automationPrincipalIdSchema,
-    securityRecordIdSchema,
-} from "../../../contracts/security.ts";
 import { jobWorkerControl } from "../schema/jobWorkerControl.ts";
+import { jobActorIdentityIsValid } from "./jobActors.ts";
 import { nonnegativeDateSchema } from "./scalars.ts";
 
 const controlActorKindSchema = v.picklist(["automation", "user"]);
-
-function controlActorIsValid(kind: "automation" | "user", id: string): boolean {
-    return v.safeParse(
-        kind === "automation" ? automationPrincipalIdSchema : securityRecordIdSchema,
-        id
-    ).success;
-}
 
 interface StoredWorkerControl {
     readonly claimingPaused: boolean;
@@ -42,7 +32,7 @@ function workerControlIsConsistent(control: StoredWorkerControl): boolean {
         control.version > 1 &&
         control.updatedByKind !== null &&
         control.updatedById !== null &&
-        controlActorIsValid(control.updatedByKind, control.updatedById)
+        jobActorIdentityIsValid(control.updatedByKind, control.updatedById)
     );
 }
 
@@ -68,13 +58,7 @@ export const jobWorkerControlSelectSchema = v.pipe(
 
 const workerControlUpdateObjectSchema = v.strictObject({
     claimingPaused: v.boolean("Worker claiming state is invalid"),
-    updatedAt: v.pipe(
-        v.date("Worker control timestamp is invalid"),
-        v.check(
-            (value) => Number.isFinite(value.getTime()) && value.getTime() >= 0,
-            "Worker control timestamp is invalid"
-        )
-    ),
+    updatedAt: nonnegativeDateSchema(v.date("Worker control timestamp is invalid")),
     updatedById: v.string("Worker control actor id is invalid"),
     updatedByKind: controlActorKindSchema,
     version: jobVersionSchema,
@@ -86,7 +70,7 @@ export const jobWorkerControlUpdateSchema = v.pipe(
     v.check(
         (control) =>
             control.version > 1 &&
-            controlActorIsValid(control.updatedByKind, control.updatedById),
+            jobActorIdentityIsValid(control.updatedByKind, control.updatedById),
         "Worker control update actor is invalid"
     )
 );

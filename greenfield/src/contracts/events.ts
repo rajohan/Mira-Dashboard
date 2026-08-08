@@ -95,7 +95,7 @@ export const realtimeStreamInputSchema = v.strictObject({
 /** Data inside one tRPC tracked SSE envelope. */
 export const realtimeStreamDataSchema = v.variant("kind", [
     v.strictObject({
-        event: v.variant("topic", [
+        event: v.union([
             agentRealtimeChangeSchema,
             ...jobRealtimeChangeSchemas,
             ...monitoringRealtimeChangeSchemas,

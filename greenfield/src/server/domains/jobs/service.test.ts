@@ -9,7 +9,7 @@ import {
     authenticationTestUserId,
     openAuthenticationTestDatabase,
 } from "../security/testSupport/authentication.ts";
-import { JobValidationError } from "./errors.ts";
+import { JobConflictError, JobValidationError } from "./errors.ts";
 import type { JobRunEventRecord } from "./records.ts";
 import { createJobRepository, type JobRepository } from "./repository.ts";
 import { createJobService, reconcileJobSchedules } from "./service.ts";
@@ -137,6 +137,160 @@ describe("durable jobs service", () => {
             expect(
                 repository.findSchedule("system.worker-smoke")?.schedule.nextRunAt
             ).toEqual(new Date(authenticationTestNow.getTime() + 120_000));
+
+            const replacement = await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 4,
+                    id: "system.worker-smoke",
+                    patch: {
+                        disableIntent: {
+                            expiresAtMs: authenticationTestNow.getTime() + 600_000,
+                            reason: "Extended operator maintenance",
+                        },
+                        enabled: false,
+                    },
+                })
+            );
+            expect(replacement).toMatchObject({
+                activeDisableIntent: {
+                    reason: "Extended operator maintenance",
+                },
+                enabled: false,
+                version: 5,
+            });
+            expect(replacement.activeDisableIntent?.id).not.toBe(originalIntent?.id);
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("stores the recalculated dormant cursor when cadence changes during disable", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+            const enabled = await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 1,
+                    id: "system.worker-smoke",
+                    patch: { disableIntent: null, enabled: true },
+                })
+            );
+            const disabled = await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 2,
+                    id: "system.worker-smoke",
+                    patch: {
+                        disableIntent: { reason: "Change cadence during maintenance" },
+                        enabled: false,
+                        schedule: { intervalMs: 120_000, kind: "interval" },
+                    },
+                })
+            );
+
+            expect(disabled).toMatchObject({
+                enabled: false,
+                schedule: { intervalMs: 120_000, kind: "interval" },
+                version: 3,
+            });
+            expect(disabled.nextRunAtMs).toBeUndefined();
+            expect(enabled.nextRunAtMs).not.toBe(
+                authenticationTestNow.getTime() + 120_000
+            );
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule.nextRunAt
+            ).toEqual(new Date(authenticationTestNow.getTime() + 120_000));
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("maps a never-cancellable queued schedule run to a declared conflict", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+            await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 1,
+                    id: "system.worker-smoke",
+                    patch: { disableIntent: null, enabled: true },
+                })
+            );
+            const runSummary = await Effect.runPromise(
+                service.runSchedule(principal, {
+                    id: "system.worker-smoke",
+                    idempotencyKey: "1".repeat(32),
+                })
+            );
+            const run = repository.findRun(runSummary.id);
+            if (run === undefined) throw new Error("Expected the manual run fixture");
+            const conflictRepository: JobRepository = {
+                ...repository,
+                updateSchedule: () =>
+                    Promise.resolve({
+                        kind: "cancellation-not-supported",
+                        run,
+                    }),
+            };
+            const conflictService = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository: conflictRepository,
+            });
+
+            expect(
+                Effect.runPromise(
+                    conflictService.updateSchedule(principal, {
+                        expectedVersion: 2,
+                        id: "system.worker-smoke",
+                        patch: {
+                            disableIntent: { reason: "Maintenance" },
+                            enabled: false,
+                        },
+                    })
+                )
+            ).rejects.toBeInstanceOf(JobConflictError);
+            const unchangedSchedule = repository.findSchedule("system.worker-smoke");
+            expect(unchangedSchedule?.activeDisableIntent).toBeUndefined();
+            expect(unchangedSchedule?.schedule).toMatchObject({
+                enabled: true,
+                version: 2,
+            });
         } finally {
             fixture.database.sqlite.close(true);
         }
@@ -190,9 +344,13 @@ describe("durable jobs service", () => {
                 sequence: 2,
                 workerInstanceId: "019fdf20-0000-7000-8000-000000000099",
             } satisfies JobRunEventRecord;
+            const listSnapshot = repository.listRunsWithQueueState({ limit: 10 });
             let snapshotReads = 0;
+            let listSnapshotReads = 0;
             let legacyRunReads = 0;
             let legacyEventReads = 0;
+            let legacyListReads = 0;
+            let legacyQueueReads = 0;
             const interleavedRepository: JobRepository = {
                 ...repository,
                 findRun: () => {
@@ -207,6 +365,18 @@ describe("durable jobs service", () => {
                     legacyEventReads += 1;
                     return [interleavedEvent, ...snapshot.events];
                 },
+                listRuns: () => {
+                    legacyListReads += 1;
+                    return [];
+                },
+                listRunsWithQueueState: () => {
+                    listSnapshotReads += 1;
+                    return listSnapshot;
+                },
+                readQueueState: () => {
+                    legacyQueueReads += 1;
+                    return listSnapshot.queue;
+                },
             };
             const service = createJobService({
                 generateId,
@@ -217,12 +387,24 @@ describe("durable jobs service", () => {
             const detail = await Effect.runPromise(
                 service.getRun({ eventLimit: 10, id: queued.id })
             );
+            const listing = await Effect.runPromise(service.listRuns({ limit: 10 }));
 
             expect(detail.events.map(({ sequence }) => sequence)).toEqual([1]);
             expect(detail.run).toMatchObject({ attemptCount: 0, eventCount: 1 });
-            expect({ legacyEventReads, legacyRunReads, snapshotReads }).toEqual({
+            expect(listing.runs.map(({ id }) => id)).toEqual([queued.id]);
+            expect({
+                legacyEventReads,
+                legacyListReads,
+                legacyQueueReads,
+                legacyRunReads,
+                listSnapshotReads,
+                snapshotReads,
+            }).toEqual({
                 legacyEventReads: 0,
+                legacyListReads: 0,
+                legacyQueueReads: 0,
                 legacyRunReads: 0,
+                listSnapshotReads: 1,
                 snapshotReads: 1,
             });
         } finally {

@@ -56,6 +56,7 @@ import {
     scheduleSummaryIsConsistent,
     scheduleTimeZoneIsCanonical,
 } from "../../src/contracts/jobModel.ts";
+import { jobRealtimeIdentityMatches } from "../../src/contracts/jobRealtime.ts";
 import {
     activeJobResourceClassesAreCanonical,
     jobQueueSummaryIsConsistent,
@@ -256,6 +257,10 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         jobRunDetailIsConsistent,
         "Live Valibot validation additionally binds job result, events, cursor, and run state.",
+    ],
+    [
+        jobRealtimeIdentityMatches,
+        "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly.",
     ],
     [
         scheduleOrderIsStable,

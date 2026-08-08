@@ -195,7 +195,7 @@ describe("generated contract documentation", () => {
         }
         expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(7);
         expect(first.get("schemas/schedules.update.input.schema.json")).toContain(
-            "Canonical five-field minute cron; live validation normalizes ASCII whitespace and requires a future occurrence."
+            "Five-field minute cron; live validation accepts JAN-DEC month and SUN-SAT weekday aliases, normalizes aliases and ASCII whitespace, and requires a future occurrence."
         );
     });
 

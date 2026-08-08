@@ -17,6 +17,7 @@ import {
     scheduleSummarySchema,
     scheduleTimeZoneSchema,
 } from "./jobModel.ts";
+import { canonicalScheduleTimeZones } from "./scheduleTimeZones.ts";
 
 const runId = "018f6f50-6a9e-7b88-8000-000000000001";
 const workerId = "018f6f50-6a9e-7b88-8000-000000000002";
@@ -206,10 +207,19 @@ describe("durable job models", () => {
     });
 
     test("accepts explicit UTC and canonical IANA zones but rejects aliases and offsets", () => {
+        expect(Object.isFrozen(canonicalScheduleTimeZones)).toBeTrue();
+        expect(canonicalScheduleTimeZones).toEqual(
+            [...canonicalScheduleTimeZones].toSorted()
+        );
+        expect(new Set(canonicalScheduleTimeZones).size).toBe(
+            canonicalScheduleTimeZones.length
+        );
         for (const timeZone of ["UTC", "Europe/Oslo", "America/New_York"]) {
+            expect(canonicalScheduleTimeZones).toContain(timeZone);
             expect(v.parse(scheduleTimeZoneSchema, timeZone)).toBe(timeZone);
         }
         for (const timeZone of ["US/Eastern", "GMT", "+01:00", "local"]) {
+            expect(canonicalScheduleTimeZones).not.toContain(timeZone);
             expect(v.safeParse(scheduleTimeZoneSchema, timeZone).success).toBeFalse();
         }
     });
@@ -226,6 +236,31 @@ describe("durable job models", () => {
                 state: "online",
             }).state
         ).toBe("online");
+        expect(
+            v.parse(jobWorkerSummarySchema, {
+                activeRunCount: 1,
+                capacity: 2,
+                drainingAtMs: 2500,
+                heartbeatAtMs: 2600,
+                id: workerId,
+                releaseId: "a".repeat(40),
+                startedAtMs: 1000,
+                state: "draining",
+            }).state
+        ).toBe("draining");
+        expect(
+            v.parse(jobWorkerSummarySchema, {
+                activeRunCount: 0,
+                capacity: 2,
+                drainingAtMs: 2500,
+                heartbeatAtMs: 2600,
+                id: workerId,
+                releaseId: "a".repeat(40),
+                startedAtMs: 1000,
+                state: "stopped",
+                stoppedAtMs: 3000,
+            }).state
+        ).toBe("stopped");
         expect(
             v.safeParse(jobWorkerSummarySchema, {
                 activeRunCount: 3,

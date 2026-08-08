@@ -167,6 +167,19 @@ describe("durable jobs repository", () => {
                 version: 2,
             });
 
+            const rejectedRun = queuedRun(9, { scheduledJobVersion: 2 });
+            expect(
+                repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: {
+                        ...queuedEvent(rejectedRun),
+                        jobRunId: uuid(99),
+                    },
+                    run: rejectedRun,
+                })
+            ).rejects.toThrow("Queued event does not belong to the inserted manual run");
+            expect(repository.findRun(rejectedRun.id)).toBeUndefined();
+
             const run = queuedRun(10, { scheduledJobVersion: 2 });
             const inserted = await repository.enqueueManualRun({
                 ...noSideEffects,
@@ -429,6 +442,89 @@ describe("durable jobs repository", () => {
             expect(
                 repository.findActiveDisableIntent("system.worker-smoke-rollback")
             ).toMatchObject({ endedAt: null, id: rollbackIntent.id });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("rejects disabling before mutating when a queued schedule run is never cancellable", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        try {
+            await repository.reconcileSchedules({
+                ...noSideEffects,
+                schedules: [schedule({ cancellationPolicy: "never" })],
+            });
+            const run = queuedRun(73, {
+                availableAt: new Date(100_000),
+                cancellationPolicy: "never",
+                queuedAt: new Date(100_000),
+                requestedById: "job-scheduler",
+                requestedByKind: "system",
+                scheduledForAt: new Date(61_000),
+                triggerType: "schedule",
+                updatedAt: new Date(100_000),
+            });
+            expect(
+                await repository.enqueueNextDueSchedule({
+                    ...noSideEffects,
+                    at: new Date(100_000),
+                    nextRunAt: new Date(121_000),
+                    observedNextRunAt: new Date(61_000),
+                    run,
+                    scheduleId: "system.worker-smoke",
+                })
+            ).toMatchObject({ kind: "inserted" });
+
+            const result = await repository.updateSchedule({
+                ...noSideEffects,
+                at: new Date(110_000),
+                expectedVersion: 1,
+                id: "system.worker-smoke",
+                insertDisableIntent: {
+                    createdAt: new Date(110_000),
+                    createdById: userId,
+                    createdByKind: "user",
+                    endedAt: null,
+                    endedById: null,
+                    endedByKind: null,
+                    endedReason: null,
+                    expiresAt: null,
+                    externalJobId: null,
+                    externalProvider: null,
+                    id: uuid(74),
+                    reason: "Maintenance must wait for the queued run",
+                    scheduledJobId: "system.worker-smoke",
+                    targetKind: "dashboard-schedule",
+                },
+                patch: { enabled: false },
+                queuedCancellation: {
+                    at: new Date(110_000),
+                    terminalCode: "schedule/disabled",
+                    terminalMessage: "The schedule was disabled before execution.",
+                },
+                queuedCancellationSideEffects: () => noSideEffects,
+            });
+
+            expect(result).toMatchObject({
+                kind: "cancellation-not-supported",
+                run: { id: run.id, state: "queued" },
+            });
+            const unchangedSchedule = repository.findSchedule("system.worker-smoke");
+            expect(unchangedSchedule?.activeDisableIntent).toBeUndefined();
+            expect(unchangedSchedule?.schedule).toMatchObject({
+                enabled: true,
+                nextRunAt: new Date(121_000),
+                version: 1,
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                cancelRequestedAt: null,
+                eventCount: 1,
+                state: "queued",
+            });
         } finally {
             database.sqlite.close(true);
         }

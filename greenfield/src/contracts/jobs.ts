@@ -27,6 +27,12 @@ import {
     jobWorkerSummarySchema,
     scheduleIdSchema,
 } from "./jobModel.ts";
+import {
+    jobMutationTransport,
+    jobQueryTransport,
+    jobReadAccess,
+    jobSessionWriteAccess,
+} from "./jobProcedurePolicies.ts";
 import type { ProcedureContract } from "./registry.ts";
 
 /** Default durable runs returned by one request. */
@@ -287,28 +293,6 @@ export const setJobClaimingPausedInputSchema = v.strictObject({
     paused: v.boolean("Worker claiming state is invalid"),
 });
 
-const jobReadAccess = {
-    capabilities: ["jobs:read"],
-    capabilityPolicy: "all",
-    kind: "authenticated",
-} as const;
-const jobSessionWriteAccess = {
-    capabilities: ["jobs:write"],
-    capabilityPolicy: "all",
-    kind: "authenticated",
-    principalKinds: ["session"],
-} as const;
-const queryTransport = {
-    batching: "adapter-default",
-    handler: "default",
-    requestBody: "default",
-} as const;
-const mutationTransport = {
-    batching: "forbidden",
-    handler: "default",
-    requestBody: "default",
-} as const;
-
 /** Durable job inventory, detail, cancellation, and worker-control contracts. */
 export const jobProcedureContracts = [
     {
@@ -322,7 +306,7 @@ export const jobProcedureContracts = [
         output: listJobRunsResultSchema,
         outputSchemaId: "jobs.listRuns.output",
         summary: "Lists stable newest-first durable run history and queue state.",
-        transport: queryTransport,
+        transport: jobQueryTransport,
     },
     {
         access: jobReadAccess,
@@ -335,7 +319,7 @@ export const jobProcedureContracts = [
         output: jobRunDetailSchema,
         outputSchemaId: "jobs.getRun.output",
         summary: "Loads one durable run with bounded newest-first events.",
-        transport: queryTransport,
+        transport: jobQueryTransport,
     },
     {
         access: jobSessionWriteAccess,
@@ -354,7 +338,7 @@ export const jobProcedureContracts = [
         output: jobRunSummarySchema,
         outputSchemaId: "jobs.cancelRun.output",
         summary: "Cancels a queued run or requests cooperative running cancellation.",
-        transport: mutationTransport,
+        transport: jobMutationTransport,
     },
     {
         access: jobSessionWriteAccess,
@@ -367,7 +351,7 @@ export const jobProcedureContracts = [
         output: jobWorkerControlSchema,
         outputSchemaId: "jobs.setClaimingPaused.output",
         summary: "Pauses or resumes new cross-process claims under version control.",
-        transport: mutationTransport,
+        transport: jobMutationTransport,
     },
 ] as const satisfies readonly ProcedureContract[];
 

@@ -132,5 +132,15 @@ describe("durable job realtime contracts", () => {
         for (const [index, schema] of jobRealtimeChangeSchemas.entries()) {
             expect(v.safeParse(schema, changes[index]).success).toBeTrue();
         }
+
+        const mismatchedPayloadIds = ["system.worker-smoke", runId, runId];
+        for (const [index, schema] of jobRealtimeChangeSchemas.entries()) {
+            expect(
+                v.safeParse(schema, {
+                    ...changes[index],
+                    payload: { id: mismatchedPayloadIds[index] },
+                }).success
+            ).toBeFalse();
+        }
     });
 });

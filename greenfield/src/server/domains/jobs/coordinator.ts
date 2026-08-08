@@ -21,6 +21,7 @@ import {
 } from "./actionRegistry.ts";
 import type { JobRunRecord, ScheduledJobRecord } from "./records.ts";
 import { toScheduleConfiguration } from "./records.ts";
+import { buildRegisteredSchedule } from "./registeredSchedule.ts";
 import {
     type JobMutationSideEffects,
     type JobClaimOutcome,
@@ -246,35 +247,11 @@ function scheduleInsert(
     registration: JobActionRegistration,
     at: Date
 ): ScheduledJobInsert {
-    const schedule = registration.defaultSchedule;
-    const nextRunAtMs = nextScheduleOccurrence(schedule, at.getTime());
-    if (nextRunAtMs === undefined) {
+    const schedule = buildRegisteredSchedule(registration, at);
+    if (schedule === undefined) {
         throw new RangeError("Default job schedule has no representable occurrence");
     }
-    return {
-        actionKey: registration.actionKey,
-        actionPayloadJson: JSON.stringify(registration.actionPayload),
-        attemptLimit: registration.attemptLimit,
-        cancellationPolicy: registration.cancellationPolicy,
-        createdAt: at,
-        cronExpression: schedule.kind === "cron" ? schedule.expression : null,
-        description: registration.description,
-        enabled: registration.defaultEnabled,
-        id: registration.scheduleId,
-        intervalMs: schedule.kind === "interval" ? schedule.intervalMs : null,
-        name: registration.displayName,
-        nextRunAt: new Date(nextRunAtMs),
-        priority: registration.priority,
-        resourceClass: registration.resourceClass,
-        resourceKeysJson: JSON.stringify(registration.resourceKeys),
-        retrySafe: registration.retrySafe,
-        scheduleKind: schedule.kind,
-        timeOfDay: schedule.kind === "daily" ? schedule.timeOfDay : null,
-        timeZone: schedule.kind === "interval" ? null : schedule.timeZone,
-        timeoutMs: registration.timeoutMs,
-        updatedAt: at,
-        version: 1,
-    };
+    return schedule;
 }
 
 function scheduledRunIdentity(
@@ -466,12 +443,17 @@ async function waitForActiveExecution(
             forceSignal.removeEventListener("abort", onForce);
         }
     }
-    await Promise.race([
-        execution,
-        waitFor(forceDrainMs).then(() => {
-            throw new Error("Durable job action exceeded forced-drain timeout");
-        }),
-    ]);
+    const drainController = new AbortController();
+    try {
+        await Promise.race([
+            execution,
+            waitFor(forceDrainMs, drainController.signal).then(() => {
+                throw new Error("Durable job action exceeded forced-drain timeout");
+            }),
+        ]);
+    } finally {
+        drainController.abort(new JobCoordinatorShutdownError());
+    }
 }
 
 interface ExecuteClaimOptions {
@@ -713,9 +695,10 @@ export function createJobWorkerCoordinator(
         throwIfAborted(signal);
         if (worker === undefined) throw new Error("Job worker registration was lost");
     };
-    const heartbeatLoop = Effect.tryPromise((signal) =>
-        trackPass("heartbeat", () => heartbeatPass(signal))
-    ).pipe(Effect.andThen(Effect.sleep(timings.heartbeatMs)), Effect.forever);
+    const heartbeatLoop = Effect.tryPromise({
+        catch: (error) => error,
+        try: (signal) => trackPass("heartbeat", () => heartbeatPass(signal)),
+    }).pipe(Effect.andThen(Effect.sleep(timings.heartbeatMs)), Effect.forever);
 
     const schedulePass = async (signal: AbortSignal): Promise<void> => {
         throwIfAborted(signal);
@@ -787,9 +770,10 @@ export function createJobWorkerCoordinator(
             throwIfAborted(signal);
         }
     };
-    const scheduleLoop = Effect.tryPromise((signal) =>
-        trackPass("schedule", () => schedulePass(signal))
-    ).pipe(Effect.andThen(Effect.sleep(timings.schedulePollMs)), Effect.forever);
+    const scheduleLoop = Effect.tryPromise({
+        catch: (error) => error,
+        try: (signal) => trackPass("schedule", () => schedulePass(signal)),
+    }).pipe(Effect.andThen(Effect.sleep(timings.schedulePollMs)), Effect.forever);
 
     const claimPass = async (signal: AbortSignal): Promise<void> => {
         const at = new Date(nowMs());
@@ -1028,7 +1012,11 @@ export function createJobWorkerCoordinator(
             if (disposePromise !== undefined) {
                 return Promise.reject(new Error("Durable job coordinator is disposed"));
             }
-            initializePromise ??= initialize();
+            initializePromise ??= initialize().catch((error: unknown) => {
+                const failure = normalizeCoordinatorFailure(error);
+                rejectCompletion?.(failure);
+                throw failure;
+            });
             return initializePromise;
         },
     });

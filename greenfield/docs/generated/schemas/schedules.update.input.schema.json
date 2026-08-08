@@ -62,7 +62,7 @@
                 "expression": {
                   "type": "string",
                   "maxLength": 400,
-                  "description": "Canonical five-field minute cron; live validation normalizes ASCII whitespace and requires a future occurrence."
+                  "description": "Five-field minute cron; live validation accepts JAN-DEC month and SUN-SAT weekday aliases, normalizes aliases and ASCII whitespace, and requires a future occurrence."
                 },
                 "kind": {
                   "const": "cron"

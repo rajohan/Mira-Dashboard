@@ -543,50 +543,50 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 ...validScheduledJobRow,
                 id: "System.Worker-Smoke",
             })
-        ).toThrow();
+        ).toThrow("Schedule id is invalid");
         expect(() =>
             v.parse(scheduledJobSelectSchema, {
                 ...validScheduledJobRow,
                 actionPayloadJson: "[]",
             })
-        ).toThrow();
+        ).toThrow("Stored job payload must contain a JSON object");
         expect(() =>
             v.parse(scheduledJobSelectSchema, {
                 ...validScheduledJobRow,
                 resourceKeysJson: '["database","database"]',
             })
-        ).toThrow();
+        ).toThrow("Stored job resource keys are not canonical");
         expect(() =>
             v.parse(scheduledJobSelectSchema, {
                 ...validScheduledJobRow,
                 resourceKeysJson: "{}",
             })
-        ).toThrow();
+        ).toThrow("Stored job resource keys are not canonical");
         expect(() =>
             v.parse(jobRunSelectSchema, {
                 ...validJobRunRow,
                 id: "550e8400-e29b-41d4-a716-446655440000",
             })
-        ).toThrow();
+        ).toThrow("Expected a lowercase UUIDv7 identifier");
         expect(() =>
             v.parse(jobRunInsertSchema, {
                 ...validJobRunInsert,
                 availableAt: new Date(1999),
             })
-        ).toThrow();
+        ).toThrow("New job run must be an internally consistent queued row");
         expect(() =>
             v.parse(jobRunSelectSchema, {
                 ...validJobRunRow,
                 eventCount: 1001,
             })
-        ).toThrow();
+        ).toThrow("Stored job event count is invalid");
         expect(() =>
             v.parse(jobRunSelectSchema, {
                 ...validJobRunRow,
                 eventCount: 1,
                 payloadEventCount: 2,
             })
-        ).toThrow();
+        ).toThrow("Stored job run is inconsistent");
         expect(() =>
             v.parse(resourceLeaseSelectSchema, {
                 acquiredAt: jobCreatedAt,
@@ -597,7 +597,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 resourceKey: "Database",
                 workerInstanceId: jobWorkerId,
             })
-        ).toThrow();
+        ).toThrow("Job resource key is invalid");
     });
 
     test("rejects inconsistent durable job lifecycle rows", () => {

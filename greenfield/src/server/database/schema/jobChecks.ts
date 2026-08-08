@@ -60,7 +60,7 @@ export function optionalJobMessageCheck(
     maximumBytes: number
 ) {
     const maximumBytesSql = sql.raw(String(maximumBytes));
-    return sql`${column} IS NULL OR (${boundedControlSafeTextCheck(column, maximumCodePoints)} AND length(CAST(${column} AS BLOB)) <= ${maximumBytesSql})`;
+    return sql`(${column} IS NULL OR (${boundedControlSafeTextCheck(column, maximumCodePoints)} AND length(CAST(${column} AS BLOB)) <= ${maximumBytesSql}))`;
 }
 
 /**
@@ -69,7 +69,7 @@ export function optionalJobMessageCheck(
  */
 export function optionalJobTerminalCodeCheck(column: SQLWrapper, maximumLength: number) {
     const maximumLengthSql = sql.raw(String(maximumLength));
-    return sql`${column} IS NULL OR (length(${column}) BETWEEN 1 AND ${maximumLengthSql} AND ${nulFreeTextCheck(column)} AND ${column} = lower(${column}) AND substr(${column}, 1, 1) GLOB '[a-z0-9]' AND ${column} NOT GLOB '*[^a-z0-9._/-]*')`;
+    return sql`(${column} IS NULL OR (length(${column}) BETWEEN 1 AND ${maximumLengthSql} AND ${nulFreeTextCheck(column)} AND ${column} = lower(${column}) AND substr(${column}, 1, 1) GLOB '[a-z0-9]' AND ${column} NOT GLOB '*[^a-z0-9._/-]*'))`;
 }
 
 /**
@@ -77,5 +77,5 @@ export function optionalJobTerminalCodeCheck(column: SQLWrapper, maximumLength: 
  * @returns SQL predicate for a null or bounded identifier.
  */
 export function optionalBoundedJobTextCheck(column: SQLWrapper, maximumLength: number) {
-    return sql`${column} IS NULL OR (${boundedNonBlankTextCheck(column, maximumLength)})`;
+    return sql`(${column} IS NULL OR (${boundedNonBlankTextCheck(column, maximumLength)}))`;
 }

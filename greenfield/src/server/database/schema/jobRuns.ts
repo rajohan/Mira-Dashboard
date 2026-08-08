@@ -9,6 +9,11 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import {
+    jobRunEventMaximum,
+    jobRunOutputMaximumBytes,
+    jobRunPayloadEventMaximum,
+} from "../../../contracts/jobModel.ts";
+import {
     boundedCanonicalBase64UrlTextCheck,
     boundedControlSafeTextCheck,
     lowercaseHexTextCheck,
@@ -120,7 +125,7 @@ export const jobRuns = sqliteTable(
         ),
         check(
             "job_runs_event_budget_check",
-            sql`${table.eventCount} BETWEEN 0 AND 1000 AND ${table.payloadEventCount} BETWEEN 0 AND 967 AND ${table.payloadEventCount} <= ${table.eventCount} AND ${table.eventBytes} BETWEEN 0 AND 1048576`
+            sql`${table.eventCount} BETWEEN 0 AND ${sql.raw(String(jobRunEventMaximum))} AND ${table.payloadEventCount} BETWEEN 0 AND ${sql.raw(String(jobRunPayloadEventMaximum))} AND ${table.payloadEventCount} <= ${table.eventCount} AND ${table.eventBytes} BETWEEN 0 AND ${sql.raw(String(jobRunOutputMaximumBytes))}`
         ),
         check("job_runs_id_check", uuidV7TextCheck(table.id)),
         check(

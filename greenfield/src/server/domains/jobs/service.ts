@@ -33,7 +33,11 @@ import {
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import { isDatabaseRuntimeWriteUnavailableError } from "../../database/runtime/databaseErrors.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
-import { findJobActionRegistration, jobActionRegistrations } from "./actionRegistry.ts";
+import {
+    type JobActionRegistration,
+    findJobActionRegistration,
+    jobActionRegistrations,
+} from "./actionRegistry.ts";
 import {
     JobConflictError,
     JobNotFoundError,
@@ -48,6 +52,7 @@ import {
     toJobWorkerSummary,
     toScheduleSummary,
 } from "./records.ts";
+import { buildRegisteredSchedule } from "./registeredSchedule.ts";
 import {
     type JobMutationSideEffects,
     type JobRepository,
@@ -189,12 +194,9 @@ function readSchedule(
 }
 
 function listRuns(repository: JobRepository, input: ListJobRunsInput): ListJobRunsResult {
-    const { hasNextPage, page } = pageResult(
-        repository.listRuns(input),
-        input.limit,
-        toJobRunSummary
-    );
-    const queue = repository.readQueueState();
+    const snapshot = repository.listRunsWithQueueState(input);
+    const { hasNextPage, page } = pageResult(snapshot.runs, input.limit, toJobRunSummary);
+    const queue = snapshot.queue;
     const last = page.at(-1);
     return v.parse(listJobRunsResultSchema, {
         ...(hasNextPage && last !== undefined
@@ -308,43 +310,16 @@ function mutationSideEffects(
     return createJobMutationSideEffects({ ...input, auditId: generateId() });
 }
 
-function scheduleInsertShape(
-    registration: (typeof jobActionRegistrations)[number],
-    at: Date
-) {
-    const nextRunAtMs = nextScheduleOccurrence(registration.defaultSchedule, getTime(at));
-    if (nextRunAtMs === undefined) {
+function scheduleInsertShape(registration: JobActionRegistration, at: Date) {
+    const schedule = buildRegisteredSchedule(registration, at);
+    if (schedule === undefined) {
         throw new JobValidationError({
             id: registration.scheduleId,
             reason: "next-occurrence-unavailable",
             resource: "schedule",
         });
     }
-    const schedule = registration.defaultSchedule;
-    return {
-        actionKey: registration.actionKey,
-        actionPayloadJson: JSON.stringify(registration.actionPayload),
-        attemptLimit: registration.attemptLimit,
-        cancellationPolicy: registration.cancellationPolicy,
-        createdAt: at,
-        cronExpression: schedule.kind === "cron" ? schedule.expression : null,
-        description: registration.description,
-        enabled: registration.defaultEnabled,
-        id: registration.scheduleId,
-        intervalMs: schedule.kind === "interval" ? schedule.intervalMs : null,
-        name: registration.displayName,
-        nextRunAt: toDate(nextRunAtMs),
-        priority: registration.priority,
-        resourceClass: registration.resourceClass,
-        resourceKeysJson: JSON.stringify(registration.resourceKeys),
-        retrySafe: registration.retrySafe,
-        scheduleKind: schedule.kind,
-        timeOfDay: schedule.kind === "daily" ? schedule.timeOfDay : null,
-        timeZone: schedule.kind === "interval" ? null : schedule.timeZone,
-        timeoutMs: registration.timeoutMs,
-        updatedAt: at,
-        version: 1,
-    };
+    return schedule;
 }
 
 /**
@@ -575,9 +550,16 @@ export function createJobService(
             mutationEffect(async () => {
                 const current = readSchedule(dependencies.repository, input.id);
                 const at = operationTime(nowMs, [current.schedule.updatedAt]);
+                const replacesActiveDisableIntent =
+                    current.activeDisableIntent !== undefined &&
+                    current.schedule.enabled === false &&
+                    input.patch.enabled === false &&
+                    input.patch.disableIntent !== undefined &&
+                    input.patch.disableIntent !== null;
                 if (
                     input.patch.enabled !== undefined &&
-                    input.patch.enabled === current.schedule.enabled
+                    input.patch.enabled === current.schedule.enabled &&
+                    !replacesActiveDisableIntent
                 ) {
                     throw new JobValidationError({
                         id: input.id,
@@ -732,6 +714,13 @@ export function createJobService(
                 if (result.kind === "not-found") {
                     throw new JobNotFoundError({ id: input.id, resource: "schedule" });
                 }
+                if (result.kind === "cancellation-not-supported") {
+                    throw new JobConflictError({
+                        id: result.run.id,
+                        reason: "cancellation-not-supported",
+                        resource: "job-run",
+                    });
+                }
                 if (result.kind === "version-changed") {
                     throw new JobConflictError({
                         id: input.id,
@@ -769,7 +758,7 @@ export async function reconcileJobSchedules(
             occurredAt: at,
             outcome: "succeeded",
             realtime: {
-                id: jobActionRegistrations[0]?.scheduleId ?? "schedule-directory",
+                id: "schedule-directory",
                 kind: "schedule",
                 operation: "updated",
             },

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import { Effect } from "effect";
 
@@ -154,6 +154,8 @@ interface RepositoryFixtureOptions {
     readonly expiryGate?: Promise<void>;
     readonly expiryFailure?: Error;
     readonly heartbeatFailure?: Error;
+    readonly reconciliationFailure?: Error;
+    readonly registrationFailure?: Error;
     readonly settlementAt?: Date;
 }
 
@@ -224,14 +226,18 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         },
         reconcileSchedules(input) {
             events.push(`reconcile:${input.schedules.length}`);
-            return Promise.resolve([]);
+            return options.reconciliationFailure === undefined
+                ? Promise.resolve([])
+                : Promise.reject(options.reconciliationFailure);
         },
         recoverExpiredClaims() {
             return Promise.resolve([]);
         },
         registerWorker(input) {
             events.push("register");
-            return Promise.resolve(workerRecord(input.worker.id, "online"));
+            return options.registrationFailure === undefined
+                ? Promise.resolve(workerRecord(input.worker.id, "online"))
+                : Promise.reject(options.registrationFailure);
         },
         renewClaim(input) {
             events.push("renew");
@@ -319,6 +325,30 @@ describe("durable job worker coordinator", () => {
             fixture.events.indexOf("stop")
         );
         expect(await coordinator.completion).toBeUndefined();
+    });
+
+    test("rejects completion when initialization fails before worker loops start", async () => {
+        for (const operation of ["reconcile", "register"] as const) {
+            const failure = new Error(`${operation} failed`);
+            const workerId = Bun.randomUUIDv7();
+            const fixture = repositoryFixture(
+                operation === "reconcile"
+                    ? { reconciliationFailure: failure }
+                    : { registrationFailure: failure }
+            );
+            const coordinator = createJobWorkerCoordinator(
+                coordinatorOptions(fixture.repository, workerId)
+            );
+            const completion = coordinator.completion.catch((error: unknown) => error);
+            const initialization = coordinator.initialize();
+
+            expect(coordinator.initialize()).toBe(initialization);
+            expect(await initialization.catch((error: unknown) => error)).toBe(failure);
+            expect(await completion).toBe(failure);
+            expect(await coordinator.dispose().catch((error: unknown) => error)).toBe(
+                failure
+            );
+        }
     });
 
     test("stops the claim monitor immediately after a fast action finishes", async () => {
@@ -665,6 +695,118 @@ describe("durable job worker coordinator", () => {
         );
     });
 
+    test("clears the forced-drain timer when interrupted work finishes", async () => {
+        const forceDrainMs = 123_456;
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId, "test.forced-drain-completes");
+        const actionGate = deferred<void>();
+        const actionStarted = deferred<void>();
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const baseRegistration = jobActionRegistrations.at(0);
+        if (baseRegistration === undefined) throw new Error("Missing smoke action");
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            actionKey: run.actionKey,
+            execute: () =>
+                Effect.uninterruptible(
+                    Effect.promise(() => {
+                        actionStarted.resolve();
+                        return actionGate.promise;
+                    }).pipe(Effect.as({}))
+                ),
+        };
+        const options = coordinatorOptions(fixture.repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...options,
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+            timings: { ...options.timings, forceDrainMs },
+        });
+        const setTimeoutSpy = spyOn(globalThis, "setTimeout");
+        const clearTimeoutSpy = spyOn(globalThis, "clearTimeout");
+        let forcedTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            await coordinator.initialize();
+            await actionStarted.promise;
+            const force = new AbortController();
+            const disposal = coordinator.dispose(force.signal);
+            await waitUntil(() => fixture.events.includes("drain"));
+
+            force.abort();
+            await waitUntil(() =>
+                setTimeoutSpy.mock.calls.some(
+                    ([, milliseconds]) => milliseconds === forceDrainMs
+                )
+            );
+            const timerCall = setTimeoutSpy.mock.calls.findIndex(
+                ([, milliseconds]) => milliseconds === forceDrainMs
+            );
+            const timerResult = setTimeoutSpy.mock.results[timerCall];
+            if (timerResult?.type !== "return") {
+                throw new Error("Forced-drain timer was not created");
+            }
+            forcedTimer = timerResult.value;
+            actionGate.resolve();
+            await disposal;
+
+            expect(
+                clearTimeoutSpy.mock.calls.some(([timer]) => timer === forcedTimer)
+            ).toBeTrue();
+        } finally {
+            actionGate.resolve();
+            if (forcedTimer !== undefined) clearTimeout(forcedTimer);
+            clearTimeoutSpy.mockRestore();
+            setTimeoutSpy.mockRestore();
+        }
+    });
+
+    test("fails a forced drain after its bounded timeout", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId, "test.forced-drain-timeout");
+        const actionGate = deferred<void>();
+        const actionStarted = deferred<void>();
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const baseRegistration = jobActionRegistrations.at(0);
+        if (baseRegistration === undefined) throw new Error("Missing smoke action");
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            actionKey: run.actionKey,
+            execute: () =>
+                Effect.uninterruptible(
+                    Effect.promise(() => {
+                        actionStarted.resolve();
+                        return actionGate.promise;
+                    }).pipe(Effect.as({}))
+                ),
+        };
+        const options = coordinatorOptions(fixture.repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...options,
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+            timings: { ...options.timings, forceDrainMs: 5 },
+        });
+
+        try {
+            await coordinator.initialize();
+            await actionStarted.promise;
+            const force = new AbortController();
+            const disposal = coordinator
+                .dispose(force.signal)
+                .catch((error: unknown) => error);
+            await waitUntil(() => fixture.events.includes("drain"));
+            force.abort();
+
+            expect(await disposal).toEqual(
+                new Error("Durable job action exceeded forced-drain timeout")
+            );
+            expect(fixture.events).toContain("stop");
+        } finally {
+            actionGate.resolve();
+            await waitUntil(() => fixture.settlements.length === 1);
+        }
+    });
+
     test("settles a claim that resolves after worker draining begins", async () => {
         const workerId = Bun.randomUUIDv7();
         const run = claimedRun(workerId, "test.deferred-claim");
@@ -745,9 +887,9 @@ describe("durable job worker coordinator", () => {
         );
 
         await coordinator.initialize();
-        expect(
-            await coordinator.completion.catch((error: unknown) => error)
-        ).toBeDefined();
+        expect(await coordinator.completion.catch((error: unknown) => error)).toBe(
+            failure
+        );
         await coordinator.dispose();
     });
 
@@ -760,9 +902,9 @@ describe("durable job worker coordinator", () => {
         );
 
         await coordinator.initialize();
-        expect(
-            await coordinator.completion.catch((error: unknown) => error)
-        ).toBeDefined();
+        expect(await coordinator.completion.catch((error: unknown) => error)).toBe(
+            failure
+        );
         expect(fixture.events).toContain("expire-disable-intents");
         await coordinator.dispose();
     });

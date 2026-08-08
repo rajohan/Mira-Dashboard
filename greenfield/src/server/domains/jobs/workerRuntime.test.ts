@@ -7,6 +7,7 @@ import type { JobWorkerCoordinator } from "./coordinator.ts";
 import type { JobRepository } from "./repository.ts";
 import {
     createDashboardWorkerRuntime,
+    createSystemJobWorkerSideEffects,
     type DashboardWorkerRuntimeDependencies,
     type DashboardWorkerRuntimeOptions,
 } from "./workerRuntime.ts";
@@ -112,6 +113,30 @@ function runtimeFixture(initializationFailure?: Error) {
 }
 
 describe("Dashboard worker runtime", () => {
+    test("emits created only for explicit run-creation actions", () => {
+        const sideEffects = createSystemJobWorkerSideEffects();
+        const at = new Date(1000);
+
+        for (const action of ["jobs.run.enqueue", "jobs.run.enqueue-scheduled"]) {
+            expect(
+                sideEffects.forRun({
+                    action,
+                    at,
+                    outcome: "accepted",
+                    targetId: Bun.randomUUIDv7(),
+                }).realtimeEvents[0]?.operation
+            ).toBe("created");
+        }
+        expect(
+            sideEffects.forRun({
+                action: "jobs.run.enqueue-retry-observed",
+                at,
+                outcome: "accepted",
+                targetId: Bun.randomUUIDv7(),
+            }).realtimeEvents[0]?.operation
+        ).toBe("updated");
+    });
+
     test("owns database then coordinator and disposes them in reverse order", async () => {
         const fixture = runtimeFixture();
         const runtime = createDashboardWorkerRuntime(

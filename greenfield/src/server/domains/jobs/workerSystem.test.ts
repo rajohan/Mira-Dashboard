@@ -15,13 +15,14 @@ const noSideEffects: JobMutationSideEffects = Object.freeze({
     auditEvents: Object.freeze([]),
     realtimeEvents: Object.freeze([]),
 });
+const terminalRunStates = new Set(["cancelled", "failed", "succeeded", "timed-out"]);
 
 async function waitForTerminal(
     readState: () => string | undefined
 ): Promise<string | undefined> {
     const deadline = Date.now() + 2000;
     let state = readState();
-    while (state !== "succeeded") {
+    while (state === undefined || !terminalRunStates.has(state)) {
         if (Date.now() >= deadline) return state;
         await Bun.sleep(2);
         state = readState();
@@ -30,6 +31,19 @@ async function waitForTerminal(
 }
 
 describe("durable job worker system", () => {
+    test("stops polling when any terminal state is observed", async () => {
+        for (const terminalState of terminalRunStates) {
+            let reads = 0;
+            expect(
+                await waitForTerminal(() => {
+                    reads += 1;
+                    return terminalState;
+                })
+            ).toBe(terminalState);
+            expect(reads).toBe(1);
+        }
+    });
+
     test("claims and settles a repository-enqueued smoke run", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
