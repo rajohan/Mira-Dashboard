@@ -48,7 +48,7 @@ describe("source-boundary policy", () => {
         expect(
             validateSourceImport(
                 "src/app/worker.ts",
-                staticImport("../server/database/runtime/databaseRuntimeOwner.ts")
+                staticImport("../server/domains/jobs/workerRuntime.ts")
             )
         ).toBeUndefined();
         expect(
@@ -100,6 +100,12 @@ describe("source-boundary policy", () => {
                 staticImport("../../server/domains/security/authenticationLifecycle.ts")
             )?.message
         ).toContain("worker may not import server");
+        expect(
+            validateSourceImport(
+                "src/app/worker.ts",
+                staticImport("../server/database/runtime/databaseRuntimeOwner.ts")
+            )?.message
+        ).toContain("worker-app may not import server");
         expect(
             validateSourceImport("src/contracts/auth.ts", staticImport("./auth.test.ts"))
                 ?.message
@@ -191,6 +197,13 @@ describe("source-boundary policy", () => {
         expect(
             validateSourceImport("src/shared/dateTime.ts", staticImport("date-fns"))
         ).toBeUndefined();
+        expect(
+            validateSourceImport("src/contracts/jobModel.ts", staticImport("effect/Cron"))
+        ).toBeUndefined();
+        expect(
+            validateSourceImport("src/contracts/jobModel.ts", staticImport("effect"))
+                ?.message
+        ).toContain("environment-neutral packages");
         expect(
             validateSourceImport("src/contracts/auth.ts", staticImport("node:fs"))
                 ?.message

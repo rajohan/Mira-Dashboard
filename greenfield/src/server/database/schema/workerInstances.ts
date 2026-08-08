@@ -1,0 +1,42 @@
+import { sql } from "drizzle-orm";
+import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+import {
+    nulFreeTextCheck,
+    timestampMillisecondsCheck,
+    uuidV7TextCheck,
+} from "./checks.ts";
+
+/** Durable worker registration and heartbeat state shared across rolling releases. */
+export const workerInstances = sqliteTable(
+    "worker_instances",
+    {
+        capacity: integer("capacity").notNull(),
+        drainingAt: integer("draining_at", { mode: "timestamp_ms" }),
+        heartbeatAt: integer("heartbeat_at", { mode: "timestamp_ms" }).notNull(),
+        id: text("id").notNull().primaryKey(),
+        pid: integer("pid").notNull(),
+        releaseId: text("release_id").notNull(),
+        startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+        state: text("state", { enum: ["draining", "online", "stopped"] }).notNull(),
+        stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
+    },
+    (table) => [
+        check("worker_instances_capacity_check", sql`${table.capacity} BETWEEN 1 AND 16`),
+        check("worker_instances_id_check", uuidV7TextCheck(table.id)),
+        check("worker_instances_pid_check", sql`${table.pid} BETWEEN 1 AND 2147483647`),
+        check(
+            "worker_instances_release_id_check",
+            sql`length(${table.releaseId}) = 40 AND ${nulFreeTextCheck(table.releaseId)} AND ${table.releaseId} = lower(${table.releaseId}) AND ${table.releaseId} NOT GLOB '*[^0-9a-f]*'`
+        ),
+        check(
+            "worker_instances_state_check",
+            sql`(${table.state} = 'online' AND ${table.drainingAt} IS NULL AND ${table.stoppedAt} IS NULL) OR (${table.state} = 'draining' AND ${table.drainingAt} IS NOT NULL AND ${table.stoppedAt} IS NULL) OR (${table.state} = 'stopped' AND ${table.drainingAt} IS NOT NULL AND ${table.stoppedAt} IS NOT NULL)`
+        ),
+        check(
+            "worker_instances_time_check",
+            sql`${timestampMillisecondsCheck(table.startedAt)} AND ${timestampMillisecondsCheck(table.heartbeatAt)} AND ${table.heartbeatAt} >= ${table.startedAt} AND (${table.drainingAt} IS NULL OR (${timestampMillisecondsCheck(table.drainingAt)} AND ${table.drainingAt} >= ${table.startedAt})) AND (${table.stoppedAt} IS NULL OR (${timestampMillisecondsCheck(table.stoppedAt)} AND ${table.stoppedAt} >= ${table.drainingAt}))`
+        ),
+        index("worker_instances_heartbeat_id_idx").on(table.heartbeatAt, table.id),
+    ]
+);

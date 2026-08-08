@@ -76,6 +76,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/incidents.ts");
             return module.incidentProcedureContracts;
         }
+        case "jobs": {
+            const module = await import("../../contracts/jobs.ts");
+            return module.jobProcedureContracts;
+        }
         case "notifications": {
             const module = await import("../../contracts/notifications.ts");
             return module.notificationProcedureContracts;
@@ -91,6 +95,10 @@ async function procedureContractsFor(
         case "reports": {
             const module = await import("../../contracts/reports.ts");
             return module.reportProcedureContracts;
+        }
+        case "schedules": {
+            const module = await import("../../contracts/schedules.ts");
+            return module.scheduleProcedureContracts;
         }
         case "automationSecurity": {
             const module = await import("../../contracts/automationSecurity.ts");

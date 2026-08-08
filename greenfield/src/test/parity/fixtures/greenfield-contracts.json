@@ -184,6 +184,22 @@
         },
         {
             "kind": "mutation",
+            "name": "jobs.cancelRun"
+        },
+        {
+            "kind": "query",
+            "name": "jobs.getRun"
+        },
+        {
+            "kind": "query",
+            "name": "jobs.listRuns"
+        },
+        {
+            "kind": "mutation",
+            "name": "jobs.setClaimingPaused"
+        },
+        {
+            "kind": "mutation",
             "name": "monitoring.submitCompleteSnapshot"
         },
         {
@@ -225,6 +241,26 @@
         {
             "kind": "mutation",
             "name": "reports.upsert"
+        },
+        {
+            "kind": "query",
+            "name": "schedules.get"
+        },
+        {
+            "kind": "query",
+            "name": "schedules.list"
+        },
+        {
+            "kind": "query",
+            "name": "schedules.listRuns"
+        },
+        {
+            "kind": "mutation",
+            "name": "schedules.run"
+        },
+        {
+            "kind": "mutation",
+            "name": "schedules.update"
         },
         {
             "kind": "query",

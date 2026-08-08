@@ -18,6 +18,7 @@ describe("realtime transport contracts", () => {
     test("documents only capabilities required by registered topics", () => {
         expect(realtimeStreamCapabilities).toEqual([
             "agents:read",
+            "jobs:read",
             "notifications:read",
             "reports:read",
             "tasks:read",

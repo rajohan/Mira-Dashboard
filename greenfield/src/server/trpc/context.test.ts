@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createTestAgentService } from "../domains/agents/testSupport/service.ts";
+import { createTestJobService } from "../domains/jobs/testSupport/service.ts";
 import {
     createTestMonitoringCatalogService,
     createTestMonitoringService,
@@ -35,6 +36,7 @@ describe("tRPC request context", () => {
             createTestAutomationSecurityLifecycleService();
         const monitoringCatalogService = createTestMonitoringCatalogService();
         const monitoringService = createTestMonitoringService();
+        const jobService = createTestJobService();
         const responseHeaders = new Headers();
 
         const context = await createRequestContext({
@@ -65,6 +67,7 @@ describe("tRPC request context", () => {
             },
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+            jobService,
             monitoringCatalogService,
             monitoringService,
             pendingLoginCredential: credentials.pendingLogin,
@@ -94,6 +97,7 @@ describe("tRPC request context", () => {
         expect(context.automationSecurityLifecycle).toBe(automationSecurityLifecycle);
         expect(context.monitoringCatalogService).toBe(monitoringCatalogService);
         expect(context.monitoringService).toBe(monitoringService);
+        expect(context.jobService).toBe(jobService);
         expect(context.authenticationClientSourceId).toBe("client-source-1");
         expect(context.pendingLoginCredential).toEqual({
             kind: "present",
@@ -127,6 +131,7 @@ describe("tRPC request context", () => {
             authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+            jobService: createTestJobService(),
             monitoringCatalogService: createTestMonitoringCatalogService(),
             monitoringService: createTestMonitoringService(),
             pendingLoginCredential: credentials.pendingLogin,
@@ -168,6 +173,7 @@ describe("tRPC request context", () => {
                 }),
                 mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
                 mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+                jobService: createTestJobService(),
                 monitoringCatalogService: createTestMonitoringCatalogService(),
                 monitoringService: createTestMonitoringService(),
                 pendingLoginCredential: credentials.pendingLogin,

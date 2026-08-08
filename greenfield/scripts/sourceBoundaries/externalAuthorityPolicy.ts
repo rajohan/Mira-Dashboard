@@ -73,7 +73,10 @@ function isForbiddenBrowserPackage(specifier: string): boolean {
 }
 
 function isAllowedNeutralPackage(specifier: string): boolean {
-    return /^(?:date-fns(?:\/|$)|valibot(?:\/|$))/u.test(specifier);
+    return (
+        /^(?:date-fns(?:\/|$)|valibot(?:\/|$))/u.test(specifier) ||
+        /^(?:effect\/(?:Cron|Result))$/u.test(specifier)
+    );
 }
 
 function importBindingSignature(sourceImport: SourceImport): string | undefined {

@@ -42,9 +42,20 @@ const release: RuntimeRelease = Object.freeze({
     releaseRoot: `${layout.production.releases}/${releaseId}`,
 });
 
-function processFixture(initializationFailure?: Error) {
+function processFixture(
+    initializationFailure?: Error,
+    runtimeFailure?: Error,
+    runtimeStopsUnexpectedly = false
+) {
     const events: string[] = [];
     const logLines: string[] = [];
+    const forceSignals: Array<AbortSignal | undefined> = [];
+    let resolveCompletion: (() => void) | undefined;
+    let rejectCompletion: ((error: unknown) => void) | undefined;
+    const completion = new Promise<void>((resolve, reject) => {
+        resolveCompletion = resolve;
+        rejectCompletion = reject;
+    });
     const destination = Object.freeze({
         fallbackWrite() {
             events.push("log-fallback");
@@ -65,16 +76,29 @@ function processFixture(initializationFailure?: Error) {
             events.push("signals-dispose");
         },
         forceSignal: new AbortController().signal,
-        termination: Promise.resolve("SIGTERM" as const),
+        termination: runtimeStopsUnexpectedly
+            ? new Promise<"SIGTERM">(() => {})
+            : Promise.resolve("SIGTERM" as const),
     });
     const runtime: DashboardWorkerRuntime = Object.freeze({
-        dispose() {
+        completion,
+        dispose(forceSignal?: AbortSignal) {
             events.push("runtime-dispose");
+            forceSignals.push(forceSignal);
+            resolveCompletion?.();
             return Promise.resolve();
         },
         initialize() {
             events.push("runtime-initialize");
-            if (initializationFailure) return Promise.reject(initializationFailure);
+            if (initializationFailure) {
+                rejectCompletion?.(initializationFailure);
+                return Promise.reject(initializationFailure);
+            }
+            if (runtimeFailure) {
+                queueMicrotask(() => rejectCompletion?.(runtimeFailure));
+            } else if (runtimeStopsUnexpectedly) {
+                queueMicrotask(() => resolveCompletion?.());
+            }
             return Promise.resolve();
         },
     });
@@ -103,7 +127,7 @@ function processFixture(initializationFailure?: Error) {
             return Promise.resolve(layout);
         },
     } satisfies DashboardWorkerProcessDependencies);
-    return { dependencies, events, logLines };
+    return { dependencies, events, forceSignals, logLines };
 }
 
 const processOptions = Object.freeze({
@@ -135,6 +159,9 @@ describe("Dashboard worker process", () => {
         expect(
             fixture.logLines.map((line) => (JSON.parse(line) as { event: string }).event)
         ).toEqual(["runtime.started", "runtime.stopped"]);
+        expect(fixture.forceSignals).toEqual([
+            expect.objectContaining({ aborted: false }),
+        ]);
     });
 
     test("disposes partial ownership and reports a redacted startup failure", () => {
@@ -153,5 +180,40 @@ describe("Dashboard worker process", () => {
         };
         expect(fatal.event).toBe("runtime.start_failed");
         expect(JSON.stringify(fatal)).not.toContain("private worker failure");
+    });
+
+    test("disposes and fails when the durable coordinator exits unexpectedly", async () => {
+        const failure = new Error("private coordinator failure");
+        const fixture = processFixture(undefined, failure);
+
+        expect(
+            await runDashboardWorkerProcess(processOptions, fixture.dependencies).catch(
+                (error: unknown) => error
+            )
+        ).toBe(failure);
+
+        expect(fixture.events).toContain("runtime-dispose");
+        const fatal = JSON.parse(fixture.logLines.at(-1) ?? "null") as {
+            event: string;
+            failure?: unknown;
+        };
+        expect(fatal.event).toBe("runtime.start_failed");
+        expect(JSON.stringify(fatal)).not.toContain("private coordinator failure");
+    });
+
+    test("fails closed when the durable runtime resolves before a signal", async () => {
+        const fixture = processFixture(undefined, undefined, true);
+
+        expect(
+            await runDashboardWorkerProcess(processOptions, fixture.dependencies).catch(
+                (error: unknown) => error
+            )
+        ).toEqual(new Error("Dashboard worker runtime stopped unexpectedly"));
+
+        expect(fixture.events).toContain("runtime-dispose");
+        const fatal = JSON.parse(fixture.logLines.at(-1) ?? "null") as {
+            event: string;
+        };
+        expect(fatal.event).toBe("runtime.start_failed");
     });
 });

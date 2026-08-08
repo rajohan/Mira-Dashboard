@@ -113,6 +113,8 @@ describe("contract JSON Schema conversion", () => {
                 enum: [
                     "agents:read",
                     "agents:write",
+                    "jobs:read",
+                    "jobs:write",
                     "monitoring:write",
                     "notifications:read",
                     "notifications:write",
@@ -122,7 +124,7 @@ describe("contract JSON Schema conversion", () => {
                     "tasks:write",
                 ],
             },
-            maxItems: 9,
+            maxItems: 11,
             type: "array",
             uniqueItems: true,
         });

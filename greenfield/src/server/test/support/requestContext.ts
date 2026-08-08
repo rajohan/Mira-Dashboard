@@ -7,6 +7,8 @@ import type {
 } from "../../../contracts/security.ts";
 import type { AgentService } from "../../domains/agents/service.ts";
 import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
+import type { JobService } from "../../domains/jobs/service.ts";
+import { createTestJobService } from "../../domains/jobs/testSupport/service.ts";
 import type { MonitoringCatalogService } from "../../domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../../domains/monitoring/service.ts";
 import {
@@ -394,6 +396,7 @@ export interface TestServerSecurityServices {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
+    readonly jobService: JobService["Service"];
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
@@ -423,6 +426,7 @@ export function createTestServerSecurityServices(
             overrides.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:
             overrides.mfaLoginLifecycle ?? createTestMfaLoginLifecycleService(),
+        jobService: overrides.jobService ?? createTestJobService(),
         monitoringCatalogService:
             overrides.monitoringCatalogService ?? createTestMonitoringCatalogService(),
         monitoringService: overrides.monitoringService ?? createTestMonitoringService(),
@@ -511,6 +515,7 @@ export function createTestRequestContext(
         readonly automationSecurityLifecycle?: AutomationSecurityLifecycleService;
         readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
         readonly mfaLoginLifecycle?: MfaLoginLifecycleService;
+        readonly jobService?: JobService["Service"];
         readonly monitoringCatalogService?: MonitoringCatalogService["Service"];
         readonly monitoringService?: MonitoringService["Service"];
         readonly request?: Request;
@@ -538,6 +543,7 @@ export function createTestRequestContext(
             options.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:
             options.mfaLoginLifecycle ?? createTestMfaLoginLifecycleService(),
+        jobService: options.jobService ?? createTestJobService(),
         monitoringCatalogService:
             options.monitoringCatalogService ?? createTestMonitoringCatalogService(),
         monitoringService: options.monitoringService ?? createTestMonitoringService(),
