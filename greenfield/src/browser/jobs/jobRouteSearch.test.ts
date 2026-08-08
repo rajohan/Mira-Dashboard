@@ -29,5 +29,8 @@ describe("jobs route search", () => {
             runId,
         });
         expect(parseJobsRouteSearch("invalid")).toEqual({});
+        expect(parseJobsRouteSearch(null)).toEqual({});
+        expect(parseJobsRouteSearch([runId, "system.worker-smoke"])).toEqual({});
+        expect(parseJobsRouteSearch({ runId: 1, scheduleId: false })).toEqual({});
     });
 });

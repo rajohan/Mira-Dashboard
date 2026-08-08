@@ -28,7 +28,8 @@ const scheduleEditorObjectSchema = v.strictObject({
 function intervalMilliseconds(value: string): number | undefined {
     const normalized = value.trim();
     if (!/^(?:0|[1-9]\d*)(?:\.\d{1,3})?$/u.test(normalized)) return;
-    const milliseconds = Number(normalized) * 1000;
+    const [seconds = "", fraction = ""] = normalized.split(".");
+    const milliseconds = Number(seconds) * 1000 + Number(fraction.padEnd(3, "0"));
     if (!Number.isSafeInteger(milliseconds)) return;
     if (
         milliseconds < scheduleIntervalMinimumMilliseconds ||

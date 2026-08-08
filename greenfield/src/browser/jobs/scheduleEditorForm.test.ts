@@ -58,7 +58,7 @@ function schedule(configuration: ScheduleSummary["schedule"]): ScheduleSummary {
 describe("schedule editor form", () => {
     test("round-trips each schedule variant", () => {
         const configurations = [
-            { intervalMs: 60_500, kind: "interval" },
+            { intervalMs: 64_001, kind: "interval" },
             { kind: "daily", timeOfDay: "07:30", timeZone: "Europe/Oslo" },
             { expression: "0 6 * * MON", kind: "cron", timeZone: "UTC" },
         ] as const;
@@ -73,7 +73,7 @@ describe("schedule editor form", () => {
                 )
             )
         ).toEqual([
-            { intervalMs: 60_500, kind: "interval" },
+            { intervalMs: 64_001, kind: "interval" },
             { kind: "daily", timeOfDay: "07:30", timeZone: "Europe/Oslo" },
             { expression: "0 6 * * 1", kind: "cron", timeZone: "UTC" },
         ]);

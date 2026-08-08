@@ -97,6 +97,7 @@ describe("coverage runner", () => {
     test("runs and merges the five private LCOV inventories", async () => {
         const calls: string[][] = [];
         const mergedInventories: string[][] = [];
+        const mergedPatterns: string[] = [];
         const writes: string[][] = [];
         const checks: string[][] = [];
         const logs: string[] = [];
@@ -111,8 +112,9 @@ describe("coverage runner", () => {
             },
             coverageDirectory: "/tmp/coverage",
             log: (message) => logs.push(message),
-            mergeReports: (reportPaths) => {
+            mergeReports: (reportPaths, reportPattern) => {
                 mergedInventories.push([...reportPaths]);
+                mergedPatterns.push(reportPattern);
                 return Promise.resolve("TN:\nend_of_record");
             },
             projectRoot: "/tmp/project",
@@ -142,6 +144,7 @@ describe("coverage runner", () => {
             ]),
         ]);
         expect(mergedInventories).toEqual([plans.map((plan) => plan.reportPath)]);
+        expect(mergedPatterns).toEqual(["/tmp/coverage/*/lcov.info"]);
         expect(writes).toEqual([["/tmp/coverage/lcov.info", "TN:\nend_of_record"]]);
         expect(checks).toHaveLength(1);
         expect(checks[0]?.[0]).toBe("/tmp/coverage/lcov.info");

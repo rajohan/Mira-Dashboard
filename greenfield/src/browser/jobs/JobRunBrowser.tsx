@@ -11,6 +11,7 @@ import {
     jobRunStates,
     type JobTriggerType,
     jobTriggerTypes,
+    scheduleIdMaximumLength,
     scheduleIdSchema,
 } from "../../contracts/jobModel.ts";
 import type { ListJobRunsInput } from "../../contracts/jobs.ts";
@@ -498,7 +499,7 @@ export function JobRunBrowser({
                 <FormField error={scheduleFilterError} label="Schedule id">
                     <Input
                         className="mt-2 font-mono"
-                        maxLength={80}
+                        maxLength={scheduleIdMaximumLength}
                         onChange={(event) => {
                             setScheduleFilterError(undefined);
                             setScheduleDraft(event.currentTarget.value);

@@ -15,7 +15,7 @@ import {
     useJobRealtimeInvalidation,
 } from "./useJobRealtimeInvalidation.ts";
 
-const { render } = await import("@testing-library/react");
+const { render, waitFor } = await import("@testing-library/react");
 const runId = "019fdf70-0000-7000-8000-000000000002";
 const scheduleId = "system.worker-smoke";
 const unrelatedKey = ["monitoring", "reports", "test"] as const;
@@ -84,16 +84,14 @@ describe("jobs realtime invalidation", () => {
                 topics: [jobRealtimeTopics.runs, jobRealtimeTopics.schedules],
             });
             expect(realtimeClient.activeSubscriptionCount).toBe(1);
-            await act(async () => {
+            act(() => {
                 realtimeClient.emit(runChange());
                 realtimeClient.emit(runChange());
-                await new Promise((resolve) =>
-                    setTimeout(resolve, jobRealtimeRefreshDelayMs + 20)
-                );
             });
-
-            expect(queryClient.getQueryState(runKey)?.isInvalidated).toBeTrue();
-            expect(queryClient.getQueryState(scheduleKey)?.isInvalidated).toBeTrue();
+            await waitFor(() => {
+                expect(queryClient.getQueryState(runKey)?.isInvalidated).toBeTrue();
+                expect(queryClient.getQueryState(scheduleKey)?.isInvalidated).toBeTrue();
+            });
             expect(queryClient.getQueryState(unrelatedKey)?.isInvalidated).toBeFalse();
         } finally {
             view.unmount();

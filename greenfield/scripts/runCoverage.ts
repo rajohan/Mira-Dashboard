@@ -40,7 +40,10 @@ export interface CoverageRunnerDependencies {
     ) => Promise<LineCoverageSummary>;
     readonly coverageDirectory: string;
     readonly log: (message: string) => void;
-    readonly mergeReports: (reportPaths: readonly string[]) => Promise<string>;
+    readonly mergeReports: (
+        reportPaths: readonly string[],
+        reportPattern: string
+    ) => Promise<string>;
     readonly projectRoot: string;
     readonly resetDirectory: (directory: string) => Promise<void>;
     readonly runTests: (
@@ -132,10 +135,14 @@ async function resetCoverageDirectory(directory: string): Promise<void> {
 /**
  * Merges the exact private LCOV reports without filesystem discovery.
  * @param reportPaths Private LCOV paths in deterministic partition order.
+ * @param reportPattern Real glob covering the private LCOV reports.
  * @returns One merged LCOV document.
  */
-async function mergeCoverageReports(reportPaths: readonly string[]): Promise<string> {
-    return mergeCoverageReportFiles([...reportPaths], { pattern: "" });
+async function mergeCoverageReports(
+    reportPaths: readonly string[],
+    reportPattern: string
+): Promise<string> {
+    return mergeCoverageReportFiles([...reportPaths], { pattern: reportPattern });
 }
 
 /**
@@ -181,7 +188,8 @@ export async function runCoverage(
     }
 
     const mergedCoverage = await dependencies.mergeReports(
-        plans.map((plan) => plan.reportPath)
+        plans.map((plan) => plan.reportPath),
+        path.join(dependencies.coverageDirectory, "*", "lcov.info")
     );
     const lcovPath = path.join(dependencies.coverageDirectory, "lcov.info");
     await dependencies.writeReport(lcovPath, mergedCoverage);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 let fileReaderResult: string | undefined;
+let nestedTimerCompleted = false;
 
 describe("browser test teardown", () => {
     test("leaves HappyDOM-owned nested zero-delay work for teardown to drain", () => {
@@ -22,13 +23,16 @@ describe("browser test teardown", () => {
         const schedule = globalThis.setTimeout.bind(globalThis);
         schedule(() => {
             schedule(() => {
-                schedule(() => {}, 0);
+                schedule(() => {
+                    nestedTimerCompleted = true;
+                }, 0);
             }, 0);
         }, 0);
         expect(true).toBeTrue();
     });
 
     test("keeps zero-delay timers usable in the following test", async () => {
+        expect(nestedTimerCompleted).toBeTrue();
         let completed = false;
         await new Promise<void>((resolve) => {
             globalThis.setTimeout(() => {

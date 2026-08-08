@@ -43,7 +43,6 @@ import {
     ControlledDashboardRealtimeClient,
     noOpDashboardRealtimeClient,
 } from "../test/realtime.ts";
-import { jobRealtimeRefreshDelayMs } from "./useJobRealtimeInvalidation.ts";
 
 const { fireEvent, render, screen, waitFor, within } =
     await import("@testing-library/react");
@@ -619,11 +618,8 @@ describe("Dashboard jobs route", () => {
             },
             id: "41",
         };
-        await act(async () => {
+        act(() => {
             realtimeClient.emit(change);
-            await new Promise((resolve) =>
-                setTimeout(resolve, jobRealtimeRefreshDelayMs + 20)
-            );
         });
         await waitFor(() =>
             expect(transport.callsFor("jobs.getRun").length).toBeGreaterThan(
@@ -681,7 +677,7 @@ describe("Dashboard jobs route", () => {
                 .filter(
                     ({ input }) => (input as GetJobRunInput).eventCursor !== undefined
                 );
-        const emitRunChange = async (id: string) => {
+        const emitRunChange = (id: string) => {
             const change: RealtimeStreamOutput = {
                 data: {
                     event: {
@@ -696,11 +692,8 @@ describe("Dashboard jobs route", () => {
                 },
                 id,
             };
-            await act(async () => {
+            act(() => {
                 realtimeClient.emit(change);
-                await new Promise((resolve) =>
-                    setTimeout(resolve, jobRealtimeRefreshDelayMs + 20)
-                );
             });
         };
 
@@ -731,7 +724,7 @@ describe("Dashboard jobs route", () => {
             updatedAtMs: timestampMs + 1000,
         };
         transport.runDetails.set(runId, eventPage(firstRealtimeRun, 203, 100, 104));
-        await emitRunChange("42");
+        emitRunChange("42");
         await waitFor(() => expect(detailCalls()).toHaveLength(2));
         expect(historyCalls()).toHaveLength(1);
         expect(
@@ -745,7 +738,7 @@ describe("Dashboard jobs route", () => {
             updatedAtMs: timestampMs + 2000,
         };
         transport.runDetails.set(runId, eventPage(secondRealtimeRun, 204, 100, 105));
-        await emitRunChange("43");
+        emitRunChange("43");
         await waitFor(() => expect(detailCalls()).toHaveLength(3));
         await waitFor(() =>
             expect(
