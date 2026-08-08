@@ -29,7 +29,7 @@
 | `@tanstack/react-query` | `^5.101.4` | `5.101.4` | runtime |
 | `@tanstack/react-router` | `^1.170.23` | `1.170.23` | runtime |
 | `@tanstack/react-store` | `0.11.1` | `0.11.1` | runtime |
-| `@tanstack/react-table` | `^9.1.0` | `9.1.0` | runtime |
+| `@tanstack/react-table` | `^9.1.1` | `9.1.1` | runtime |
 | `@tanstack/react-virtual` | `^3.14.9` | `3.14.9` | runtime |
 | `@trpc/client` | `11.18.0` | `11.18.0` | runtime |
 | `@trpc/server` | `11.18.0` | `11.18.0` | runtime |
