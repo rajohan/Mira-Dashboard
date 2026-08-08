@@ -1095,13 +1095,18 @@ class DrizzleJobWriter extends DrizzleJobReader {
             .filter((schedule) => !registeredScheduleIds.has(schedule.id));
         for (const schedule of retiredSchedules) {
             const queuedScheduleRun = this.#findQueuedScheduleRun(schedule.id);
-            if (queuedScheduleRun?.cancellationPolicy === "never") {
-                throw new Error(
-                    "Removed schedule has a queued run that forbids cancellation"
-                );
-            }
+            // Registry retirement disables future scheduling. A queued `never` run keeps
+            // its immutable execution snapshot and completes through the normal worker
+            // action-availability path; retirement must not reinterpret it as cancellable.
+            const cancellableQueuedScheduleRun =
+                queuedScheduleRun?.cancellationPolicy === "never"
+                    ? undefined
+                    : queuedScheduleRun;
             const retiredRunCancellation = input.retiredRunCancellation;
-            if (queuedScheduleRun !== undefined && retiredRunCancellation === undefined) {
+            if (
+                cancellableQueuedScheduleRun !== undefined &&
+                retiredRunCancellation === undefined
+            ) {
                 throw new Error(
                     "Removed schedule retirement requires queued-run cancellation metadata"
                 );
@@ -1125,9 +1130,12 @@ class DrizzleJobWriter extends DrizzleJobReader {
             const retiredSchedule = parseSchedule(
                 requiredRow(retired, "removed schedule retirement")
             );
-            if (queuedScheduleRun !== undefined && retiredRunCancellation !== undefined) {
+            if (
+                cancellableQueuedScheduleRun !== undefined &&
+                retiredRunCancellation !== undefined
+            ) {
                 const cancelled = this.#cancelQueuedRun(
-                    queuedScheduleRun,
+                    cancellableQueuedScheduleRun,
                     retiredRunCancellation.actor,
                     {
                         at: retiredSchedule.updatedAt,

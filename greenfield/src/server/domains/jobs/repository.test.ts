@@ -1100,7 +1100,7 @@ describe("durable jobs repository", () => {
         }
     });
 
-    test("rejects disabling before mutating when a queued schedule run is never cancellable", async () => {
+    test("rejects operator disabling but retires around a queued never-cancellable run", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
             database.orm,
@@ -1181,18 +1181,22 @@ describe("durable jobs repository", () => {
                 state: "queued",
             });
             const rejectedRetirement = repository.reconcileSchedules({
-                at: new Date(120_000),
+                at: new Date(900),
                 retiredRunCancellation: {
                     actor: { id: "job-scheduler", kind: "system" },
-                    sideEffectsForRun: () => noSideEffects,
+                    sideEffectsForRun: () => {
+                        throw new Error("retirement cancelled never-cancellable work");
+                    },
                     terminalCode: "cancelled/schedule-retired",
                     terminalMessage: "Cancelled because the schedule was retired",
                 },
                 schedules: [],
-                sideEffectsForSchedule: () => noSideEffects,
+                sideEffectsForSchedule: () => {
+                    throw new Error("reject retirement schedule side effects");
+                },
             });
             expect(rejectedRetirement).rejects.toThrow(
-                "Removed schedule has a queued run that forbids cancellation"
+                "reject retirement schedule side effects"
             );
             await rejectedRetirement.catch(() => {});
             expect(
@@ -1205,6 +1209,69 @@ describe("durable jobs repository", () => {
                 cancelRequestedAt: null,
                 eventCount: 1,
                 state: "queued",
+            });
+
+            const retiredSchedules: Array<{
+                readonly id: string;
+                readonly updatedAt: Date;
+                readonly version: number;
+            }> = [];
+            await repository.reconcileSchedules({
+                at: new Date(900),
+                retiredRunCancellation: {
+                    actor: { id: "job-scheduler", kind: "system" },
+                    sideEffectsForRun: () => {
+                        throw new Error("retirement cancelled never-cancellable work");
+                    },
+                    terminalCode: "cancelled/schedule-retired",
+                    terminalMessage: "Cancelled because the schedule was retired",
+                },
+                schedules: [],
+                sideEffectsForSchedule: (retired) => {
+                    retiredSchedules.push({
+                        id: retired.id,
+                        updatedAt: retired.updatedAt,
+                        version: retired.version,
+                    });
+                    return noSideEffects;
+                },
+            });
+
+            expect(retiredSchedules).toEqual([
+                {
+                    id: "system.worker-smoke",
+                    updatedAt: new Date(1000),
+                    version: 2,
+                },
+            ]);
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule
+            ).toMatchObject({
+                enabled: false,
+                updatedAt: new Date(1000),
+                version: 2,
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                cancelRequestedAt: null,
+                eventCount: 1,
+                state: "queued",
+                updatedAt: new Date(100_000),
+            });
+
+            await repository.reconcileSchedules({
+                at: new Date(130_000),
+                retiredRunCancellation: {
+                    actor: { id: "job-scheduler", kind: "system" },
+                    sideEffectsForRun: () => {
+                        throw new Error("idempotent retirement touched the run");
+                    },
+                    terminalCode: "cancelled/schedule-retired",
+                    terminalMessage: "Cancelled because the schedule was retired",
+                },
+                schedules: [],
+                sideEffectsForSchedule: () => {
+                    throw new Error("idempotent retirement emitted schedule effects");
+                },
             });
         } finally {
             database.sqlite.close(true);

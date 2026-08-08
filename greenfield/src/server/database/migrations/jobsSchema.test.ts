@@ -1008,6 +1008,243 @@ describe("jobs baseline schema", () => {
         }
     });
 
+    test("enforces durable event attempts for every lifecycle kind", async () => {
+        const database = await openFreshMigratedDatabase();
+        const workerId = uuid(70);
+
+        const prepareStartedRun = (runIndex: number, leaseIndex: number): string => {
+            const runId = uuid(runIndex);
+            insertQueuedRun(database, {
+                id: runId,
+                idempotencyKey: idempotencyKey(runIndex),
+            });
+            insertEvent(database, { jobRunId: runId, kind: "queued", sequence: 1 });
+            claimRun(database, runId, workerId, uuid(leaseIndex));
+            return runId;
+        };
+        const expectStartedEventAttempts = (
+            runId: string,
+            sequence: number,
+            event: Partial<EventFixture> & Pick<EventFixture, "kind">,
+            occurredAt = 2000
+        ): void => {
+            expect(() =>
+                insertEvent(database, {
+                    ...event,
+                    attempt: 0,
+                    jobRunId: runId,
+                    occurredAt,
+                    sequence,
+                    workerInstanceId: workerId,
+                })
+            ).toThrow("job_run_events must follow the parent run lifecycle");
+            insertEvent(database, {
+                ...event,
+                attempt: 1,
+                jobRunId: runId,
+                occurredAt,
+                sequence,
+                workerInstanceId: workerId,
+            });
+        };
+
+        try {
+            insertWorker(database, workerId);
+
+            const runningRunId = prepareStartedRun(71, 81);
+            const runningEvents = [
+                { kind: "claimed" },
+                { kind: "failed", message: "Attempt failed" },
+                { kind: "lease-expired" },
+                { kind: "output-truncated" },
+                { kind: "progress", progressJson: "{}" },
+                { kind: "stderr", message: "stderr" },
+                { kind: "stdout", message: "stdout" },
+            ];
+            let sequence = 2;
+            for (const event of runningEvents) {
+                expectStartedEventAttempts(runningRunId, sequence, event);
+                sequence += 1;
+            }
+            expect(() =>
+                insertEvent(database, {
+                    attempt: 2,
+                    jobRunId: runningRunId,
+                    kind: "lease-expired",
+                    occurredAt: 2000,
+                    sequence,
+                    workerInstanceId: workerId,
+                })
+            ).toThrow("job_run_events must follow the parent run lifecycle");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_run_events SET attempt = 0
+                     WHERE job_run_id = ? AND sequence = 2`,
+                    [runningRunId]
+                )
+            ).toThrow("job_run_events are append-only");
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT OR REPLACE INTO job_run_events (
+                        attempt, job_run_id, kind, message, occurred_at,
+                        progress_json, sequence, worker_instance_id
+                    ) VALUES (1, ?, 'claimed', NULL, 2000, NULL, 2, ?)`,
+                    [runningRunId, workerId]
+                )
+            ).toThrow();
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT OR REPLACE INTO job_run_events (
+                        attempt, job_run_id, kind, message, occurred_at,
+                        progress_json, sequence, worker_instance_id
+                    ) VALUES (0, ?, 'stdout', 'stdout', 2000, NULL, ?, ?)`,
+                    [runningRunId, sequence, workerId]
+                )
+            ).toThrow("job_run_events must follow the parent run lifecycle");
+
+            const retryRunId = prepareStartedRun(72, 82);
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET available_at = 3000,
+                     heartbeat_at = NULL,
+                     lease_expires_at = NULL,
+                     lease_owner_id = NULL,
+                     lease_token = NULL,
+                     state = 'queued',
+                     state_version = state_version + 1,
+                     updated_at = 2500
+                 WHERE id = ?`,
+                [retryRunId]
+            );
+            expectStartedEventAttempts(retryRunId, 2, { kind: "retry-scheduled" }, 2500);
+
+            const succeededRunId = prepareStartedRun(73, 83);
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET finished_at = 2500,
+                     heartbeat_at = NULL,
+                     lease_expires_at = NULL,
+                     lease_owner_id = NULL,
+                     lease_token = NULL,
+                     result_json = '{}',
+                     state = 'succeeded',
+                     state_version = state_version + 1,
+                     updated_at = 2500
+                 WHERE id = ?`,
+                [succeededRunId]
+            );
+            expectStartedEventAttempts(succeededRunId, 2, { kind: "succeeded" }, 2500);
+
+            const timedOutRunId = prepareStartedRun(74, 84);
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET finished_at = 2500,
+                     heartbeat_at = NULL,
+                     lease_expires_at = NULL,
+                     lease_owner_id = NULL,
+                     lease_token = NULL,
+                     state = 'timed-out',
+                     state_version = state_version + 1,
+                     terminal_code = 'action-timeout',
+                     terminal_message = 'Action timed out',
+                     updated_at = 2500
+                 WHERE id = ?`,
+                [timedOutRunId]
+            );
+            expectStartedEventAttempts(timedOutRunId, 2, { kind: "timed-out" }, 2500);
+
+            const cancelledRunId = uuid(75);
+            insertQueuedRun(database, {
+                id: cancelledRunId,
+                idempotencyKey: idempotencyKey(75),
+            });
+            insertEvent(database, {
+                jobRunId: cancelledRunId,
+                kind: "queued",
+                sequence: 1,
+            });
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET cancel_requested_at = 1500,
+                     cancel_requested_by_id = ?,
+                     cancel_requested_by_kind = 'user',
+                     finished_at = 1500,
+                     state = 'cancelled',
+                     state_version = state_version + 1,
+                     terminal_code = 'job/cancelled',
+                     terminal_message = 'Cancelled before start',
+                     updated_at = 1500
+                 WHERE id = ?`,
+                [userId, cancelledRunId]
+            );
+            insertEvent(database, {
+                attempt: 0,
+                jobRunId: cancelledRunId,
+                kind: "cancel-requested",
+                occurredAt: 1500,
+                sequence: 2,
+            });
+            insertEvent(database, {
+                attempt: 0,
+                jobRunId: cancelledRunId,
+                kind: "cancelled",
+                occurredAt: 1500,
+                sequence: 3,
+            });
+            for (const kind of ["cancel-requested", "cancelled"]) {
+                expect(() =>
+                    insertEvent(database, {
+                        attempt: 1,
+                        jobRunId: cancelledRunId,
+                        kind,
+                        occurredAt: 1500,
+                        sequence: 4,
+                    })
+                ).toThrow("job_run_events must follow the parent run lifecycle");
+            }
+
+            const queuedRunId = uuid(76);
+            insertQueuedRun(database, {
+                id: queuedRunId,
+                idempotencyKey: idempotencyKey(76),
+            });
+            expect(() =>
+                insertEvent(database, {
+                    attempt: 1,
+                    jobRunId: queuedRunId,
+                    kind: "queued",
+                    sequence: 1,
+                })
+            ).toThrow("job_run_events must follow the parent run lifecycle");
+            expect(() =>
+                insertEvent(database, {
+                    attempt: 0,
+                    jobRunId: queuedRunId,
+                    kind: "queued",
+                    sequence: 1,
+                    workerInstanceId: workerId,
+                })
+            ).toThrow("job_run_events must follow the parent run lifecycle");
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT OR REPLACE INTO job_run_events (
+                        attempt, job_run_id, kind, message, occurred_at,
+                        progress_json, sequence, worker_instance_id
+                    ) VALUES (0, ?, 'queued', NULL, 1000, NULL, 1, ?)`,
+                    [queuedRunId, workerId]
+                )
+            ).toThrow("job_run_events must follow the parent run lifecycle");
+            insertEvent(database, {
+                attempt: 0,
+                jobRunId: queuedRunId,
+                kind: "queued",
+                sequence: 1,
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("serializes append-only events and enforces count, payload, and byte budgets", async () => {
         const database = await openFreshMigratedDatabase();
         const workerId = uuid(30);
@@ -1470,6 +1707,296 @@ describe("jobs baseline schema", () => {
                     [lifecycleWorkerId]
                 )
             ).toThrow("worker_instances lifecycle transition is invalid");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("enforces stored run time ordering across raw insert and update boundaries", async () => {
+        const database = await openFreshMigratedDatabase();
+        const workerId = uuid(90);
+        const runningRunId = uuid(93);
+
+        const transitionToRunning = (
+            firstStartedAt: number,
+            lastAttemptStartedAt: number,
+            heartbeatAt: number,
+            leaseExpiresAt: number,
+            updatedAt: number
+        ): void => {
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET attempt_count = 1,
+                     first_started_at = ?,
+                     heartbeat_at = ?,
+                     last_attempt_started_at = ?,
+                     lease_expires_at = ?,
+                     lease_owner_id = ?,
+                     lease_token = ?,
+                     state = 'running',
+                     state_version = 2,
+                     updated_at = ?
+                 WHERE id = ?`,
+                [
+                    firstStartedAt,
+                    heartbeatAt,
+                    lastAttemptStartedAt,
+                    leaseExpiresAt,
+                    workerId,
+                    uuid(94),
+                    updatedAt,
+                    runningRunId,
+                ]
+            );
+        };
+
+        try {
+            insertSchedule(database);
+            insertWorker(database, workerId);
+
+            expect(() =>
+                insertQueuedRun(database, {
+                    id: uuid(91),
+                    idempotencyKey: idempotencyKey(91),
+                    scheduledForAt: 1001,
+                    scheduledJobId: "system.worker-smoke",
+                    scheduledJobVersion: 1,
+                    triggerType: "schedule",
+                })
+            ).toThrow("job_runs_schedule_check");
+            const scheduledRunId = uuid(92);
+            insertQueuedRun(database, {
+                id: scheduledRunId,
+                idempotencyKey: idempotencyKey(92),
+                scheduledForAt: 1000,
+                scheduledJobId: "system.worker-smoke",
+                scheduledJobVersion: 1,
+                triggerType: "schedule",
+            });
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT OR REPLACE INTO job_runs
+                     SELECT * FROM job_runs WHERE id = ?`,
+                    [scheduledRunId]
+                )
+            ).toThrow("job_runs identity is immutable");
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE OR REPLACE job_runs SET scheduled_for_at = 1001 WHERE id = ?",
+                    [scheduledRunId]
+                )
+            ).toThrow("job_runs execution snapshot is immutable");
+
+            insertQueuedRun(database, {
+                id: runningRunId,
+                idempotencyKey: idempotencyKey(93),
+            });
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE job_runs SET available_at = 999 WHERE id = ?",
+                    [runningRunId]
+                )
+            ).toThrow("job_runs_available_at_check");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET cancel_requested_at = 999,
+                         cancel_requested_by_id = ?,
+                         cancel_requested_by_kind = 'user',
+                         state_version = 2
+                     WHERE id = ?`,
+                    [userId, runningRunId]
+                )
+            ).toThrow("job_runs_cancel_request_check");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE OR REPLACE job_runs
+                     SET cancel_requested_at = 1500,
+                         cancel_requested_by_id = ?,
+                         cancel_requested_by_kind = 'user',
+                         state_version = 2,
+                         updated_at = 1200
+                     WHERE id = ?`,
+                    [userId, runningRunId]
+                )
+            ).toThrow("job_runs_cancel_request_check");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE OR REPLACE job_runs
+                     SET finished_at = 1000,
+                         state = 'cancelled',
+                         state_version = 2,
+                         terminal_code = 'job/cancelled',
+                         terminal_message = 'Missing durable request'
+                     WHERE id = ?`,
+                    [runningRunId]
+                )
+            ).toThrow("job_runs_cancel_request_check");
+
+            expect(() => transitionToRunning(999, 999, 999, 5000, 1000)).toThrow(
+                "job_runs_time_check"
+            );
+            expect(() => transitionToRunning(1200, 1200, 1200, 5000, 1100)).toThrow(
+                "job_runs_time_check"
+            );
+            expect(() => transitionToRunning(1100, 1050, 1100, 5000, 1100)).toThrow(
+                "job_runs_time_check"
+            );
+            expect(() => transitionToRunning(1100, 1100, 1050, 5000, 1100)).toThrow(
+                "job_runs_lease_check"
+            );
+            expect(() => transitionToRunning(1100, 1100, 1200, 5000, 1150)).toThrow(
+                "job_runs_time_check"
+            );
+            expect(() => transitionToRunning(1100, 1100, 1100, 1100, 1100)).toThrow(
+                "job_runs_lease_check"
+            );
+
+            transitionToRunning(1100, 1100, 1100, 5000, 1100);
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET cancel_requested_at = 1300,
+                         cancel_requested_by_id = ?,
+                         cancel_requested_by_kind = 'user',
+                         state_version = 3,
+                         updated_at = 1200
+                     WHERE id = ?`,
+                    [userId, runningRunId]
+                )
+            ).toThrow("job_runs_cancel_request_check");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET finished_at = 1050,
+                         heartbeat_at = NULL,
+                         lease_expires_at = NULL,
+                         lease_owner_id = NULL,
+                         lease_token = NULL,
+                         state = 'failed',
+                         state_version = 3,
+                         terminal_code = 'job/failed',
+                         terminal_message = 'Backdated terminal time',
+                         updated_at = 1200
+                     WHERE id = ?`,
+                    [runningRunId]
+                )
+            ).toThrow("job_runs_time_check");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET finished_at = 1300,
+                         heartbeat_at = NULL,
+                         lease_expires_at = NULL,
+                         lease_owner_id = NULL,
+                         lease_token = NULL,
+                         state = 'failed',
+                         state_version = 3,
+                         terminal_code = 'job/failed',
+                         terminal_message = 'Future terminal time',
+                         updated_at = 1200
+                     WHERE id = ?`,
+                    [runningRunId]
+                )
+            ).toThrow("job_runs_time_check");
+
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET available_at = 5000,
+                     heartbeat_at = NULL,
+                     lease_expires_at = NULL,
+                     lease_owner_id = NULL,
+                     lease_token = NULL,
+                     state = 'queued',
+                     state_version = 3
+                 WHERE id = ?`,
+                [runningRunId]
+            );
+            claimRun(database, runningRunId, workerId, uuid(95), 1100, 5000);
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET finished_at = 1100,
+                     heartbeat_at = NULL,
+                     lease_expires_at = NULL,
+                     lease_owner_id = NULL,
+                     lease_token = NULL,
+                     state = 'failed',
+                     state_version = 5,
+                     terminal_code = 'job/failed',
+                     terminal_message = 'Clock-clamped terminal failure',
+                     updated_at = 1100
+                 WHERE id = ?`,
+                [runningRunId]
+            );
+            expect(
+                database.sqlite
+                    .query<
+                        {
+                            attempt_count: number;
+                            available_at: number;
+                            finished_at: number;
+                            first_started_at: number;
+                            last_attempt_started_at: number;
+                            state: string;
+                            updated_at: number;
+                        },
+                        [string]
+                    >(
+                        `SELECT attempt_count, available_at, finished_at,
+                                first_started_at, last_attempt_started_at, state,
+                                updated_at
+                         FROM job_runs WHERE id = ?`
+                    )
+                    .get(runningRunId)
+            ).toEqual({
+                attempt_count: 2,
+                available_at: 5000,
+                finished_at: 1100,
+                first_started_at: 1100,
+                last_attempt_started_at: 1100,
+                state: "failed",
+                updated_at: 1100,
+            });
+
+            const cancelledRunId = uuid(96);
+            insertQueuedRun(database, {
+                id: cancelledRunId,
+                idempotencyKey: idempotencyKey(96),
+            });
+            database.sqlite.run(
+                `UPDATE OR REPLACE job_runs
+                 SET cancel_requested_at = 1000,
+                     cancel_requested_by_id = ?,
+                     cancel_requested_by_kind = 'user',
+                     finished_at = 1000,
+                     state = 'cancelled',
+                     state_version = 2,
+                     terminal_code = 'job/cancelled',
+                     terminal_message = 'Clock-clamped queued cancellation'
+                 WHERE id = ?`,
+                [userId, cancelledRunId]
+            );
+            expect(
+                database.sqlite
+                    .query<
+                        {
+                            cancel_requested_at: number;
+                            finished_at: number;
+                            state: string;
+                            updated_at: number;
+                        },
+                        [string]
+                    >(
+                        `SELECT cancel_requested_at, finished_at, state, updated_at
+                         FROM job_runs WHERE id = ?`
+                    )
+                    .get(cancelledRunId)
+            ).toEqual({
+                cancel_requested_at: 1000,
+                finished_at: 1000,
+                state: "cancelled",
+                updated_at: 1000,
+            });
         } finally {
             database.sqlite.close(true);
         }

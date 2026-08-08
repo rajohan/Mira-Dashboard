@@ -2,6 +2,8 @@ import { describe, expect, spyOn, test } from "bun:test";
 
 import { Effect } from "effect";
 
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
+import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import {
     type JobActionRegistration,
     JobActionRetryableError,
@@ -20,16 +22,18 @@ import type {
     ScheduledJobRecord,
     WorkerInstanceRecord,
 } from "./records.ts";
-import type {
-    DueScheduleEnqueueInput,
-    ExpireDisableIntentResult,
-    ExpireDisableIntentsInput,
-    JobAppendEventResult,
-    JobClaimResult,
-    JobMutationSideEffects,
-    JobRepository,
-    JobSettlementResult,
-    ListDueSchedulesInput,
+import {
+    createJobRepository,
+    type DueScheduleEnqueueInput,
+    type ExpireDisableIntentResult,
+    type ExpireDisableIntentsInput,
+    type JobAppendEventResult,
+    type JobClaimResult,
+    type JobMutationSideEffects,
+    type JobRepository,
+    type JobRunInsert,
+    type JobSettlementResult,
+    type ListDueSchedulesInput,
 } from "./repository.ts";
 import { createJobRealtimeSideEffects } from "./sideEffects.ts";
 
@@ -151,6 +155,54 @@ function intervalSchedule(
         timeoutMs: 30_000,
         updatedAt: at,
         version: 1,
+        ...overrides,
+    };
+}
+
+function queuedScheduledRun(
+    schedule: ScheduledJobRecord,
+    overrides: Partial<JobRunInsert> = {}
+): JobRunInsert {
+    if (schedule.nextRunAt === null) {
+        throw new Error("Expected a durable schedule cursor");
+    }
+    return {
+        actionKey: schedule.actionKey,
+        attemptLimit: schedule.attemptLimit,
+        availableAt: new Date(at.getTime() + 86_400_000),
+        cancellationPolicy: schedule.cancellationPolicy,
+        cancelRequestedAt: null,
+        cancelRequestedById: null,
+        cancelRequestedByKind: null,
+        displayName: schedule.name,
+        enqueueSha256: "d".repeat(64),
+        finishedAt: null,
+        firstStartedAt: null,
+        heartbeatAt: null,
+        id: Bun.randomUUIDv7(),
+        idempotencyKey: "e".repeat(32),
+        lastAttemptStartedAt: null,
+        leaseExpiresAt: null,
+        leaseOwnerId: null,
+        leaseToken: null,
+        payloadJson: schedule.actionPayloadJson,
+        priority: schedule.priority,
+        queuedAt: at,
+        requestedById: "jobs-scheduler",
+        requestedByKind: "system",
+        resourceClass: schedule.resourceClass,
+        resourceKeysJson: schedule.resourceKeysJson,
+        resultJson: null,
+        retrySafe: schedule.retrySafe,
+        scheduledForAt: schedule.nextRunAt,
+        scheduledJobId: schedule.id,
+        scheduledJobVersion: schedule.version,
+        state: "queued",
+        terminalCode: null,
+        terminalMessage: null,
+        timeoutMs: schedule.timeoutMs,
+        triggerType: "schedule",
+        updatedAt: at,
         ...overrides,
     };
 }
@@ -609,6 +661,115 @@ describe("durable job worker coordinator", () => {
             { entityId: cancelledRun.id, topic: "jobs.runs" },
             { entityId: scheduleId, topic: "schedules.records" },
         ]);
+    });
+
+    test("starts after retiring a queued never-cancellable schedule run", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const workerId = Bun.randomUUIDv7();
+        const scheduleId = "system.worker-smoke-never-retired";
+        const scheduleTransitions: JobWorkerSideEffectInput[] = [];
+        const runTransitions: JobWorkerSideEffectInput[] = [];
+
+        try {
+            const [registered] = await repository.reconcileSchedules({
+                at,
+                schedules: [
+                    intervalSchedule({
+                        actionKey: "retired.action",
+                        cancellationPolicy: "never",
+                        createdAt: new Date(at.getTime() - 1000),
+                        id: scheduleId,
+                        nextRunAt: at,
+                        updatedAt: new Date(at.getTime() - 1000),
+                    }),
+                ],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            if (registered === undefined) {
+                throw new Error("Missing never-cancellable schedule fixture");
+            }
+            const run = queuedScheduledRun(registered, { availableAt: at });
+            expect(
+                await repository.enqueueNextDueSchedule({
+                    ...noSideEffects,
+                    at,
+                    nextRunAt: new Date(at.getTime() + 60_000),
+                    observedNextRunAt: at,
+                    run,
+                    scheduleId,
+                })
+            ).toMatchObject({ kind: "inserted" });
+
+            const coordinator = createJobWorkerCoordinator({
+                ...coordinatorOptions(repository, workerId),
+                sideEffects: {
+                    ...sideEffects,
+                    forRun: (input) => {
+                        runTransitions.push(input);
+                        if (input.action === "jobs.run.cancelled") {
+                            throw new Error(
+                                "worker reconciliation cancelled never-cancellable work"
+                            );
+                        }
+                        return noSideEffects;
+                    },
+                    forSchedule: (input) => {
+                        scheduleTransitions.push(input);
+                        return noSideEffects;
+                    },
+                    forScheduleEvent: (input) => {
+                        scheduleTransitions.push(input);
+                        return noSideEffects;
+                    },
+                },
+            });
+
+            await coordinator.initialize();
+            await waitUntil(() => repository.findRun(run.id)?.state === "failed");
+            expect(repository.findSchedule(scheduleId)?.schedule).toMatchObject({
+                enabled: false,
+                updatedAt: at,
+                version: 2,
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                cancelRequestedAt: null,
+                eventCount: 3,
+                state: "failed",
+                terminalCode: "action-unavailable",
+            });
+            expect(runTransitions).toEqual([
+                {
+                    action: "jobs.run.action-unavailable",
+                    at,
+                    outcome: "failed",
+                    targetId: run.id,
+                },
+            ]);
+            expect(scheduleTransitions).toContainEqual({
+                action: "schedules.reconcile",
+                at,
+                outcome: "accepted",
+                targetId: scheduleId,
+            });
+            expect(scheduleTransitions).toContainEqual({
+                action: "jobs.run.action-unavailable",
+                at,
+                outcome: "failed",
+                targetId: scheduleId,
+            });
+            expect(scheduleTransitions).not.toContainEqual(
+                expect.objectContaining({ action: "jobs.run.cancelled" })
+            );
+
+            await coordinator.dispose();
+            expect(await coordinator.completion).toBeUndefined();
+        } finally {
+            database.sqlite.close(true);
+        }
     });
 
     test("continues bounded claim pages and resets the cursor after a claim", async () => {

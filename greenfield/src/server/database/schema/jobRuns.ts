@@ -113,7 +113,7 @@ export const jobRuns = sqliteTable(
         ),
         check(
             "job_runs_cancel_request_check",
-            sql`(${table.cancelRequestedAt} IS NULL AND ${table.cancelRequestedByKind} IS NULL AND ${table.cancelRequestedById} IS NULL) OR (${table.cancellationPolicy} <> 'never' AND ${table.cancelRequestedAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.cancelRequestedAt)} AND ${table.cancelRequestedAt} >= ${table.queuedAt} AND ${table.cancelRequestedByKind} IS NOT NULL AND ${table.cancelRequestedById} IS NOT NULL AND ${jobActorCheck(table.cancelRequestedByKind, table.cancelRequestedById, { allowSystem: true })})`
+            sql`(${table.state} <> 'cancelled' AND ${table.cancelRequestedAt} IS NULL AND ${table.cancelRequestedByKind} IS NULL AND ${table.cancelRequestedById} IS NULL) OR (${table.cancellationPolicy} <> 'never' AND ${table.cancelRequestedAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.cancelRequestedAt)} AND ${table.cancelRequestedAt} >= ${table.queuedAt} AND ${table.cancelRequestedAt} <= ${table.updatedAt} AND ${table.cancelRequestedByKind} IS NOT NULL AND ${table.cancelRequestedById} IS NOT NULL AND ${jobActorCheck(table.cancelRequestedByKind, table.cancelRequestedById, { allowSystem: true })})`
         ),
         check(
             "job_runs_display_name_check",
@@ -162,7 +162,7 @@ export const jobRuns = sqliteTable(
         check("job_runs_retry_safe_check", sql`${table.retrySafe} IN (0, 1)`),
         check(
             "job_runs_schedule_check",
-            sql`(${table.triggerType} = 'schedule' AND ${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991 AND ${table.scheduledForAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.scheduledForAt)}) OR (${table.triggerType} = 'manual' AND ${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991 AND ${table.scheduledForAt} IS NULL) OR (${table.triggerType} IN ('startup', 'system') AND ${table.scheduledJobId} IS NULL AND ${table.scheduledJobVersion} IS NULL AND ${table.scheduledForAt} IS NULL)`
+            sql`(${table.triggerType} = 'schedule' AND ${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991 AND ${table.scheduledForAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.scheduledForAt)} AND ${table.scheduledForAt} <= ${table.queuedAt}) OR (${table.triggerType} = 'manual' AND ${table.scheduledJobId} IS NOT NULL AND ${table.scheduledJobVersion} BETWEEN 1 AND 9007199254740991 AND ${table.scheduledForAt} IS NULL) OR (${table.triggerType} IN ('startup', 'system') AND ${table.scheduledJobId} IS NULL AND ${table.scheduledJobVersion} IS NULL AND ${table.scheduledForAt} IS NULL)`
         ),
         check(
             "job_runs_state_check",
@@ -186,7 +186,7 @@ export const jobRuns = sqliteTable(
         ),
         check(
             "job_runs_time_check",
-            sql`${timestampMillisecondsCheck(table.queuedAt)} AND ${timestampMillisecondsCheck(table.updatedAt)} AND ${table.updatedAt} >= ${table.queuedAt} AND (${table.firstStartedAt} IS NULL OR (${timestampMillisecondsCheck(table.firstStartedAt)} AND ${table.firstStartedAt} >= ${table.queuedAt})) AND (${table.lastAttemptStartedAt} IS NULL OR (${timestampMillisecondsCheck(table.lastAttemptStartedAt)} AND ${table.lastAttemptStartedAt} >= ${table.firstStartedAt})) AND (${table.finishedAt} IS NULL OR (${timestampMillisecondsCheck(table.finishedAt)} AND ${table.finishedAt} >= COALESCE(${table.lastAttemptStartedAt}, ${table.queuedAt})))`
+            sql`${timestampMillisecondsCheck(table.queuedAt)} AND ${timestampMillisecondsCheck(table.updatedAt)} AND ${table.updatedAt} >= ${table.queuedAt} AND (${table.firstStartedAt} IS NULL OR (${timestampMillisecondsCheck(table.firstStartedAt)} AND ${table.firstStartedAt} BETWEEN ${table.queuedAt} AND ${table.updatedAt})) AND (${table.lastAttemptStartedAt} IS NULL OR (${table.firstStartedAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.lastAttemptStartedAt)} AND ${table.lastAttemptStartedAt} BETWEEN ${table.firstStartedAt} AND ${table.updatedAt})) AND (${table.heartbeatAt} IS NULL OR (${table.lastAttemptStartedAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.heartbeatAt)} AND ${table.heartbeatAt} BETWEEN ${table.lastAttemptStartedAt} AND ${table.updatedAt})) AND (${table.cancelRequestedAt} IS NULL OR (${timestampMillisecondsCheck(table.cancelRequestedAt)} AND ${table.cancelRequestedAt} BETWEEN ${table.queuedAt} AND ${table.updatedAt})) AND (${table.finishedAt} IS NULL OR (${timestampMillisecondsCheck(table.finishedAt)} AND ${table.finishedAt} BETWEEN COALESCE(${table.lastAttemptStartedAt}, ${table.queuedAt}) AND ${table.updatedAt}))`
         ),
         uniqueIndex("job_runs_idempotency_unique").on(
             table.requestedByKind,
