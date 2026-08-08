@@ -1884,23 +1884,21 @@ class DrizzleJobWriter extends DrizzleJobReader {
     public renewClaim(input: RenewClaimInput): JobClaimMutationResult {
         const run = this.#findFencedRun(input);
         if (run === undefined) return { kind: "lost-claim" };
-        if (
-            run.leaseExpiresAt === null ||
-            getTime(input.leaseExpiresAt) <= getTime(run.leaseExpiresAt) ||
-            getTime(input.leaseExpiresAt) <= getTime(input.at)
-        ) {
-            throw new RangeError("Renewed lease expiry must advance the active lease");
-        }
+        if (run.leaseExpiresAt === null) throw new Error("Active claim has no lease");
         const at = maximumDate(
             run.updatedAt,
             requiredValue(run.heartbeatAt, "claim heartbeat"),
             input.at
         );
+        const leaseExpiresAt = shiftDurationToStart(input.at, input.leaseExpiresAt, at);
+        if (getTime(leaseExpiresAt) <= getTime(run.leaseExpiresAt)) {
+            throw new RangeError("Renewed lease expiry must advance the active lease");
+        }
         const row = this.#transaction
             .update(jobRuns)
             .set({
                 heartbeatAt: at,
-                leaseExpiresAt: input.leaseExpiresAt,
+                leaseExpiresAt,
                 updatedAt: at,
             })
             .where(this.#claimFence(input))
@@ -1913,7 +1911,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 ? []
                 : this.#transaction
                       .update(resourceLeases)
-                      .set({ expiresAt: input.leaseExpiresAt, renewedAt: at })
+                      .set({ expiresAt: leaseExpiresAt, renewedAt: at })
                       .where(
                           and(
                               eq(resourceLeases.jobRunId, input.runId),

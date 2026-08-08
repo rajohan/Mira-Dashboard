@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
+import { asc, gt, max } from "drizzle-orm";
 import { Effect } from "effect";
 
 import { jobWorkerFreshnessMs } from "../../../contracts/jobModel.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
+import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import {
     authenticationTestNow,
@@ -23,6 +25,144 @@ function createIdGenerator(): () => string {
 const serviceNowMs = () => authenticationTestNow.getTime();
 
 describe("durable jobs service", () => {
+    test("accepts a full-form cadence edit while an enabled schedule stays enabled", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+            expect(
+                Effect.runPromise(
+                    service.updateSchedule(principal, {
+                        expectedVersion: 1,
+                        id: "system.worker-smoke",
+                        patch: {
+                            disableIntent: { reason: "Already disabled" },
+                            enabled: false,
+                            schedule: { intervalMs: 120_000, kind: "interval" },
+                        },
+                    })
+                )
+            ).rejects.toBeInstanceOf(JobValidationError);
+            await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 1,
+                    id: "system.worker-smoke",
+                    patch: { disableIntent: null, enabled: true },
+                })
+            );
+            expect(
+                Effect.runPromise(
+                    service.updateSchedule(principal, {
+                        expectedVersion: 2,
+                        id: "system.worker-smoke",
+                        patch: {
+                            disableIntent: null,
+                            enabled: true,
+                            schedule: {
+                                intervalMs: 86_400_000,
+                                kind: "interval",
+                            },
+                        },
+                    })
+                )
+            ).rejects.toBeInstanceOf(JobValidationError);
+
+            const updated = await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 2,
+                    id: "system.worker-smoke",
+                    patch: {
+                        disableIntent: null,
+                        enabled: true,
+                        schedule: { intervalMs: 120_000, kind: "interval" },
+                    },
+                })
+            );
+
+            expect(updated).toMatchObject({
+                enabled: true,
+                nextRunAtMs: authenticationTestNow.getTime() + 120_000,
+                schedule: { intervalMs: 120_000, kind: "interval" },
+                version: 3,
+            });
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("atomically invalidates run and schedule projections for a manual enqueue", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+            const previousEventId =
+                fixture.database.orm
+                    .select({ value: max(realtimeEvents.id) })
+                    .from(realtimeEvents)
+                    .get()?.value ?? 0;
+
+            const run = await Effect.runPromise(
+                service.runSchedule(principal, {
+                    id: "system.worker-smoke",
+                    idempotencyKey: "e".repeat(32),
+                })
+            );
+            const addedEvents = fixture.database.orm
+                .select({
+                    entityId: realtimeEvents.entityId,
+                    id: realtimeEvents.id,
+                    topic: realtimeEvents.topic,
+                })
+                .from(realtimeEvents)
+                .where(gt(realtimeEvents.id, previousEventId))
+                .orderBy(asc(realtimeEvents.id))
+                .all()
+                .map(({ entityId, topic }) => ({ entityId, topic }));
+
+            expect(addedEvents).toEqual([
+                { entityId: run.id, topic: "jobs.runs" },
+                { entityId: "system.worker-smoke", topic: "schedules.records" },
+            ]);
+            expect(repository.findRun(run.id)).toBeDefined();
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
     test("preserves an active disable intent across a schedule-only update", async () => {
         const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
         const repository = createJobRepository(

@@ -889,6 +889,43 @@ describe("durable jobs repository", () => {
                 },
             });
             expect(claimSideEffectAt).toEqual(new Date(20_000));
+            expect(
+                await repository.appendClaimEvent({
+                    at: new Date(25_000),
+                    kind: "progress",
+                    leaseToken: uuid(100),
+                    progressJson: '{"percent":25}',
+                    runId: runs[0]?.id ?? "",
+                    sideEffectsForRun: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "appended" });
+            expect(
+                await repository.renewClaim({
+                    at: new Date(20_000),
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken: uuid(100),
+                    runId: runs[0]?.id ?? "",
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({
+                kind: "renewed",
+                run: {
+                    heartbeatAt: new Date(25_000),
+                    leaseExpiresAt: new Date(35_000),
+                    updatedAt: new Date(25_000),
+                },
+            });
+            expect(
+                database.orm
+                    .select()
+                    .from(resourceLeases)
+                    .where(eq(resourceLeases.jobRunId, runs[0]?.id ?? ""))
+                    .get()
+            ).toMatchObject({
+                expiresAt: new Date(35_000),
+                renewedAt: new Date(25_000),
+            });
             const secondClaim = await repository.claimNextRun({
                 sideEffectsForClaim: () => noSideEffects,
                 at: new Date(3000),
@@ -976,7 +1013,7 @@ describe("durable jobs repository", () => {
                     workerId: workerOneId,
                 })
             ).toMatchObject({ kind: "settled", run: { state: "succeeded" } });
-            expect(settlementSideEffectAt).toEqual(new Date(20_000));
+            expect(settlementSideEffectAt).toEqual(new Date(25_000));
 
             const nowUnblocked = await repository.claimNextRun({
                 sideEffectsForClaim: () => noSideEffects,

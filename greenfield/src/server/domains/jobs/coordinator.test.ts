@@ -25,10 +25,12 @@ import type {
     ExpireDisableIntentsInput,
     JobAppendEventResult,
     JobClaimResult,
+    JobMutationSideEffects,
     JobRepository,
     JobSettlementResult,
     ListDueSchedulesInput,
 } from "./repository.ts";
+import { createJobRealtimeSideEffects } from "./sideEffects.ts";
 
 const releaseId = "a".repeat(40);
 const at = new Date("2026-08-08T00:00:00.000Z");
@@ -187,6 +189,7 @@ interface RepositoryFixtureOptions {
 
 function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const events: string[] = [];
+    const claimSideEffects: JobMutationSideEffects[] = [];
     const claimInputs: Array<Parameters<JobRepository["claimNextRun"]>[0]> = [];
     const enqueues: DueScheduleEnqueueInput[] = [];
     const expiryEligibility: boolean[] = [];
@@ -223,7 +226,9 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
             claimInputs.push(input);
             const result = claims.shift() ?? ({ kind: "empty" } as const);
             events.push(`claim:${result.kind}`);
-            if (result.kind === "claimed") input.sideEffectsForClaim(result.run);
+            if (result.kind === "claimed") {
+                claimSideEffects.push(input.sideEffectsForClaim(result.run));
+            }
             if (options.claimGate !== undefined) await options.claimGate;
             return result;
         },
@@ -313,6 +318,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     } satisfies JobWorkerCoordinatorOptions["repository"];
     return {
         claimInputs,
+        claimSideEffects,
         enqueues,
         events,
         expiryEligibility,
@@ -510,19 +516,39 @@ describe("durable job worker coordinator", () => {
             claim: { kind: "claimed", run },
             settlementAt: durableAt,
         });
-        const observed: Array<{ readonly action: string; readonly at: Date }> = [];
+        const observed: Array<{
+            readonly action: string;
+            readonly at: Date;
+            readonly target: "queue" | "run" | "run-event";
+        }> = [];
         const recordingSideEffects: JobWorkerSideEffectFactory = {
             forQueue: (input) => {
-                observed.push({ action: input.action, at: input.at });
-                return noSideEffects;
+                observed.push({ action: input.action, at: input.at, target: "queue" });
+                return input.action === "jobs.run.claim"
+                    ? createJobRealtimeSideEffects({
+                          occurredAt: input.at,
+                          realtime: { id: "jobs.queue", kind: "queue" },
+                      })
+                    : noSideEffects;
             },
             forRun: (input) => {
-                observed.push({ action: input.action, at: input.at });
+                observed.push({ action: input.action, at: input.at, target: "run" });
                 return noSideEffects;
             },
             forRunEvent: (input) => {
-                observed.push({ action: input.action, at: input.at });
-                return noSideEffects;
+                observed.push({
+                    action: input.action,
+                    at: input.at,
+                    target: "run-event",
+                });
+                return createJobRealtimeSideEffects({
+                    occurredAt: input.at,
+                    realtime: {
+                        id: input.targetId,
+                        kind: "run",
+                        operation: "updated",
+                    },
+                });
             },
             forSchedule: () => noSideEffects,
         };
@@ -540,8 +566,28 @@ describe("durable job worker coordinator", () => {
                 ["jobs.run.claim", "jobs.run.succeeded"].includes(action)
             )
         ).toEqual([
-            { action: "jobs.run.claim", at: durableAt },
-            { action: "jobs.run.succeeded", at: durableAt },
+            { action: "jobs.run.claim", at: durableAt, target: "queue" },
+            { action: "jobs.run.claim", at: durableAt, target: "run-event" },
+            { action: "jobs.run.succeeded", at: durableAt, target: "run" },
+        ]);
+        expect(fixture.claimSideEffects).toEqual([
+            {
+                auditEvents: [],
+                realtimeEvents: [
+                    expect.objectContaining({
+                        entityId: "jobs.queue",
+                        entityType: "job-queue",
+                        operation: "snapshot-required",
+                        topic: "jobs.runs",
+                    }),
+                    expect.objectContaining({
+                        entityId: run.id,
+                        entityType: "job-run",
+                        operation: "updated",
+                        topic: "jobs.runs",
+                    }),
+                ],
+            },
         ]);
     });
 
@@ -743,6 +789,7 @@ describe("durable job worker coordinator", () => {
         expect(fixture.events).toContain("append:progress");
         expect(fixture.events).toContain("append:stdout");
         expect(eventInvalidations).toEqual([
+            { action: "jobs.run.claim", at },
             { action: "jobs.run.event", at: durableEventAt },
             { action: "jobs.run.event", at: durableEventAt },
         ]);

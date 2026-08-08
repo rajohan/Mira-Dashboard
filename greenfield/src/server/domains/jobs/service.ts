@@ -61,7 +61,11 @@ import {
     type ScheduleRecordWithRelations,
 } from "./repository.ts";
 import { nextScheduleOccurrence } from "./scheduleTime.ts";
-import { type JobAuditActor, createJobMutationSideEffects } from "./sideEffects.ts";
+import {
+    type JobAuditActor,
+    createJobMutationSideEffects,
+    createJobRealtimeSideEffects,
+} from "./sideEffects.ts";
 
 const systemActor = Object.freeze({
     authenticatorId: null,
@@ -455,7 +459,29 @@ export function createJobService(
                 const at = operationTime(nowMs, [schedule.updatedAt]);
                 const runId = generateId();
                 const actor = principalActor(principal);
+                const runSideEffects = mutationSideEffects(generateId, {
+                    action: "jobs.run.enqueue",
+                    actor: principalAuditActor(principal),
+                    occurredAt: at,
+                    outcome: "accepted",
+                    realtime: {
+                        id: runId,
+                        kind: "run",
+                        operation: "created",
+                    },
+                    targetId: runId,
+                    targetType: "job-run",
+                });
+                const scheduleSideEffects = createJobRealtimeSideEffects({
+                    occurredAt: at,
+                    realtime: {
+                        id: schedule.id,
+                        kind: "schedule",
+                        operation: "updated",
+                    },
+                });
                 const result = await dependencies.repository.enqueueManualRun({
+                    auditEvents: runSideEffects.auditEvents,
                     queuedEvent: {
                         attempt: 0,
                         jobRunId: runId,
@@ -511,19 +537,10 @@ export function createJobService(
                         triggerType: "manual",
                         updatedAt: at,
                     },
-                    ...mutationSideEffects(generateId, {
-                        action: "jobs.run.enqueue",
-                        actor: principalAuditActor(principal),
-                        occurredAt: at,
-                        outcome: "accepted",
-                        realtime: {
-                            id: runId,
-                            kind: "run",
-                            operation: "created",
-                        },
-                        targetId: runId,
-                        targetType: "job-run",
-                    }),
+                    realtimeEvents: Object.freeze([
+                        ...runSideEffects.realtimeEvents,
+                        ...scheduleSideEffects.realtimeEvents,
+                    ]),
                 });
                 if (result.kind === "idempotency-mismatch") {
                     throw new JobConflictError({
@@ -587,6 +604,17 @@ export function createJobService(
                     });
                 }
                 const at = operationTime(nowMs, [current.schedule.updatedAt]);
+                const currentConfiguration = toScheduleSummary(
+                    current.schedule,
+                    current
+                ).schedule;
+                const changesSchedule =
+                    input.patch.schedule !== undefined &&
+                    !schedulesAreEqual(input.patch.schedule, currentConfiguration);
+                const editsEnabledScheduleCadence =
+                    current.schedule.enabled &&
+                    input.patch.enabled === true &&
+                    changesSchedule;
                 const replacesActiveDisableIntent =
                     current.activeDisableIntent !== undefined &&
                     current.schedule.enabled === false &&
@@ -596,7 +624,8 @@ export function createJobService(
                 if (
                     input.patch.enabled !== undefined &&
                     input.patch.enabled === current.schedule.enabled &&
-                    !replacesActiveDisableIntent
+                    !replacesActiveDisableIntent &&
+                    !editsEnabledScheduleCadence
                 ) {
                     throw new JobValidationError({
                         id: input.id,
@@ -604,14 +633,10 @@ export function createJobService(
                         resource: "schedule",
                     });
                 }
-                const currentConfiguration = toScheduleSummary(
-                    current.schedule,
-                    current
-                ).schedule;
                 if (
                     input.patch.enabled === undefined &&
                     input.patch.schedule !== undefined &&
-                    schedulesAreEqual(input.patch.schedule, currentConfiguration)
+                    !changesSchedule
                 ) {
                     throw new JobValidationError({
                         id: input.id,

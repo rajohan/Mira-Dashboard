@@ -880,12 +880,20 @@ export function createJobWorkerCoordinator(
             leaseToken,
             minimumHeartbeatAt: subMilliseconds(at, timings.workerFreshnessMs),
             sideEffectsForClaim: (run) =>
-                options.sideEffects.forQueue({
-                    action: "jobs.run.claim",
-                    at: run.updatedAt,
-                    outcome: "accepted",
-                    targetId: options.workerInstanceId,
-                }),
+                mergeSideEffects([
+                    options.sideEffects.forQueue({
+                        action: "jobs.run.claim",
+                        at: run.updatedAt,
+                        outcome: "accepted",
+                        targetId: options.workerInstanceId,
+                    }),
+                    options.sideEffects.forRunEvent({
+                        action: "jobs.run.claim",
+                        at: run.updatedAt,
+                        outcome: "accepted",
+                        targetId: run.id,
+                    }),
+                ]),
             workerId: options.workerInstanceId,
         });
         if (claim.kind === "page-exhausted") {
