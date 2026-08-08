@@ -1,0 +1,122 @@
+import { describe, expect, jest, test } from "bun:test";
+
+import { maxTime } from "date-fns/constants";
+
+import {
+    disabledSchedule,
+    renderScheduleDetail,
+    timestampMs,
+} from "./testSupport/ScheduleDetail.tsx";
+
+const { fireEvent, screen, waitFor } = await import("@testing-library/react");
+const userEventModule = await import("@testing-library/user-event");
+const userEvent = userEventModule.default;
+
+describe("schedule detail disable form", () => {
+    test("round-trips a contract-maximum disable expiry without overflowing Date", async () => {
+        const onDisable = jest.fn(async () => {});
+        renderScheduleDetail({ onDisable, schedule: disabledSchedule(maxTime) });
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Update disable intent" }));
+
+        expect(screen.getByLabelText<HTMLInputElement>("Expiry").value).toMatch(
+            /^\d{4,6}-\d{2}-\d{2}T\d{2}:\d{2}$/u
+        );
+        fireEvent.change(screen.getByLabelText("Reason"), {
+            target: { value: "Updated maintenance" },
+        });
+        await user.click(screen.getByRole("button", { name: "Save intent" }));
+        expect(onDisable).toHaveBeenCalledWith(
+            {
+                expiresAtMs: maxTime,
+                reason: "Updated maintenance",
+            },
+            2
+        );
+    });
+
+    test("preserves sub-minute precision in an existing disable expiry", async () => {
+        const expiry = timestampMs + 60_123;
+        const onDisable = jest.fn(async () => {});
+        renderScheduleDetail({ onDisable, schedule: disabledSchedule(expiry) });
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Update disable intent" }));
+        expect(screen.getByLabelText<HTMLInputElement>("Expiry").value).toMatch(
+            /:\d{2}\.123$/u
+        );
+        fireEvent.change(screen.getByLabelText("Reason"), {
+            target: { value: "Updated maintenance" },
+        });
+        await user.click(screen.getByRole("button", { name: "Save intent" }));
+        expect(onDisable).toHaveBeenCalledWith(
+            {
+                expiresAtMs: expiry,
+                reason: "Updated maintenance",
+            },
+            2
+        );
+    });
+
+    test("associates an invalid expiry with only the expiry control", async () => {
+        const onDisable = jest.fn(async () => {});
+        renderScheduleDetail({ onDisable });
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Disable" }));
+        await user.type(screen.getByLabelText("Reason"), "Planned maintenance");
+        const expiry = screen.getByLabelText("Expiry");
+        fireEvent.change(expiry, { target: { value: "2000-01-01T00:00" } });
+        await user.click(screen.getByRole("button", { name: "Disable schedule" }));
+
+        const expiryError = screen.getByText(
+            "Expiry must be a valid future date and time."
+        );
+        const describedBy = expiry.getAttribute("aria-describedby")?.split(" ");
+        expect(describedBy).toContain(expiryError.id);
+        expect(expiry).toHaveAttribute("data-invalid");
+        expect(screen.getByLabelText("Reason")).not.toHaveAttribute("data-invalid");
+        expect(onDisable).not.toHaveBeenCalled();
+        await waitFor(() => expect(expiry).toHaveFocus());
+        expect(screen.getByRole("form", { name: "Disable schedule" })).toHaveAttribute(
+            "novalidate"
+        );
+    });
+
+    test("validates disable reasons with the shared control-safe code-point schema", async () => {
+        const onDisable = jest.fn(async () => {});
+        renderScheduleDetail({ onDisable });
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Disable" }));
+        const reason = screen.getByLabelText("Reason");
+        fireEvent.change(reason, { target: { value: "Unsafe\nreason" } });
+        await user.click(screen.getByRole("button", { name: "Disable schedule" }));
+
+        const error = screen.getByText(
+            "Use 1–1000 visible characters without control characters."
+        );
+        expect(reason.getAttribute("aria-describedby")?.split(" ")).toContain(error.id);
+        expect(reason).toHaveAttribute("data-invalid");
+        expect(onDisable).not.toHaveBeenCalled();
+        await waitFor(() => expect(reason).toHaveFocus());
+
+        const maximumAstralReason = "😀".repeat(1000);
+        fireEvent.change(reason, { target: { value: maximumAstralReason } });
+        await user.click(screen.getByRole("button", { name: "Disable schedule" }));
+        expect(onDisable).toHaveBeenCalledWith({ reason: maximumAstralReason }, 1);
+    });
+
+    test("does not resubmit an unchanged disable intent", async () => {
+        const onDisable = jest.fn(async () => {});
+        renderScheduleDetail({ onDisable, schedule: disabledSchedule(maxTime) });
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Update disable intent" }));
+        const save = screen.getByRole("button", { name: "Save intent" });
+        expect(save).toBeDisabled();
+        fireEvent.submit(screen.getByRole("form", { name: "Update disable intent" }));
+        expect(onDisable).not.toHaveBeenCalled();
+    });
+});

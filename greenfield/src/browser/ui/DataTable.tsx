@@ -75,14 +75,17 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
         );
     }
 
+    /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- Safari requires an explicit tab stop for keyboard access to two-dimensional scroll regions. */
     return (
         <section
             aria-label={label}
             className={cn(
-                "border-primary-700 max-h-128 overflow-auto rounded-lg border",
+                "border-primary-700 max-h-128 overflow-auto rounded-lg border outline-none",
+                "focus-visible:border-accent-400 focus-visible:ring-accent-400/30 focus-visible:ring-2",
                 scrollClassName
             )}
             ref={scrollContainerRef}
+            tabIndex={0}
         >
             <table
                 aria-label={label}
@@ -137,4 +140,5 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
             </table>
         </section>
     );
+    /* oxlint-enable jsx-a11y/no-noninteractive-tabindex */
 }
