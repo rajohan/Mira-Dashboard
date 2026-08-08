@@ -256,14 +256,14 @@ describe("durable jobs service", () => {
                 repository,
             });
 
-            expect(
-                Effect.runPromise(
-                    service.runSchedule(principal, {
-                        id: "system.worker-smoke-retired",
-                        idempotencyKey: "f".repeat(32),
-                    })
-                )
-            ).rejects.toBeInstanceOf(JobConflictError);
+            const runError = await Effect.runPromise(
+                service.runSchedule(principal, {
+                    id: "system.worker-smoke-retired",
+                    idempotencyKey: "f".repeat(32),
+                })
+            ).catch((error: unknown) => error);
+            expect(runError).toBeInstanceOf(JobConflictError);
+            expect(runError).toMatchObject({ reason: "action-unavailable" });
             expect(
                 Effect.runPromise(
                     service.updateSchedule(principal, {
@@ -515,6 +515,56 @@ describe("durable jobs service", () => {
                 legacyRunReads: 0,
                 listSnapshotReads: 1,
                 snapshotReads: 1,
+            });
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("reads only worker control before changing the claiming state", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+        let queueReads = 0;
+        let workerControlReads = 0;
+        const narrowRepository: JobRepository = {
+            ...repository,
+            readQueueState: () => {
+                queueReads += 1;
+                throw new Error("Queue summary should not be read before pausing claims");
+            },
+            readWorkerControl: () => {
+                workerControlReads += 1;
+                return repository.readWorkerControl();
+            },
+        };
+        const service = createJobService({
+            generateId: createIdGenerator(),
+            nowMs: serviceNowMs,
+            repository: narrowRepository,
+        });
+
+        try {
+            const control = await Effect.runPromise(
+                service.setClaimingPaused(principal, {
+                    expectedVersion: 1,
+                    paused: true,
+                })
+            );
+
+            expect(control).toMatchObject({ claimingPaused: true, version: 2 });
+            expect({ queueReads, workerControlReads }).toEqual({
+                queueReads: 0,
+                workerControlReads: 1,
             });
         } finally {
             fixture.database.sqlite.close(true);

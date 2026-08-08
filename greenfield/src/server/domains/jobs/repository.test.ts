@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { count, eq } from "drizzle-orm";
 
+import { jobWorkerSummaryMaximum } from "../../../contracts/jobModel.ts";
 import { jobRunEvents } from "../../database/schema/jobRunEvents.ts";
 import { jobRuns } from "../../database/schema/jobRuns.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
@@ -255,26 +256,26 @@ describe("durable jobs repository", () => {
                 schedules: [original],
                 sideEffectsForSchedule: () => noSideEffects,
             });
-            expect(
-                repository.reconcileSchedules({
-                    at: new Date(9000),
-                    schedules: [],
-                    sideEffectsForSchedule: (retired) => ({
-                        auditEvents: [],
-                        realtimeEvents: [
-                            {
-                                entityId: retired.id,
-                                entityType: "schedule",
-                                expiresAt: retired.updatedAt,
-                                occurredAt: retired.updatedAt,
-                                operation: "updated",
-                                payloadJson: JSON.stringify({ id: retired.id }),
-                                topic: "schedules.records",
-                            },
-                        ],
-                    }),
-                })
-            ).rejects.toThrow();
+            const rejectedRetirement = repository.reconcileSchedules({
+                at: new Date(9000),
+                schedules: [],
+                sideEffectsForSchedule: (retired) => ({
+                    auditEvents: [],
+                    realtimeEvents: [
+                        {
+                            entityId: retired.id,
+                            entityType: "schedule",
+                            expiresAt: retired.updatedAt,
+                            occurredAt: retired.updatedAt,
+                            operation: "updated",
+                            payloadJson: JSON.stringify({ id: retired.id }),
+                            topic: "schedules.records",
+                        },
+                    ],
+                }),
+            });
+            expect(rejectedRetirement).rejects.toThrow();
+            await rejectedRetirement.catch(() => {});
             expect(
                 repository.findSchedule("system.worker-smoke")?.schedule
             ).toMatchObject({
@@ -638,28 +639,28 @@ describe("durable jobs repository", () => {
                 insertDisableIntent: rollbackIntent,
                 patch: { enabled: false },
             });
-            expect(
-                repository.expireDisableIntents({
-                    at: new Date(4000),
-                    canReenableSchedule: () => true,
-                    nextRunAt: () => new Date(64_000),
-                    sideEffectsForSchedule: (resumed) => ({
-                        auditEvents: [],
-                        realtimeEvents: [
-                            {
-                                entityId: resumed.id,
-                                entityType: "schedule",
-                                expiresAt: new Date(4000),
-                                occurredAt: new Date(4000),
-                                operation: "updated",
-                                payloadJson: JSON.stringify({ id: resumed.id }),
-                                topic: "schedules.records",
-                            },
-                        ],
-                    }),
-                    systemActorId: "job-scheduler",
-                })
-            ).rejects.toThrow();
+            const rejectedExpiry = repository.expireDisableIntents({
+                at: new Date(4000),
+                canReenableSchedule: () => true,
+                nextRunAt: () => new Date(64_000),
+                sideEffectsForSchedule: (resumed) => ({
+                    auditEvents: [],
+                    realtimeEvents: [
+                        {
+                            entityId: resumed.id,
+                            entityType: "schedule",
+                            expiresAt: new Date(4000),
+                            occurredAt: new Date(4000),
+                            operation: "updated",
+                            payloadJson: JSON.stringify({ id: resumed.id }),
+                            topic: "schedules.records",
+                        },
+                    ],
+                }),
+                systemActorId: "job-scheduler",
+            });
+            expect(rejectedExpiry).rejects.toThrow();
+            await rejectedExpiry.catch(() => {});
             expect(
                 repository.findSchedule("system.worker-smoke-rollback")?.schedule
             ).toMatchObject({ enabled: false, version: 2 });
@@ -965,13 +966,13 @@ describe("durable jobs repository", () => {
             testImmediateDatabaseWriteAdmission
         );
         const minimumHeartbeatAt = new Date(10_000);
-        const boundaryWorkerId = uuid(300);
+        const boundaryWorkerId = uuid(10_000);
         try {
-            for (let index = 200; index < 233; index += 1) {
+            for (let index = 0; index < jobWorkerSummaryMaximum + 1; index += 1) {
                 await repository.registerWorker({
                     ...noSideEffects,
                     worker: {
-                        ...worker(uuid(index)),
+                        ...worker(uuid(200 + index)),
                         heartbeatAt: new Date(minimumHeartbeatAt.getTime() - 1),
                     },
                 });
@@ -1324,24 +1325,24 @@ describe("durable jobs repository", () => {
                 scheduledJobVersion: null,
                 triggerType: "system",
             });
-            expect(
-                repository.enqueueManualRun({
-                    auditEvents: [],
-                    queuedEvent: queuedEvent(run),
-                    realtimeEvents: [
-                        {
-                            entityId: run.id,
-                            entityType: "job-run",
-                            expiresAt: new Date(1000),
-                            occurredAt: new Date(1000),
-                            operation: "created",
-                            payloadJson: JSON.stringify({ id: run.id }),
-                            topic: "jobs.runs",
-                        },
-                    ],
-                    run,
-                })
-            ).rejects.toThrow();
+            const rejectedEnqueue = repository.enqueueManualRun({
+                auditEvents: [],
+                queuedEvent: queuedEvent(run),
+                realtimeEvents: [
+                    {
+                        entityId: run.id,
+                        entityType: "job-run",
+                        expiresAt: new Date(1000),
+                        occurredAt: new Date(1000),
+                        operation: "created",
+                        payloadJson: JSON.stringify({ id: run.id }),
+                        topic: "jobs.runs",
+                    },
+                ],
+                run,
+            });
+            expect(rejectedEnqueue).rejects.toThrow();
+            await rejectedEnqueue.catch(() => {});
             expect(repository.findRun(run.id)).toBeUndefined();
             expect(
                 database.orm

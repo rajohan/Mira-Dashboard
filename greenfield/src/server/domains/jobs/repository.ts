@@ -27,6 +27,7 @@ import {
     jobResourceClasses,
     jobResourceKeysSchema,
     jobRunStates,
+    jobWorkerSummaryMaximum,
     type JobResourceClass,
     type JobRunState,
     type ScheduleConfiguration,
@@ -403,6 +404,7 @@ export interface JobRepositoryReader {
     listSchedules(input: ListSchedulesInput): ScheduleRecordWithRelations[];
     readClaimCancellation(input: ClaimFenceInput): JobClaimCancellation;
     readQueueState(input: ReadQueueStateInput): JobQueueState;
+    readWorkerControl(): JobWorkerControlRecord;
 }
 
 /** One run page and queue summary read from the same SQLite snapshot. */
@@ -443,7 +445,6 @@ export interface JobRepository extends JobRepositoryReader {
 }
 
 const claimCandidateMaximum = 32;
-const workerSummaryMaximum = 32;
 const recoveryBatchMaximum = 32;
 const terminalRunStates = new Set<JobRunState>([
     "cancelled",
@@ -803,7 +804,7 @@ class DrizzleJobReader implements JobRepositoryReader {
                 )
             )
             .orderBy(asc(workerInstances.id))
-            .limit(workerSummaryMaximum)
+            .limit(jobWorkerSummaryMaximum)
             .all()
             .map((row) => parseWorker(row));
         const workerIds = workerRows.map(({ id }) => id);
@@ -826,17 +827,9 @@ class DrizzleJobReader implements JobRepositoryReader {
                 row.ownerId === null ? [] : [[row.ownerId, row.value] as const]
             )
         );
-        const controlRow = this.database
-            .select()
-            .from(jobWorkerControl)
-            .where(eq(jobWorkerControl.id, 1))
-            .get();
         return {
             activeResourceClasses,
-            control: v.parse(
-                jobWorkerControlSelectSchema,
-                requiredRow(controlRow, "worker control read")
-            ),
+            control: this.readWorkerControl(),
             ...(oldestQueued === undefined
                 ? {}
                 : { oldestQueuedAt: oldestQueued.queuedAt }),
@@ -846,6 +839,18 @@ class DrizzleJobReader implements JobRepositoryReader {
                 worker,
             })),
         };
+    }
+
+    public readWorkerControl(): JobWorkerControlRecord {
+        const row = this.database
+            .select()
+            .from(jobWorkerControl)
+            .where(eq(jobWorkerControl.id, 1))
+            .get();
+        return v.parse(
+            jobWorkerControlSelectSchema,
+            requiredRow(row, "worker control read")
+        );
     }
 
     #attachScheduleRelations(
@@ -1517,28 +1522,13 @@ class DrizzleJobWriter extends DrizzleJobReader {
                     requiredValue(intent.expiresAt, "disable intent expiry"),
                     input.at
                 );
-                const closedRow = this.#transaction
-                    .update(jobDisableIntents)
-                    .set(
-                        v.parse(jobDisableIntentCloseSchema, {
-                            endedAt: transitionAt,
-                            endedById: input.systemActorId,
-                            endedByKind: "system",
-                            endedReason: "expired",
-                        })
-                    )
-                    .where(
-                        and(
-                            eq(jobDisableIntents.id, intent.id),
-                            isNull(jobDisableIntents.endedAt),
-                            lte(jobDisableIntents.expiresAt, input.at)
-                        )
-                    )
-                    .returning()
-                    .get();
-                const closedIntent = parseDisableIntent(
-                    requiredRow(closedRow, "retired schedule intent closure")
-                );
+                const closedIntent = this.#closeExpiredIntent({
+                    at: input.at,
+                    context: "retired schedule intent closure",
+                    intent,
+                    systemActorId: input.systemActorId,
+                    transitionAt,
+                });
                 this.#insertSideEffects(
                     input.sideEffectsForSchedule(schedule, closedIntent)
                 );
@@ -1566,28 +1556,13 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 requiredValue(intent.expiresAt, "disable intent expiry"),
                 input.at
             );
-            const closedRow = this.#transaction
-                .update(jobDisableIntents)
-                .set(
-                    v.parse(jobDisableIntentCloseSchema, {
-                        endedAt: transitionAt,
-                        endedById: input.systemActorId,
-                        endedByKind: "system",
-                        endedReason: "expired",
-                    })
-                )
-                .where(
-                    and(
-                        eq(jobDisableIntents.id, intent.id),
-                        isNull(jobDisableIntents.endedAt),
-                        lte(jobDisableIntents.expiresAt, input.at)
-                    )
-                )
-                .returning()
-                .get();
-            const closedIntent = parseDisableIntent(
-                requiredRow(closedRow, "expired intent closure")
-            );
+            const closedIntent = this.#closeExpiredIntent({
+                at: input.at,
+                context: "expired intent closure",
+                intent,
+                systemActorId: input.systemActorId,
+                transitionAt,
+            });
             const scheduleRow = this.#transaction
                 .update(scheduledJobs)
                 .set({
@@ -2140,6 +2115,35 @@ class DrizzleJobWriter extends DrizzleJobReader {
         return row === undefined ? undefined : parseRun(row);
     }
 
+    #closeExpiredIntent(input: {
+        readonly at: Date;
+        readonly context: string;
+        readonly intent: JobDisableIntentRecord;
+        readonly systemActorId: string;
+        readonly transitionAt: Date;
+    }): JobDisableIntentRecord {
+        const row = this.#transaction
+            .update(jobDisableIntents)
+            .set(
+                v.parse(jobDisableIntentCloseSchema, {
+                    endedAt: input.transitionAt,
+                    endedById: input.systemActorId,
+                    endedByKind: "system",
+                    endedReason: "expired",
+                })
+            )
+            .where(
+                and(
+                    eq(jobDisableIntents.id, input.intent.id),
+                    isNull(jobDisableIntents.endedAt),
+                    lte(jobDisableIntents.expiresAt, input.at)
+                )
+            )
+            .returning()
+            .get();
+        return parseDisableIntent(requiredRow(row, input.context));
+    }
+
     #findScheduleRecord(id: string): ScheduledJobRecord | undefined {
         const row = this.#transaction
             .select()
@@ -2347,6 +2351,7 @@ export function createJobRepository(
             read((reader) => reader.readClaimCancellation(input)),
         readQueueState: (input: ReadQueueStateInput) =>
             read((reader) => reader.readQueueState(input)),
+        readWorkerControl: () => read((reader) => reader.readWorkerControl()),
         reconcileSchedules: (input: ReconcileSchedulesInput) =>
             write((writer) => writer.reconcileSchedules(input)),
         recoverExpiredClaims: (input: RecoverExpiredClaimsInput) =>

@@ -438,10 +438,14 @@ export function createJobService(
             mutationEffect(async () => {
                 const { schedule } = readSchedule(dependencies.repository, input.id);
                 const registration = findJobActionRegistration(schedule.actionKey);
-                if (
-                    !isRegisteredJobSchedule(schedule.id, schedule.actionKey) ||
-                    registration?.manualExposure !== "jobs-write"
-                ) {
+                if (!isRegisteredJobSchedule(schedule.id, schedule.actionKey)) {
+                    throw new JobConflictError({
+                        id: input.id,
+                        reason: "action-unavailable",
+                        resource: "schedule",
+                    });
+                }
+                if (registration?.manualExposure !== "jobs-write") {
                     throw new JobConflictError({
                         id: input.id,
                         reason: "action-not-manually-exposed",
@@ -540,9 +544,7 @@ export function createJobService(
             }),
         setClaimingPaused: (principal, input) =>
             mutationEffect(async () => {
-                const current = dependencies.repository.readQueueState({
-                    minimumHeartbeatAt: minimumWorkerHeartbeatAt(nowMs),
-                }).control;
+                const current = dependencies.repository.readWorkerControl();
                 const at = operationTime(nowMs, [current.updatedAt]);
                 const result = await dependencies.repository.setClaimingPaused({
                     actor: principalActor(principal),

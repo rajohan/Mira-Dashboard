@@ -734,10 +734,35 @@ export function createJobWorkerCoordinator(
             systemActorId: "system.jobs-worker",
         });
         throwIfAborted(signal);
-        if (expired.some((result) => result.kind === "next-occurrence-unavailable")) {
-            throw new RangeError(
-                "Expired disable intent has no representable next occurrence"
-            );
+        const leftDisabledScheduleIds = new Set<string>();
+        for (const result of expired) {
+            switch (result.kind) {
+                case "left-disabled": {
+                    if (result.schedule.enabled) {
+                        throw new Error(
+                            "Retired schedule was enabled after disable-intent expiry"
+                        );
+                    }
+                    leftDisabledScheduleIds.add(result.schedule.id);
+                    break;
+                }
+                case "next-occurrence-unavailable": {
+                    throw new RangeError(
+                        "Expired disable intent has no representable next occurrence"
+                    );
+                }
+                case "re-enabled": {
+                    if (!result.schedule.enabled) {
+                        throw new Error(
+                            "Registered schedule remained disabled after disable-intent expiry"
+                        );
+                    }
+                    break;
+                }
+                default: {
+                    result satisfies never;
+                }
+            }
         }
         const schedules = options.repository.listDueSchedules({
             at,
@@ -745,6 +770,7 @@ export function createJobWorkerCoordinator(
         });
         for (const schedule of schedules) {
             throwIfAborted(signal);
+            if (leftDisabledScheduleIds.has(schedule.id)) continue;
             if (schedule.nextRunAt === null) continue;
             const nextRunAtMs = nextScheduleOccurrence(
                 toScheduleConfiguration(schedule),

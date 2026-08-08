@@ -13,12 +13,14 @@ import {
     type JobWorkerSideEffectFactory,
 } from "./coordinator.ts";
 import type {
+    JobDisableIntentRecord,
     JobRunRecord,
     ScheduledJobRecord,
     WorkerInstanceRecord,
 } from "./records.ts";
 import type {
     DueScheduleEnqueueInput,
+    ExpireDisableIntentResult,
     ExpireDisableIntentsInput,
     JobAppendEventResult,
     JobClaimResult,
@@ -143,6 +145,25 @@ function intervalSchedule(
     };
 }
 
+function expiredDisableIntent(scheduleId: string): JobDisableIntentRecord {
+    return {
+        createdAt: new Date(at.getTime() - 120_000),
+        createdById: "019fdf20-0000-7000-8000-000000000001",
+        createdByKind: "user",
+        endedAt: at,
+        endedById: "system.jobs-worker",
+        endedByKind: "system",
+        endedReason: "expired",
+        expiresAt: new Date(at.getTime() - 60_000),
+        externalJobId: null,
+        externalProvider: null,
+        id: "019fdf20-0000-7000-8000-000000000002",
+        reason: "Temporary operator pause",
+        scheduledJobId: scheduleId,
+        targetKind: "dashboard-schedule",
+    };
+}
+
 interface RepositoryFixtureOptions {
     readonly appendEvent?: (
         input: Parameters<JobRepository["appendClaimEvent"]>[0]
@@ -154,6 +175,7 @@ interface RepositoryFixtureOptions {
     readonly expiringSchedule?: ScheduledJobRecord;
     readonly expiryGate?: Promise<void>;
     readonly expiryFailure?: Error;
+    readonly expiryResults?: readonly ExpireDisableIntentResult[];
     readonly heartbeatFailure?: Error;
     readonly reconciliationFailure?: Error;
     readonly registrationFailure?: Error;
@@ -218,7 +240,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
                     if (next !== undefined) expiryNextRuns.push(next);
                 }
             }
-            return [];
+            return options.expiryResults ?? [];
         },
         heartbeatWorker(input) {
             events.push("heartbeat");
@@ -228,6 +250,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
             return Promise.resolve(workerRecord(input.workerId, "online"));
         },
         listDueSchedules() {
+            events.push("list-due");
             const schedules = dueSchedules;
             dueSchedules = [];
             return schedules;
@@ -993,17 +1016,31 @@ describe("durable job worker coordinator", () => {
             id: "system.worker-smoke-retired",
             nextRunAt: new Date(at.getTime() + 60_000),
         });
-        const fixture = repositoryFixture({ expiringSchedule: schedule });
+        const fixture = repositoryFixture({
+            dueSchedules: [schedule],
+            expiringSchedule: schedule,
+            expiryResults: [
+                {
+                    intent: expiredDisableIntent(schedule.id),
+                    kind: "left-disabled",
+                    schedule,
+                },
+            ],
+        });
         const coordinator = createJobWorkerCoordinator(
             coordinatorOptions(fixture.repository, workerId)
         );
 
         await coordinator.initialize();
-        await waitUntil(() => fixture.expiryEligibility.length === 1);
+        await waitUntil(() => fixture.events.includes("list-due"));
         await coordinator.dispose();
 
         expect(fixture.expiryEligibility.length).toBeGreaterThanOrEqual(1);
         expect(fixture.expiryEligibility.every((eligible) => !eligible)).toBe(true);
         expect(fixture.expiryNextRuns).toEqual([]);
+        expect(fixture.enqueues).toEqual([]);
+        expect(fixture.events.indexOf("expire-disable-intents")).toBeLessThan(
+            fixture.events.indexOf("list-due")
+        );
     });
 });
