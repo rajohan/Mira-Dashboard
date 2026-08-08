@@ -8,40 +8,18 @@ import {
     type LineCoverageSummary,
     requiredLineCoveragePercent,
 } from "./checkCoverage.ts";
-import {
-    type BrowserTestInventory,
-    type BrowserTestPartition,
-    createBrowserTestArguments,
-    discoverBrowserTestInventory,
-} from "./runBrowserTests.ts";
 import { runTestSuite } from "./runTestSuite.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "..");
 const coverageDirectory = path.join(projectRoot, "coverage");
 const coveredSourceRoots = Object.freeze(["src"]);
+const bunTestParallelProcesses = 3;
+const browserTestTimingsFile = ".bun-browser-test-timings.json";
+const bunTestTimingsFile = ".bun-test-timings.json";
+const browserTestPreload = "./src/browser/test/setup.ts";
 
 /** Independently executed test process contributing to the merged LCOV artifact. */
-export type CoveragePartition =
-    | "browser-core"
-    | "browser-jobs"
-    | "browser-schedule-detail-form"
-    | "browser-schedule-detail-state-copy"
-    | "browser-schedule-detail-state-disable"
-    | "browser-schedule-detail-state-errors"
-    | "browser-schedule-detail-state-replay"
-    | "browser-schedule-detail-state-version"
-    | "bun";
-
-const coverageBrowserPartitions = Object.freeze({
-    "browser-core": "core",
-    "browser-jobs": "jobs",
-    "browser-schedule-detail-form": "schedule-detail-form",
-    "browser-schedule-detail-state-copy": "schedule-detail-state-copy",
-    "browser-schedule-detail-state-disable": "schedule-detail-state-disable",
-    "browser-schedule-detail-state-errors": "schedule-detail-state-errors",
-    "browser-schedule-detail-state-replay": "schedule-detail-state-replay",
-    "browser-schedule-detail-state-version": "schedule-detail-state-version",
-} satisfies Readonly<Record<Exclude<CoveragePartition, "bun">, BrowserTestPartition>>);
+export type CoveragePartition = "browser" | "bun";
 
 /** One isolated coverage process and its private artifact paths. */
 export interface CoveragePartitionPlan {
@@ -59,7 +37,6 @@ export interface CoverageRunnerDependencies {
         projectRoot: string
     ) => Promise<LineCoverageSummary>;
     readonly coverageDirectory: string;
-    readonly discoverBrowserTests: (projectRoot: string) => BrowserTestInventory;
     readonly log: (message: string) => void;
     readonly mergeReports: (
         reportPaths: readonly string[],
@@ -77,25 +54,13 @@ export interface CoverageRunnerDependencies {
 /**
  * Creates the deterministic coverage process and merge inventory.
  * @param directory Root directory for private and merged LCOV artifacts.
- * @returns Nine process plans in execution and merge order.
+ * @returns The Bun and browser process plans in execution and merge order.
  */
 export function createCoveragePartitionPlan(
     directory: string
 ): readonly CoveragePartitionPlan[] {
     return Object.freeze(
-        (
-            [
-                "bun",
-                "browser-core",
-                "browser-jobs",
-                "browser-schedule-detail-form",
-                "browser-schedule-detail-state-disable",
-                "browser-schedule-detail-state-errors",
-                "browser-schedule-detail-state-version",
-                "browser-schedule-detail-state-copy",
-                "browser-schedule-detail-state-replay",
-            ] as const
-        ).map((name) => {
+        (["bun", "browser"] as const).map((name) => {
             const outputDirectory = path.join(directory, name);
             return Object.freeze({
                 name,
@@ -110,32 +75,35 @@ export function createCoveragePartitionPlan(
  * Builds the exact Bun test arguments used by the coverage gate.
  * @param outputDirectory Directory where Bun writes coverage artifacts.
  * @param partition Runtime partition whose tests and preload policy are selected.
- * @param browserInventory Shared exact-path inventory for browser partitions.
  * @returns Complete arguments after `bun test`.
  */
 export function createCoverageTestArguments(
     outputDirectory: string,
-    partition: CoveragePartition,
-    browserInventory?: BrowserTestInventory
+    partition: CoveragePartition
 ): readonly string[] {
     const coverageArguments = [
+        "--only-failures",
         "--coverage",
         "--coverage-reporter",
         "lcov",
         "--coverage-dir",
         outputDirectory,
     ];
-    if (partition !== "bun") {
-        if (browserInventory === undefined) {
-            throw new TypeError("Browser coverage requires a discovered test inventory");
-        }
-        return createBrowserTestArguments(
-            coverageBrowserPartitions[partition],
-            browserInventory,
-            coverageArguments
-        );
+    if (partition === "browser") {
+        return Object.freeze([
+            `--parallel=${bunTestParallelProcesses}`,
+            `--timings=${browserTestTimingsFile}`,
+            ...coverageArguments,
+            "--preload",
+            browserTestPreload,
+            "--bail=1",
+            "src/browser",
+        ]);
     }
     return Object.freeze([
+        `--parallel=${bunTestParallelProcesses}`,
+        `--timings=${bunTestTimingsFile}`,
+        "--bail=1",
         ...coverageArguments,
         "scripts",
         "src/app",
@@ -185,7 +153,6 @@ async function writeCoverageReport(filePath: string, coverage: string): Promise<
 const defaultDependencies: CoverageRunnerDependencies = Object.freeze({
     checkReport: checkCoverageFile,
     coverageDirectory,
-    discoverBrowserTests: discoverBrowserTestInventory,
     log: (message: string) => console.log(message),
     mergeReports: mergeCoverageReports,
     projectRoot,
@@ -202,17 +169,12 @@ const defaultDependencies: CoverageRunnerDependencies = Object.freeze({
 export async function runCoverage(
     dependencies: CoverageRunnerDependencies = defaultDependencies
 ): Promise<number> {
-    const browserInventory = dependencies.discoverBrowserTests(dependencies.projectRoot);
     await dependencies.resetDirectory(dependencies.coverageDirectory);
 
     const plans = createCoveragePartitionPlan(dependencies.coverageDirectory);
     for (const plan of plans) {
         const testExitCode = await dependencies.runTests(
-            createCoverageTestArguments(
-                plan.outputDirectory,
-                plan.name,
-                browserInventory
-            ),
+            createCoverageTestArguments(plan.outputDirectory, plan.name),
             dependencies.projectRoot
         );
         if (testExitCode !== 0) return testExitCode;

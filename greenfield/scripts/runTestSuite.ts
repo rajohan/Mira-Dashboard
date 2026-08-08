@@ -1,8 +1,104 @@
 import { once } from "node:events";
+import { rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Writable } from "node:stream";
 
 import { TestOutputInspector, type TestOutputViolation } from "./testOutputPolicy.ts";
+
+interface TestTimingsInventory {
+    readonly files: Readonly<Record<string, number>>;
+    readonly version: 1;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function parseTestTimingsInventory(value: unknown): TestTimingsInventory {
+    if (!isUnknownRecord(value)) {
+        throw new TypeError("Test timings must be an object");
+    }
+    const { files: rawFiles, version } = value;
+    if (version !== 1 || !isUnknownRecord(rawFiles)) {
+        throw new TypeError("Test timings must contain version 1 and a file map");
+    }
+
+    const files: Record<string, number> = {};
+    for (const [filePath, duration] of Object.entries(rawFiles)) {
+        if (typeof duration !== "number" || !Number.isFinite(duration) || duration < 0) {
+            throw new TypeError(`Invalid test timing duration: ${filePath}`);
+        }
+        files[filePath] = duration;
+    }
+    return { files, version };
+}
+
+/**
+ * Removes deleted test paths that Bun intentionally retains while merging timings.
+ * @param timingsPath Timing inventory written by Bun.
+ * @param projectRoot Root used to resolve repository-relative test paths.
+ */
+export async function pruneMissingTestTimings(
+    timingsPath: string,
+    projectRoot: string
+): Promise<void> {
+    const resolvedTimingsPath = path.resolve(projectRoot, timingsPath);
+    const timingsFile = Bun.file(resolvedTimingsPath);
+    const rawInventory: unknown = await timingsFile.json();
+    const inventory = parseTestTimingsInventory(rawInventory);
+    const entriesWithExistence = await Promise.all(
+        Object.entries(inventory.files).map(async ([filePath, duration]) => {
+            const testFile = Bun.file(path.resolve(projectRoot, filePath));
+            return {
+                duration,
+                exists: await testFile.exists(),
+                filePath,
+            };
+        })
+    );
+    const retainedEntries = entriesWithExistence.filter((entry) => entry.exists);
+
+    const temporaryPath = `${resolvedTimingsPath}.${process.pid}.tmp`;
+    try {
+        await writeFile(
+            temporaryPath,
+            `${JSON.stringify(
+                {
+                    files: Object.fromEntries(
+                        retainedEntries.map(({ duration, filePath }) => [
+                            filePath,
+                            duration,
+                        ])
+                    ),
+                    version: inventory.version,
+                },
+                null,
+                4
+            )}\n`,
+            { encoding: "utf8", mode: 0o600 }
+        );
+        await rename(temporaryPath, resolvedTimingsPath);
+    } finally {
+        await rm(temporaryPath, { force: true });
+    }
+}
+
+async function pruneUpdatedTestTimings(
+    arguments_: readonly string[],
+    projectRoot: string
+): Promise<void> {
+    if (!arguments_.includes("--update-timings")) return;
+    const inlinePath = arguments_
+        .find((argument) => argument.startsWith("--timings="))
+        ?.slice("--timings=".length);
+    const timingsIndex = arguments_.indexOf("--timings");
+    const timingsPath =
+        inlinePath ?? (timingsIndex === -1 ? undefined : arguments_[timingsIndex + 1]);
+    if (timingsPath === undefined || timingsPath.length === 0) {
+        throw new TypeError("--update-timings requires a timings file");
+    }
+    await pruneMissingTestTimings(timingsPath, projectRoot);
+}
 
 async function relayOutput(
     stream: ReadableStream<Uint8Array>,
@@ -62,7 +158,9 @@ export async function runTestSuite(
     }
 
     if (exitCode !== 0) return exitCode;
-    return violation === undefined ? 0 : 1;
+    if (violation !== undefined) return 1;
+    await pruneUpdatedTestTimings(arguments_, projectRoot);
+    return 0;
 }
 
 if (import.meta.main) {

@@ -23,6 +23,18 @@ coverage gate requires at least 85% aggregate production line coverage, rejects 
 `src/` modules missing entirely from LCOV, and publishes the same report for Codecov's 85% patch
 gate.
 
+The non-browser coverage partition uses three isolated Bun worker processes. The checked-in
+`.bun-test-timings.json` file is only a scheduling hint: it starts the slowest files first without
+changing test discovery, assertions, coverage collection, or the 85% gate. Browser tests stay in
+Bun's default per-file isolation because a shared `--no-isolate` environment can retain preload
+teardown state and has triggered a native Bun panic. Browser files use the same three-worker cap,
+with their own `.bun-browser-test-timings.json` scheduling hints. After adding, removing, or
+materially changing tests, refresh both timing inventories before push with:
+
+```bash
+bun run test:timings:update
+```
+
 ## TypeScript graphs
 
 The project has exactly three TypeScript configurations in one solution:

@@ -111,6 +111,13 @@ class AgentTransport implements DashboardTrpcTransport {
                     ],
                 });
             }
+            case "notifications.list": {
+                return Promise.resolve({
+                    notifications: [],
+                    readCount: 0,
+                    unreadCount: 0,
+                });
+            }
             default: {
                 return Promise.reject(new TypeError(`Unexpected query: ${path}`));
             }
@@ -164,6 +171,13 @@ const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
 const collectionRegistries: DashboardBrowserCollections[] = [];
 const mountedViews: ReturnType<typeof render>[] = [];
 
+async function expectAgentShellReady(): Promise<void> {
+    expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+    expect(
+        await screen.findByRole("button", { name: "Notifications, none unread" })
+    ).toBeTruthy();
+}
+
 afterEach(async () => {
     for (const view of mountedViews.splice(0)) view.unmount();
     await Promise.all(
@@ -199,9 +213,7 @@ describe("Dashboard agents route", () => {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Agents" })
         ).toBeTruthy();
-        expect(
-            await screen.findByRole("heading", { level: 3, name: "Mira" })
-        ).toBeTruthy();
+        await expectAgentShellReady();
         expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
         expect(screen.getByText("unavailable")).toBeTruthy();
         expect(screen.getByRole("table", { name: "Agent task history" })).toBeTruthy();
@@ -241,6 +253,7 @@ describe("Dashboard agents route", () => {
         );
         const user = userEvent.setup();
 
+        await expectAgentShellReady();
         expect(await screen.findByText("Newest agent task")).toBeTruthy();
         await user.click(screen.getByRole("button", { name: "Load older tasks" }));
         expect(await screen.findByText("Older agent task")).toBeTruthy();
@@ -268,7 +281,7 @@ describe("Dashboard agents route", () => {
         );
         mountedViews.push(firstView);
 
-        expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+        await expectAgentShellReady();
         expect(transport.configurationQueryCount).toBe(1);
         expect(transport.statusQueryCount).toBe(1);
         firstView.unmount();
@@ -296,7 +309,7 @@ describe("Dashboard agents route", () => {
             )
         );
 
-        expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+        await expectAgentShellReady();
         await waitFor(() => {
             expect(transport.configurationQueryCount).toBe(2);
             expect(transport.statusQueryCount).toBe(2);
@@ -330,7 +343,7 @@ describe("Dashboard agents route", () => {
         const user = userEvent.setup();
         const statusRefresh = Promise.withResolvers<unknown>();
 
-        expect(await screen.findByRole("heading", { name: "Mira" })).toBeTruthy();
+        await expectAgentShellReady();
         transport.statusQueryResponse = statusRefresh.promise;
         await user.click(screen.getByRole("button", { name: "Refresh" }));
         expect(await screen.findByText("Refreshing…")).toBeTruthy();
