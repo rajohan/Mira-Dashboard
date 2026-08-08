@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import type { Effect } from "effect";
 import * as v from "valibot";
 
 import {
@@ -24,12 +24,39 @@ import { utf8ByteLength } from "../../../shared/encoding.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import { boundedControlSafeTextSchema } from "../../../shared/validation.ts";
 
-export type JobManualExposure = "jobs-write" | "none";
+export type JobInitialDuePolicy = "immediate" | "next-occurrence";
+export type JobManualExposure = "cache-write" | "jobs-write" | "none";
 export type JobActionEventWriteResult = "appended" | "dropped" | "truncated";
+export type JobCacheAttemptWriteResult = "committed" | "lost-claim";
+
+export type JobCacheAttemptCommit =
+    | {
+          readonly durationMs: number;
+          readonly failureCode: string;
+          readonly failureMessage: string;
+          readonly key: string;
+          readonly kind: "failed";
+      }
+    | {
+          readonly durationMs: number;
+          readonly entries: readonly {
+              readonly key: string;
+              readonly metadata: JsonObject;
+              readonly payload: JsonObject;
+              readonly schemaId: string;
+              readonly source: string;
+              readonly ttlMs: number;
+          }[];
+          readonly kind: "succeeded";
+      };
 
 const jobManualExposureSchema = v.picklist(
-    ["jobs-write", "none"],
+    ["cache-write", "jobs-write", "none"],
     "Job manual exposure is invalid"
+);
+const jobInitialDuePolicySchema = v.picklist(
+    ["immediate", "next-occurrence"],
+    "Job initial due policy is invalid"
 );
 
 /** Explicit action-owned classification for failures safe to retry from scratch. */
@@ -50,6 +77,9 @@ const jobActionOutputMessageSchema = v.pipe(
 
 /** Safe execution context supplied by the worker without host or shell authority. */
 export interface JobActionExecutionContext {
+    readonly commitCacheAttempt: (
+        attempt: JobCacheAttemptCommit
+    ) => Promise<JobCacheAttemptWriteResult>;
     readonly databaseReleaseId: string;
     readonly nowMs: () => number;
     readonly reportProgress: (
@@ -63,7 +93,7 @@ export interface JobActionExecutionContext {
 }
 
 /** Code-owned action metadata reconciled into schedules and captured into each run. */
-export interface JobActionRegistration {
+export interface JobActionDefinition {
     readonly actionKey: string;
     readonly actionPayload: JsonObject;
     readonly attemptLimit: number;
@@ -72,10 +102,7 @@ export interface JobActionRegistration {
     readonly defaultSchedule: ScheduleConfiguration;
     readonly description: string;
     readonly displayName: string;
-    readonly execute: (
-        context: JobActionExecutionContext,
-        payload: JsonObject
-    ) => Effect.Effect<JobRunResult, unknown>;
+    readonly initialDue: JobInitialDuePolicy;
     readonly manualExposure: JobManualExposure;
     readonly priority: number;
     readonly resourceClass: JobResourceClass;
@@ -85,64 +112,66 @@ export interface JobActionRegistration {
     readonly timeoutMs: number;
 }
 
-const emptyPayloadSchema = v.strictObject({});
-const smokeResultSchema = v.strictObject({
-    checkedAtMs: v.pipe(
-        v.number("Worker smoke timestamp is invalid"),
-        v.safeInteger("Worker smoke timestamp is invalid"),
-        v.minValue(0, "Worker smoke timestamp is invalid")
-    ),
-    databaseReleaseId: v.pipe(
-        v.string("Worker smoke release is invalid"),
-        v.length(40, "Worker smoke release is invalid"),
-        v.regex(/^[0-9a-f]{40}$/u, "Worker smoke release is invalid")
-    ),
-    status: v.literal("ok"),
-    workerInstanceId: v.pipe(
-        v.string("Worker smoke identity is invalid"),
-        v.uuid("Worker smoke identity is invalid")
-    ),
-});
+/** Worker-owned authority for one exact action definition. */
+export type JobActionExecutor = (
+    context: JobActionExecutionContext,
+    payload: JsonObject
+) => Effect.Effect<JobRunResult, unknown>;
+
+/** Combined definition and executor accepted only at the worker composition boundary. */
+export interface JobActionRegistration extends JobActionDefinition {
+    readonly execute: JobActionExecutor;
+}
 
 /**
  * Validates one code-owned action and retains canonical schedule output.
  * @param registration Candidate release-owned action metadata.
  * @returns A frozen registration safe for reconciliation and execution.
  */
-export function validateJobActionRegistration(
-    registration: JobActionRegistration
-): JobActionRegistration {
-    v.parse(jobActionKeySchema, registration.actionKey);
-    const actionPayload = v.parse(jobPayloadSchema, registration.actionPayload);
-    v.parse(jobAttemptLimitSchema, registration.attemptLimit);
-    v.parse(jobCancellationPolicySchema, registration.cancellationPolicy);
-    v.parse(
-        v.boolean("Job default-enabled flag is invalid"),
-        registration.defaultEnabled
-    );
+export function validateJobActionDefinition(
+    definition: JobActionDefinition
+): JobActionDefinition {
+    v.parse(jobActionKeySchema, definition.actionKey);
+    const actionPayload = v.parse(jobPayloadSchema, definition.actionPayload);
+    v.parse(jobAttemptLimitSchema, definition.attemptLimit);
+    v.parse(jobCancellationPolicySchema, definition.cancellationPolicy);
+    v.parse(v.boolean("Job default-enabled flag is invalid"), definition.defaultEnabled);
     const defaultSchedule = v.parse(
         scheduleConfigurationSchema,
-        registration.defaultSchedule
+        definition.defaultSchedule
     );
-    v.parse(jobDescriptionSchema, registration.description);
-    v.parse(jobDisplayNameSchema, registration.displayName);
-    v.parse(jobPrioritySchema, registration.priority);
-    v.parse(jobResourceClassSchema, registration.resourceClass);
-    const resourceKeys = v.parse(jobResourceKeysSchema, registration.resourceKeys);
-    v.parse(jobManualExposureSchema, registration.manualExposure);
-    v.parse(v.boolean("Job retry-safe flag is invalid"), registration.retrySafe);
-    v.parse(scheduleIdSchema, registration.scheduleId);
-    v.parse(jobTimeoutSchema, registration.timeoutMs);
-    v.parse(v.function("Job action executor is invalid"), registration.execute);
+    v.parse(jobDescriptionSchema, definition.description);
+    v.parse(jobDisplayNameSchema, definition.displayName);
+    v.parse(jobInitialDuePolicySchema, definition.initialDue);
+    v.parse(jobPrioritySchema, definition.priority);
+    v.parse(jobResourceClassSchema, definition.resourceClass);
+    const resourceKeys = v.parse(jobResourceKeysSchema, definition.resourceKeys);
+    v.parse(jobManualExposureSchema, definition.manualExposure);
+    v.parse(v.boolean("Job retry-safe flag is invalid"), definition.retrySafe);
+    v.parse(scheduleIdSchema, definition.scheduleId);
+    v.parse(jobTimeoutSchema, definition.timeoutMs);
     return Object.freeze({
-        ...registration,
+        ...definition,
         actionPayload: Object.freeze({ ...actionPayload }),
         defaultSchedule: Object.freeze({ ...defaultSchedule }),
         resourceKeys: Object.freeze([...resourceKeys]),
     });
 }
 
-const workerSmokeRegistration = validateJobActionRegistration({
+/**
+ * Validates a worker-only combined registration without publishing it to web code.
+ * @param registration Candidate action definition and worker executor.
+ * @returns A frozen, validated worker action registration.
+ */
+export function validateJobActionRegistration(
+    registration: JobActionRegistration
+): JobActionRegistration {
+    const definition = validateJobActionDefinition(registration);
+    v.parse(v.function("Job action executor is invalid"), registration.execute);
+    return Object.freeze({ ...definition, execute: registration.execute });
+}
+
+const workerSmokeDefinition = validateJobActionDefinition({
     actionKey: "system.worker-smoke",
     actionPayload: Object.freeze({}),
     attemptLimit: 3,
@@ -155,16 +184,7 @@ const workerSmokeRegistration = validateJobActionRegistration({
     description:
         "Verifies the release, database, and durable worker without host mutation.",
     displayName: "Worker smoke",
-    execute: (context, payload) =>
-        Effect.sync(() => {
-            v.parse(emptyPayloadSchema, payload);
-            return v.parse(smokeResultSchema, {
-                checkedAtMs: context.nowMs(),
-                databaseReleaseId: context.databaseReleaseId,
-                status: "ok",
-                workerInstanceId: context.workerInstanceId,
-            });
-        }),
+    initialDue: "next-occurrence",
     manualExposure: "jobs-write",
     priority: 0,
     resourceClass: "light",
@@ -174,20 +194,45 @@ const workerSmokeRegistration = validateJobActionRegistration({
     timeoutMs: 30_000,
 });
 
-/** Complete reviewed action registry for this slice. */
-export const jobActionRegistrations = Object.freeze([workerSmokeRegistration]);
+const systemHostCacheDefinition = validateJobActionDefinition({
+    actionKey: "cache.refresh.system-host",
+    actionPayload: Object.freeze({ key: "system.host" }),
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: 86_400_000,
+        kind: "interval",
+    }),
+    description: "Projects bounded host, memory, and root-filesystem status.",
+    displayName: "System host cache",
+    initialDue: "immediate",
+    manualExposure: "cache-write",
+    priority: 0,
+    resourceClass: "light",
+    resourceKeys: Object.freeze(["cache.system.host"]),
+    retrySafe: true,
+    scheduleId: "cache.system-host",
+    timeoutMs: 30_000,
+});
 
-const registrationByKey = new Map(
-    jobActionRegistrations.map((registration) => [registration.actionKey, registration])
+/** Complete reviewed pure-definition registry for this slice. */
+export const jobActionDefinitions = Object.freeze([
+    systemHostCacheDefinition,
+    workerSmokeDefinition,
+]);
+
+const definitionByKey = new Map(
+    jobActionDefinitions.map((definition) => [definition.actionKey, definition])
 );
-if (registrationByKey.size !== jobActionRegistrations.length) {
-    throw new Error("Job action registry contains duplicate action keys");
+if (definitionByKey.size !== jobActionDefinitions.length) {
+    throw new Error("Job action definition registry contains duplicate action keys");
 }
-const registrationByScheduleId = new Map(
-    jobActionRegistrations.map((registration) => [registration.scheduleId, registration])
+const definitionByScheduleId = new Map(
+    jobActionDefinitions.map((definition) => [definition.scheduleId, definition])
 );
-if (registrationByScheduleId.size !== jobActionRegistrations.length) {
-    throw new Error("Job action registry contains duplicate schedule IDs");
+if (definitionByScheduleId.size !== jobActionDefinitions.length) {
+    throw new Error("Job action definition registry contains duplicate schedule IDs");
 }
 
 /**
@@ -195,10 +240,10 @@ if (registrationByScheduleId.size !== jobActionRegistrations.length) {
  * @param actionKey Durable action identity.
  * @returns The action registration, when this release implements it.
  */
-export function findJobActionRegistration(
+export function findJobActionDefinition(
     actionKey: string
-): JobActionRegistration | undefined {
-    return registrationByKey.get(actionKey);
+): JobActionDefinition | undefined {
+    return definitionByKey.get(actionKey);
 }
 
 /**
@@ -208,7 +253,7 @@ export function findJobActionRegistration(
  * @returns Whether this release owns the exact schedule/action pair.
  */
 export function isRegisteredJobSchedule(scheduleId: string, actionKey: string): boolean {
-    return registrationByScheduleId.get(scheduleId)?.actionKey === actionKey;
+    return definitionByScheduleId.get(scheduleId)?.actionKey === actionKey;
 }
 
 /**

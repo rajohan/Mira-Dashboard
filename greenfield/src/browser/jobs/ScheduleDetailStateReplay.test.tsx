@@ -12,6 +12,14 @@ const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
 describe("schedule detail interaction state", () => {
+    test("hides jobs manual execution for cache-only actions", () => {
+        renderScheduleDetail({
+            schedule: { ...enabledSchedule(), manualRunAvailable: false },
+        });
+
+        expect(screen.queryByRole("button", { name: "Run now" })).not.toBeInTheDocument();
+    });
+
     test("allows an explicit idempotent retry while the refreshed schedule has an active run", async () => {
         const onRun = jest.fn(async () => {});
         renderScheduleDetail({

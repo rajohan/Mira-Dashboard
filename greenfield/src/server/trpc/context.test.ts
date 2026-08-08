@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createTestAgentService } from "../domains/agents/testSupport/service.ts";
+import { createTestCacheService } from "../domains/cache/testSupport/service.ts";
 import { createTestJobService } from "../domains/jobs/testSupport/service.ts";
 import {
     createTestMonitoringCatalogService,
@@ -37,6 +38,7 @@ describe("tRPC request context", () => {
         const monitoringCatalogService = createTestMonitoringCatalogService();
         const monitoringService = createTestMonitoringService();
         const jobService = createTestJobService();
+        const cacheService = createTestCacheService();
         const responseHeaders = new Headers();
 
         const context = await createRequestContext({
@@ -65,6 +67,7 @@ describe("tRPC request context", () => {
                     },
                 };
             },
+            cacheService,
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
             jobService,
@@ -98,6 +101,7 @@ describe("tRPC request context", () => {
         expect(context.monitoringCatalogService).toBe(monitoringCatalogService);
         expect(context.monitoringService).toBe(monitoringService);
         expect(context.jobService).toBe(jobService);
+        expect(context.cacheService).toBe(cacheService);
         expect(context.authenticationClientSourceId).toBe("client-source-1");
         expect(context.pendingLoginCredential).toEqual({
             kind: "present",
@@ -129,6 +133,7 @@ describe("tRPC request context", () => {
             authenticationLifecycle: createTestAuthenticationLifecycleService(),
             automationSecurityLifecycle: createTestAutomationSecurityLifecycleService(),
             authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
+            cacheService: createTestCacheService(),
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
             jobService: createTestJobService(),
@@ -171,6 +176,7 @@ describe("tRPC request context", () => {
                         },
                     },
                 }),
+                cacheService: createTestCacheService(),
                 mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
                 mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
                 jobService: createTestJobService(),

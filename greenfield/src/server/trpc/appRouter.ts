@@ -1,4 +1,5 @@
 import { agentProcedureNames, agentRouter } from "../domains/agents/procedures.ts";
+import { cacheProcedureNames, cacheRouter } from "../domains/cache/procedures.ts";
 import {
     jobProcedureNames,
     jobRouter,
@@ -46,6 +47,7 @@ export const appRouter = router({
     accountSecurity: accountSecurityRouter,
     auth: authRouter,
     automationSecurity: automationSecurityRouter,
+    cache: cacheRouter,
     events: eventsRouter,
     incidents: incidentRouter,
     jobs: jobRouter,
@@ -64,6 +66,7 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("accountSecurity", accountSecurityProcedureNames),
     ...namespacedProcedureNames("auth", authProcedureNames),
     ...namespacedProcedureNames("automationSecurity", automationSecurityProcedureNames),
+    ...namespacedProcedureNames("cache", cacheProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
     ...namespacedProcedureNames("incidents", incidentProcedureNames),
     ...namespacedProcedureNames("jobs", jobProcedureNames),

@@ -422,6 +422,11 @@ export interface JobRepositoryReader {
     findActiveRunForSchedule(scheduleId: string): JobRunRecord | undefined;
     findLatestRunForSchedule(scheduleId: string): JobRunRecord | undefined;
     findRun(id: string): JobRunRecord | undefined;
+    findRunByIdempotency(
+        requestedByKind: JobRunRecord["requestedByKind"],
+        requestedById: string,
+        idempotencyKey: string
+    ): JobRunRecord | undefined;
     findRunDetail(input: ListJobRunEventsInput): JobRunDetailRecord | undefined;
     findSchedule(id: string): ScheduleRecordWithRelations | undefined;
     listDueSchedules(input: ListDueSchedulesInput): ScheduledJobRecord[];
@@ -701,6 +706,25 @@ class DrizzleJobReader implements JobRepositoryReader {
 
     public findRun(id: string): JobRunRecord | undefined {
         const row = this.database.select().from(jobRuns).where(eq(jobRuns.id, id)).get();
+        return row === undefined ? undefined : parseRun(row);
+    }
+
+    public findRunByIdempotency(
+        requestedByKind: JobRunRecord["requestedByKind"],
+        requestedById: string,
+        idempotencyKey: string
+    ): JobRunRecord | undefined {
+        const row = this.database
+            .select()
+            .from(jobRuns)
+            .where(
+                and(
+                    eq(jobRuns.requestedByKind, requestedByKind),
+                    eq(jobRuns.requestedById, requestedById),
+                    eq(jobRuns.idempotencyKey, idempotencyKey)
+                )
+            )
+            .get();
         return row === undefined ? undefined : parseRun(row);
     }
 
@@ -1157,7 +1181,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
         if (input.queuedEvent.jobRunId !== run.id) {
             throw new Error("Queued event does not belong to the inserted manual run");
         }
-        const existing = this.#findRunByIdempotency(
+        const existing = this.findRunByIdempotency(
             run.requestedByKind,
             run.requestedById,
             run.idempotencyKey
@@ -1305,7 +1329,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
         input: DueScheduleEnqueueInput
     ): DueScheduleEnqueueResult {
         const validatedRun = v.parse(jobRunInsertSchema, input.run);
-        const replay = this.#findRunByIdempotency(
+        const replay = this.findRunByIdempotency(
             validatedRun.requestedByKind,
             validatedRun.requestedById,
             validatedRun.idempotencyKey
@@ -2245,25 +2269,6 @@ class DrizzleJobWriter extends DrizzleJobReader {
         return row === undefined ? undefined : parseRun(row);
     }
 
-    #findRunByIdempotency(
-        requestedByKind: JobRunRecord["requestedByKind"],
-        requestedById: string,
-        idempotencyKey: string
-    ): JobRunRecord | undefined {
-        const row = this.#transaction
-            .select()
-            .from(jobRuns)
-            .where(
-                and(
-                    eq(jobRuns.requestedByKind, requestedByKind),
-                    eq(jobRuns.requestedById, requestedById),
-                    eq(jobRuns.idempotencyKey, idempotencyKey)
-                )
-            )
-            .get();
-        return row === undefined ? undefined : parseRun(row);
-    }
-
     #findQueuedScheduleRun(scheduleId: string): JobRunRecord | undefined {
         const row = this.#transaction
             .select()
@@ -2495,6 +2500,18 @@ export function createJobRepository(
         findLatestRunForSchedule: (scheduleId: string) =>
             read((reader) => reader.findLatestRunForSchedule(scheduleId)),
         findRun: (id: string) => read((reader) => reader.findRun(id)),
+        findRunByIdempotency: (
+            requestedByKind: JobRunRecord["requestedByKind"],
+            requestedById: string,
+            idempotencyKey: string
+        ) =>
+            read((reader) =>
+                reader.findRunByIdempotency(
+                    requestedByKind,
+                    requestedById,
+                    idempotencyKey
+                )
+            ),
         findRunDetail: (input: ListJobRunEventsInput) =>
             read((reader) => reader.findRunDetail(input)),
         findSchedule: (id: string) => read((reader) => reader.findSchedule(id)),

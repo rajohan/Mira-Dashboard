@@ -5,6 +5,7 @@
 | Topic | Payload | Snapshot | Retention | Summary |
 | --- | --- | --- | --- | --- |
 | `agents.status` | [payload](./schemas/agents.status.realtime.payload.schema.json) | `agents.listStatuses` | 7 days | Invalidates one agent status row after a durable metadata change. |
+| `cache.entries` | [payload](./schemas/cache.entries.realtime.payload.schema.json) | `cache.getStatus` | 7 days | Invalidates one cache projection after a claim-fenced refresh attempt. |
 | `jobs.runs` | [payload](./schemas/jobs.runs.realtime.payload.schema.json) | `jobs.listRuns` | 7 days | Invalidates durable run rows and exact queue state. |
 | `monitoring.incidents` | [payload](./schemas/monitoring.incidents.realtime.payload.schema.json) | `incidents.list` | 7 days | Invalidates incident lifecycle rows after a complete monitor snapshot. |
 | `monitoring.notifications` | [payload](./schemas/monitoring.notifications.realtime.payload.schema.json) | `notifications.list` | 7 days | Invalidates Dashboard notifications after catalog changes. |

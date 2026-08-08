@@ -1,5 +1,6 @@
 import type { RequestAuthentication } from "../../contracts/security.ts";
 import type { AgentService } from "../domains/agents/service.ts";
+import type { CacheService } from "../domains/cache/service.ts";
 import type { JobService } from "../domains/jobs/service.ts";
 import type { MonitoringCatalogService } from "../domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../domains/monitoring/service.ts";
@@ -34,6 +35,7 @@ export interface RequestContextOptions {
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticateCredential: AuthenticateCredential;
+    readonly cacheService: CacheService["Service"];
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
@@ -55,6 +57,7 @@ export interface RequestContext {
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticationLease?: AuthenticationLease;
+    readonly cacheService: CacheService["Service"];
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
@@ -87,6 +90,7 @@ export async function createRequestContext(
         authenticationClientSourceId: options.authenticationClientSourceId,
         authenticationLifecycle: options.authenticationLifecycle,
         automationSecurityLifecycle: options.automationSecurityLifecycle,
+        cacheService: options.cacheService,
         mfaAccountLifecycle: options.mfaAccountLifecycle,
         mfaLoginLifecycle: options.mfaLoginLifecycle,
         jobService: options.jobService,

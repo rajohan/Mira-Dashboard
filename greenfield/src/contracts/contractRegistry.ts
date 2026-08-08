@@ -3,6 +3,8 @@ import { agentRealtimeEventContract } from "./agentRealtime.ts";
 import { agentProcedureContracts } from "./agents.ts";
 import { authProcedureContracts } from "./auth.ts";
 import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
+import { cacheProcedureContracts } from "./cache.ts";
+import { cacheRealtimeEventContract } from "./cacheRealtime.ts";
 import { eventsStreamContract } from "./events.ts";
 import { incidentProcedureContracts } from "./incidents.ts";
 import { jobRealtimeEventContracts } from "./jobRealtime.ts";
@@ -29,6 +31,7 @@ const registeredProcedureContracts = [
     ...agentProcedureContracts,
     ...authProcedureContracts,
     ...automationSecurityProcedureContracts,
+    ...cacheProcedureContracts,
     eventsStreamContract,
     ...incidentProcedureContracts,
     ...jobProcedureContracts,
@@ -79,6 +82,7 @@ export const rawHttpContracts: readonly RawHttpContract[] = [...systemRawHttpCon
 /** Implemented realtime topics used by runtime wiring and docs. */
 export const realtimeEventContracts: readonly RealtimeEventContract[] = Object.freeze([
     agentRealtimeEventContract,
+    cacheRealtimeEventContract,
     ...jobRealtimeEventContracts,
     ...monitoringRealtimeEventContracts,
     taskRealtimeEventContract,

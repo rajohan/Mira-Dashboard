@@ -1,0 +1,135 @@
+{
+  "$id": "urn:mira-dashboard:cache.getEntry.output",
+  "type": "object",
+  "properties": {
+    "consecutiveFailures": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "failureCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._/-]*$"
+    },
+    "failureMessage": {
+      "type": "string",
+      "maxLength": 2000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+        }
+      ]
+    },
+    "lastAttemptAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "lastAttemptDurationMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "lastAttemptNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "lastAttemptRunId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "lastAttemptStatus": {
+      "enum": [
+        "failed",
+        "succeeded"
+      ],
+      "type": "string"
+    },
+    "updatedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "freshness": {
+      "enum": [
+        "fresh",
+        "missing",
+        "stale"
+      ],
+      "type": "string"
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "manualRunAvailable": {
+      "type": "boolean"
+    },
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "lastSuccessAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "metadata": {
+      "type": "object",
+      "$comment": "Live Valibot validation additionally requires an acyclic plain JSON object with bounded depth, finite safe-magnitude numbers, and no sparse arrays. Live Valibot validation additionally limits serialized cache metadata to its reviewed UTF-8 byte budget."
+    },
+    "schemaId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+        }
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "$comment": "Live Valibot validation additionally requires an acyclic plain JSON object with bounded depth, finite safe-magnitude numbers, and no sparse arrays. Live Valibot validation additionally limits the serialized cache payload to its reviewed UTF-8 byte budget."
+    }
+  },
+  "required": [
+    "consecutiveFailures",
+    "lastAttemptAtMs",
+    "lastAttemptDurationMs",
+    "lastAttemptNumber",
+    "lastAttemptRunId",
+    "lastAttemptStatus",
+    "updatedAtMs",
+    "freshness",
+    "key",
+    "manualRunAvailable"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires cache projection, attempt, failure, and freshness fields to agree.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

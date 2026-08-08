@@ -139,7 +139,7 @@ CREATE TABLE `automation_principal_capabilities` (
 	`principal_id` text NOT NULL,
 	CONSTRAINT `automation_principal_capabilities_pk` PRIMARY KEY(`principal_id`, `capability`),
 	CONSTRAINT `fk_automation_principal_capabilities_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'jobs:read', 'jobs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')),
+	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'jobs:read', 'jobs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')),
 	CONSTRAINT "automation_principal_capabilities_granted_at_check" CHECK("granted_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
@@ -155,6 +155,41 @@ CREATE TABLE `automation_principals` (
 	CONSTRAINT "automation_principals_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "label" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
 	CONSTRAINT "automation_principals_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at" AND ("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")))
 ) STRICT;
+--> statement-breakpoint
+CREATE TABLE `cache_entries` (
+	`consecutive_failures` integer DEFAULT 0 NOT NULL,
+	`expires_at` integer,
+	`failure_code` text,
+	`failure_message` text,
+	`key` text PRIMARY KEY NOT NULL,
+	`last_attempt_at` integer NOT NULL,
+	`last_attempt_duration_ms` integer NOT NULL,
+	`last_attempt_number` integer NOT NULL,
+	`last_attempt_run_id` text NOT NULL,
+	`last_attempt_status` text NOT NULL,
+	`last_success_at` integer,
+	`metadata_json` text,
+	`payload_json` text,
+	`schema_id` text,
+	`source` text,
+	`updated_at` integer NOT NULL,
+	CONSTRAINT `fk_cache_entries_last_attempt_run_id_job_runs_id_fk` FOREIGN KEY (`last_attempt_run_id`) REFERENCES `job_runs`(`id`) ON UPDATE RESTRICT ON DELETE RESTRICT,
+	CONSTRAINT "cache_entries_attempt_number_check" CHECK("last_attempt_number" BETWEEN 1 AND 10),
+	CONSTRAINT "cache_entries_attempt_run_id_check" CHECK(length("last_attempt_run_id") = 36 AND instr("last_attempt_run_id", char(0)) = 0 AND length(replace("last_attempt_run_id", '-', '')) = 32 AND replace("last_attempt_run_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("last_attempt_run_id", 9, 1) = '-' AND substr("last_attempt_run_id", 14, 1) = '-' AND substr("last_attempt_run_id", 15, 1) = '7' AND substr("last_attempt_run_id", 19, 1) = '-' AND substr("last_attempt_run_id", 20, 1) GLOB '[89ab]' AND substr("last_attempt_run_id", 24, 1) = '-'),
+	CONSTRAINT "cache_entries_attempt_status_check" CHECK("last_attempt_status" IN ('failed', 'succeeded')),
+	CONSTRAINT "cache_entries_duration_check" CHECK("last_attempt_duration_ms" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "cache_entries_failure_code_check" CHECK(("failure_code" IS NULL OR (length("failure_code") BETWEEN 1 AND 128 AND instr("failure_code", char(0)) = 0 AND "failure_code" = lower("failure_code") AND substr("failure_code", 1, 1) GLOB '[a-z0-9]' AND "failure_code" NOT GLOB '*[^a-z0-9._/-]*'))),
+	CONSTRAINT "cache_entries_failure_message_check" CHECK(("failure_message" IS NULL OR (length("failure_message") BETWEEN 1 AND 2000 AND instr("failure_message", char(0)) = 0 AND length(trim("failure_message", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "failure_message" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST("failure_message" AS BLOB)) <= 8000))),
+	CONSTRAINT "cache_entries_failure_state_check" CHECK(("last_attempt_status" = 'succeeded' AND "consecutive_failures" = 0 AND "failure_code" IS NULL AND "failure_message" IS NULL) OR ("last_attempt_status" = 'failed' AND "consecutive_failures" BETWEEN 1 AND 9007199254740991 AND "failure_code" IS NOT NULL AND "failure_message" IS NOT NULL)),
+	CONSTRAINT "cache_entries_key_check" CHECK(length("key") BETWEEN 1 AND 128 AND instr("key", char(0)) = 0 AND "key" = lower("key") AND substr("key", 1, 1) GLOB '[a-z0-9]' AND "key" NOT GLOB '*[^a-z0-9._-]*'),
+	CONSTRAINT "cache_entries_metadata_json_check" CHECK("metadata_json" IS NULL OR (length(CAST("metadata_json" AS BLOB)) <= 16384 AND CASE WHEN json_valid("metadata_json") THEN json_type("metadata_json") = 'object' ELSE 0 END)),
+	CONSTRAINT "cache_entries_payload_json_check" CHECK("payload_json" IS NULL OR (length(CAST("payload_json" AS BLOB)) <= 262144 AND CASE WHEN json_valid("payload_json") THEN json_type("payload_json") = 'object' ELSE 0 END)),
+	CONSTRAINT "cache_entries_projection_check" CHECK(("payload_json" IS NULL AND "metadata_json" IS NULL AND "source" IS NULL AND "schema_id" IS NULL AND "last_success_at" IS NULL AND "expires_at" IS NULL) OR ("payload_json" IS NOT NULL AND "metadata_json" IS NOT NULL AND "source" IS NOT NULL AND "schema_id" IS NOT NULL AND "last_success_at" IS NOT NULL AND "expires_at" IS NOT NULL)),
+	CONSTRAINT "cache_entries_schema_id_check" CHECK("schema_id" IS NULL OR (length("schema_id") BETWEEN 1 AND 128 AND instr("schema_id", char(0)) = 0 AND "schema_id" = lower("schema_id") AND substr("schema_id", 1, 1) GLOB '[a-z0-9]' AND "schema_id" NOT GLOB '*[^a-z0-9._-]*')),
+	CONSTRAINT "cache_entries_source_check" CHECK("source" IS NULL OR (length("source") BETWEEN 1 AND 128 AND instr("source", char(0)) = 0 AND length(trim("source", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "source" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST("source" AS BLOB)) <= 512)),
+	CONSTRAINT "cache_entries_success_state_check" CHECK("last_attempt_status" <> 'succeeded' OR ("payload_json" IS NOT NULL AND "last_success_at" = "last_attempt_at")),
+	CONSTRAINT "cache_entries_time_check" CHECK("last_attempt_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "last_attempt_at" AND ("last_success_at" IS NULL OR ("last_success_at" BETWEEN 0 AND 8640000000000000 AND "last_success_at" <= "last_attempt_at")) AND ("expires_at" IS NULL OR ("expires_at" BETWEEN 0 AND 8640000000000000 AND "last_success_at" IS NOT NULL AND "expires_at" > "last_success_at")))
+) STRICT, WITHOUT ROWID;
 --> statement-breakpoint
 CREATE TABLE `incident_observations` (
 	`details_json` text DEFAULT '{}' NOT NULL,
@@ -378,6 +413,7 @@ CREATE UNIQUE INDEX `automation_credentials_prefix_unique` ON `automation_creden
 CREATE UNIQUE INDEX `automation_credentials_validator_unique` ON `automation_credentials` (`validator_version`,`validator_hash`);--> statement-breakpoint
 CREATE INDEX `automation_principals_created_id_idx` ON `automation_principals` (`created_at`,`id`);--> statement-breakpoint
 CREATE INDEX `automation_principals_active_created_id_idx` ON `automation_principals` (`created_at`,`id`) WHERE "automation_principals"."disabled_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `cache_entries_status_expires_key_idx` ON `cache_entries` (`last_attempt_status`,`expires_at`,`key`);--> statement-breakpoint
 CREATE TABLE `task_automation_profiles` (
 	`cron_job_id` text NOT NULL,
 	`kind` text NOT NULL,

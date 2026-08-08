@@ -261,19 +261,21 @@ export function ScheduleDetail({
                     <Text className="mt-3 wrap-anywhere">{schedule.description}</Text>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <Button
-                        busy={runBusy}
-                        busyLabel="Enqueuing…"
-                        disabled={
-                            updateBusy ||
-                            (schedule.activeRun !== undefined && !runReplayAvailable)
-                        }
-                        onClick={() => void onRun().catch(() => {})}
-                        size="sm"
-                    >
-                        <Icon icon={Play} size="sm" tone="inherit" />
-                        {runReplayAvailable ? "Retry run request" : "Run now"}
-                    </Button>
+                    {schedule.manualRunAvailable ? (
+                        <Button
+                            busy={runBusy}
+                            busyLabel="Enqueuing…"
+                            disabled={
+                                updateBusy ||
+                                (schedule.activeRun !== undefined && !runReplayAvailable)
+                            }
+                            onClick={() => void onRun().catch(() => {})}
+                            size="sm"
+                        >
+                            <Icon icon={Play} size="sm" tone="inherit" />
+                            {runReplayAvailable ? "Retry run request" : "Run now"}
+                        </Button>
+                    ) : null}
                     {schedule.enabled ? (
                         <Button
                             disabled={actionsBusy}

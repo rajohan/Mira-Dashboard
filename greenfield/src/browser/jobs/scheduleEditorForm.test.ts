@@ -42,6 +42,7 @@ function schedule(configuration: ScheduleSummary["schedule"]): ScheduleSummary {
             triggerType: "manual",
             updatedAtMs: 2000,
         },
+        manualRunAvailable: true,
         name: "Worker smoke",
         nextRunAtMs: 120_000,
         priority: 0,

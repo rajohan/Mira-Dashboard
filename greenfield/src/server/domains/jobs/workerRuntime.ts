@@ -8,6 +8,9 @@ import {
     DatabaseRuntimeService,
     type DatabaseRuntimeLayerOptions,
 } from "../../database/runtime/databaseService.ts";
+import { createCacheRepository, type CacheRepository } from "../cache/repository.ts";
+import { findJobWorkerAction } from "./actionExecutors.ts";
+import { jobActionDefinitions } from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
     type JobWorkerCoordinator,
@@ -39,6 +42,10 @@ interface WorkerDatabaseRuntime {
 }
 
 export interface DashboardWorkerRuntimeDependencies {
+    readonly createCacheRepository: (
+        database: SQLiteBunDatabase,
+        writeAdmission: ImmediateDatabaseWriteAdmission
+    ) => CacheRepository;
     readonly createCoordinator: typeof createJobWorkerCoordinator;
     readonly createDatabaseRuntime: (
         options: DatabaseRuntimeLayerOptions
@@ -80,6 +87,7 @@ function createWorkerDatabaseRuntime(
 }
 
 const defaultDependencies: DashboardWorkerRuntimeDependencies = Object.freeze({
+    createCacheRepository,
     createCoordinator: createJobWorkerCoordinator,
     createDatabaseRuntime: createWorkerDatabaseRuntime,
     createRepository: createJobRepository,
@@ -220,8 +228,15 @@ export function createDashboardWorkerRuntime(
                 database.database,
                 database.writeAdmission
             );
+            const cacheRepository = dependencies.createCacheRepository(
+                database.database,
+                database.writeAdmission
+            );
             coordinator = dependencies.createCoordinator({
+                actionDefinitions: jobActionDefinitions,
+                commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
                 databaseReleaseId: options.releaseId,
+                findAction: findJobWorkerAction,
                 pid: options.pid,
                 repository,
                 sideEffects: options.sideEffects,

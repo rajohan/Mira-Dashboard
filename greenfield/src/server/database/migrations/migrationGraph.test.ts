@@ -39,6 +39,7 @@ const expectedTables: string[] = [
     "automation_credentials",
     "automation_principal_capabilities",
     "automation_principals",
+    "cache_entries",
     "incident_observations",
     "incidents",
     "job_disable_intents",
@@ -195,6 +196,7 @@ describe("database migration graph", () => {
                     ?.wr
             ).toBe(1);
             for (const tableName of [
+                "cache_entries",
                 "job_disable_intents",
                 "job_run_events",
                 "job_runs",

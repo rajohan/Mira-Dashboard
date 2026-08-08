@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "21335169-a9af-4cae-a2c4-732aa16d7b80",
+  "id": "d65c13c5-1ce8-4595-9328-52c607378fa0",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -40,6 +40,10 @@
     },
     {
       "name": "automation_principals",
+      "entityType": "tables"
+    },
+    {
+      "name": "cache_entries",
       "entityType": "tables"
     },
     {
@@ -957,6 +961,166 @@
       "name": "id",
       "entityType": "columns",
       "table": "automation_principals"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "consecutive_failures",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_code",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "failure_message",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "key",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_attempt_at",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_attempt_duration_ms",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_attempt_number",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_attempt_run_id",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_attempt_status",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_success_at",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "metadata_json",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload_json",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "schema_id",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source",
+      "entityType": "columns",
+      "table": "cache_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "cache_entries"
     },
     {
       "type": "text",
@@ -3600,6 +3764,21 @@
     },
     {
       "columns": [
+        "last_attempt_run_id"
+      ],
+      "tableTo": "job_runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_cache_entries_last_attempt_run_id_job_runs_id_fk",
+      "entityType": "fks",
+      "table": "cache_entries"
+    },
+    {
+      "columns": [
         "incident_id"
       ],
       "tableTo": "incidents",
@@ -3912,6 +4091,15 @@
       "name": "task_labels_pk",
       "entityType": "pks",
       "table": "task_labels"
+    },
+    {
+      "columns": [
+        "key"
+      ],
+      "nameExplicit": false,
+      "name": "cache_entries_pk",
+      "table": "cache_entries",
+      "entityType": "pks"
     },
     {
       "columns": [
@@ -4640,6 +4828,28 @@
       "name": "automation_principals_active_created_id_idx",
       "entityType": "indexes",
       "table": "automation_principals"
+    },
+    {
+      "columns": [
+        {
+          "value": "last_attempt_status",
+          "isExpression": false
+        },
+        {
+          "value": "expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "cache_entries_status_expires_key_idx",
+      "entityType": "indexes",
+      "table": "cache_entries"
     },
     {
       "columns": [
@@ -5950,7 +6160,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('agents:read', 'agents:write', 'jobs:read', 'jobs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')",
+      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'jobs:read', 'jobs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"
@@ -5984,6 +6194,96 @@
       "name": "automation_principals_time_check",
       "entityType": "checks",
       "table": "automation_principals"
+    },
+    {
+      "value": "\"last_attempt_number\" BETWEEN 1 AND 10",
+      "name": "cache_entries_attempt_number_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "length(\"last_attempt_run_id\") = 36 AND instr(\"last_attempt_run_id\", char(0)) = 0 AND length(replace(\"last_attempt_run_id\", '-', '')) = 32 AND replace(\"last_attempt_run_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"last_attempt_run_id\", 9, 1) = '-' AND substr(\"last_attempt_run_id\", 14, 1) = '-' AND substr(\"last_attempt_run_id\", 15, 1) = '7' AND substr(\"last_attempt_run_id\", 19, 1) = '-' AND substr(\"last_attempt_run_id\", 20, 1) GLOB '[89ab]' AND substr(\"last_attempt_run_id\", 24, 1) = '-'",
+      "name": "cache_entries_attempt_run_id_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"last_attempt_status\" IN ('failed', 'succeeded')",
+      "name": "cache_entries_attempt_status_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"last_attempt_duration_ms\" BETWEEN 0 AND 9007199254740991",
+      "name": "cache_entries_duration_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "(\"failure_code\" IS NULL OR (length(\"failure_code\") BETWEEN 1 AND 128 AND instr(\"failure_code\", char(0)) = 0 AND \"failure_code\" = lower(\"failure_code\") AND substr(\"failure_code\", 1, 1) GLOB '[a-z0-9]' AND \"failure_code\" NOT GLOB '*[^a-z0-9._/-]*'))",
+      "name": "cache_entries_failure_code_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "(\"failure_message\" IS NULL OR (length(\"failure_message\") BETWEEN 1 AND 2000 AND instr(\"failure_message\", char(0)) = 0 AND length(trim(\"failure_message\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"failure_message\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"failure_message\" AS BLOB)) <= 8000))",
+      "name": "cache_entries_failure_message_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "(\"last_attempt_status\" = 'succeeded' AND \"consecutive_failures\" = 0 AND \"failure_code\" IS NULL AND \"failure_message\" IS NULL) OR (\"last_attempt_status\" = 'failed' AND \"consecutive_failures\" BETWEEN 1 AND 9007199254740991 AND \"failure_code\" IS NOT NULL AND \"failure_message\" IS NOT NULL)",
+      "name": "cache_entries_failure_state_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "length(\"key\") BETWEEN 1 AND 128 AND instr(\"key\", char(0)) = 0 AND \"key\" = lower(\"key\") AND substr(\"key\", 1, 1) GLOB '[a-z0-9]' AND \"key\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "cache_entries_key_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"metadata_json\" IS NULL OR (length(CAST(\"metadata_json\" AS BLOB)) <= 16384 AND CASE WHEN json_valid(\"metadata_json\") THEN json_type(\"metadata_json\") = 'object' ELSE 0 END)",
+      "name": "cache_entries_metadata_json_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"payload_json\" IS NULL OR (length(CAST(\"payload_json\" AS BLOB)) <= 262144 AND CASE WHEN json_valid(\"payload_json\") THEN json_type(\"payload_json\") = 'object' ELSE 0 END)",
+      "name": "cache_entries_payload_json_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "(\"payload_json\" IS NULL AND \"metadata_json\" IS NULL AND \"source\" IS NULL AND \"schema_id\" IS NULL AND \"last_success_at\" IS NULL AND \"expires_at\" IS NULL) OR (\"payload_json\" IS NOT NULL AND \"metadata_json\" IS NOT NULL AND \"source\" IS NOT NULL AND \"schema_id\" IS NOT NULL AND \"last_success_at\" IS NOT NULL AND \"expires_at\" IS NOT NULL)",
+      "name": "cache_entries_projection_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"schema_id\" IS NULL OR (length(\"schema_id\") BETWEEN 1 AND 128 AND instr(\"schema_id\", char(0)) = 0 AND \"schema_id\" = lower(\"schema_id\") AND substr(\"schema_id\", 1, 1) GLOB '[a-z0-9]' AND \"schema_id\" NOT GLOB '*[^a-z0-9._-]*')",
+      "name": "cache_entries_schema_id_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"source\" IS NULL OR (length(\"source\") BETWEEN 1 AND 128 AND instr(\"source\", char(0)) = 0 AND length(trim(\"source\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"source\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"source\" AS BLOB)) <= 512)",
+      "name": "cache_entries_source_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"last_attempt_status\" <> 'succeeded' OR (\"payload_json\" IS NOT NULL AND \"last_success_at\" = \"last_attempt_at\")",
+      "name": "cache_entries_success_state_check",
+      "entityType": "checks",
+      "table": "cache_entries"
+    },
+    {
+      "value": "\"last_attempt_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"last_attempt_at\" AND (\"last_success_at\" IS NULL OR (\"last_success_at\" BETWEEN 0 AND 8640000000000000 AND \"last_success_at\" <= \"last_attempt_at\")) AND (\"expires_at\" IS NULL OR (\"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"last_success_at\" IS NOT NULL AND \"expires_at\" > \"last_success_at\"))",
+      "name": "cache_entries_time_check",
+      "entityType": "checks",
+      "table": "cache_entries"
     },
     {
       "value": "CASE WHEN json_valid(\"details_json\") THEN json_type(\"details_json\") = 'object' ELSE 0 END",

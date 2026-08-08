@@ -72,6 +72,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/agents.ts");
             return module.agentProcedureContracts;
         }
+        case "cache": {
+            const module = await import("../../contracts/cache.ts");
+            return module.cacheProcedureContracts;
+        }
         case "incidents": {
             const module = await import("../../contracts/incidents.ts");
             return module.incidentProcedureContracts;
