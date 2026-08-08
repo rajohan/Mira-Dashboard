@@ -10,12 +10,14 @@ import {
 } from "../../contracts/jobModel.ts";
 import { canonicalScheduleTimeZones } from "../../contracts/scheduleTimeZones.ts";
 import { Button } from "../ui/Button.tsx";
+import { Combobox, type ComboboxOption } from "../ui/Combobox.tsx";
 import { Form } from "../ui/Form.tsx";
 import { firstFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
+import { TimePicker } from "../ui/TimePicker.tsx";
 import {
     scheduleConfigurationFromEditor,
     scheduleEditorFormSchema,
@@ -27,6 +29,10 @@ const scheduleKindOptions: readonly SelectOption<ScheduleKind>[] = Object.freeze
     { description: "Run once per local day.", label: "Daily", value: "daily" },
     { description: "Use a five-field minute cron.", label: "Cron", value: "cron" },
 ]);
+
+const timeZoneOptions = Object.freeze(
+    canonicalScheduleTimeZones.map((timeZone) => ({ label: timeZone, value: timeZone }))
+) satisfies readonly ComboboxOption<string>[];
 
 interface ScheduleEditorProps {
     readonly busy: boolean;
@@ -63,7 +69,6 @@ function scheduleConfigurationsMatch(
 /** @returns A contract-validated editor for one code-owned schedule cadence. */
 export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) {
     const editorFormId = useId();
-    const timeZoneListId = useId();
     const form = useForm({
         defaultValues: scheduleEditorValues(schedule),
         onSubmit: async ({ value }) => {
@@ -92,19 +97,31 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
     return (
         <Form
             aria-label={`Edit ${schedule.name} schedule`}
-            className="grid gap-4 sm:grid-cols-2"
+            className="grid gap-4 sm:grid-cols-2 sm:items-start"
             id={editorFormId}
             onSubmit={submitEditor}
         >
             <form.Field name="kind">
                 {(field) => (
                     <FormField
+                        description={
+                            field.state.value === "cron" ? (
+                                <span
+                                    aria-hidden="true"
+                                    className="invisible select-none"
+                                    data-cron-description-spacer=""
+                                >
+                                    Minute, hour, day, month, weekday.
+                                </span>
+                            ) : undefined
+                        }
                         disabled={busy}
                         error={firstFormFieldError(field.state.meta.errors)}
                         label="Schedule type"
                     >
                         <Select
                             className="mt-2"
+                            disabled={busy}
                             name={field.name}
                             onChange={field.handleChange}
                             options={scheduleKindOptions}
@@ -150,27 +167,15 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                         {kind === "daily" && (
                             <form.Field name="timeOfDay">
                                 {(field) => (
-                                    <FormField
+                                    <TimePicker
                                         disabled={busy}
                                         error={firstFormFieldError(
                                             field.state.meta.errors
                                         )}
-                                        label="Time of day"
-                                    >
-                                        <Input
-                                            className="mt-2"
-                                            name={field.name}
-                                            onBlur={field.handleBlur}
-                                            onChange={(event) =>
-                                                field.handleChange(
-                                                    event.currentTarget.value
-                                                )
-                                            }
-                                            required
-                                            type="time"
-                                            value={field.state.value}
-                                        />
-                                    </FormField>
+                                        label="Time of day (24-hour)"
+                                        onChange={field.handleChange}
+                                        value={field.state.value}
+                                    />
                                 )}
                             </form.Field>
                         )}
@@ -212,29 +217,17 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                         )}
                                         label="Time zone"
                                     >
-                                        <Input
+                                        <Combobox
+                                            ariaLabel="Time zone"
                                             className="mt-2"
-                                            list={timeZoneListId}
+                                            disabled={busy}
                                             name={field.name}
                                             onBlur={field.handleBlur}
-                                            onChange={(event) =>
-                                                field.handleChange(
-                                                    event.currentTarget.value
-                                                )
-                                            }
-                                            required
+                                            onChange={field.handleChange}
+                                            options={timeZoneOptions}
+                                            placeholder="Search time zones…"
                                             value={field.state.value}
                                         />
-                                        <datalist id={timeZoneListId}>
-                                            {canonicalScheduleTimeZones.map(
-                                                (timeZone) => (
-                                                    <option
-                                                        key={timeZone}
-                                                        value={timeZone}
-                                                    />
-                                                )
-                                            )}
-                                        </datalist>
                                     </FormField>
                                 )}
                             </form.Field>

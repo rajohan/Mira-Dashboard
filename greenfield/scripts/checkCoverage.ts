@@ -25,6 +25,11 @@ function belongsToRoot(sourcePath: string, sourceRoot: string): boolean {
     return sourcePath === sourceRoot || sourcePath.startsWith(`${sourceRoot}/`);
 }
 
+function isStorybookSource(sourcePath: string): boolean {
+    const role = sourceRole(sourcePath);
+    return role === "story" || role === "storybook-config";
+}
+
 function parseLineCount(kind: "LF" | "LH", value: string): number {
     const count = Number(value);
     if (!Number.isSafeInteger(count) || count < 0) {
@@ -70,7 +75,7 @@ export function assertCoverageIncludesSources(
  * Discovers production modules that emit runtime JavaScript and therefore require LCOV.
  * @param projectRoot Absolute repository root.
  * @param sourceRoots Repository-relative roots included in the threshold.
- * @returns Sorted executable source paths, excluding tests and type-only modules.
+ * @returns Sorted executable source paths, excluding tests, stories, Storybook support, and type-only modules.
  */
 export async function discoverExecutableCoverageSources(
     projectRoot: string,
@@ -87,6 +92,7 @@ export async function discoverExecutableCoverageSources(
     for (const filePath of discovery.files) {
         if (
             sourceRole(filePath) === "test" ||
+            isStorybookSource(filePath) ||
             !normalizedRoots.some((root) => belongsToRoot(filePath, root))
         ) {
             continue;
@@ -155,9 +161,9 @@ export function summarizeLineCoverage(
         if (line.startsWith("SF:")) {
             finishRecord();
             const sourcePath = normalizeCoveragePath(line.slice(3));
-            countCurrentRecord = normalizedRoots.some((root) =>
-                belongsToRoot(sourcePath, root)
-            );
+            countCurrentRecord =
+                !isStorybookSource(sourcePath) &&
+                normalizedRoots.some((root) => belongsToRoot(sourcePath, root));
             currentFoundLines = undefined;
             currentHitLines = undefined;
         } else if (line.startsWith("LF:") && countCurrentRecord) {

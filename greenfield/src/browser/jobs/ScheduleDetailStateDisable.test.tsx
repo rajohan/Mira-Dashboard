@@ -40,7 +40,8 @@ describe("schedule detail interaction state", () => {
         render(<RejectedDisableIntent />);
         const user = userEvent.setup();
         await user.click(screen.getByRole("button", { name: "Disable" }));
-        const reason = screen.getByLabelText("Reason");
+        await user.click(screen.getByRole("radio", { name: /Indefinitely/u }));
+        const reason = screen.getByLabelText("Comment");
         await user.type(reason, "Keep this draft");
         await user.click(screen.getByRole("button", { name: "Disable schedule" }));
 

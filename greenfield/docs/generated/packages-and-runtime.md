@@ -25,7 +25,7 @@
 | `@tanstack/query-core` | `5.101.4` | `5.101.4` | runtime |
 | `@tanstack/query-db-collection` | `1.2.1` | `1.2.1` | runtime |
 | `@tanstack/react-db` | `0.1.95` | `0.1.95` | runtime |
-| `@tanstack/react-form` | `^1.33.3` | `1.33.3` | runtime |
+| `@tanstack/react-form` | `^1.33.4` | `1.33.4` | runtime |
 | `@tanstack/react-query` | `^5.101.4` | `5.101.4` | runtime |
 | `@tanstack/react-router` | `^1.170.23` | `1.170.23` | runtime |
 | `@tanstack/react-store` | `0.11.1` | `0.11.1` | runtime |
@@ -57,8 +57,13 @@
 | `valibot` | `^1.4.2` | `1.4.2` | runtime |
 | `@babel/core` | `^8.0.1` | `8.0.1` | development |
 | `@happy-dom/global-registrator` | `^20.11.2` | `20.11.2` | development |
+| `@storybook/addon-a11y` | `10.6.0-alpha.4` | `10.6.0-alpha.4` | development |
+| `@storybook/addon-docs` | `10.6.0-alpha.4` | `10.6.0-alpha.4` | development |
+| `@storybook/addon-vitest` | `10.6.0-alpha.4` | `10.6.0-alpha.4` | development |
+| `@storybook/tanstack-react` | `10.6.0-alpha.4` | `10.6.0-alpha.4` | development |
+| `@tailwindcss/vite` | `4.3.3` | `4.3.3` | development |
 | `@tanstack/react-devtools` | `^0.10.9` | `0.10.9` | development |
-| `@tanstack/react-form-devtools` | `^0.2.32` | `0.2.32` | development |
+| `@tanstack/react-form-devtools` | `^0.2.33` | `0.2.33` | development |
 | `@tanstack/react-query-devtools` | `^5.101.4` | `5.101.4` | development |
 | `@tanstack/react-router-devtools` | `1.167.1` | `1.167.1` | development |
 | `@testing-library/dom` | `^10.4.1` | `10.4.1` | development |
@@ -71,6 +76,7 @@
 | `@types/react-dom` | `^19.2.4` | `19.2.4` | development |
 | `@types/react-syntax-highlighter` | `^15.5.13` | `15.5.13` | development |
 | `@valibot/to-json-schema` | `1.7.1` | `1.7.1` | development |
+| `@vitest/browser-playwright` | `4.1.10` | `4.1.10` | development |
 | `babel-plugin-react-compiler` | `^1.0.0` | `1.0.0` | development |
 | `bun-plugin-tailwind` | `^0.1.2` | `0.1.2` | development |
 | `bun-types` | `1.4.0-canary.20260519T150915` | `1.4.0-canary.20260519T150915` | development |
@@ -85,5 +91,9 @@
 | `oxlint-config-presets` | `^0.1.18` | `0.1.18` | development |
 | `oxlint-tailwindcss` | `^1.7.1` | `1.7.1` | development |
 | `oxlint-tsgolint` | `^7.0.2001` | `7.0.2001` | development |
+| `playwright` | `1.62.1` | `1.62.1` | development |
+| `storybook` | `10.6.0-alpha.4` | `10.6.0-alpha.4` | development |
 | `tailwindcss` | `^4.3.3` | `4.3.3` | development |
 | `typescript` | `^7.0.2` | `7.0.2` | development |
+| `vite` | `8.2.1` | `8.2.1` | development |
+| `vitest` | `4.1.10` | `4.1.10` | development |

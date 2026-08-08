@@ -5,5 +5,10 @@
         "types": ["bun-types", "node"]
     },
     "include": ["**/*"],
-    "exclude": ["node_modules", "src/browser/**/*"]
+    "exclude": [
+        "node_modules",
+        "src/browser/**/*",
+        ".storybook/manager.ts",
+        ".storybook/preview.tsx"
+    ]
 }

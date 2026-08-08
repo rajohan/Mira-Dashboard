@@ -10,12 +10,13 @@ describe("source-boundary repository discovery", () => {
     test("reports missing reviewed source roots as layout violations", async () => {
         const projectRoot = await temporaryProject();
         try {
+            await rm(path.join(projectRoot, ".storybook"), { recursive: true });
             await rm(path.join(projectRoot, "scripts"), { recursive: true });
             await rm(path.join(projectRoot, "src"), { recursive: true });
 
             const violations = await checkSourceBoundaries(projectRoot);
 
-            for (const importer of ["scripts", "src"] as const) {
+            for (const importer of [".storybook", "scripts", "src"] as const) {
                 expect(
                     violations.some(
                         (violation) =>
@@ -24,6 +25,94 @@ describe("source-boundary repository discovery", () => {
                     )
                 ).toBe(true);
             }
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("requires every adopted Storybook source file", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            const requiredFiles = [
+                "main.ts",
+                "manager.ts",
+                "preview.tsx",
+                "vitest.config.ts",
+            ] as const;
+            for (const file of requiredFiles) {
+                await rm(path.join(projectRoot, ".storybook", file));
+            }
+
+            const violations = await checkSourceBoundaries(projectRoot);
+
+            for (const file of requiredFiles) {
+                expect(
+                    violations.some(
+                        (violation) =>
+                            violation.importer === `.storybook/${file}` &&
+                            violation.message.includes(
+                                "Required Storybook source file is missing"
+                            )
+                    )
+                ).toBe(true);
+            }
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("scans only explicitly classified Storybook source roles", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            await writeFile(
+                path.join(projectRoot, ".storybook", "main.ts"),
+                'import "../src/browser/client.ts";'
+            );
+            await writeFile(
+                path.join(projectRoot, ".storybook", "manager.ts"),
+                'import "node:fs";'
+            );
+            await writeFile(
+                path.join(projectRoot, ".storybook", "preview.tsx"),
+                'import "../src/server/private.ts";'
+            );
+            await writeFile(
+                path.join(projectRoot, ".storybook", "future.ts"),
+                "export const future = true;"
+            );
+
+            const violations = await checkSourceBoundaries(projectRoot);
+
+            expect(
+                violations.some(
+                    (violation) =>
+                        violation.importer === ".storybook/main.ts" &&
+                        violation.message.includes(
+                            "storybook-config may not import browser"
+                        )
+                )
+            ).toBe(true);
+            expect(
+                violations.some(
+                    (violation) =>
+                        violation.importer === ".storybook/manager.ts" &&
+                        violation.message.includes("Browser and story source")
+                )
+            ).toBe(true);
+            expect(
+                violations.some(
+                    (violation) =>
+                        violation.importer === ".storybook/preview.tsx" &&
+                        violation.message.includes("story may not import server")
+                )
+            ).toBe(true);
+            expect(
+                violations.some(
+                    (violation) =>
+                        violation.importer === ".storybook/future.ts" &&
+                        violation.message.includes("explicit process role")
+                )
+            ).toBe(true);
         } finally {
             await rm(projectRoot, { force: true, recursive: true });
         }
@@ -207,7 +296,9 @@ describe("source-boundary repository discovery", () => {
                     violations.some(
                         (violation) =>
                             violation.importer === importer &&
-                            violation.message.includes("Only browser source may use .tsx")
+                            violation.message.includes(
+                                "Only browser and story source may use .tsx"
+                            )
                     )
                 ).toBe(true);
             }
@@ -279,6 +370,14 @@ describe("source-boundary repository discovery", () => {
                 externalDirectory,
                 path.join(projectRoot, "src", "browser", "linkedDirectory")
             );
+            await symlink(
+                externalFile,
+                path.join(projectRoot, ".storybook", "linked.ts")
+            );
+            await symlink(
+                externalDirectory,
+                path.join(projectRoot, ".storybook", "linkedDirectory")
+            );
 
             const violations = await checkSourceBoundaries(projectRoot);
 
@@ -286,6 +385,22 @@ describe("source-boundary repository discovery", () => {
                 violations.some(
                     (violation) =>
                         violation.importer === "src/browser/linked.ts" &&
+                        violation.message ===
+                            "Production source paths may not be symbolic links"
+                )
+            ).toBe(true);
+            expect(
+                violations.some(
+                    (violation) =>
+                        violation.importer === ".storybook/linked.ts" &&
+                        violation.message ===
+                            "Production source paths may not be symbolic links"
+                )
+            ).toBe(true);
+            expect(
+                violations.some(
+                    (violation) =>
+                        violation.importer === ".storybook/linkedDirectory" &&
                         violation.message ===
                             "Production source paths may not be symbolic links"
                 )

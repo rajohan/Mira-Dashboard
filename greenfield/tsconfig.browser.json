@@ -12,5 +12,9 @@
         "src/test/types/bunCanaryMatchers.d.ts"
     ],
     "include": ["src/browser/**/*.ts", "src/browser/**/*.tsx"],
-    "exclude": ["node_modules"]
+    "exclude": [
+        "node_modules",
+        "src/browser/**/*.stories.tsx",
+        "src/browser/**/storySupport/**/*"
+    ]
 }

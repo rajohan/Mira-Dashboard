@@ -1,0 +1,66 @@
+import type { Preview } from "@storybook/tanstack-react";
+import { themes } from "storybook/theming";
+
+import { installPinnedStorybookDiagnosticWorkarounds } from "../src/browser/storySupport/storybookDiagnostics.ts";
+
+import "../src/browser/storySupport/storybook.css";
+
+const dashboardBackground = "#0b0b0c";
+
+const preview: Preview = {
+    beforeEach(context) {
+        return installPinnedStorybookDiagnosticWorkarounds(context.id);
+    },
+    initialGlobals: {
+        backgrounds: {
+            value: "dashboard",
+        },
+    },
+    parameters: {
+        a11y: {
+            // Headless UI's intentionally focusable dialog sentinels are hidden from
+            // assistive technology and otherwise produce an axe "incomplete" result.
+            context: {
+                exclude: 'button[data-headlessui-focus-guard="true"][aria-hidden="true"]',
+            },
+            test: "error",
+        },
+        backgrounds: {
+            options: {
+                dashboard: {
+                    name: "Dashboard",
+                    value: dashboardBackground,
+                },
+            },
+        },
+        controls: {
+            matchers: {
+                color: /(background|color)$/iu,
+                date: /Date$/u,
+            },
+        },
+        docs: {
+            theme: themes.dark,
+        },
+        layout: "centered",
+        options: {
+            storySort: {
+                method: "alphabetical",
+                order: [
+                    "UI",
+                    "Authentication",
+                    "Agents",
+                    "Cache",
+                    "Jobs",
+                    "Monitoring",
+                    "Notifications",
+                    "Security",
+                    "Tasks",
+                ],
+            },
+        },
+    },
+    tags: ["autodocs"],
+};
+
+export default preview;

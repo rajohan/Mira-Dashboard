@@ -9,6 +9,8 @@ export type SourceRole =
     | "scripts"
     | "server"
     | "shared"
+    | "story"
+    | "storybook-config"
     | "test"
     | "unclassified-app"
     | "unknown"
@@ -89,6 +91,8 @@ export const allowedTargets: Readonly<Record<SourceRole, ReadonlySet<SourceRole>
     scripts: new Set(["contracts", "scripts", "shared"]),
     server: new Set(["contracts", "server", "shared"]),
     shared: new Set(["shared"]),
+    story: new Set(["browser", "contracts", "shared", "story"]),
+    "storybook-config": new Set(["storybook-config"]),
     test: new Set([
         "browser",
         "contracts",
@@ -97,6 +101,7 @@ export const allowedTargets: Readonly<Record<SourceRole, ReadonlySet<SourceRole>
         "scripts",
         "server",
         "shared",
+        "story",
         "test",
         "web-app",
         "worker",
@@ -148,6 +153,18 @@ export function isTestPath(filePath: string): boolean {
  * @returns The reviewed source role for the path.
  */
 export function sourceRole(filePath: string): SourceRole {
+    if (filePath === ".storybook/main.ts" || filePath === ".storybook/vitest.config.ts") {
+        return "storybook-config";
+    }
+    if (filePath === ".storybook/manager.ts" || filePath === ".storybook/preview.tsx") {
+        return "story";
+    }
+    if (
+        filePath.startsWith("src/browser/") &&
+        (filePath.endsWith(".stories.tsx") || filePath.includes("/storySupport/"))
+    ) {
+        return "story";
+    }
     if (applicationCompositionTestFiles.has(filePath)) return "test";
     if (filePath.startsWith("src/app/") && isTestPath(filePath)) {
         return "unclassified-app";

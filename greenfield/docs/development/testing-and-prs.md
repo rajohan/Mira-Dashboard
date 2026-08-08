@@ -13,6 +13,8 @@ bun run lint
 bun run format:check
 bun run test
 bun run test:coverage
+bun run storybook:test
+bun run storybook:build
 bun run docs:check
 bun run db:check
 git diff --check
@@ -32,25 +34,32 @@ with their own `.bun-browser-test-timings.json` scheduling hints. After adding, 
 materially changing tests, refresh both timing inventories before push with:
 
 ```bash
-bun run test:timings:update
+bun run setup:before-push
 ```
+
+The setup stays explicit while linked worktrees are in use. They share Git's default hooks
+directory, so installing a worktree-local Lefthook executable there could make every worktree's
+hook depend on whichever worktree installed it last.
 
 ## TypeScript graphs
 
-The project has exactly three TypeScript configurations in one solution:
+The project has exactly four TypeScript configurations in one solution:
 
-- `tsconfig.json` owns every shared strict compiler rule. It has `files: []` and references only
-  `tsconfig.browser.json` and `tsconfig.bun.json`, making it the conventional solution entry point
-  for editors and `tsc -b` without claiming source files itself.
+- `tsconfig.json` owns every shared strict compiler rule. It has `files: []` and references
+  `tsconfig.browser.json`, `tsconfig.storybook.json`, and `tsconfig.bun.json`, making it the
+  conventional solution entry point for editors and `tsc -b` without claiming source files
+  itself.
 - `tsconfig.bun.json` extends the root rules and checks server, worker, repository scripts,
   non-browser tests, and non-browser test support. Its catch-all membership excludes the browser
   paths. It adds Bun and Node types with `ESNext` only, so DOM globals are unavailable.
 - `tsconfig.browser.json` also extends the root rules and owns React/browser source and browser
   tests. It adds DOM/DOM iterable libraries, JSX, its narrow type declarations, and its explicit
   browser membership without exposing Bun or Node ambient types to production browser code.
+- `tsconfig.storybook.json` owns Storybook preview, manager, stories, and browser-safe story
+  support. It exposes DOM and Vite client types without exposing Bun or Node ambient types.
 
 There is no `tsconfig.server.json` or per-role configuration proliferation. Runtime and import
-authority inside the two referenced compiler graphs is enforced by the path-aware source-boundary
+authority inside the three referenced compiler graphs is enforced by the path-aware source-boundary
 policy.
 
 Browser tests are checked by the browser graph with DOM/JSX and the narrow `bun:test` declaration.
@@ -77,10 +86,10 @@ Production source must never import test or test-support code. Prefer event- or 
 test timing over arbitrary sleeps. Test-only overrides must preserve the production default and
 exercise the same runtime path.
 
-Every package test command runs through `scripts/runTestSuite.ts`. It preserves Bun's failure code
-and additionally fails an otherwise green suite when output contains a React missing-`act(...)`
-warning, an unconfigured React act environment warning, or a Bun panic/crash banner. Do not bypass
-that runner in repository test scripts.
+Every Bun package test command runs through `scripts/runTestSuite.ts`; the separate real-browser
+Storybook command runs through `scripts/runStorybookTests.ts`. Both preserve the child failure code
+and fail an otherwise green suite when output contains a forbidden React, browser, or Bun runtime
+diagnostic. Do not bypass these runners in repository test scripts.
 
 Every suite preloads the process-private test root and mock cleanup. The browser suite additionally
 preloads Happy DOM, Testing Library matchers and cleanup, the React act-environment marker, and the
@@ -95,9 +104,10 @@ Oxlint applies its baseline strict rules to tests as well as production source. 
 production-only restrictions deliberately exclude tests—for example, tests may import
 `bun:test`, fixtures, or test support—but tests are not globally ignored.
 
-The source-boundary checker scans `src/` and `scripts/`, including test files. It rejects
-repository escapes, undeclared packages, environment-authority violations, and imports that break
-the reviewed process architecture.
+The source-boundary checker scans `.storybook/`, `src/`, and `scripts/`, including test files. It
+requires the adopted Storybook configuration files and rejects repository escapes, undeclared
+packages, environment-authority violations, and imports that break the reviewed process
+architecture.
 
 ## Pull-request evidence
 

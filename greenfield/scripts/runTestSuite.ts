@@ -129,16 +129,16 @@ function firstViolation(
 }
 
 /**
- * Runs one Bun test process and enforces the repository test-output policy.
- * @param arguments_ Arguments passed after `bun test`.
+ * Runs one test process and enforces the repository test-output policy.
+ * @param command Exact executable and arguments for the child process.
  * @param projectRoot Repository root used as the child working directory.
  * @returns The child failure code, or one when a passing child emitted forbidden output.
  */
-export async function runTestSuite(
-    arguments_: readonly string[],
-    projectRoot = path.resolve(import.meta.dir, "..")
+export async function runTestProcess(
+    command: readonly string[],
+    projectRoot: string
 ): Promise<number> {
-    const child = Bun.spawn([process.execPath, "test", ...arguments_], {
+    const child = Bun.spawn([...command], {
         cwd: projectRoot,
         stderr: "pipe",
         stdin: "inherit",
@@ -159,6 +159,24 @@ export async function runTestSuite(
 
     if (exitCode !== 0) return exitCode;
     if (violation !== undefined) return 1;
+    return 0;
+}
+
+/**
+ * Runs one Bun test process and updates its optional scheduling inventory.
+ * @param arguments_ Arguments passed after `bun test`.
+ * @param projectRoot Repository root used as the child working directory.
+ * @returns The child failure code, or one when a passing child emitted forbidden output.
+ */
+export async function runTestSuite(
+    arguments_: readonly string[],
+    projectRoot = path.resolve(import.meta.dir, "..")
+): Promise<number> {
+    const exitCode = await runTestProcess(
+        [process.execPath, "test", ...arguments_],
+        projectRoot
+    );
+    if (exitCode !== 0) return exitCode;
     await pruneUpdatedTestTimings(arguments_, projectRoot);
     return 0;
 }

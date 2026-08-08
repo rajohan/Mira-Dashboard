@@ -14,6 +14,7 @@ const nestedResolverMetadataPattern =
 const reviewedRootDirectories: ReadonlySet<string> = new Set([
     ".git",
     ".github",
+    ".storybook",
     "coverage",
     "data",
     "dist",
@@ -24,6 +25,12 @@ const reviewedRootDirectories: ReadonlySet<string> = new Set([
     "src",
     "systemd",
 ]);
+const requiredStorybookSourceFiles = [
+    ".storybook/main.ts",
+    ".storybook/manager.ts",
+    ".storybook/preview.tsx",
+    ".storybook/vitest.config.ts",
+] as const;
 
 /** Discovered executable sources plus fail-closed repository-layout findings. */
 export interface SourceDiscovery {
@@ -218,7 +225,7 @@ export async function discoverSourceFiles(projectRoot: string): Promise<SourceDi
     const files = new Set<string>();
     const violations: SourceBoundaryViolation[] = [];
     await validateRootDirectoryLayout(lexicalProjectRoot, violations);
-    for (const directory of ["scripts", "src"] as const) {
+    for (const directory of [".storybook", "scripts", "src"] as const) {
         await discoverDirectory(
             lexicalProjectRoot,
             realProjectRoot,
@@ -226,6 +233,19 @@ export async function discoverSourceFiles(projectRoot: string): Promise<SourceDi
             files,
             violations
         );
+    }
+    for (const requiredFile of requiredStorybookSourceFiles) {
+        if (
+            !files.has(requiredFile) &&
+            !violations.some((violation) => violation.importer === requiredFile)
+        ) {
+            violations.push(
+                boundaryPathViolation(
+                    requiredFile,
+                    "Required Storybook source file is missing from the reviewed project layout"
+                )
+            );
+        }
     }
     await discoverRootSources(lexicalProjectRoot, realProjectRoot, files, violations);
     return {

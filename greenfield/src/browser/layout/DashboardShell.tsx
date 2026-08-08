@@ -127,7 +127,7 @@ export function DashboardShell() {
     return (
         <div className="bg-primary-900 text-primary-50 flex h-full overflow-hidden">
             <a
-                className="bg-accent-500 fixed top-3 left-3 z-60 -translate-y-24 rounded-lg px-3 py-2 font-semibold text-white transition-transform focus:translate-y-0"
+                className="bg-accent-500 text-primary-950 fixed top-3 left-3 z-60 -translate-y-24 rounded-lg px-3 py-2 font-semibold transition-transform focus:translate-y-0"
                 href="#dashboard-content"
             >
                 Skip to content

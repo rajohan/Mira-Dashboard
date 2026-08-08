@@ -59,7 +59,7 @@ describe("CacheStatusTable", () => {
         expect(selected).toEqual(["system.host"]);
     });
 
-    test("marks the selected cache key and keeps the scroll table keyboard reachable", () => {
+    test("marks the selected cache key without tabbing into a non-scrolling region", () => {
         render(
             <CacheStatusTable
                 entries={[
@@ -92,7 +92,9 @@ describe("CacheStatusTable", () => {
             "min-h-8",
             "underline"
         );
-        expect(screen.getByRole("region", { name: "Cache entries" }).tabIndex).toBe(0);
+        expect(screen.getByRole("region", { name: "Cache entries" })).not.toHaveAttribute(
+            "tabindex"
+        );
         expect(screen.queryAllByText("Unavailable")).toHaveLength(0);
     });
 

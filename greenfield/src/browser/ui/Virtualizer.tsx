@@ -4,7 +4,15 @@ import { type ReactNode, type RefObject, useRef } from "react";
 const defaultInitialRect = Object.freeze({ height: 480, width: 960 });
 
 export interface VirtualizerRenderState<TItemElement extends Element> {
+    readonly getVirtualItemForOffset: (
+        offset: number
+    ) => Readonly<{ index: number }> | undefined;
+    readonly measure: () => void;
     readonly measureElement: (node: TItemElement | null) => void;
+    readonly scrollToIndex: (
+        index: number,
+        options?: Readonly<{ align?: "auto" | "center" | "end" | "start" }>
+    ) => void;
     readonly scrollContainerRef: RefObject<HTMLDivElement | null>;
     readonly totalSize: number;
     readonly virtualItems: readonly VirtualItem[];
@@ -39,10 +47,14 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
         getScrollElement: () => scrollContainerRef.current,
         initialRect,
         overscan,
+        useFlushSync: false,
     });
 
     return children({
+        getVirtualItemForOffset: virtualizer.getVirtualItemForOffset,
+        measure: virtualizer.measure,
         measureElement: virtualizer.measureElement,
+        scrollToIndex: virtualizer.scrollToIndex,
         scrollContainerRef,
         totalSize: virtualizer.getTotalSize(),
         virtualItems: virtualizer.getVirtualItems(),

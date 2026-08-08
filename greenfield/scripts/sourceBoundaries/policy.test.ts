@@ -65,8 +65,30 @@ describe("source-boundary policy", () => {
                 staticImport("../server/database/runtime/databaseService.ts")
             )
         ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                "src/browser/ui/stories/Button.stories.tsx",
+                staticImport("../Button.tsx")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                ".storybook/preview.tsx",
+                staticImport("../src/browser/index.css")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                "src/browser/ui/Button.test.tsx",
+                staticImport("./stories/Button.stories.tsx")
+            )
+        ).toBeUndefined();
         expect(validateSourceFile("tailwind.config.ts")).toBeUndefined();
         expect(validateSourceFile("drizzle.config.ts")).toBeUndefined();
+        expect(validateSourceFile(".storybook/main.ts")).toBeUndefined();
+        expect(validateSourceFile(".storybook/manager.ts")).toBeUndefined();
+        expect(validateSourceFile(".storybook/preview.tsx")).toBeUndefined();
+        expect(validateSourceFile(".storybook/vitest.config.ts")).toBeUndefined();
         expect(
             validateSourceImport(
                 "tailwind.config.ts",
@@ -107,6 +129,28 @@ describe("source-boundary policy", () => {
             )?.message
         ).toContain("worker-app may not import server");
         expect(
+            validateSourceImport(
+                "src/browser/dashboard.ts",
+                staticImport("./ui/stories/Button.stories.tsx")
+            )?.message
+        ).toContain("browser may not import story");
+        expect(
+            validateSourceImport(
+                "src/browser/dashboard.ts",
+                staticImport("../../.storybook/main.ts")
+            )?.message
+        ).toContain("browser may not import storybook-config");
+        expect(
+            validateSourceImport(
+                "src/browser/ui/stories/Button.stories.tsx",
+                staticImport("../../../server/private.ts")
+            )?.message
+        ).toContain("story may not import server");
+        expect(
+            validateSourceImport(".storybook/main.ts", staticImport("./preview.tsx"))
+                ?.message
+        ).toContain("storybook-config may not import story");
+        expect(
             validateSourceImport("src/contracts/auth.ts", staticImport("./auth.test.ts"))
                 ?.message
         ).toContain("may not import tests");
@@ -143,6 +187,9 @@ describe("source-boundary policy", () => {
         expect(validateSourceFile("src/newRoot.ts")?.message).toContain(
             "explicit process role"
         );
+        expect(validateSourceFile(".storybook/future.ts")?.message).toContain(
+            "explicit process role"
+        );
         for (const file of [
             "evil.spec.ts",
             "evil.test.ts",
@@ -167,8 +214,12 @@ describe("source-boundary policy", () => {
         ).toBeUndefined();
     });
 
-    test("permits TSX only in the strict browser graph", () => {
+    test("permits TSX only in the strict browser and story graphs", () => {
         expect(validateSourceFile("src/browser/view.tsx")).toBeUndefined();
+        expect(
+            validateSourceFile("src/browser/ui/stories/Button.stories.tsx")
+        ).toBeUndefined();
+        expect(validateSourceFile(".storybook/preview.tsx")).toBeUndefined();
         for (const file of [
             "drizzle.config.tsx",
             "scripts/generate.tsx",
@@ -179,9 +230,40 @@ describe("source-boundary policy", () => {
             "src/worker/jobs/run.tsx",
         ]) {
             expect(validateSourceFile(file)?.message).toContain(
-                "Only browser source may use .tsx"
+                "Only browser and story source may use .tsx"
             );
         }
+    });
+
+    test("treats story sources as browser authority and keeps config tooling separate", () => {
+        expect(
+            validateSourceImport(
+                "src/browser/ui/stories/Button.stories.tsx",
+                staticImport("@storybook/tanstack-react")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(".storybook/manager.ts", staticImport("node:fs"))
+                ?.message
+        ).toContain("Browser and story source");
+        expect(
+            validateSourceImport(
+                "src/browser/storySupport/database.ts",
+                staticImport("drizzle-orm")
+            )?.message
+        ).toContain("Browser and story source");
+        expect(
+            validateSourceImport(".storybook/main.ts", staticImport("node:path"))
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(".storybook/vitest.config.ts", staticImport("node:url"))
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(".storybook/main.ts", {
+                kind: "process-execution",
+                line: 1,
+            })?.message
+        ).toContain("scripts and worker");
     });
 
     test("allows only reviewed neutral packages in contracts and shared", () => {

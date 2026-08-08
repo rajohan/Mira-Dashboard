@@ -586,7 +586,9 @@ describe("Dashboard account security route", () => {
             session: { id: rotatedSession.id },
         });
         expect(screen.queryByRole("heading", { name: "Account security" })).toBeNull();
-        expect(screen.getByText("Preparing secure session data…")).toBeTruthy();
+        expect(
+            screen.getByRole("status", { name: "Preparing secure session data…" })
+        ).toBeTruthy();
         expect(queryClient.getQueryData<string>(previousSessionPrivateQueryKey)).toBe(
             "private session A data"
         );
@@ -680,7 +682,9 @@ describe("Dashboard account security route", () => {
             expect(
                 screen.queryByRole("heading", { name: "Account security" })
             ).toBeNull();
-            expect(screen.getByText("Preparing secure session data…")).toBeTruthy();
+            expect(
+                screen.getByRole("status", { name: "Preparing secure session data…" })
+            ).toBeTruthy();
             const queryCallCountBeforeDelayedResponse = transport.calls.filter(
                 (call) => call.kind === "query"
             ).length;

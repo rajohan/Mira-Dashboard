@@ -31,7 +31,50 @@ function intervalSchedule(): ScheduleSummary {
     };
 }
 
+function cronSchedule(): ScheduleSummary {
+    return {
+        ...intervalSchedule(),
+        schedule: {
+            expression: "0 6 * * 1-5",
+            kind: "cron",
+            timeZone: "UTC",
+        },
+    };
+}
+
 describe("schedule editor", () => {
+    test("balances the cron controls with a hidden schedule-type spacer", () => {
+        render(
+            <ScheduleEditor busy={false} onSave={jest.fn()} schedule={cronSchedule()} />
+        );
+
+        const form = screen.getByRole("form", {
+            name: "Edit Worker smoke schedule",
+        });
+        const cronExpression = screen.getByLabelText("Cron expression");
+        const spacer = form.querySelector<HTMLElement>("[data-cron-description-spacer]");
+        const descriptionId = cronExpression.getAttribute("aria-describedby");
+        const helper =
+            descriptionId === null
+                ? null
+                : document.querySelector<HTMLElement>(`[id="${descriptionId}"]`);
+
+        expect(form).toHaveClass("sm:items-start");
+        expect(spacer).toHaveClass("invisible", "select-none");
+        expect(spacer).toHaveAttribute("aria-hidden", "true");
+        expect(helper).toHaveTextContent("Minute, hour, day, month, weekday.");
+    });
+
+    test("disables every cron control while a save is busy", () => {
+        render(<ScheduleEditor busy onSave={jest.fn()} schedule={cronSchedule()} />);
+
+        expect(screen.getByLabelText("Schedule type")).toBeDisabled();
+        expect(screen.getByLabelText("Cron expression")).toBeDisabled();
+        expect(screen.getByLabelText("Time zone")).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Open Time zone" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    });
+
     test("disables normalized cadence no-ops and submits only a semantic change", async () => {
         const onSave = jest.fn(async () => {});
         render(

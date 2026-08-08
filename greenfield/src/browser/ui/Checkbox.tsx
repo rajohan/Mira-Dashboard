@@ -36,8 +36,10 @@ export function Checkbox({
             <HeadlessCheckbox
                 checked={checked}
                 className={cn(
-                    "group mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border transition-colors",
-                    "data-checked:border-accent-500 data-checked:bg-accent-500 data-unchecked:border-primary-600 data-unchecked:bg-primary-900",
+                    "border-primary-500 bg-primary-900 group mt-0.5 flex size-5 shrink-0 items-center justify-center rounded border transition-colors",
+                    "data-checked:border-accent-500 data-checked:bg-accent-500",
+                    "not-data-disabled:data-hover:border-accent-400 not-data-disabled:data-hover:bg-primary-800 hover:not-data-disabled:border-accent-400 hover:not-data-disabled:bg-primary-800",
+                    "not-data-disabled:data-checked:data-hover:bg-accent-400 hover:not-data-disabled:data-checked:bg-accent-400",
                     "data-focus:ring-accent-400 data-focus:ring-offset-primary-900 data-focus:ring-2 data-focus:ring-offset-2 data-focus:outline-none",
                     "data-disabled:cursor-not-allowed data-disabled:opacity-55"
                 )}

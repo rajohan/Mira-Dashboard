@@ -104,6 +104,8 @@
                 "node": true
             },
             "files": [
+                ".storybook/main.ts",
+                ".storybook/vitest.config.ts",
                 "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
                 "src/app/dashboardServer.ts",
                 "src/app/databaseMaintenance.ts",
@@ -204,6 +206,8 @@
                 "**/testSupport/**"
             ],
             "files": [
+                ".storybook/manager.ts",
+                ".storybook/preview.tsx",
                 "src/app/browser.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
                 "src/browser/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
             ],
@@ -300,6 +304,8 @@
                 "**/testSupport/**"
             ],
             "files": [
+                ".storybook/manager.ts",
+                ".storybook/preview.tsx",
                 "src/app/browser.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
                 "src/browser/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
             ],

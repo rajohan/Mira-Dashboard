@@ -49,7 +49,11 @@ const reviewedTypeScriptConfigurations: Readonly<
             verbatimModuleSyntax: true,
         },
         files: [],
-        references: ["./tsconfig.browser.json", "./tsconfig.bun.json"],
+        references: [
+            "./tsconfig.browser.json",
+            "./tsconfig.bun.json",
+            "./tsconfig.storybook.json",
+        ],
     },
     "tsconfig.browser.json": {
         compilerOptions: {
@@ -58,7 +62,11 @@ const reviewedTypeScriptConfigurations: Readonly<
             types: [],
             useDefineForClassFields: true,
         },
-        exclude: ["node_modules"],
+        exclude: [
+            "node_modules",
+            "src/browser/**/*.stories.tsx",
+            "src/browser/**/storySupport/**/*",
+        ],
         extends: "./tsconfig.json",
         files: [
             "node_modules/@testing-library/jest-dom/types/bun.d.ts",
@@ -72,9 +80,31 @@ const reviewedTypeScriptConfigurations: Readonly<
             lib: ["ESNext"],
             types: ["bun-types", "node"],
         },
-        exclude: ["node_modules", "src/browser/**/*"],
+        exclude: [
+            "node_modules",
+            "src/browser/**/*",
+            ".storybook/manager.ts",
+            ".storybook/preview.tsx",
+        ],
         extends: "./tsconfig.json",
         include: ["**/*"],
+    },
+    "tsconfig.storybook.json": {
+        compilerOptions: {
+            jsx: "react-jsx",
+            lib: ["ESNext", "DOM", "DOM.Iterable"],
+            types: ["vite/client"],
+            useDefineForClassFields: true,
+        },
+        exclude: ["node_modules"],
+        extends: "./tsconfig.json",
+        include: [
+            ".storybook/manager.ts",
+            ".storybook/preview.tsx",
+            "src/browser/**/*.stories.tsx",
+            "src/browser/**/storySupport/**/*.ts",
+            "src/browser/**/storySupport/**/*.tsx",
+        ],
     },
 });
 

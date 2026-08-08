@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import {
     assertCoverageIncludesSources,
     assertLineCoverage,
+    discoverExecutableCoverageSources,
     summarizeLineCoverage,
 } from "./checkCoverage.ts";
+import { temporaryProject } from "./sourceBoundaries/testSupport.ts";
 
 function record(source: string, foundLines: number, hitLines: number): string {
     return [
@@ -29,6 +33,53 @@ describe("coverage threshold", () => {
         );
 
         expect(summary).toEqual({ foundLines: 100, hitLines: 85, percent: 85 });
+    });
+
+    test("excludes Storybook sources from production totals", () => {
+        const summary = summarizeLineCoverage(
+            [
+                record("src/server/service.ts", 80, 70),
+                record("src/shared/value.ts", 20, 15),
+                record("src/browser/ui/Button.stories.tsx", 100, 100),
+                record("src/browser/storySupport/providers.tsx", 100, 100),
+            ].join("\n"),
+            ["src"]
+        );
+
+        expect(summary).toEqual({ foundLines: 100, hitLines: 85, percent: 85 });
+    });
+
+    test("excludes Storybook sources from the executable production inventory", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            await mkdir(path.join(projectRoot, "src", "shared"));
+            await mkdir(path.join(projectRoot, "src", "browser", "storySupport"));
+            await writeFile(
+                path.join(projectRoot, "src", "shared", "production.ts"),
+                "export const production = true;"
+            );
+            await writeFile(
+                path.join(projectRoot, "src", "browser", "Button.stories.tsx"),
+                "export const Story = {};"
+            );
+            await writeFile(
+                path.join(projectRoot, "src", "browser", "storySupport", "providers.tsx"),
+                "export const providers = true;"
+            );
+
+            expect(await discoverExecutableCoverageSources(projectRoot, ["src"])).toEqual(
+                ["src/shared/production.ts"]
+            );
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("keeps Bun coverage from counting stories and story support", async () => {
+        const bunfig = await Bun.file(new URL("../bunfig.toml", import.meta.url)).text();
+
+        expect(bunfig).toContain('"src/**/*.stories.tsx"');
+        expect(bunfig).toContain('"src/**/storySupport/**"');
     });
 
     test("accepts the exact threshold and rejects a lower result", () => {

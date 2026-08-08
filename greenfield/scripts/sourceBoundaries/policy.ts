@@ -85,13 +85,14 @@ export function validateSourceFile(
     if (
         normalizedImporter.endsWith(".tsx") &&
         importerRole !== "browser" &&
+        importerRole !== "story" &&
         importerRole !== "test"
     ) {
         return {
             importer: normalizedImporter,
             line: 1,
             message:
-                "Only browser source may use .tsx; every other scanned role must use .ts so it remains in its strict TypeScript graph",
+                "Only browser and story source may use .tsx; every other scanned role must use .ts so it remains in its strict TypeScript graph",
         };
     }
     if (importerRole === "unclassified-app") {

@@ -154,6 +154,7 @@ describe("source-boundary root configuration", () => {
                 "tsconfig.json",
                 "tsconfig.browser.json",
                 "tsconfig.bun.json",
+                "tsconfig.storybook.json",
             ] as const) {
                 expect(
                     violations.some(
@@ -168,7 +169,7 @@ describe("source-boundary root configuration", () => {
         }
     });
 
-    test("rejects authority and membership drift in the three TypeScript configurations", async () => {
+    test("rejects authority and membership drift in the four TypeScript configurations", async () => {
         const projectRoot = await temporaryProject();
         try {
             const sourceRoot = path.join(import.meta.dir, "..", "..");
@@ -176,6 +177,7 @@ describe("source-boundary root configuration", () => {
                 "tsconfig.json",
                 "tsconfig.browser.json",
                 "tsconfig.bun.json",
+                "tsconfig.storybook.json",
             ] as const) {
                 await writeFile(
                     path.join(projectRoot, configName),
@@ -188,6 +190,7 @@ describe("source-boundary root configuration", () => {
                 "tsconfig.json",
                 "tsconfig.browser.json",
                 "tsconfig.bun.json",
+                "tsconfig.storybook.json",
             ] as const) {
                 expect(
                     violations.some(
@@ -209,6 +212,21 @@ describe("source-boundary root configuration", () => {
                 violations.some(
                     (violation) =>
                         violation.importer === "tsconfig.bun.json" &&
+                        violation.message.includes("exact reviewed configuration")
+                )
+            ).toBe(true);
+
+            const storybookConfigPath = path.join(projectRoot, "tsconfig.storybook.json");
+            const storybookConfig = await Bun.file(storybookConfigPath).text();
+            await writeFile(
+                storybookConfigPath,
+                storybookConfig.replace('"types": ["vite/client"]', '"types": ["node"]')
+            );
+            violations = await checkSourceBoundaries(projectRoot);
+            expect(
+                violations.some(
+                    (violation) =>
+                        violation.importer === "tsconfig.storybook.json" &&
                         violation.message.includes("exact reviewed configuration")
                 )
             ).toBe(true);

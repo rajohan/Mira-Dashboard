@@ -4,6 +4,7 @@ import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 
 import { buttonClassNames, type ButtonSize, type ButtonVariant } from "./buttonStyles.ts";
 import { Icon } from "./Icon.tsx";
+import { LoadingDots } from "./LoadingDots.tsx";
 
 export interface ButtonProps extends Omit<
     ButtonHTMLAttributes<HTMLButtonElement>,
@@ -41,6 +42,7 @@ export function Button({
         <HeadlessButton
             {...properties}
             aria-busy={busy || properties["aria-busy"] || undefined}
+            aria-label={properties["aria-label"] ?? (busy ? busyLabel : undefined)}
             className={buttonClassNames({ className, fullWidth, size, variant })}
             disabled={unavailable}
             ref={ref}
@@ -48,13 +50,13 @@ export function Button({
         >
             {busy && (
                 <Icon
-                    className="animate-spin"
+                    className="animate-spin motion-reduce:animate-none"
                     icon={LoaderCircle}
                     size="sm"
                     tone="inherit"
                 />
             )}
-            {busy ? busyLabel : children}
+            {busy ? <LoadingDots label={busyLabel} /> : children}
         </HeadlessButton>
     );
 }

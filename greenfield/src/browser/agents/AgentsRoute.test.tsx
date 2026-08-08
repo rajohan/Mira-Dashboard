@@ -346,7 +346,7 @@ describe("Dashboard agents route", () => {
         await expectAgentShellReady();
         transport.statusQueryResponse = statusRefresh.promise;
         await user.click(screen.getByRole("button", { name: "Refresh" }));
-        expect(await screen.findByText("Refreshing…")).toBeTruthy();
+        expect(await screen.findByRole("button", { name: "Refreshing…" })).toBeTruthy();
 
         const consoleError = spyOn(console, "error").mockImplementation(() => {});
         try {
@@ -359,7 +359,9 @@ describe("Dashboard agents route", () => {
             consoleError.mockRestore();
         }
         expect(await screen.findByRole("alert")).toBeTruthy();
-        await waitFor(() => expect(screen.queryByText("Refreshing…")).toBeNull());
+        await waitFor(() =>
+            expect(screen.queryByRole("button", { name: "Refreshing…" })).toBeNull()
+        );
         expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
     });
 });

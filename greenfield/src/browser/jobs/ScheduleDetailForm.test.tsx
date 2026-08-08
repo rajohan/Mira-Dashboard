@@ -18,15 +18,17 @@ describe("schedule detail disable form", () => {
         renderScheduleDetail({ onDisable, schedule: disabledSchedule(maxTime) });
         const user = userEvent.setup();
 
-        await user.click(screen.getByRole("button", { name: "Update disable intent" }));
+        await user.click(screen.getByRole("button", { name: "Edit disabled state" }));
 
-        expect(screen.getByLabelText<HTMLInputElement>("Expiry").value).toMatch(
-            /^\d{4,6}-\d{2}-\d{2}T\d{2}:\d{2}$/u
-        );
-        fireEvent.change(screen.getByLabelText("Reason"), {
+        expect(
+            screen.getByRole("button", {
+                name: /Choose Disabled until date, selected \d{2}\.\d{2}\.\d{4,6}/u,
+            })
+        ).toBeVisible();
+        fireEvent.change(screen.getByLabelText("Comment"), {
             target: { value: "Updated maintenance" },
         });
-        await user.click(screen.getByRole("button", { name: "Save intent" }));
+        await user.click(screen.getByRole("button", { name: "Save disabled state" }));
         expect(onDisable).toHaveBeenCalledWith(
             {
                 expiresAtMs: maxTime,
@@ -42,14 +44,12 @@ describe("schedule detail disable form", () => {
         renderScheduleDetail({ onDisable, schedule: disabledSchedule(expiry) });
         const user = userEvent.setup();
 
-        await user.click(screen.getByRole("button", { name: "Update disable intent" }));
-        expect(screen.getByLabelText<HTMLInputElement>("Expiry").value).toMatch(
-            /:\d{2}\.123$/u
-        );
-        fireEvent.change(screen.getByLabelText("Reason"), {
+        await user.click(screen.getByRole("button", { name: "Edit disabled state" }));
+        expect(screen.getByRole("group", { name: "Disabled until" })).toBeVisible();
+        fireEvent.change(screen.getByLabelText("Comment"), {
             target: { value: "Updated maintenance" },
         });
-        await user.click(screen.getByRole("button", { name: "Save intent" }));
+        await user.click(screen.getByRole("button", { name: "Save disabled state" }));
         expect(onDisable).toHaveBeenCalledWith(
             {
                 expiresAtMs: expiry,
@@ -61,25 +61,33 @@ describe("schedule detail disable form", () => {
 
     test("associates an invalid expiry with only the expiry control", async () => {
         const onDisable = jest.fn(async () => {});
-        renderScheduleDetail({ onDisable });
+        const pastExpiry = Date.now() - 60_000;
+        const schedule = disabledSchedule(pastExpiry);
+        schedule.activeDisableIntent = {
+            ...schedule.activeDisableIntent!,
+            createdAtMs: pastExpiry - 60_000,
+        };
+        renderScheduleDetail({ onDisable, schedule });
         const user = userEvent.setup();
 
-        await user.click(screen.getByRole("button", { name: "Disable" }));
-        await user.type(screen.getByLabelText("Reason"), "Planned maintenance");
-        const expiry = screen.getByLabelText("Expiry");
-        fireEvent.change(expiry, { target: { value: "2000-01-01T00:00" } });
-        await user.click(screen.getByRole("button", { name: "Disable schedule" }));
+        await user.click(screen.getByRole("button", { name: "Edit disabled state" }));
+        fireEvent.change(screen.getByLabelText("Comment"), {
+            target: { value: "Updated maintenance" },
+        });
+        const expiry = screen.getByRole("group", { name: "Disabled until" });
+        const expiryTrigger = screen.getByRole("button", {
+            name: /Choose Disabled until date/u,
+        });
+        await user.click(screen.getByRole("button", { name: "Save disabled state" }));
 
-        const expiryError = screen.getByText(
-            "Expiry must be a valid future date and time."
-        );
+        const expiryError = screen.getByText("Choose a future date and time.");
         const describedBy = expiry.getAttribute("aria-describedby")?.split(" ");
         expect(describedBy).toContain(expiryError.id);
         expect(expiry).toHaveAttribute("data-invalid");
-        expect(screen.getByLabelText("Reason")).not.toHaveAttribute("data-invalid");
+        expect(screen.getByLabelText("Comment")).not.toHaveAttribute("data-invalid");
         expect(onDisable).not.toHaveBeenCalled();
-        await waitFor(() => expect(expiry).toHaveFocus());
-        expect(screen.getByRole("form", { name: "Disable schedule" })).toHaveAttribute(
+        await waitFor(() => expect(expiryTrigger).toHaveFocus());
+        expect(screen.getByRole("form", { name: "Edit disabled state" })).toHaveAttribute(
             "novalidate"
         );
     });
@@ -90,7 +98,9 @@ describe("schedule detail disable form", () => {
         const user = userEvent.setup();
 
         await user.click(screen.getByRole("button", { name: "Disable" }));
-        const reason = screen.getByLabelText("Reason");
+        await user.click(screen.getByRole("radio", { name: /Indefinitely/u }));
+        expect(screen.queryByRole("group", { name: "Disabled until" })).toBeNull();
+        const reason = screen.getByLabelText("Comment");
         fireEvent.change(reason, { target: { value: "Unsafe\nreason" } });
         await user.click(screen.getByRole("button", { name: "Disable schedule" }));
 
@@ -113,10 +123,10 @@ describe("schedule detail disable form", () => {
         renderScheduleDetail({ onDisable, schedule: disabledSchedule(maxTime) });
         const user = userEvent.setup();
 
-        await user.click(screen.getByRole("button", { name: "Update disable intent" }));
-        const save = screen.getByRole("button", { name: "Save intent" });
+        await user.click(screen.getByRole("button", { name: "Edit disabled state" }));
+        const save = screen.getByRole("button", { name: "Save disabled state" });
         expect(save).toBeDisabled();
-        fireEvent.submit(screen.getByRole("form", { name: "Update disable intent" }));
+        fireEvent.submit(screen.getByRole("form", { name: "Edit disabled state" }));
         expect(onDisable).not.toHaveBeenCalled();
     });
 });

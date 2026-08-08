@@ -82,7 +82,7 @@ describe("job queue panel", () => {
 
         expect(control).toBeDisabled();
         expect(control).toHaveAttribute("aria-busy", "true");
-        expect(control).toHaveTextContent("Resuming claiming…");
+        expect(control).toHaveTextContent("Resuming claiming...");
         await user.click(control);
         expect(onSetClaimingPaused).not.toHaveBeenCalled();
     });

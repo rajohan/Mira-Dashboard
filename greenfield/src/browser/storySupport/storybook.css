@@ -1,0 +1,26 @@
+@import "tailwindcss" source(none);
+@import "../base.css";
+@config "../../../tailwind.config.ts";
+@source "../**/*.{js,ts,jsx,tsx}";
+
+body.sb-show-main.sb-main-fullscreen:has(#storybook-docs) {
+    overflow: auto;
+}
+
+.storybook-task-board-docs {
+    container-type: inline-size;
+}
+
+.sbdocs-content:has(.storybook-task-board-docs) {
+    max-width: 96rem;
+}
+
+@container (max-width: 77rem) {
+    .storybook-task-board-docs [class~="lg:grid-cols-4"] {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .storybook-task-board-docs [class~="lg:min-w-70"] {
+        min-width: 0;
+    }
+}

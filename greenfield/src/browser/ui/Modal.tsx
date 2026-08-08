@@ -50,7 +50,12 @@ export function Modal({
                 className="fixed inset-0 bg-black/65 backdrop-blur-sm transition duration-200 data-closed:opacity-0"
                 transition
             />
-            <div className="fixed inset-0 w-screen overflow-y-auto p-4">
+            <div
+                aria-label={dismissible ? undefined : "Dialog content"}
+                className="fixed inset-0 w-screen overflow-y-auto p-4"
+                role={dismissible ? undefined : "region"}
+                tabIndex={dismissible ? undefined : 0}
+            >
                 <div className="flex min-h-full items-center justify-center">
                     <DialogPanel
                         className={cn(
