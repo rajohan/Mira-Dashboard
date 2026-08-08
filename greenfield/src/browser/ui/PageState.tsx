@@ -21,6 +21,7 @@ type PageStateProps =
       }>
     | Readonly<{
           message: ReactNode;
+          headingLevel?: 1 | 2 | 3;
           onRetry?: () => void;
           retryBusy?: boolean;
           retryLabel?: string;
@@ -30,6 +31,7 @@ type PageStateProps =
     | Readonly<{
           action?: ReactNode;
           description?: ReactNode;
+          headingLevel?: 1 | 2 | 3;
           icon?: LucideIcon;
           status: "empty";
           title: ReactNode;
@@ -53,6 +55,7 @@ export function PageState(properties: PageStateProps) {
                 <EmptyState
                     action={properties.action}
                     description={properties.description}
+                    headingLevel={properties.headingLevel}
                     icon={properties.icon}
                     title={properties.title}
                 />
@@ -72,7 +75,11 @@ export function PageState(properties: PageStateProps) {
                             tone="danger"
                         />
                         <div className="min-w-0">
-                            <Heading id={errorHeadingId} level={1} size="subsection">
+                            <Heading
+                                id={errorHeadingId}
+                                level={properties.headingLevel ?? 1}
+                                size="subsection"
+                            >
                                 {properties.title ?? "Dashboard unavailable"}
                             </Heading>
                             <Text className="mt-2">{properties.message}</Text>

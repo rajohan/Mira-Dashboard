@@ -289,7 +289,7 @@
                 "delivery": "planned",
                 "kind": "procedure",
                 "names": ["cache.getHeartbeat"],
-                "phase": "phase-3"
+                "phase": "phase-4"
             }
         },
         {
@@ -368,7 +368,7 @@
                 "delivery": "planned",
                 "kind": "procedure",
                 "names": ["openClawCron.list"],
-                "phase": "phase-3"
+                "phase": "phase-4"
             }
         },
         {
@@ -1429,7 +1429,7 @@
                 "delivery": "planned",
                 "kind": "procedure",
                 "names": ["openClawCron.delete"],
-                "phase": "phase-3"
+                "phase": "phase-4"
             }
         },
         {
@@ -1442,7 +1442,7 @@
                 "delivery": "planned",
                 "kind": "procedure",
                 "names": ["openClawCron.run"],
-                "phase": "phase-3"
+                "phase": "phase-4"
             }
         },
         {
@@ -1455,7 +1455,7 @@
                 "delivery": "planned",
                 "kind": "procedure",
                 "names": ["openClawCron.setEnabled"],
-                "phase": "phase-3"
+                "phase": "phase-4"
             }
         },
         {
@@ -1468,7 +1468,7 @@
                 "delivery": "planned",
                 "kind": "procedure",
                 "names": ["openClawCron.update"],
-                "phase": "phase-3"
+                "phase": "phase-4"
             }
         },
         {

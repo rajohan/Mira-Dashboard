@@ -75,8 +75,8 @@ describe("reviewed pre-cutover parity inventory", () => {
         expect(countByPhase(legacyEndpoints.endpoints)).toEqual({
             "phase-1": 7,
             "phase-2": 28,
-            "phase-3": 45,
-            "phase-4": 7,
+            "phase-3": 39,
+            "phase-4": 13,
             "phase-5": 70,
         });
     });
