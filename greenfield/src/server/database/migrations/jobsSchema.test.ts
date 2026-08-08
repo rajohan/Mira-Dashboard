@@ -283,7 +283,8 @@ function expectUsesIndexWithoutTemporarySort(
     database: TestDatabase,
     query: string,
     indexName: string,
-    parameter?: string
+    parameter?: string,
+    requiredDetail?: string
 ): void {
     const statement = `EXPLAIN QUERY PLAN ${query}`;
     const plan =
@@ -292,6 +293,9 @@ function expectUsesIndexWithoutTemporarySort(
             : database.sqlite.query<QueryPlanRow, [string]>(statement).all(parameter);
     expect(plan.some(({ detail }) => detail.includes(indexName))).toBeTrue();
     expect(plan.some(({ detail }) => detail.includes("USE TEMP B-TREE"))).toBeFalse();
+    if (requiredDetail !== undefined) {
+        expect(plan.some(({ detail }) => detail.includes(requiredDetail))).toBeTrue();
+    }
 }
 
 describe("jobs baseline schema", () => {
@@ -301,7 +305,8 @@ describe("jobs baseline schema", () => {
         try {
             expect(
                 database.sqlite
-                    .query<{ name: string; strict: number; wr: number }, []>(`
+                    .query<{ name: string; strict: number; wr: number }, []>(
+                        `
                         SELECT name, strict, wr
                         FROM pragma_table_list
                         WHERE name IN (
@@ -310,7 +315,8 @@ describe("jobs baseline schema", () => {
                             'scheduled_jobs', 'worker_instances'
                         )
                         ORDER BY name
-                    `)
+                    `
+                    )
                     .all()
             ).toEqual([
                 { name: "job_disable_intents", strict: 1, wr: 1 },
@@ -1249,6 +1255,51 @@ describe("jobs baseline schema", () => {
             );
             expectUsesIndexWithoutTemporarySort(
                 database,
+                `SELECT id FROM job_runs
+                 WHERE state = 'queued' AND available_at <= 1000
+                   AND available_at = 900 AND priority = 2
+                   AND queued_at = 800 AND id > '019f0000-0000-7000-8000-000000000001'
+                 ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
+                 LIMIT 32`,
+                "job_runs_claim_idx",
+                undefined,
+                "id>?"
+            );
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE state = 'queued' AND available_at <= 1000
+                   AND available_at = 900 AND priority = 2 AND queued_at > 800
+                 ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
+                 LIMIT 32`,
+                "job_runs_claim_idx",
+                undefined,
+                "queued_at>?"
+            );
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE state = 'queued' AND available_at <= 1000
+                   AND available_at = 900 AND priority < 2
+                 ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
+                 LIMIT 32`,
+                "job_runs_claim_idx",
+                undefined,
+                "priority<?"
+            );
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE state = 'queued' AND available_at <= 1000
+                   AND available_at > 900
+                 ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
+                 LIMIT 32`,
+                "job_runs_claim_idx",
+                undefined,
+                "available_at>? AND available_at<?"
+            );
+            expectUsesIndexWithoutTemporarySort(
+                database,
                 "SELECT id FROM job_runs ORDER BY queued_at DESC, id DESC LIMIT 50",
                 "job_runs_queued_id_idx"
             );
@@ -1276,6 +1327,17 @@ describe("jobs baseline schema", () => {
             );
             expectUsesIndexWithoutTemporarySort(
                 database,
+                `SELECT id FROM scheduled_jobs
+                 WHERE enabled = 1 AND next_run_at <= 1000
+                   AND (next_run_at, id) >
+                       (900, 'system.worker-smoke-001')
+                 ORDER BY next_run_at ASC, id ASC LIMIT 32`,
+                "scheduled_jobs_due_idx",
+                undefined,
+                "(next_run_at,id)>(?,?)"
+            );
+            expectUsesIndexWithoutTemporarySort(
+                database,
                 `SELECT id FROM worker_instances
                  WHERE heartbeat_at < 1000 ORDER BY heartbeat_at ASC, id ASC`,
                 "worker_instances_heartbeat_id_idx"
@@ -1287,12 +1349,14 @@ describe("jobs baseline schema", () => {
                 "resource_leases_expiry_key_idx"
             );
             const eventPlan = database.sqlite
-                .query<QueryPlanRow, [string]>(`
+                .query<QueryPlanRow, [string]>(
+                    `
                     EXPLAIN QUERY PLAN
                     SELECT sequence FROM job_run_events
                     WHERE job_run_id = ?
                     ORDER BY sequence DESC LIMIT 50
-                `)
+                `
+                )
                 .all(uuid(51));
             expect(
                 eventPlan.some(({ detail }) => detail.includes("PRIMARY KEY"))

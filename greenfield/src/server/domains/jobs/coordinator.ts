@@ -24,10 +24,12 @@ import type { JobRunRecord, ScheduledJobRecord } from "./records.ts";
 import { toScheduleConfiguration } from "./records.ts";
 import { buildRegisteredSchedule } from "./registeredSchedule.ts";
 import {
+    type ClaimNextRunInput,
     type JobMutationSideEffects,
     type JobClaimOutcome,
     type JobRepository,
     type JobRunInsert,
+    type ListDueSchedulesInput,
     type ScheduledJobInsert,
     type WorkerLifecycleResult,
     type WorkerInstanceInsert,
@@ -43,6 +45,7 @@ export const jobWorkerIdlePollIntervalMs = 1000;
 export const jobWorkerForceDrainMs = 5000;
 export const jobSchedulePollIntervalMs = 1000;
 export const jobSchedulePollLimit = 32;
+export const jobSchedulePollScanLimit = jobSchedulePollLimit * 8;
 export const jobDisableIntentExpiryLimit = 32;
 export const jobExpiredClaimRecoveryLimit = 32;
 
@@ -669,6 +672,9 @@ export function createJobWorkerCoordinator(
     let initializePromise: Promise<void> | undefined;
     let disposePromise: Promise<void> | undefined;
     let programPromise: Promise<void> | undefined;
+    let claimCursor: ClaimNextRunInput["cursor"];
+    let dueScheduleAvailableThrough: Date | undefined;
+    let dueScheduleCursor: ListDueSchedulesInput["cursor"];
     const activePasses = {
         claim: new Set<Promise<unknown>>(),
         heartbeat: new Set<Promise<unknown>>(),
@@ -764,46 +770,86 @@ export function createJobWorkerCoordinator(
                 }
             }
         }
-        const schedules = options.repository.listDueSchedules({
-            at,
-            limit: jobSchedulePollLimit,
-        });
-        for (const schedule of schedules) {
+        let enqueuedScheduleCount = 0;
+        let scannedScheduleCount = 0;
+        const availableThrough =
+            dueScheduleCursor === undefined ? at : (dueScheduleAvailableThrough ?? at);
+        dueScheduleAvailableThrough = availableThrough;
+        const effectiveAt = new Date(Math.max(at.getTime(), availableThrough.getTime()));
+        while (
+            enqueuedScheduleCount < jobSchedulePollLimit &&
+            scannedScheduleCount < jobSchedulePollScanLimit
+        ) {
             throwIfAborted(signal);
-            if (leftDisabledScheduleIds.has(schedule.id)) continue;
-            if (schedule.nextRunAt === null) continue;
-            const nextRunAtMs = nextScheduleOccurrence(
-                toScheduleConfiguration(schedule),
-                at.getTime(),
-                schedule.nextRunAt.getTime()
+            const pageLimit = Math.min(
+                jobSchedulePollLimit,
+                jobSchedulePollScanLimit - scannedScheduleCount
             );
-            if (nextRunAtMs === undefined) {
-                throw new RangeError("Due schedule has no representable next occurrence");
-            }
-            const run = scheduledRunInsert(schedule, at, generateId);
-            const sideEffects = mergeSideEffects([
-                options.sideEffects.forSchedule({
-                    action: "schedules.enqueue-due",
-                    at,
-                    outcome: "accepted",
-                    targetId: schedule.id,
-                }),
-                options.sideEffects.forRun({
-                    action: "jobs.run.enqueue-scheduled",
-                    at,
-                    outcome: "accepted",
-                    targetId: run.id,
-                }),
-            ]);
-            await options.repository.enqueueNextDueSchedule({
-                ...sideEffects,
-                at,
-                nextRunAt: new Date(nextRunAtMs),
-                observedNextRunAt: schedule.nextRunAt,
-                run,
-                scheduleId: schedule.id,
+            const schedules = options.repository.listDueSchedules({
+                at: availableThrough,
+                ...(dueScheduleCursor === undefined ? {} : { cursor: dueScheduleCursor }),
+                limit: pageLimit,
             });
-            throwIfAborted(signal);
+            if (schedules.length === 0) {
+                dueScheduleAvailableThrough = undefined;
+                dueScheduleCursor = undefined;
+                break;
+            }
+            for (const schedule of schedules) {
+                throwIfAborted(signal);
+                if (schedule.nextRunAt === null) {
+                    throw new Error("Due schedule is missing its keyset cursor");
+                }
+                const cursor = {
+                    id: schedule.id,
+                    nextRunAt: schedule.nextRunAt,
+                } as const;
+                if (!leftDisabledScheduleIds.has(schedule.id)) {
+                    const nextRunAtMs = nextScheduleOccurrence(
+                        toScheduleConfiguration(schedule),
+                        effectiveAt.getTime(),
+                        schedule.nextRunAt.getTime()
+                    );
+                    if (nextRunAtMs === undefined) {
+                        throw new RangeError(
+                            "Due schedule has no representable next occurrence"
+                        );
+                    }
+                    const run = scheduledRunInsert(schedule, effectiveAt, generateId);
+                    const sideEffects = mergeSideEffects([
+                        options.sideEffects.forSchedule({
+                            action: "schedules.enqueue-due",
+                            at: effectiveAt,
+                            outcome: "accepted",
+                            targetId: schedule.id,
+                        }),
+                        options.sideEffects.forRun({
+                            action: "jobs.run.enqueue-scheduled",
+                            at: effectiveAt,
+                            outcome: "accepted",
+                            targetId: run.id,
+                        }),
+                    ]);
+                    const result = await options.repository.enqueueNextDueSchedule({
+                        ...sideEffects,
+                        at: effectiveAt,
+                        nextRunAt: new Date(nextRunAtMs),
+                        observedNextRunAt: schedule.nextRunAt,
+                        run,
+                        scheduleId: schedule.id,
+                    });
+                    if (result.kind === "inserted") enqueuedScheduleCount += 1;
+                    throwIfAborted(signal);
+                }
+                dueScheduleCursor = cursor;
+                scannedScheduleCount += 1;
+                if (enqueuedScheduleCount >= jobSchedulePollLimit) return;
+            }
+            if (schedules.length < pageLimit) {
+                dueScheduleAvailableThrough = undefined;
+                dueScheduleCursor = undefined;
+                break;
+            }
         }
     };
     const scheduleLoop = Effect.tryPromise({
@@ -829,6 +875,7 @@ export function createJobWorkerCoordinator(
         const leaseToken = generateId();
         const claim = await options.repository.claimNextRun({
             at,
+            ...(claimCursor === undefined ? {} : { cursor: claimCursor }),
             leaseExpiresAt: addMilliseconds(at, timings.claimLeaseMs),
             leaseToken,
             minimumHeartbeatAt: subMilliseconds(at, timings.workerFreshnessMs),
@@ -841,6 +888,12 @@ export function createJobWorkerCoordinator(
                 }),
             workerId: options.workerInstanceId,
         });
+        if (claim.kind === "page-exhausted") {
+            claimCursor = claim.cursor;
+            throwIfAborted(signal);
+            return;
+        }
+        claimCursor = undefined;
         if (claim.kind !== "claimed") {
             throwIfAborted(signal);
             if (claim.kind === "worker-unavailable") {

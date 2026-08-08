@@ -5,6 +5,7 @@ import {
     isRegisteredJobSchedule,
     parseJobActionOutputMessage,
     parseJobActionProgress,
+    validateJobActionRegistration,
 } from "./actionRegistry.ts";
 
 describe("durable job action registry", () => {
@@ -27,6 +28,45 @@ describe("durable job action registry", () => {
         expect(isRegisteredJobSchedule("system.worker-smoke", "system.shell")).toBe(
             false
         );
+    });
+
+    test("retains the canonical schedule produced while validating a registration", () => {
+        const smoke = findJobActionRegistration("system.worker-smoke");
+        if (smoke === undefined) throw new TypeError("Missing smoke registration");
+
+        const registration = validateJobActionRegistration({
+            ...smoke,
+            defaultSchedule: {
+                expression: "0\t0 * JAN MON",
+                kind: "cron",
+                timeZone: "UTC",
+            },
+            scheduleId: "system.normalized-cron-test",
+        });
+
+        expect(registration.defaultSchedule).toEqual({
+            expression: "0 0 * 1 1",
+            kind: "cron",
+            timeZone: "UTC",
+        });
+        expect(() =>
+            validateJobActionRegistration({
+                ...smoke,
+                manualExposure: "administrator" as never,
+            })
+        ).toThrow("Job manual exposure is invalid");
+        expect(() =>
+            validateJobActionRegistration({
+                ...smoke,
+                retrySafe: "yes" as never,
+            })
+        ).toThrow("Job retry-safe flag is invalid");
+        expect(() =>
+            validateJobActionRegistration({
+                ...smoke,
+                execute: null as never,
+            })
+        ).toThrow("Job action executor is invalid");
     });
 
     test("bounds progress and output before persistence", () => {

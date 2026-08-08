@@ -145,6 +145,10 @@ export interface JobRunDetailRecord {
 
 export interface ListDueSchedulesInput {
     readonly at: Date;
+    readonly cursor?: {
+        readonly id: string;
+        readonly nextRunAt: Date;
+    };
     readonly limit?: number;
 }
 
@@ -312,8 +316,17 @@ export type ExpireDisableIntentResult =
           readonly schedule: ScheduledJobRecord;
       };
 
+export interface JobClaimCursor {
+    readonly availableAt: Date;
+    readonly availableThrough: Date;
+    readonly id: string;
+    readonly priority: number;
+    readonly queuedAt: Date;
+}
+
 export interface ClaimNextRunInput {
     readonly at: Date;
+    readonly cursor?: JobClaimCursor;
     readonly leaseExpiresAt: Date;
     readonly leaseToken: string;
     readonly minimumHeartbeatAt: Date;
@@ -324,6 +337,10 @@ export interface ClaimNextRunInput {
 export type JobClaimResult =
     | { readonly kind: "claimed"; readonly run: JobRunRecord }
     | { readonly kind: "empty" }
+    | {
+          readonly cursor: JobClaimCursor;
+          readonly kind: "page-exhausted";
+      }
     | { readonly kind: "paused" }
     | { readonly kind: "worker-unavailable" };
 
@@ -663,7 +680,11 @@ class DrizzleJobReader implements JobRepositoryReader {
                 and(
                     eq(scheduledJobs.enabled, true),
                     isNotNull(scheduledJobs.nextRunAt),
-                    lte(scheduledJobs.nextRunAt, input.at)
+                    lte(scheduledJobs.nextRunAt, input.at),
+                    input.cursor === undefined
+                        ? undefined
+                        : sql`(${scheduledJobs.nextRunAt}, ${scheduledJobs.id}) >
+                              (${getTime(input.cursor.nextRunAt)}, ${input.cursor.id})`
                 )
             )
             .orderBy(asc(scheduledJobs.nextRunAt), asc(scheduledJobs.id))
@@ -1714,19 +1735,60 @@ class DrizzleJobWriter extends DrizzleJobReader {
         ).value;
         if (activeCount >= worker.capacity) return { kind: "worker-unavailable" };
 
-        const candidates = this.#transaction
-            .select()
-            .from(jobRuns)
-            .where(and(eq(jobRuns.state, "queued"), lte(jobRuns.availableAt, input.at)))
-            .orderBy(
-                asc(jobRuns.availableAt),
-                desc(jobRuns.priority),
-                asc(jobRuns.queuedAt),
-                asc(jobRuns.id)
-            )
-            .limit(claimCandidateMaximum)
-            .all()
-            .map((row) => parseRun(row));
+        const availableThrough = input.cursor?.availableThrough ?? input.at;
+        const candidates: JobRunRecord[] = [];
+        const appendCandidateRange = (range?: SQL): void => {
+            const remaining = claimCandidateMaximum - candidates.length;
+            if (remaining === 0) return;
+            candidates.push(
+                ...this.#transaction
+                    .select()
+                    .from(jobRuns)
+                    .where(
+                        and(
+                            eq(jobRuns.state, "queued"),
+                            lte(jobRuns.availableAt, availableThrough),
+                            range
+                        )
+                    )
+                    .orderBy(
+                        asc(jobRuns.availableAt),
+                        desc(jobRuns.priority),
+                        asc(jobRuns.queuedAt),
+                        asc(jobRuns.id)
+                    )
+                    .limit(remaining)
+                    .all()
+                    .map((row) => parseRun(row))
+            );
+        };
+        if (input.cursor === undefined) {
+            appendCandidateRange();
+        } else {
+            const cursor = input.cursor;
+            appendCandidateRange(
+                and(
+                    eq(jobRuns.availableAt, cursor.availableAt),
+                    eq(jobRuns.priority, cursor.priority),
+                    eq(jobRuns.queuedAt, cursor.queuedAt),
+                    gt(jobRuns.id, cursor.id)
+                )
+            );
+            appendCandidateRange(
+                and(
+                    eq(jobRuns.availableAt, cursor.availableAt),
+                    eq(jobRuns.priority, cursor.priority),
+                    gt(jobRuns.queuedAt, cursor.queuedAt)
+                )
+            );
+            appendCandidateRange(
+                and(
+                    eq(jobRuns.availableAt, cursor.availableAt),
+                    lt(jobRuns.priority, cursor.priority)
+                )
+            );
+            appendCandidateRange(gt(jobRuns.availableAt, cursor.availableAt));
+        }
         for (const candidate of candidates) {
             const keys = resourceKeys(candidate);
             const resourceConflict =
@@ -1739,7 +1801,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
                     .get() !== undefined;
             if (resourceConflict) continue;
 
-            const at = maximumDate(candidate.updatedAt, input.at);
+            const at = maximumDate(candidate.updatedAt, availableThrough, input.at);
             const leaseExpiresAt = shiftDurationToStart(
                 input.at,
                 input.leaseExpiresAt,
@@ -1764,7 +1826,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
                         eq(jobRuns.id, candidate.id),
                         eq(jobRuns.state, "queued"),
                         eq(jobRuns.stateVersion, candidate.stateVersion),
-                        lte(jobRuns.availableAt, input.at)
+                        lte(jobRuns.availableAt, availableThrough)
                     )
                 )
                 .returning()
@@ -1801,6 +1863,19 @@ class DrizzleJobWriter extends DrizzleJobReader {
             return {
                 kind: "claimed",
                 run: refreshed,
+            };
+        }
+        const lastCandidate = candidates.at(-1);
+        if (candidates.length === claimCandidateMaximum && lastCandidate !== undefined) {
+            return {
+                cursor: {
+                    availableAt: lastCandidate.availableAt,
+                    availableThrough,
+                    id: lastCandidate.id,
+                    priority: lastCandidate.priority,
+                    queuedAt: lastCandidate.queuedAt,
+                },
+                kind: "page-exhausted",
             };
         }
         return { kind: "empty" };

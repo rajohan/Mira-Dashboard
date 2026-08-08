@@ -232,6 +232,65 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("pages due schedules by next occurrence and ID", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        try {
+            await repository.reconcileSchedules({
+                at: new Date(1000),
+                schedules: [
+                    schedule({
+                        id: "system.worker-smoke-a",
+                        nextRunAt: new Date(60_000),
+                    }),
+                    schedule({
+                        id: "system.worker-smoke-b",
+                        nextRunAt: new Date(60_000),
+                    }),
+                    schedule({
+                        id: "system.worker-smoke-c",
+                        nextRunAt: new Date(65_000),
+                    }),
+                    schedule({
+                        id: "system.worker-smoke-future",
+                        nextRunAt: new Date(70_001),
+                    }),
+                ],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+
+            const firstPage = repository.listDueSchedules({
+                at: new Date(70_000),
+                limit: 2,
+            });
+            expect(firstPage.map(({ id }) => id)).toEqual([
+                "system.worker-smoke-a",
+                "system.worker-smoke-b",
+            ]);
+            const lastSchedule = firstPage.at(-1);
+            if (lastSchedule === undefined || lastSchedule.nextRunAt === null) {
+                throw new Error("Expected a due schedule cursor");
+            }
+            expect(
+                repository
+                    .listDueSchedules({
+                        at: new Date(70_000),
+                        cursor: {
+                            id: lastSchedule.id,
+                            nextRunAt: lastSchedule.nextRunAt,
+                        },
+                        limit: 2,
+                    })
+                    .map(({ id }) => id)
+            ).toEqual(["system.worker-smoke-c"]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("retires schedules removed from the code-owned action registry", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -954,6 +1013,248 @@ describe("durable jobs repository", () => {
                     .listRunEvents({ limit: 10, runId: runs[1]?.id ?? "" })
                     .map(({ kind }) => kind)
             ).toEqual(["retry-scheduled", "failed", "claimed", "queued"]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("claims runnable work after a full page of resource-conflicted runs", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const systemRun = {
+            requestedById: "job-scheduler",
+            requestedByKind: "system",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+            triggerType: "system",
+        } satisfies Partial<JobRunInsert>;
+        const resourceHolder = queuedRun(40, {
+            ...systemRun,
+            resourceKeysJson: '["database"]',
+        });
+        try {
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(resourceHolder),
+                    run: resourceHolder,
+                })
+            ).toMatchObject({ kind: "inserted" });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerTwoId, 2),
+            });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(10_000),
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken: uuid(140),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: { id: resourceHolder.id },
+            });
+
+            const conflictedRuns = Array.from({ length: 32 }, (_, index) =>
+                queuedRun(100 + index, {
+                    ...systemRun,
+                    resourceKeysJson: '["database"]',
+                })
+            );
+            const runnableRun = queuedRun(132, {
+                ...systemRun,
+                resourceKeysJson: '["network"]',
+            });
+            for (const run of [...conflictedRuns, runnableRun]) {
+                expect(
+                    await repository.enqueueManualRun({
+                        ...noSideEffects,
+                        queuedEvent: queuedEvent(run),
+                        run,
+                    })
+                ).toMatchObject({ kind: "inserted" });
+            }
+
+            const firstPage = await repository.claimNextRun({
+                at: new Date(11_000),
+                leaseExpiresAt: new Date(31_000),
+                leaseToken: uuid(141),
+                minimumHeartbeatAt: new Date(1000),
+                sideEffectsForClaim: () => noSideEffects,
+                workerId: workerTwoId,
+            });
+            expect(firstPage).toMatchObject({
+                cursor: { id: conflictedRuns.at(-1)?.id },
+                kind: "page-exhausted",
+            });
+            expect(repository.findRun(runnableRun.id)).toMatchObject({
+                state: "queued",
+            });
+            if (firstPage.kind !== "page-exhausted") {
+                throw new Error("Expected the bounded claim page to be exhausted");
+            }
+            expect(firstPage.cursor.availableThrough).toEqual(new Date(11_000));
+            const futureTail = queuedRun(10_500, {
+                ...systemRun,
+                resourceKeysJson: '["network.future"]',
+            });
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(futureTail),
+                    run: futureTail,
+                })
+            ).toMatchObject({ kind: "inserted" });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(12_000),
+                    cursor: firstPage.cursor,
+                    leaseExpiresAt: new Date(32_000),
+                    leaseToken: uuid(142),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: { id: runnableRun.id },
+            });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(12_000),
+                    cursor: firstPage.cursor,
+                    leaseExpiresAt: new Date(32_000),
+                    leaseToken: uuid(143),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toEqual({ kind: "empty" });
+            expect(repository.findRun(futureTail.id)).toMatchObject({ state: "queued" });
+            expect(repository.findRun(conflictedRuns[0]?.id ?? "")).toMatchObject({
+                state: "queued",
+            });
+            expect(repository.findRun(conflictedRuns.at(-1)?.id ?? "")).toMatchObject({
+                state: "queued",
+            });
+            expect(
+                database.orm
+                    .select({
+                        jobRunId: resourceLeases.jobRunId,
+                        resourceKey: resourceLeases.resourceKey,
+                    })
+                    .from(resourceLeases)
+                    .all()
+            ).toEqual([
+                { jobRunId: resourceHolder.id, resourceKey: "database" },
+                { jobRunId: runnableRun.id, resourceKey: "network" },
+            ]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("concatenates every mixed-order claim cursor range", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const systemRun = {
+            requestedById: "job-scheduler",
+            requestedByKind: "system",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+            triggerType: "system",
+        } satisfies Partial<JobRunInsert>;
+        const runAt = (
+            index: number,
+            availableAtMs: number,
+            priority: number,
+            queuedAtMs: number,
+            resourceKey: string
+        ): JobRunInsert =>
+            queuedRun(index, {
+                ...systemRun,
+                availableAt: new Date(availableAtMs),
+                priority,
+                queuedAt: new Date(queuedAtMs),
+                resourceKeysJson: JSON.stringify([resourceKey]),
+                updatedAt: new Date(queuedAtMs),
+            });
+        const resourceHolder = runAt(350, 1500, 100, 1500, "database");
+        const cursor = {
+            availableAt: new Date(5000),
+            availableThrough: new Date(6000),
+            id: uuid(400),
+            priority: 10,
+            queuedAt: new Date(4000),
+        } as const;
+        const candidates = [
+            runAt(401, 5000, 10, 4000, "database"),
+            runAt(402, 5000, 10, 4001, "database"),
+            runAt(403, 5000, 9, 3000, "database"),
+            runAt(404, 5001, 100, 3000, "network"),
+        ];
+        try {
+            for (const run of [resourceHolder, ...candidates]) {
+                expect(
+                    await repository.enqueueManualRun({
+                        ...noSideEffects,
+                        queuedEvent: queuedEvent(run),
+                        run,
+                    })
+                ).toMatchObject({ kind: "inserted" });
+            }
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerTwoId),
+            });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(3000),
+                    leaseExpiresAt: new Date(30_000),
+                    leaseToken: uuid(450),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: { id: resourceHolder.id },
+            });
+
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(6000),
+                    cursor,
+                    leaseExpiresAt: new Date(36_000),
+                    leaseToken: uuid(451),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerTwoId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: { id: candidates[3]?.id },
+            });
+            expect(
+                candidates.slice(0, 3).map((run) => repository.findRun(run.id)?.state)
+            ).toEqual(["queued", "queued", "queued"]);
         } finally {
             database.sqlite.close(true);
         }

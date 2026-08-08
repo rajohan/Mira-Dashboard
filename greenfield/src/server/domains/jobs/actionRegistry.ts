@@ -27,6 +27,11 @@ import { boundedControlSafeTextSchema } from "../../../shared/validation.ts";
 export type JobManualExposure = "jobs-write" | "none";
 export type JobActionEventWriteResult = "appended" | "dropped" | "truncated";
 
+const jobManualExposureSchema = v.picklist(
+    ["jobs-write", "none"],
+    "Job manual exposure is invalid"
+);
+
 /** Explicit action-owned classification for failures safe to retry from scratch. */
 export class JobActionRetryableError extends Error {
     constructor(cause?: unknown) {
@@ -99,30 +104,45 @@ const smokeResultSchema = v.strictObject({
     ),
 });
 
-function validateRegistration(
+/**
+ * Validates one code-owned action and retains canonical schedule output.
+ * @param registration Candidate release-owned action metadata.
+ * @returns A frozen registration safe for reconciliation and execution.
+ */
+export function validateJobActionRegistration(
     registration: JobActionRegistration
 ): JobActionRegistration {
     v.parse(jobActionKeySchema, registration.actionKey);
-    v.parse(jobPayloadSchema, registration.actionPayload);
+    const actionPayload = v.parse(jobPayloadSchema, registration.actionPayload);
     v.parse(jobAttemptLimitSchema, registration.attemptLimit);
     v.parse(jobCancellationPolicySchema, registration.cancellationPolicy);
-    v.parse(scheduleConfigurationSchema, registration.defaultSchedule);
+    v.parse(
+        v.boolean("Job default-enabled flag is invalid"),
+        registration.defaultEnabled
+    );
+    const defaultSchedule = v.parse(
+        scheduleConfigurationSchema,
+        registration.defaultSchedule
+    );
     v.parse(jobDescriptionSchema, registration.description);
     v.parse(jobDisplayNameSchema, registration.displayName);
     v.parse(jobPrioritySchema, registration.priority);
     v.parse(jobResourceClassSchema, registration.resourceClass);
-    v.parse(jobResourceKeysSchema, registration.resourceKeys);
+    const resourceKeys = v.parse(jobResourceKeysSchema, registration.resourceKeys);
+    v.parse(jobManualExposureSchema, registration.manualExposure);
+    v.parse(v.boolean("Job retry-safe flag is invalid"), registration.retrySafe);
     v.parse(scheduleIdSchema, registration.scheduleId);
     v.parse(jobTimeoutSchema, registration.timeoutMs);
+    v.parse(v.function("Job action executor is invalid"), registration.execute);
     return Object.freeze({
         ...registration,
-        actionPayload: Object.freeze({ ...registration.actionPayload }),
-        defaultSchedule: Object.freeze({ ...registration.defaultSchedule }),
-        resourceKeys: Object.freeze([...registration.resourceKeys]),
+        actionPayload: Object.freeze({ ...actionPayload }),
+        defaultSchedule: Object.freeze({ ...defaultSchedule }),
+        resourceKeys: Object.freeze([...resourceKeys]),
     });
 }
 
-const workerSmokeRegistration = validateRegistration({
+const workerSmokeRegistration = validateJobActionRegistration({
     actionKey: "system.worker-smoke",
     actionPayload: Object.freeze({}),
     attemptLimit: 3,

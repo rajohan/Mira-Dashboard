@@ -9,6 +9,7 @@ import {
 } from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
+    jobSchedulePollScanLimit,
     type JobWorkerCoordinatorOptions,
     type JobWorkerSideEffectFactory,
 } from "./coordinator.ts";
@@ -26,6 +27,7 @@ import type {
     JobClaimResult,
     JobRepository,
     JobSettlementResult,
+    ListDueSchedulesInput,
 } from "./repository.ts";
 
 const releaseId = "a".repeat(40);
@@ -171,6 +173,7 @@ interface RepositoryFixtureOptions {
     readonly cancellationRequested?: boolean;
     readonly claim?: JobClaimResult;
     readonly claimGate?: Promise<void>;
+    readonly claims?: readonly JobClaimResult[];
     readonly dueSchedules?: readonly ScheduledJobRecord[];
     readonly expiringSchedule?: ScheduledJobRecord;
     readonly expiryGate?: Promise<void>;
@@ -184,12 +187,15 @@ interface RepositoryFixtureOptions {
 
 function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const events: string[] = [];
+    const claimInputs: Array<Parameters<JobRepository["claimNextRun"]>[0]> = [];
     const enqueues: DueScheduleEnqueueInput[] = [];
     const expiryEligibility: boolean[] = [];
     const expiryNextRuns: Date[] = [];
     const settlements: Array<Parameters<JobRepository["settleClaim"]>[0]> = [];
-    const eventRun = options.claim?.kind === "claimed" ? options.claim.run : undefined;
-    let claim = options.claim;
+    const claims = [
+        ...(options.claims ?? (options.claim === undefined ? [] : [options.claim])),
+    ];
+    const eventRun = claims.find((result) => result.kind === "claimed")?.run;
     let dueSchedules = [...(options.dueSchedules ?? [])];
     const repository = {
         appendClaimEvent(input) {
@@ -214,8 +220,8 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
             });
         },
         async claimNextRun(input) {
-            const result = claim ?? ({ kind: "empty" } as const);
-            claim = undefined;
+            claimInputs.push(input);
+            const result = claims.shift() ?? ({ kind: "empty" } as const);
             events.push(`claim:${result.kind}`);
             if (result.kind === "claimed") input.sideEffectsForClaim(result.run);
             if (options.claimGate !== undefined) await options.claimGate;
@@ -306,6 +312,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         },
     } satisfies JobWorkerCoordinatorOptions["repository"];
     return {
+        claimInputs,
         enqueues,
         events,
         expiryEligibility,
@@ -370,6 +377,36 @@ describe("durable job worker coordinator", () => {
             fixture.events.indexOf("stop")
         );
         expect(await coordinator.completion).toBeUndefined();
+    });
+
+    test("continues bounded claim pages and resets the cursor after a claim", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId);
+        const cursor = {
+            availableAt: new Date(at.getTime() - 1000),
+            availableThrough: at,
+            id: Bun.randomUUIDv7(),
+            priority: 0,
+            queuedAt: new Date(at.getTime() - 1000),
+        } as const;
+        const fixture = repositoryFixture({
+            claims: [
+                { cursor, kind: "page-exhausted" },
+                { kind: "claimed", run },
+            ],
+        });
+        const coordinator = createJobWorkerCoordinator(
+            coordinatorOptions(fixture.repository, workerId)
+        );
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.claimInputs.length >= 3);
+        await coordinator.dispose();
+
+        expect(fixture.claimInputs[0]).not.toHaveProperty("cursor");
+        expect(fixture.claimInputs[1]).toMatchObject({ cursor });
+        expect(fixture.claimInputs[2]).not.toHaveProperty("cursor");
+        expect(fixture.settlements).toHaveLength(1);
     });
 
     test("rejects completion when initialization fails before worker loops start", async () => {
@@ -549,6 +586,101 @@ describe("durable job worker coordinator", () => {
             scheduledJobId: schedule.id,
             scheduledJobVersion: schedule.version,
             triggerType: "schedule",
+        });
+    });
+
+    test("pages past active schedules across bounded polling passes", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const dueAt = new Date(at.getTime() - 30_000);
+        const schedules = Array.from(
+            { length: jobSchedulePollScanLimit + 2 },
+            (_, index) =>
+                intervalSchedule({
+                    id: `system.worker-smoke-${String(index).padStart(3, "0")}`,
+                    nextRunAt: dueAt,
+                })
+        );
+        const runnableSchedule = schedules.at(-1);
+        if (runnableSchedule === undefined) throw new Error("Missing runnable schedule");
+        const newlyDueSchedule = intervalSchedule({
+            id: "system.worker-smoke-newly-due",
+            nextRunAt: new Date(at.getTime() + 30_000),
+        });
+        const allSchedules = [...schedules, newlyDueSchedule];
+        const fixture = repositoryFixture();
+        const listInputs: ListDueSchedulesInput[] = [];
+        const listedScheduleIds: string[][] = [];
+        const enqueueAttempts: DueScheduleEnqueueInput[] = [];
+        let clockMs = at.getTime();
+        const activeRun = claimedRun(workerId);
+        const repository = {
+            ...fixture.repository,
+            enqueueNextDueSchedule(input: DueScheduleEnqueueInput) {
+                enqueueAttempts.push(input);
+                return Promise.resolve(
+                    input.scheduleId === runnableSchedule.id
+                        ? { kind: "inserted" as const, run: activeRun }
+                        : { kind: "active" as const, run: activeRun }
+                );
+            },
+            listDueSchedules(input: ListDueSchedulesInput) {
+                listInputs.push(input);
+                const afterCursor = allSchedules.filter((schedule) => {
+                    if (schedule.nextRunAt === null) return false;
+                    if (schedule.nextRunAt.getTime() > input.at.getTime()) return false;
+                    if (input.cursor === undefined) return true;
+                    const timeDifference =
+                        schedule.nextRunAt.getTime() - input.cursor.nextRunAt.getTime();
+                    return (
+                        timeDifference > 0 ||
+                        (timeDifference === 0 && schedule.id > input.cursor.id)
+                    );
+                });
+                const page = afterCursor.slice(0, input.limit);
+                listedScheduleIds.push(page.map(({ id }) => id));
+                if (listInputs.length === 8) clockMs = at.getTime() - 60_000;
+                return page;
+            },
+        } satisfies JobWorkerCoordinatorOptions["repository"];
+        const baseOptions = coordinatorOptions(repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...baseOptions,
+            nowMs: () => clockMs,
+            timings: { ...baseOptions.timings, schedulePollMs: 1 },
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() =>
+            enqueueAttempts.some(({ scheduleId }) => scheduleId === runnableSchedule.id)
+        );
+        await coordinator.dispose();
+
+        expect(listInputs.length).toBeGreaterThanOrEqual(9);
+        expect(listInputs[0]?.cursor).toBeUndefined();
+        expect(listInputs[1]?.cursor).toEqual({
+            id: schedules[31]?.id,
+            nextRunAt: dueAt,
+        });
+        expect(listInputs[8]?.cursor).toEqual({
+            id: schedules[jobSchedulePollScanLimit - 1]?.id,
+            nextRunAt: dueAt,
+        });
+        expect(listInputs[8]?.at).toEqual(at);
+        expect(listedScheduleIds[8]).not.toContain(newlyDueSchedule.id);
+        const firstTraversal = enqueueAttempts.slice(0, schedules.length);
+        expect(firstTraversal.map(({ scheduleId }) => scheduleId)).toEqual(
+            schedules.map(({ id }) => id)
+        );
+        expect(new Set(firstTraversal.map(({ scheduleId }) => scheduleId)).size).toBe(
+            schedules.length
+        );
+        expect(
+            fixture.events.filter((event) => event === "expire-disable-intents").length
+        ).toBeGreaterThanOrEqual(2);
+        expect(firstTraversal.at(-1)?.observedNextRunAt).toEqual(dueAt);
+        expect(firstTraversal.at(-1)).toMatchObject({
+            at,
+            run: { queuedAt: at },
         });
     });
 
