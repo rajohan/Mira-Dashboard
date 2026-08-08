@@ -20,7 +20,7 @@ export function nulFreeTextCheck(column: SQLWrapper) {
  * @param exactLength Required hexadecimal character count.
  * @returns Drizzle SQL expression for the storage constraint.
  */
-export function lowercaseHexTextCheck(column: SQLWrapper, exactLength: 32 | 64) {
+export function lowercaseHexTextCheck(column: SQLWrapper, exactLength: 32 | 40 | 64) {
     const exactLengthSql = sql.raw(String(exactLength));
     return sql`length(${column}) = ${exactLengthSql} AND ${nulFreeTextCheck(column)} AND ${column} NOT GLOB '*[^0-9a-f]*'`;
 }

@@ -196,8 +196,8 @@ paths, code/module loaders, and process-execution authorities outside their expl
 Source-tree symlinks and imports outside the future root are prohibited. Fast Oxlint restrictions
 provide earlier feedback for supported import and global patterns; the AST check is the path-aware
 policy gate for the source surfaces it explicitly scans, not a replacement for runtime sandboxing.
-The browser and worker roles are already classified even where their composition remains future
-work.
+The browser and worker roles are classified, and the worker composition owns the durable
+coordinator, database runtime, process signals, and ordered shutdown boundary.
 
 ## Application API
 
@@ -389,7 +389,7 @@ once. Reusable procedure builders are limited to:
 
 Expected errors use a small stable code set such as `UNAUTHORIZED`, `FORBIDDEN`, `CONFLICT`,
 `NOT_FOUND`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, and `SERVICE_UNAVAILABLE` with safe
-structured details. The `ContractErrorCode` union, all 68 actual router paths, the server-owned
+structured details. The `ContractErrorCode` union, all 77 actual router paths, the server-owned
 runtime allowlist, and generated contract metadata must match exactly. The base procedure
 middleware enforces that allowlist for immediate and deferred subscription failures; an
 implemented procedure missing from the policy or an undeclared code becomes a redacted internal

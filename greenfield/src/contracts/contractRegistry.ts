@@ -5,6 +5,8 @@ import { authProcedureContracts } from "./auth.ts";
 import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
 import { eventsStreamContract } from "./events.ts";
 import { incidentProcedureContracts } from "./incidents.ts";
+import { jobRealtimeEventContracts } from "./jobRealtime.ts";
+import { jobProcedureContracts } from "./jobs.ts";
 import { monitoringProcedureContracts } from "./monitoringIngestion.ts";
 import { monitoringRealtimeEventContracts } from "./monitoringRealtime.ts";
 import { notificationProcedureContracts } from "./notifications.ts";
@@ -15,6 +17,7 @@ import {
     type RealtimeEventContract,
 } from "./registry.ts";
 import { reportProcedureContracts } from "./reports.ts";
+import { scheduleProcedureContracts } from "./schedules.ts";
 import { securityAuditProcedureContracts } from "./securityAudit.ts";
 import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
 import { taskRealtimeEventContract } from "./taskRealtime.ts";
@@ -28,9 +31,11 @@ const registeredProcedureContracts = [
     ...automationSecurityProcedureContracts,
     eventsStreamContract,
     ...incidentProcedureContracts,
+    ...jobProcedureContracts,
     ...monitoringProcedureContracts,
     ...notificationProcedureContracts,
     ...reportProcedureContracts,
+    ...scheduleProcedureContracts,
     ...securityAuditProcedureContracts,
     ...systemProcedureContracts,
     ...taskProcedureContracts,
@@ -74,6 +79,7 @@ export const rawHttpContracts: readonly RawHttpContract[] = [...systemRawHttpCon
 /** Implemented realtime topics used by runtime wiring and docs. */
 export const realtimeEventContracts: readonly RealtimeEventContract[] = Object.freeze([
     agentRealtimeEventContract,
+    ...jobRealtimeEventContracts,
     ...monitoringRealtimeEventContracts,
     taskRealtimeEventContract,
 ]);

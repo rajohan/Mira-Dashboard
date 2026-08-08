@@ -23,6 +23,8 @@ import {
     listAutomationPrincipalsResultSchema,
 } from "../../src/contracts/automationSecurity.ts";
 import { listIncidentsResultSchema } from "../../src/contracts/incidents.ts";
+import { scheduleCronExpressionSchema } from "../../src/contracts/jobModel.ts";
+import { jobRealtimeChangeSchemas } from "../../src/contracts/jobRealtime.ts";
 import {
     completeMonitoringSnapshotInputSchema,
     monitoringJsonObjectSchema,
@@ -101,6 +103,30 @@ describe("contract JSON Schema conversion", () => {
         ).toThrow('The "transform" action cannot be converted to JSON Schema.');
     });
 
+    test("documents accepted cron aliases before canonical normalization", () => {
+        const schema = convertContractSchema(
+            scheduleCronExpressionSchema,
+            "test.scheduleCronExpression",
+            "input"
+        );
+
+        expect(schema.description).toContain("JAN-DEC month");
+        expect(schema.description).toContain("SUN-SAT weekday");
+    });
+
+    test("documents runtime-only realtime entity identity equality", () => {
+        expect(
+            convertContractSchema(
+                jobRealtimeChangeSchemas[0],
+                "test.jobRealtimeChange",
+                "output"
+            )
+        ).toMatchObject({
+            $comment:
+                "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly.",
+        });
+    });
+
     test("documents automation normalization and runtime-only cross-field checks", () => {
         expect(
             convertContractSchema(
@@ -113,6 +139,8 @@ describe("contract JSON Schema conversion", () => {
                 enum: [
                     "agents:read",
                     "agents:write",
+                    "jobs:read",
+                    "jobs:write",
                     "monitoring:write",
                     "notifications:read",
                     "notifications:write",
@@ -122,7 +150,7 @@ describe("contract JSON Schema conversion", () => {
                     "tasks:write",
                 ],
             },
-            maxItems: 9,
+            maxItems: 11,
             type: "array",
             uniqueItems: true,
         });

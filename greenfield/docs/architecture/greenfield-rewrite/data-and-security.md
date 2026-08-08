@@ -24,8 +24,8 @@
   write-admission port: it may retry only before `BEGIN IMMEDIATE` admits the transaction and the
   synchronous callback starts. A callback is never replayed. Exhausted admission and post-admission
   contention remain typed failures; only mutation routes that declare temporary write unavailability
-  expose the fixed redacted `SERVICE_UNAVAILABLE` response. The future worker must use the same
-  explicit policy before that process starts.
+  expose the fixed redacted `SERVICE_UNAVAILABLE` response. The worker uses that same explicit
+  admission policy before entering any immediate transaction.
 - Use Drizzle's typed query builder for ordinary reads/writes and its parameterized `sql`
   tagged template for SQLite-specific queries, CTEs, queue claims, and expressions not
   represented cleanly by the builder.
@@ -111,7 +111,7 @@ tag.
 | Tasks/agents         | `tasks`, `task_labels`, `task_automation_profiles`, `task_updates`, `task_events`, `agent_task_runs`                                                                                                                                                                           |
 | Monitoring           | `reports`, `monitor_runs`, `incidents`, `incident_observations`, `notifications`                                                                                                                                                                                               |
 | Realtime             | `realtime_events`                                                                                                                                                                                                                                                              |
-| Scheduling/work      | `scheduled_jobs`, `job_disable_intents`, `job_runs`, `job_run_events`, `worker_instances`, `resource_leases`                                                                                                                                                                   |
+| Scheduling/work      | `scheduled_jobs`, `job_disable_intents`, `job_runs`, `job_run_events`, `worker_instances`, `resource_leases`, `job_worker_control`                                                                                                                                             |
 | Chat                 | `chat_runs`, `chat_run_events`, `chat_runtime_snapshots`                                                                                                                                                                                                                       |
 | Delivery             | `deployments`, `deployment_events`, `release_records`                                                                                                                                                                                                                          |
 | Docker               | `managed_docker_services`, `docker_update_events`                                                                                                                                                                                                                              |
@@ -199,9 +199,9 @@ queryable lifecycle.
 | Incident identity             | unique `incidents(monitor_key, fingerprint)`                                              |
 | Unread notifications          | partial `notifications(occurred_at_ms DESC) WHERE read_at_ms IS NULL`                     |
 | Incident notification         | unique `(incident_id, incident_generation, channel)` when incident is non-null            |
-| Queue claim                   | partial `job_runs(available_at_ms, priority DESC, queued_at_ms) WHERE state = 'queued'`   |
+| Queue claim                   | partial `job_runs(available_at, priority DESC, queued_at, id) WHERE state = 'queued'`     |
 | One active scheduled run      | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`          |
-| Worker expiry                 | `worker_instances(heartbeat_at_ms)`                                                       |
+| Worker expiry                 | `worker_instances(heartbeat_at, id)`                                                      |
 | Job timeline                  | `job_run_events(job_run_id, sequence)`                                                    |
 | Realtime catch-up             | `realtime_events(topic, id)`                                                              |
 | Chat replay                   | unique `chat_run_events(chat_run_id, sequence)`                                           |
@@ -271,9 +271,15 @@ the worker.
 
 Queue behavior is explicit:
 
-- a transaction claims one eligible run and assigns a lease;
+- a strict singleton `job_worker_control` row persists cross-process claim pause state and
+  versioned operator changes; its absence is an integrity failure, never an implicit resume;
+- one immediate transaction considers at most 32 totally ordered candidates, skips candidates
+  with occupied resources, and atomically assigns the first eligible run plus every required
+  resource lease;
 - each run has an idempotency key, resource class, priority, timeout, attempt limit, and
   cancellation policy;
+- manual-run idempotency is scoped to the requesting principal and hashes stable request intent,
+  while schedule ticks use a deterministic schedule-and-occurrence namespace;
 - the worker renews its lease and writes ordered progress events;
 - expired leases can be recovered only when the action is declared retry-safe;
 - resource leases prevent conflicting deploy, restore, Docker, or OpenClaw operations;
@@ -281,6 +287,16 @@ Queue behavior is explicit:
 - stdout/stderr are incrementally bounded, redacted, and spilled to a controlled log file when
   necessary only beneath `<project-root>/production/state/job-output`; and
 - final structured output is validated before persistence or display.
+
+Run history is bounded to 1,000 events and 1 MiB of encoded payload per run. The first 967 slots
+may carry progress/stdout/stderr payloads; 33 structural slots remain reserved so every legal
+ten-attempt lifecycle can record claims, retry decisions, cancellation, truncation, and a terminal
+event. Schedule cursor advancement is separate from operator configuration versioning. A due
+schedule with an active queued or running occurrence keeps its original cursor; after completion
+the scheduler creates one coalesced run for that occurrence and advances directly to the first
+future occurrence, never replaying an unbounded backlog. Disabled schedules retain that cursor as
+an internal cadence anchor but do not become due until re-enabled; the public summary exposes a
+next run only while enabled. Manual runs do not move cadence.
 
 `Bun.spawn` receives argument arrays, a deliberate environment allowlist, an explicit working
 directory, a timeout, and an abort signal. It never receives interpolated shell text for user

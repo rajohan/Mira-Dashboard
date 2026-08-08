@@ -1,0 +1,98 @@
+{
+  "$id": "urn:mira-dashboard:jobs.listRuns.input",
+  "type": "object",
+  "properties": {
+    "cursor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "queuedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        }
+      },
+      "required": [
+        "id",
+        "queuedAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "filters": {
+      "type": "object",
+      "properties": {
+        "resourceClasses": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "exclusive",
+              "host-heavy",
+              "interactive",
+              "light",
+              "network"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "scheduleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "cancelled",
+              "failed",
+              "queued",
+              "running",
+              "succeeded",
+              "timed-out"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "triggerTypes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "manual",
+              "schedule",
+              "startup",
+              "system"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 50
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

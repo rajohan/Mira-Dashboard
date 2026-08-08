@@ -8,7 +8,7 @@
           "type": "object",
           "properties": {
             "event": {
-              "oneOf": [
+              "anyOf": [
                 {
                   "type": "object",
                   "properties": {
@@ -60,6 +60,201 @@
                     "topic"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "type": "string",
+                      "minLength": 36,
+                      "maxLength": 36,
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    "entityType": {
+                      "const": "job-run"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "enum": [
+                        "created",
+                        "updated"
+                      ],
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 36,
+                              "maxLength": 36,
+                              "format": "uuid",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "jobs.runs"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false,
+                  "$comment": "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                    },
+                    "entityType": {
+                      "const": "job-queue"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "enum": [
+                        "snapshot-required"
+                      ],
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 36,
+                              "maxLength": 36,
+                              "format": "uuid",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "jobs.runs"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false,
+                  "$comment": "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                    },
+                    "entityType": {
+                      "const": "schedule"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "enum": [
+                        "created",
+                        "updated"
+                      ],
+                      "type": "string"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 36,
+                              "maxLength": 36,
+                              "format": "uuid",
+                              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "schedules.records"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false,
+                  "$comment": "Live Valibot validation additionally requires the realtime entity and compact payload IDs to match exactly."
                 },
                 {
                   "type": "object",

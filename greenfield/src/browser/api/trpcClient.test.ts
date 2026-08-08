@@ -99,6 +99,76 @@ describe("Dashboard browser tRPC client", () => {
         ]);
     });
 
+    test("loads durable job and schedule contracts on demand", async () => {
+        const jobCalls: TransportCall[] = [];
+        const scheduleCalls: TransportCall[] = [];
+        const jobClient = createDashboardTrpcClient(
+            createRecordingTransport(
+                {
+                    runs: [],
+                    summary: {
+                        activeResourceClasses: [],
+                        control: {
+                            claimingPaused: false,
+                            updatedAtMs: 0,
+                            version: 1,
+                        },
+                        stateCounts: {
+                            cancelled: 0,
+                            failed: 0,
+                            queued: 0,
+                            running: 0,
+                            succeeded: 0,
+                            "timed-out": 0,
+                        },
+                        workers: [],
+                    },
+                },
+                jobCalls
+            )
+        );
+        const scheduleClient = createDashboardTrpcClient(
+            createRecordingTransport({ schedules: [] }, scheduleCalls)
+        );
+
+        expect(await jobClient.query("jobs.listRuns", { limit: 50 })).toEqual({
+            runs: [],
+            summary: {
+                activeResourceClasses: [],
+                control: {
+                    claimingPaused: false,
+                    updatedAtMs: 0,
+                    version: 1,
+                },
+                stateCounts: {
+                    cancelled: 0,
+                    failed: 0,
+                    queued: 0,
+                    running: 0,
+                    succeeded: 0,
+                    "timed-out": 0,
+                },
+                workers: [],
+            },
+        });
+        expect(
+            await scheduleClient.query("schedules.list", {
+                enabled: "all",
+                limit: 50,
+            })
+        ).toEqual({ schedules: [] });
+        expect(jobCalls).toEqual([
+            { input: { limit: 50 }, kind: "query", path: "jobs.listRuns" },
+        ]);
+        expect(scheduleCalls).toEqual([
+            {
+                input: { enabled: "all", limit: 50 },
+                kind: "query",
+                path: "schedules.list",
+            },
+        ]);
+    });
+
     test("rejects invalid input before transport access", async () => {
         const calls: TransportCall[] = [];
         const client = createDashboardTrpcClient(

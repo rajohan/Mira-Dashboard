@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "fccb7937-15cf-4628-a561-1093e2ee23ed",
+  "id": "21335169-a9af-4cae-a2c4-732aa16d7b80",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -51,6 +51,22 @@
       "entityType": "tables"
     },
     {
+      "name": "job_disable_intents",
+      "entityType": "tables"
+    },
+    {
+      "name": "job_run_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "job_runs",
+      "entityType": "tables"
+    },
+    {
+      "name": "job_worker_control",
+      "entityType": "tables"
+    },
+    {
       "name": "monitor_runs",
       "entityType": "tables"
     },
@@ -64,6 +80,14 @@
     },
     {
       "name": "reports",
+      "entityType": "tables"
+    },
+    {
+      "name": "resource_leases",
+      "entityType": "tables"
+    },
+    {
+      "name": "scheduled_jobs",
       "entityType": "tables"
     },
     {
@@ -108,6 +132,10 @@
     },
     {
       "name": "users",
+      "entityType": "tables"
+    },
+    {
+      "name": "worker_instances",
       "entityType": "tables"
     },
     {
@@ -1172,6 +1200,696 @@
     },
     {
       "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_by_id",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_by_kind",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_at",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_by_id",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_by_kind",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_reason",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_job_id",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "external_provider",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scheduled_job_id",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "target_kind",
+      "entityType": "columns",
+      "table": "job_disable_intents"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "job_run_id",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "kind",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "message",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "occurred_at",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "progress_json",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sequence",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "worker_instance_id",
+      "entityType": "columns",
+      "table": "job_run_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "action_key",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "attempt_count",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_limit",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "available_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cancellation_policy",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cancel_requested_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cancel_requested_by_id",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cancel_requested_by_kind",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "display_name",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "enqueue_sha256",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "event_bytes",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "event_count",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "finished_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "first_started_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "heartbeat_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "idempotency_key",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_attempt_started_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_expires_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_owner_id",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_token",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "payload_event_count",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload_json",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "priority",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "queued_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requested_by_id",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requested_by_kind",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resource_class",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resource_keys_json",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result_json",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "retry_safe",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scheduled_for_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scheduled_job_id",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scheduled_job_version",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "state_version",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "terminal_code",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "terminal_message",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "timeout_ms",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trigger_type",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "claiming_paused",
+      "entityType": "columns",
+      "table": "job_worker_control"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "job_worker_control"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "job_worker_control"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_by_id",
+      "entityType": "columns",
+      "table": "job_worker_control"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_by_kind",
+      "entityType": "columns",
+      "table": "job_worker_control"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "job_worker_control"
+    },
+    {
+      "type": "integer",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -1559,6 +2277,296 @@
       "name": "title",
       "entityType": "columns",
       "table": "reports"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "acquired_at",
+      "entityType": "columns",
+      "table": "resource_leases"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "resource_leases"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "job_run_id",
+      "entityType": "columns",
+      "table": "resource_leases"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_token",
+      "entityType": "columns",
+      "table": "resource_leases"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "renewed_at",
+      "entityType": "columns",
+      "table": "resource_leases"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resource_key",
+      "entityType": "columns",
+      "table": "resource_leases"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "worker_instance_id",
+      "entityType": "columns",
+      "table": "resource_leases"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "action_key",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "action_payload_json",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_limit",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cancellation_policy",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cron_expression",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "description",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "enabled",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "interval_ms",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "next_run_at",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "priority",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resource_class",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resource_keys_json",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "retry_safe",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "schedule_kind",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_of_day",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_zone",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "timeout_ms",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "scheduled_jobs"
     },
     {
       "type": "integer",
@@ -2381,6 +3389,96 @@
       "table": "users"
     },
     {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "capacity",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "draining_at",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "heartbeat_at",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pid",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "release_id",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "stopped_at",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
       "columns": [
         "pending_login_id"
       ],
@@ -2532,6 +3630,81 @@
     },
     {
       "columns": [
+        "scheduled_job_id"
+      ],
+      "tableTo": "scheduled_jobs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_job_disable_intents_scheduled_job_id_scheduled_jobs_id_fk",
+      "entityType": "fks",
+      "table": "job_disable_intents"
+    },
+    {
+      "columns": [
+        "job_run_id"
+      ],
+      "tableTo": "job_runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_job_run_events_job_run_id_job_runs_id_fk",
+      "entityType": "fks",
+      "table": "job_run_events"
+    },
+    {
+      "columns": [
+        "worker_instance_id"
+      ],
+      "tableTo": "worker_instances",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "SET NULL",
+      "nameExplicit": false,
+      "name": "fk_job_run_events_worker_instance_id_worker_instances_id_fk",
+      "entityType": "fks",
+      "table": "job_run_events"
+    },
+    {
+      "columns": [
+        "lease_owner_id"
+      ],
+      "tableTo": "worker_instances",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_job_runs_lease_owner_id_worker_instances_id_fk",
+      "entityType": "fks",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        "scheduled_job_id"
+      ],
+      "tableTo": "scheduled_jobs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_job_runs_scheduled_job_id_scheduled_jobs_id_fk",
+      "entityType": "fks",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
         "report_id"
       ],
       "tableTo": "reports",
@@ -2574,6 +3747,36 @@
       "name": "fk_notifications_report_id_reports_id_fk",
       "entityType": "fks",
       "table": "notifications"
+    },
+    {
+      "columns": [
+        "job_run_id"
+      ],
+      "tableTo": "job_runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_resource_leases_job_run_id_job_runs_id_fk",
+      "entityType": "fks",
+      "table": "resource_leases"
+    },
+    {
+      "columns": [
+        "worker_instance_id"
+      ],
+      "tableTo": "worker_instances",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_resource_leases_worker_instance_id_worker_instances_id_fk",
+      "entityType": "fks",
+      "table": "resource_leases"
     },
     {
       "columns": [
@@ -2692,6 +3895,16 @@
     },
     {
       "columns": [
+        "job_run_id",
+        "sequence"
+      ],
+      "nameExplicit": true,
+      "name": "job_run_events_pk",
+      "entityType": "pks",
+      "table": "job_run_events"
+    },
+    {
+      "columns": [
         "task_id",
         "label"
       ],
@@ -2795,6 +4008,33 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "job_disable_intents_pk",
+      "table": "job_disable_intents",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "job_runs_pk",
+      "table": "job_runs",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "job_worker_control_pk",
+      "table": "job_worker_control",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "monitor_runs_pk",
       "table": "monitor_runs",
       "entityType": "pks"
@@ -2824,6 +4064,24 @@
       "nameExplicit": false,
       "name": "reports_pk",
       "table": "reports",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "resource_key"
+      ],
+      "nameExplicit": false,
+      "name": "resource_leases_pk",
+      "table": "resource_leases",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "scheduled_jobs_pk",
+      "table": "scheduled_jobs",
       "entityType": "pks"
     },
     {
@@ -2914,6 +4172,15 @@
       "nameExplicit": false,
       "name": "users_pk",
       "table": "users",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "worker_instances_pk",
+      "table": "worker_instances",
       "entityType": "pks"
     },
     {
@@ -3489,6 +4756,264 @@
     {
       "columns": [
         {
+          "value": "scheduled_job_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"job_disable_intents\".\"scheduled_job_id\" IS NOT NULL AND \"job_disable_intents\".\"ended_at\" IS NULL",
+      "origin": "manual",
+      "name": "job_disable_intents_active_schedule_unique",
+      "entityType": "indexes",
+      "table": "job_disable_intents"
+    },
+    {
+      "columns": [
+        {
+          "value": "external_provider",
+          "isExpression": false
+        },
+        {
+          "value": "external_job_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"job_disable_intents\".\"external_job_id\" IS NOT NULL AND \"job_disable_intents\".\"ended_at\" IS NULL",
+      "origin": "manual",
+      "name": "job_disable_intents_active_external_unique",
+      "entityType": "indexes",
+      "table": "job_disable_intents"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_disable_intents\".\"expires_at\" IS NOT NULL AND \"job_disable_intents\".\"ended_at\" IS NULL",
+      "origin": "manual",
+      "name": "job_disable_intents_active_expiry_idx",
+      "entityType": "indexes",
+      "table": "job_disable_intents"
+    },
+    {
+      "columns": [
+        {
+          "value": "scheduled_job_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "job_disable_intents_schedule_created_id_idx",
+      "entityType": "indexes",
+      "table": "job_disable_intents"
+    },
+    {
+      "columns": [
+        {
+          "value": "external_provider",
+          "isExpression": false
+        },
+        {
+          "value": "external_job_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "job_disable_intents_external_created_id_idx",
+      "entityType": "indexes",
+      "table": "job_disable_intents"
+    },
+    {
+      "columns": [
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "job_run_id",
+          "isExpression": false
+        },
+        {
+          "value": "sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "job_run_events_occurred_run_sequence_idx",
+      "entityType": "indexes",
+      "table": "job_run_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "requested_by_kind",
+          "isExpression": false
+        },
+        {
+          "value": "requested_by_id",
+          "isExpression": false
+        },
+        {
+          "value": "idempotency_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "job_runs_idempotency_unique",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "\"available_at\" asc",
+          "isExpression": true
+        },
+        {
+          "value": "\"priority\" desc",
+          "isExpression": true
+        },
+        {
+          "value": "\"queued_at\" asc",
+          "isExpression": true
+        },
+        {
+          "value": "\"id\" asc",
+          "isExpression": true
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"state\" = 'queued'",
+      "origin": "manual",
+      "name": "job_runs_claim_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "scheduled_job_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"job_runs\".\"scheduled_job_id\" IS NOT NULL AND \"job_runs\".\"state\" IN ('queued', 'running')",
+      "origin": "manual",
+      "name": "job_runs_one_active_schedule_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "queued_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "job_runs_queued_id_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "scheduled_job_id",
+          "isExpression": false
+        },
+        {
+          "value": "queued_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "job_runs_schedule_queued_id_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "lease_expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"state\" = 'running'",
+      "origin": "manual",
+      "name": "job_runs_running_lease_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "lease_owner_id",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"state\" = 'running'",
+      "origin": "manual",
+      "name": "job_runs_running_owner_id_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
           "value": "monitor_key",
           "isExpression": false
         },
@@ -3677,6 +5202,78 @@
       "name": "reports_source_job_occurred_id_idx",
       "entityType": "indexes",
       "table": "reports"
+    },
+    {
+      "columns": [
+        {
+          "value": "expires_at",
+          "isExpression": false
+        },
+        {
+          "value": "resource_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "resource_leases_expiry_key_idx",
+      "entityType": "indexes",
+      "table": "resource_leases"
+    },
+    {
+      "columns": [
+        {
+          "value": "job_run_id",
+          "isExpression": false
+        },
+        {
+          "value": "resource_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "resource_leases_run_key_idx",
+      "entityType": "indexes",
+      "table": "resource_leases"
+    },
+    {
+      "columns": [
+        {
+          "value": "next_run_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"scheduled_jobs\".\"enabled\" = 1",
+      "origin": "manual",
+      "name": "scheduled_jobs_due_idx",
+      "entityType": "indexes",
+      "table": "scheduled_jobs"
+    },
+    {
+      "columns": [
+        {
+          "value": "updated_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "scheduled_jobs_updated_id_idx",
+      "entityType": "indexes",
+      "table": "scheduled_jobs"
     },
     {
       "columns": [
@@ -4011,6 +5608,24 @@
       "table": "users"
     },
     {
+      "columns": [
+        {
+          "value": "heartbeat_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "worker_instances_heartbeat_id_idx",
+      "entityType": "indexes",
+      "table": "worker_instances"
+    },
+    {
       "value": "length(\"agent_id\") BETWEEN 1 AND 64 AND instr(\"agent_id\", char(0)) = 0 AND \"agent_id\" = lower(\"agent_id\") AND substr(\"agent_id\", 1, 1) GLOB '[a-z0-9]' AND \"agent_id\" NOT GLOB '*[^a-z0-9._-]*'",
       "name": "agent_task_runs_agent_id_check",
       "entityType": "checks",
@@ -4335,7 +5950,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('agents:read', 'agents:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')",
+      "value": "\"capability\" IN ('agents:read', 'agents:write', 'jobs:read', 'jobs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"
@@ -4443,6 +6058,270 @@
       "table": "incidents"
     },
     {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "job_disable_intents_created_at_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "((\"created_by_kind\" = 'user' AND length(\"created_by_id\") = 36 AND instr(\"created_by_id\", char(0)) = 0 AND length(replace(\"created_by_id\", '-', '')) = 32 AND replace(\"created_by_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"created_by_id\", 9, 1) = '-' AND substr(\"created_by_id\", 14, 1) = '-' AND substr(\"created_by_id\", 15, 1) = '7' AND substr(\"created_by_id\", 19, 1) = '-' AND substr(\"created_by_id\", 20, 1) GLOB '[89ab]' AND substr(\"created_by_id\", 24, 1) = '-') OR (\"created_by_kind\" = 'automation' AND length(\"created_by_id\") BETWEEN 1 AND 64 AND instr(\"created_by_id\", char(0)) = 0 AND \"created_by_id\" = lower(\"created_by_id\") AND substr(\"created_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"created_by_id\" NOT GLOB '*[^a-z0-9._-]*'))",
+      "name": "job_disable_intents_created_actor_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "(\"ended_at\" IS NULL AND \"ended_by_kind\" IS NULL AND \"ended_by_id\" IS NULL AND \"ended_reason\" IS NULL) OR (\"ended_at\" IS NOT NULL AND \"ended_at\" BETWEEN 0 AND 8640000000000000 AND \"ended_at\" >= \"created_at\" AND \"ended_by_kind\" IS NOT NULL AND \"ended_by_id\" IS NOT NULL AND \"ended_reason\" IN ('expired', 're-enabled', 'replaced') AND ((\"ended_by_kind\" = 'user' AND length(\"ended_by_id\") = 36 AND instr(\"ended_by_id\", char(0)) = 0 AND length(replace(\"ended_by_id\", '-', '')) = 32 AND replace(\"ended_by_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"ended_by_id\", 9, 1) = '-' AND substr(\"ended_by_id\", 14, 1) = '-' AND substr(\"ended_by_id\", 15, 1) = '7' AND substr(\"ended_by_id\", 19, 1) = '-' AND substr(\"ended_by_id\", 20, 1) GLOB '[89ab]' AND substr(\"ended_by_id\", 24, 1) = '-') OR (\"ended_by_kind\" = 'automation' AND length(\"ended_by_id\") BETWEEN 1 AND 64 AND instr(\"ended_by_id\", char(0)) = 0 AND \"ended_by_id\" = lower(\"ended_by_id\") AND substr(\"ended_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"ended_by_id\" NOT GLOB '*[^a-z0-9._-]*') OR (\"ended_by_kind\" = 'system' AND length(\"ended_by_id\") BETWEEN 1 AND 128 AND instr(\"ended_by_id\", char(0)) = 0 AND \"ended_by_id\" = lower(\"ended_by_id\") AND substr(\"ended_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"ended_by_id\" NOT GLOB '*[^a-z0-9._-]*')) AND (\"ended_reason\" <> 'expired' OR (\"ended_by_kind\" = 'system' AND \"expires_at\" IS NOT NULL AND \"ended_at\" >= \"expires_at\")))",
+      "name": "job_disable_intents_end_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "\"expires_at\" IS NULL OR (\"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"created_at\")",
+      "name": "job_disable_intents_expiry_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "\"external_job_id\" IS NULL OR (length(\"external_job_id\") BETWEEN 1 AND 256 AND instr(\"external_job_id\", char(0)) = 0 AND length(trim(\"external_job_id\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)",
+      "name": "job_disable_intents_external_job_id_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "job_disable_intents_id_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "length(\"reason\") BETWEEN 1 AND 1000 AND instr(\"reason\", char(0)) = 0 AND length(trim(\"reason\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"reason\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"reason\" AS BLOB)) <= 4000",
+      "name": "job_disable_intents_reason_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "(\"target_kind\" = 'dashboard-schedule' AND \"scheduled_job_id\" IS NOT NULL AND \"external_provider\" IS NULL AND \"external_job_id\" IS NULL) OR (\"target_kind\" = 'openclaw-cron' AND \"scheduled_job_id\" IS NULL AND \"external_provider\" = 'openclaw' AND \"external_job_id\" IS NOT NULL)",
+      "name": "job_disable_intents_target_check",
+      "entityType": "checks",
+      "table": "job_disable_intents"
+    },
+    {
+      "value": "\"attempt\" BETWEEN 0 AND 10",
+      "name": "job_run_events_attempt_check",
+      "entityType": "checks",
+      "table": "job_run_events"
+    },
+    {
+      "value": "\"kind\" IN ('cancel-requested', 'cancelled', 'claimed', 'failed', 'lease-expired', 'output-truncated', 'progress', 'queued', 'retry-scheduled', 'stderr', 'stdout', 'succeeded', 'timed-out')",
+      "name": "job_run_events_kind_check",
+      "entityType": "checks",
+      "table": "job_run_events"
+    },
+    {
+      "value": "(\"message\" IS NULL OR (length(\"message\") BETWEEN 1 AND 4096 AND instr(\"message\", char(0)) = 0 AND length(trim(\"message\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"message\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"message\" AS BLOB)) <= 4096))",
+      "name": "job_run_events_message_check",
+      "entityType": "checks",
+      "table": "job_run_events"
+    },
+    {
+      "value": "\"occurred_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "job_run_events_occurred_at_check",
+      "entityType": "checks",
+      "table": "job_run_events"
+    },
+    {
+      "value": "(\"kind\" = 'progress' AND \"progress_json\" IS NOT NULL AND length(CAST(\"progress_json\" AS BLOB)) <= 16384 AND CASE WHEN json_valid(\"progress_json\") THEN json_type(\"progress_json\") = 'object' ELSE 0 END) OR (\"kind\" IN ('stderr', 'stdout') AND \"message\" IS NOT NULL AND \"progress_json\" IS NULL) OR (\"kind\" NOT IN ('progress', 'stderr', 'stdout') AND \"progress_json\" IS NULL)",
+      "name": "job_run_events_payload_shape_check",
+      "entityType": "checks",
+      "table": "job_run_events"
+    },
+    {
+      "value": "\"sequence\" BETWEEN 1 AND 1000",
+      "name": "job_run_events_sequence_check",
+      "entityType": "checks",
+      "table": "job_run_events"
+    },
+    {
+      "value": "length(\"action_key\") BETWEEN 1 AND 128 AND instr(\"action_key\", char(0)) = 0 AND \"action_key\" = lower(\"action_key\") AND substr(\"action_key\", 1, 1) GLOB '[a-z0-9]' AND \"action_key\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "job_runs_action_key_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"attempt_limit\" BETWEEN 1 AND 10 AND \"attempt_count\" BETWEEN 0 AND \"attempt_limit\" AND ((\"attempt_count\" = 0 AND \"first_started_at\" IS NULL AND \"last_attempt_started_at\" IS NULL) OR (\"attempt_count\" > 0 AND \"first_started_at\" IS NOT NULL AND \"last_attempt_started_at\" IS NOT NULL))",
+      "name": "job_runs_attempt_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"available_at\" BETWEEN 0 AND 8640000000000000 AND \"available_at\" >= \"queued_at\"",
+      "name": "job_runs_available_at_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"cancellation_policy\" IN ('cooperative', 'never', 'queued-only')",
+      "name": "job_runs_cancellation_policy_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "(\"state\" <> 'cancelled' AND \"cancel_requested_at\" IS NULL AND \"cancel_requested_by_kind\" IS NULL AND \"cancel_requested_by_id\" IS NULL) OR (\"cancellation_policy\" <> 'never' AND \"cancel_requested_at\" IS NOT NULL AND \"cancel_requested_at\" BETWEEN 0 AND 8640000000000000 AND \"cancel_requested_at\" >= \"queued_at\" AND \"cancel_requested_at\" <= \"updated_at\" AND \"cancel_requested_by_kind\" IS NOT NULL AND \"cancel_requested_by_id\" IS NOT NULL AND ((\"cancel_requested_by_kind\" = 'user' AND length(\"cancel_requested_by_id\") = 36 AND instr(\"cancel_requested_by_id\", char(0)) = 0 AND length(replace(\"cancel_requested_by_id\", '-', '')) = 32 AND replace(\"cancel_requested_by_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"cancel_requested_by_id\", 9, 1) = '-' AND substr(\"cancel_requested_by_id\", 14, 1) = '-' AND substr(\"cancel_requested_by_id\", 15, 1) = '7' AND substr(\"cancel_requested_by_id\", 19, 1) = '-' AND substr(\"cancel_requested_by_id\", 20, 1) GLOB '[89ab]' AND substr(\"cancel_requested_by_id\", 24, 1) = '-') OR (\"cancel_requested_by_kind\" = 'automation' AND length(\"cancel_requested_by_id\") BETWEEN 1 AND 64 AND instr(\"cancel_requested_by_id\", char(0)) = 0 AND \"cancel_requested_by_id\" = lower(\"cancel_requested_by_id\") AND substr(\"cancel_requested_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"cancel_requested_by_id\" NOT GLOB '*[^a-z0-9._-]*') OR (\"cancel_requested_by_kind\" = 'system' AND length(\"cancel_requested_by_id\") BETWEEN 1 AND 128 AND instr(\"cancel_requested_by_id\", char(0)) = 0 AND \"cancel_requested_by_id\" = lower(\"cancel_requested_by_id\") AND substr(\"cancel_requested_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"cancel_requested_by_id\" NOT GLOB '*[^a-z0-9._-]*')))",
+      "name": "job_runs_cancel_request_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "length(\"display_name\") BETWEEN 1 AND 160 AND instr(\"display_name\", char(0)) = 0 AND length(trim(\"display_name\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"display_name\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"display_name\" AS BLOB)) <= 640",
+      "name": "job_runs_display_name_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "length(\"enqueue_sha256\") = 64 AND instr(\"enqueue_sha256\", char(0)) = 0 AND \"enqueue_sha256\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "job_runs_enqueue_sha256_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"event_count\" BETWEEN 0 AND 1000 AND \"payload_event_count\" BETWEEN 0 AND 967 AND \"payload_event_count\" <= \"event_count\" AND \"event_bytes\" BETWEEN 0 AND 1048576",
+      "name": "job_runs_event_budget_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "job_runs_id_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "length(\"idempotency_key\") BETWEEN 32 AND 128 AND instr(\"idempotency_key\", char(0)) = 0 AND \"idempotency_key\" NOT GLOB '*[^A-Za-z0-9_-]*' AND (length(\"idempotency_key\") % 4 = 0 OR (length(\"idempotency_key\") % 4 = 2 AND substr(\"idempotency_key\", -1, 1) GLOB '[AQgw]') OR (length(\"idempotency_key\") % 4 = 3 AND substr(\"idempotency_key\", -1, 1) GLOB '[AEIMQUYcgkosw048]'))",
+      "name": "job_runs_idempotency_key_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "(\"state\" <> 'running' AND \"lease_owner_id\" IS NULL AND \"lease_token\" IS NULL AND \"lease_expires_at\" IS NULL AND \"heartbeat_at\" IS NULL) OR (\"state\" = 'running' AND \"lease_owner_id\" IS NOT NULL AND \"lease_token\" IS NOT NULL AND length(\"lease_token\") = 36 AND instr(\"lease_token\", char(0)) = 0 AND length(replace(\"lease_token\", '-', '')) = 32 AND replace(\"lease_token\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"lease_token\", 9, 1) = '-' AND substr(\"lease_token\", 14, 1) = '-' AND substr(\"lease_token\", 15, 1) = '7' AND substr(\"lease_token\", 19, 1) = '-' AND substr(\"lease_token\", 20, 1) GLOB '[89ab]' AND substr(\"lease_token\", 24, 1) = '-' AND \"lease_expires_at\" IS NOT NULL AND \"heartbeat_at\" IS NOT NULL AND \"heartbeat_at\" BETWEEN 0 AND 8640000000000000 AND \"lease_expires_at\" BETWEEN 0 AND 8640000000000000 AND \"heartbeat_at\" >= \"last_attempt_started_at\" AND \"lease_expires_at\" > \"heartbeat_at\")",
+      "name": "job_runs_lease_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "length(CAST(\"payload_json\" AS BLOB)) <= 65536 AND CASE WHEN json_valid(\"payload_json\") THEN json_type(\"payload_json\") = 'object' ELSE 0 END",
+      "name": "job_runs_payload_json_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"priority\" BETWEEN -100 AND 100",
+      "name": "job_runs_priority_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "((\"requested_by_kind\" = 'user' AND length(\"requested_by_id\") = 36 AND instr(\"requested_by_id\", char(0)) = 0 AND length(replace(\"requested_by_id\", '-', '')) = 32 AND replace(\"requested_by_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"requested_by_id\", 9, 1) = '-' AND substr(\"requested_by_id\", 14, 1) = '-' AND substr(\"requested_by_id\", 15, 1) = '7' AND substr(\"requested_by_id\", 19, 1) = '-' AND substr(\"requested_by_id\", 20, 1) GLOB '[89ab]' AND substr(\"requested_by_id\", 24, 1) = '-') OR (\"requested_by_kind\" = 'automation' AND length(\"requested_by_id\") BETWEEN 1 AND 64 AND instr(\"requested_by_id\", char(0)) = 0 AND \"requested_by_id\" = lower(\"requested_by_id\") AND substr(\"requested_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"requested_by_id\" NOT GLOB '*[^a-z0-9._-]*') OR (\"requested_by_kind\" = 'system' AND length(\"requested_by_id\") BETWEEN 1 AND 128 AND instr(\"requested_by_id\", char(0)) = 0 AND \"requested_by_id\" = lower(\"requested_by_id\") AND substr(\"requested_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"requested_by_id\" NOT GLOB '*[^a-z0-9._-]*'))",
+      "name": "job_runs_requested_actor_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"resource_class\" IN ('exclusive', 'host-heavy', 'interactive', 'light', 'network')",
+      "name": "job_runs_resource_class_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "length(CAST(\"resource_keys_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"resource_keys_json\") THEN json_type(\"resource_keys_json\") = 'array' ELSE 0 END",
+      "name": "job_runs_resource_keys_json_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"result_json\" IS NULL OR (length(CAST(\"result_json\" AS BLOB)) <= 65536 AND CASE WHEN json_valid(\"result_json\") THEN json_type(\"result_json\") = 'object' ELSE 0 END)",
+      "name": "job_runs_result_json_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"retry_safe\" IN (0, 1)",
+      "name": "job_runs_retry_safe_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "(\"trigger_type\" = 'schedule' AND \"scheduled_job_id\" IS NOT NULL AND \"scheduled_job_version\" BETWEEN 1 AND 9007199254740991 AND \"scheduled_for_at\" IS NOT NULL AND \"scheduled_for_at\" BETWEEN 0 AND 8640000000000000 AND \"scheduled_for_at\" <= \"queued_at\") OR (\"trigger_type\" = 'manual' AND \"scheduled_job_id\" IS NOT NULL AND \"scheduled_job_version\" BETWEEN 1 AND 9007199254740991 AND \"scheduled_for_at\" IS NULL) OR (\"trigger_type\" IN ('startup', 'system') AND \"scheduled_job_id\" IS NULL AND \"scheduled_job_version\" IS NULL AND \"scheduled_for_at\" IS NULL)",
+      "name": "job_runs_schedule_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"state\" IN ('cancelled', 'failed', 'queued', 'running', 'succeeded', 'timed-out') AND ((\"state\" = 'queued' AND \"finished_at\" IS NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" = 'running' AND \"attempt_count\" > 0 AND \"finished_at\" IS NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" = 'succeeded' AND \"attempt_count\" > 0 AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NOT NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" IN ('failed', 'timed-out') AND \"attempt_count\" > 0 AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NOT NULL AND \"terminal_message\" IS NOT NULL) OR (\"state\" = 'cancelled' AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NOT NULL AND \"terminal_message\" IS NOT NULL))",
+      "name": "job_runs_state_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"state_version\" BETWEEN 1 AND 9007199254740991",
+      "name": "job_runs_state_version_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "(\"terminal_code\" IS NULL OR (length(\"terminal_code\") BETWEEN 1 AND 128 AND instr(\"terminal_code\", char(0)) = 0 AND \"terminal_code\" = lower(\"terminal_code\") AND substr(\"terminal_code\", 1, 1) GLOB '[a-z0-9]' AND \"terminal_code\" NOT GLOB '*[^a-z0-9._/-]*'))",
+      "name": "job_runs_terminal_code_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "(\"terminal_message\" IS NULL OR (length(\"terminal_message\") BETWEEN 1 AND 2000 AND instr(\"terminal_message\", char(0)) = 0 AND length(trim(\"terminal_message\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"terminal_message\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"terminal_message\" AS BLOB)) <= 8000))",
+      "name": "job_runs_terminal_message_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"timeout_ms\" BETWEEN 1000 AND 86400000",
+      "name": "job_runs_timeout_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "\"queued_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"queued_at\" AND (\"first_started_at\" IS NULL OR (\"first_started_at\" BETWEEN 0 AND 8640000000000000 AND \"first_started_at\" BETWEEN \"queued_at\" AND \"updated_at\")) AND (\"last_attempt_started_at\" IS NULL OR (\"first_started_at\" IS NOT NULL AND \"last_attempt_started_at\" BETWEEN 0 AND 8640000000000000 AND \"last_attempt_started_at\" BETWEEN \"first_started_at\" AND \"updated_at\")) AND (\"heartbeat_at\" IS NULL OR (\"last_attempt_started_at\" IS NOT NULL AND \"heartbeat_at\" BETWEEN 0 AND 8640000000000000 AND \"heartbeat_at\" BETWEEN \"last_attempt_started_at\" AND \"updated_at\")) AND (\"cancel_requested_at\" IS NULL OR (\"cancel_requested_at\" BETWEEN 0 AND 8640000000000000 AND \"cancel_requested_at\" BETWEEN \"queued_at\" AND \"updated_at\")) AND (\"finished_at\" IS NULL OR (\"finished_at\" BETWEEN 0 AND 8640000000000000 AND \"finished_at\" BETWEEN COALESCE(\"last_attempt_started_at\", \"queued_at\") AND \"updated_at\"))",
+      "name": "job_runs_time_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
+      "value": "(\"updated_by_kind\" IS NULL AND \"updated_by_id\" IS NULL) OR (\"updated_by_kind\" IS NOT NULL AND \"updated_by_id\" IS NOT NULL AND ((\"updated_by_kind\" = 'user' AND length(\"updated_by_id\") = 36 AND instr(\"updated_by_id\", char(0)) = 0 AND length(replace(\"updated_by_id\", '-', '')) = 32 AND replace(\"updated_by_id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"updated_by_id\", 9, 1) = '-' AND substr(\"updated_by_id\", 14, 1) = '-' AND substr(\"updated_by_id\", 15, 1) = '7' AND substr(\"updated_by_id\", 19, 1) = '-' AND substr(\"updated_by_id\", 20, 1) GLOB '[89ab]' AND substr(\"updated_by_id\", 24, 1) = '-') OR (\"updated_by_kind\" = 'automation' AND length(\"updated_by_id\") BETWEEN 1 AND 64 AND instr(\"updated_by_id\", char(0)) = 0 AND \"updated_by_id\" = lower(\"updated_by_id\") AND substr(\"updated_by_id\", 1, 1) GLOB '[a-z0-9]' AND \"updated_by_id\" NOT GLOB '*[^a-z0-9._-]*')))",
+      "name": "job_worker_control_actor_check",
+      "entityType": "checks",
+      "table": "job_worker_control"
+    },
+    {
+      "value": "\"claiming_paused\" IN (0, 1)",
+      "name": "job_worker_control_claiming_paused_check",
+      "entityType": "checks",
+      "table": "job_worker_control"
+    },
+    {
+      "value": "\"id\" = 1",
+      "name": "job_worker_control_id_check",
+      "entityType": "checks",
+      "table": "job_worker_control"
+    },
+    {
+      "value": "\"updated_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "job_worker_control_updated_at_check",
+      "entityType": "checks",
+      "table": "job_worker_control"
+    },
+    {
+      "value": "\"version\" BETWEEN 1 AND 9007199254740991",
+      "name": "job_worker_control_version_check",
+      "entityType": "checks",
+      "table": "job_worker_control"
+    },
+    {
       "value": "\"complete_snapshot\" IN (0, 1)",
       "name": "monitor_runs_complete_snapshot_check",
       "entityType": "checks",
@@ -4531,6 +6410,138 @@
       "name": "reports_status_check",
       "entityType": "checks",
       "table": "reports"
+    },
+    {
+      "value": "length(\"lease_token\") = 36 AND instr(\"lease_token\", char(0)) = 0 AND length(replace(\"lease_token\", '-', '')) = 32 AND replace(\"lease_token\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"lease_token\", 9, 1) = '-' AND substr(\"lease_token\", 14, 1) = '-' AND substr(\"lease_token\", 15, 1) = '7' AND substr(\"lease_token\", 19, 1) = '-' AND substr(\"lease_token\", 20, 1) GLOB '[89ab]' AND substr(\"lease_token\", 24, 1) = '-'",
+      "name": "resource_leases_lease_token_check",
+      "entityType": "checks",
+      "table": "resource_leases"
+    },
+    {
+      "value": "length(\"resource_key\") BETWEEN 1 AND 128 AND instr(\"resource_key\", char(0)) = 0 AND \"resource_key\" = lower(\"resource_key\") AND substr(\"resource_key\", 1, 1) GLOB '[a-z0-9]' AND \"resource_key\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "resource_leases_resource_key_check",
+      "entityType": "checks",
+      "table": "resource_leases"
+    },
+    {
+      "value": "\"acquired_at\" BETWEEN 0 AND 8640000000000000 AND \"renewed_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"renewed_at\" >= \"acquired_at\" AND \"expires_at\" > \"renewed_at\"",
+      "name": "resource_leases_time_check",
+      "entityType": "checks",
+      "table": "resource_leases"
+    },
+    {
+      "value": "length(\"action_key\") BETWEEN 1 AND 128 AND instr(\"action_key\", char(0)) = 0 AND \"action_key\" = lower(\"action_key\") AND substr(\"action_key\", 1, 1) GLOB '[a-z0-9]' AND \"action_key\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "scheduled_jobs_action_key_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "length(CAST(\"action_payload_json\" AS BLOB)) <= 65536 AND CASE WHEN json_valid(\"action_payload_json\") THEN json_type(\"action_payload_json\") = 'object' ELSE 0 END",
+      "name": "scheduled_jobs_action_payload_json_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"attempt_limit\" BETWEEN 1 AND 10",
+      "name": "scheduled_jobs_attempt_limit_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"cancellation_policy\" IN ('cooperative', 'never', 'queued-only')",
+      "name": "scheduled_jobs_cancellation_policy_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"created_at\" BETWEEN 0 AND 8640000000000000",
+      "name": "scheduled_jobs_created_at_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "length(\"description\") BETWEEN 1 AND 1000 AND instr(\"description\", char(0)) = 0 AND length(trim(\"description\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"description\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"description\" AS BLOB)) <= 4000",
+      "name": "scheduled_jobs_description_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"enabled\" IN (0, 1)",
+      "name": "scheduled_jobs_enabled_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "length(\"id\") BETWEEN 1 AND 80 AND instr(\"id\", char(0)) = 0 AND \"id\" = lower(\"id\") AND substr(\"id\", 1, 1) GLOB '[a-z0-9]' AND \"id\" NOT GLOB '*[^a-z0-9._-]*'",
+      "name": "scheduled_jobs_id_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "length(\"name\") BETWEEN 1 AND 160 AND instr(\"name\", char(0)) = 0 AND length(trim(\"name\", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND \"name\" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST(\"name\" AS BLOB)) <= 640",
+      "name": "scheduled_jobs_name_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "(\"next_run_at\" IS NULL OR \"next_run_at\" BETWEEN 0 AND 8640000000000000) AND (\"enabled\" = 0 OR \"next_run_at\" IS NOT NULL)",
+      "name": "scheduled_jobs_next_run_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"priority\" BETWEEN -100 AND 100",
+      "name": "scheduled_jobs_priority_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"resource_class\" IN ('exclusive', 'host-heavy', 'interactive', 'light', 'network')",
+      "name": "scheduled_jobs_resource_class_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "length(CAST(\"resource_keys_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"resource_keys_json\") THEN json_type(\"resource_keys_json\") = 'array' ELSE 0 END",
+      "name": "scheduled_jobs_resource_keys_json_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"retry_safe\" IN (0, 1)",
+      "name": "scheduled_jobs_retry_safe_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "(\"schedule_kind\" = 'interval' AND \"interval_ms\" BETWEEN 60000 AND 31536000000 AND \"time_of_day\" IS NULL AND \"cron_expression\" IS NULL AND \"time_zone\" IS NULL) OR (\"schedule_kind\" = 'daily' AND \"interval_ms\" IS NULL AND \"time_of_day\" IS NOT NULL AND instr(\"time_of_day\", char(0)) = 0 AND \"time_of_day\" GLOB '[0-2][0-9]:[0-5][0-9]' AND CAST(substr(\"time_of_day\", 1, 2) AS INTEGER) BETWEEN 0 AND 23 AND \"cron_expression\" IS NULL AND \"time_zone\" IS NOT NULL) OR (\"schedule_kind\" = 'cron' AND \"interval_ms\" IS NULL AND \"time_of_day\" IS NULL AND \"cron_expression\" IS NOT NULL AND length(\"cron_expression\") BETWEEN 9 AND 200 AND instr(\"cron_expression\", char(0)) = 0 AND \"cron_expression\" = trim(\"cron_expression\") AND \"cron_expression\" NOT LIKE '%  %' AND \"cron_expression\" NOT GLOB '*[^-0-9*,/ ]*' AND length(\"cron_expression\") - length(replace(\"cron_expression\", ' ', '')) = 4 AND \"time_zone\" IS NOT NULL)",
+      "name": "scheduled_jobs_schedule_shape_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"time_zone\" IS NULL OR \"time_zone\" IN ('Africa/Abidjan', 'Africa/Accra', 'Africa/Addis_Ababa', 'Africa/Algiers', 'Africa/Asmara', 'Africa/Bamako', 'Africa/Bangui', 'Africa/Banjul', 'Africa/Bissau', 'Africa/Blantyre', 'Africa/Brazzaville', 'Africa/Bujumbura', 'Africa/Cairo', 'Africa/Casablanca', 'Africa/Ceuta', 'Africa/Conakry', 'Africa/Dakar', 'Africa/Dar_es_Salaam', 'Africa/Djibouti', 'Africa/Douala', 'Africa/El_Aaiun', 'Africa/Freetown', 'Africa/Gaborone', 'Africa/Harare', 'Africa/Johannesburg', 'Africa/Juba', 'Africa/Kampala', 'Africa/Khartoum', 'Africa/Kigali', 'Africa/Kinshasa', 'Africa/Lagos', 'Africa/Libreville', 'Africa/Lome', 'Africa/Luanda', 'Africa/Lubumbashi', 'Africa/Lusaka', 'Africa/Malabo', 'Africa/Maputo', 'Africa/Maseru', 'Africa/Mbabane', 'Africa/Mogadishu', 'Africa/Monrovia', 'Africa/Nairobi', 'Africa/Ndjamena', 'Africa/Niamey', 'Africa/Nouakchott', 'Africa/Ouagadougou', 'Africa/Porto-Novo', 'Africa/Sao_Tome', 'Africa/Tripoli', 'Africa/Tunis', 'Africa/Windhoek', 'America/Adak', 'America/Anchorage', 'America/Anguilla', 'America/Antigua', 'America/Araguaina', 'America/Argentina/Buenos_Aires', 'America/Argentina/Catamarca', 'America/Argentina/Cordoba', 'America/Argentina/Jujuy', 'America/Argentina/La_Rioja', 'America/Argentina/Mendoza', 'America/Argentina/Rio_Gallegos', 'America/Argentina/Salta', 'America/Argentina/San_Juan', 'America/Argentina/San_Luis', 'America/Argentina/Tucuman', 'America/Argentina/Ushuaia', 'America/Aruba', 'America/Asuncion', 'America/Atikokan', 'America/Bahia', 'America/Bahia_Banderas', 'America/Barbados', 'America/Belem', 'America/Belize', 'America/Blanc-Sablon', 'America/Boa_Vista', 'America/Bogota', 'America/Boise', 'America/Cambridge_Bay', 'America/Campo_Grande', 'America/Cancun', 'America/Caracas', 'America/Cayenne', 'America/Cayman', 'America/Chicago', 'America/Chihuahua', 'America/Ciudad_Juarez', 'America/Costa_Rica', 'America/Creston', 'America/Cuiaba', 'America/Curacao', 'America/Danmarkshavn', 'America/Dawson', 'America/Dawson_Creek', 'America/Denver', 'America/Detroit', 'America/Dominica', 'America/Edmonton', 'America/Eirunepe', 'America/El_Salvador', 'America/Fort_Nelson', 'America/Fortaleza', 'America/Glace_Bay', 'America/Goose_Bay', 'America/Grand_Turk', 'America/Grenada', 'America/Guadeloupe', 'America/Guatemala', 'America/Guayaquil', 'America/Guyana', 'America/Halifax', 'America/Havana', 'America/Hermosillo', 'America/Indiana/Indianapolis', 'America/Indiana/Knox', 'America/Indiana/Marengo', 'America/Indiana/Petersburg', 'America/Indiana/Tell_City', 'America/Indiana/Vevay', 'America/Indiana/Vincennes', 'America/Indiana/Winamac', 'America/Inuvik', 'America/Iqaluit', 'America/Jamaica', 'America/Juneau', 'America/Kentucky/Louisville', 'America/Kentucky/Monticello', 'America/Kralendijk', 'America/La_Paz', 'America/Lima', 'America/Los_Angeles', 'America/Lower_Princes', 'America/Maceio', 'America/Managua', 'America/Manaus', 'America/Marigot', 'America/Martinique', 'America/Matamoros', 'America/Mazatlan', 'America/Menominee', 'America/Merida', 'America/Metlakatla', 'America/Mexico_City', 'America/Miquelon', 'America/Moncton', 'America/Monterrey', 'America/Montevideo', 'America/Montserrat', 'America/Nassau', 'America/New_York', 'America/Nome', 'America/Noronha', 'America/North_Dakota/Beulah', 'America/North_Dakota/Center', 'America/North_Dakota/New_Salem', 'America/Nuuk', 'America/Ojinaga', 'America/Panama', 'America/Paramaribo', 'America/Phoenix', 'America/Port-au-Prince', 'America/Port_of_Spain', 'America/Porto_Velho', 'America/Puerto_Rico', 'America/Punta_Arenas', 'America/Rankin_Inlet', 'America/Recife', 'America/Regina', 'America/Resolute', 'America/Rio_Branco', 'America/Santarem', 'America/Santiago', 'America/Santo_Domingo', 'America/Sao_Paulo', 'America/Scoresbysund', 'America/Sitka', 'America/St_Barthelemy', 'America/St_Johns', 'America/St_Kitts', 'America/St_Lucia', 'America/St_Thomas', 'America/St_Vincent', 'America/Swift_Current', 'America/Tegucigalpa', 'America/Thule', 'America/Tijuana', 'America/Toronto', 'America/Tortola', 'America/Vancouver', 'America/Whitehorse', 'America/Winnipeg', 'America/Yakutat', 'Antarctica/Casey', 'Antarctica/Davis', 'Antarctica/DumontDUrville', 'Antarctica/Macquarie', 'Antarctica/Mawson', 'Antarctica/McMurdo', 'Antarctica/Palmer', 'Antarctica/Rothera', 'Antarctica/Syowa', 'Antarctica/Troll', 'Antarctica/Vostok', 'Arctic/Longyearbyen', 'Asia/Aden', 'Asia/Almaty', 'Asia/Amman', 'Asia/Anadyr', 'Asia/Aqtau', 'Asia/Aqtobe', 'Asia/Ashgabat', 'Asia/Atyrau', 'Asia/Baghdad', 'Asia/Bahrain', 'Asia/Baku', 'Asia/Bangkok', 'Asia/Barnaul', 'Asia/Beirut', 'Asia/Bishkek', 'Asia/Brunei', 'Asia/Chita', 'Asia/Choibalsan', 'Asia/Colombo', 'Asia/Damascus', 'Asia/Dhaka', 'Asia/Dili', 'Asia/Dubai', 'Asia/Dushanbe', 'Asia/Famagusta', 'Asia/Gaza', 'Asia/Hebron', 'Asia/Ho_Chi_Minh', 'Asia/Hong_Kong', 'Asia/Hovd', 'Asia/Irkutsk', 'Asia/Jakarta', 'Asia/Jayapura', 'Asia/Jerusalem', 'Asia/Kabul', 'Asia/Kamchatka', 'Asia/Karachi', 'Asia/Kathmandu', 'Asia/Khandyga', 'Asia/Kolkata', 'Asia/Krasnoyarsk', 'Asia/Kuala_Lumpur', 'Asia/Kuching', 'Asia/Kuwait', 'Asia/Macau', 'Asia/Magadan', 'Asia/Makassar', 'Asia/Manila', 'Asia/Muscat', 'Asia/Nicosia', 'Asia/Novokuznetsk', 'Asia/Novosibirsk', 'Asia/Omsk', 'Asia/Oral', 'Asia/Phnom_Penh', 'Asia/Pontianak', 'Asia/Pyongyang', 'Asia/Qatar', 'Asia/Qostanay', 'Asia/Qyzylorda', 'Asia/Riyadh', 'Asia/Sakhalin', 'Asia/Samarkand', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Srednekolymsk', 'Asia/Taipei', 'Asia/Tashkent', 'Asia/Tbilisi', 'Asia/Tehran', 'Asia/Thimphu', 'Asia/Tokyo', 'Asia/Tomsk', 'Asia/Ulaanbaatar', 'Asia/Urumqi', 'Asia/Ust-Nera', 'Asia/Vientiane', 'Asia/Vladivostok', 'Asia/Yakutsk', 'Asia/Yangon', 'Asia/Yekaterinburg', 'Asia/Yerevan', 'Atlantic/Azores', 'Atlantic/Bermuda', 'Atlantic/Canary', 'Atlantic/Cape_Verde', 'Atlantic/Faroe', 'Atlantic/Madeira', 'Atlantic/Reykjavik', 'Atlantic/South_Georgia', 'Atlantic/St_Helena', 'Atlantic/Stanley', 'Australia/Adelaide', 'Australia/Brisbane', 'Australia/Broken_Hill', 'Australia/Darwin', 'Australia/Eucla', 'Australia/Hobart', 'Australia/Lindeman', 'Australia/Lord_Howe', 'Australia/Melbourne', 'Australia/Perth', 'Australia/Sydney', 'Etc/GMT+1', 'Etc/GMT+10', 'Etc/GMT+11', 'Etc/GMT+12', 'Etc/GMT+2', 'Etc/GMT+3', 'Etc/GMT+4', 'Etc/GMT+5', 'Etc/GMT+6', 'Etc/GMT+7', 'Etc/GMT+8', 'Etc/GMT+9', 'Etc/GMT-1', 'Etc/GMT-10', 'Etc/GMT-11', 'Etc/GMT-12', 'Etc/GMT-13', 'Etc/GMT-14', 'Etc/GMT-2', 'Etc/GMT-3', 'Etc/GMT-4', 'Etc/GMT-5', 'Etc/GMT-6', 'Etc/GMT-7', 'Etc/GMT-8', 'Etc/GMT-9', 'Europe/Amsterdam', 'Europe/Andorra', 'Europe/Astrakhan', 'Europe/Athens', 'Europe/Belgrade', 'Europe/Berlin', 'Europe/Bratislava', 'Europe/Brussels', 'Europe/Bucharest', 'Europe/Budapest', 'Europe/Busingen', 'Europe/Chisinau', 'Europe/Copenhagen', 'Europe/Dublin', 'Europe/Gibraltar', 'Europe/Guernsey', 'Europe/Helsinki', 'Europe/Isle_of_Man', 'Europe/Istanbul', 'Europe/Jersey', 'Europe/Kaliningrad', 'Europe/Kirov', 'Europe/Kyiv', 'Europe/Lisbon', 'Europe/Ljubljana', 'Europe/London', 'Europe/Luxembourg', 'Europe/Madrid', 'Europe/Malta', 'Europe/Mariehamn', 'Europe/Minsk', 'Europe/Monaco', 'Europe/Moscow', 'Europe/Oslo', 'Europe/Paris', 'Europe/Podgorica', 'Europe/Prague', 'Europe/Riga', 'Europe/Rome', 'Europe/Samara', 'Europe/San_Marino', 'Europe/Sarajevo', 'Europe/Saratov', 'Europe/Simferopol', 'Europe/Skopje', 'Europe/Sofia', 'Europe/Stockholm', 'Europe/Tallinn', 'Europe/Tirane', 'Europe/Ulyanovsk', 'Europe/Vaduz', 'Europe/Vatican', 'Europe/Vienna', 'Europe/Vilnius', 'Europe/Volgograd', 'Europe/Warsaw', 'Europe/Zagreb', 'Europe/Zurich', 'Indian/Antananarivo', 'Indian/Chagos', 'Indian/Christmas', 'Indian/Cocos', 'Indian/Comoro', 'Indian/Kerguelen', 'Indian/Mahe', 'Indian/Maldives', 'Indian/Mauritius', 'Indian/Mayotte', 'Indian/Reunion', 'Pacific/Apia', 'Pacific/Auckland', 'Pacific/Bougainville', 'Pacific/Chatham', 'Pacific/Chuuk', 'Pacific/Easter', 'Pacific/Efate', 'Pacific/Fakaofo', 'Pacific/Fiji', 'Pacific/Funafuti', 'Pacific/Galapagos', 'Pacific/Gambier', 'Pacific/Guadalcanal', 'Pacific/Guam', 'Pacific/Honolulu', 'Pacific/Kanton', 'Pacific/Kiritimati', 'Pacific/Kosrae', 'Pacific/Kwajalein', 'Pacific/Majuro', 'Pacific/Marquesas', 'Pacific/Midway', 'Pacific/Nauru', 'Pacific/Niue', 'Pacific/Norfolk', 'Pacific/Noumea', 'Pacific/Pago_Pago', 'Pacific/Palau', 'Pacific/Pitcairn', 'Pacific/Pohnpei', 'Pacific/Port_Moresby', 'Pacific/Rarotonga', 'Pacific/Saipan', 'Pacific/Tahiti', 'Pacific/Tarawa', 'Pacific/Tongatapu', 'Pacific/Wake', 'Pacific/Wallis', 'UTC')",
+      "name": "scheduled_jobs_time_zone_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"timeout_ms\" BETWEEN 1000 AND 86400000",
+      "name": "scheduled_jobs_timeout_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"updated_at\" BETWEEN 0 AND 8640000000000000 AND \"updated_at\" >= \"created_at\"",
+      "name": "scheduled_jobs_updated_at_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
+    },
+    {
+      "value": "\"version\" BETWEEN 1 AND 9007199254740991",
+      "name": "scheduled_jobs_version_check",
+      "entityType": "checks",
+      "table": "scheduled_jobs"
     },
     {
       "value": "\"applied_at\" BETWEEN 0 AND 8640000000000000",
@@ -4939,6 +6950,42 @@
       "name": "users_username_check",
       "entityType": "checks",
       "table": "users"
+    },
+    {
+      "value": "\"capacity\" BETWEEN 1 AND 16",
+      "name": "worker_instances_capacity_check",
+      "entityType": "checks",
+      "table": "worker_instances"
+    },
+    {
+      "value": "length(\"id\") = 36 AND instr(\"id\", char(0)) = 0 AND length(replace(\"id\", '-', '')) = 32 AND replace(\"id\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"id\", 9, 1) = '-' AND substr(\"id\", 14, 1) = '-' AND substr(\"id\", 15, 1) = '7' AND substr(\"id\", 19, 1) = '-' AND substr(\"id\", 20, 1) GLOB '[89ab]' AND substr(\"id\", 24, 1) = '-'",
+      "name": "worker_instances_id_check",
+      "entityType": "checks",
+      "table": "worker_instances"
+    },
+    {
+      "value": "\"pid\" BETWEEN 1 AND 2147483647",
+      "name": "worker_instances_pid_check",
+      "entityType": "checks",
+      "table": "worker_instances"
+    },
+    {
+      "value": "length(\"release_id\") = 40 AND instr(\"release_id\", char(0)) = 0 AND \"release_id\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "worker_instances_release_id_check",
+      "entityType": "checks",
+      "table": "worker_instances"
+    },
+    {
+      "value": "(\"state\" = 'online' AND \"draining_at\" IS NULL AND \"stopped_at\" IS NULL) OR (\"state\" = 'draining' AND \"draining_at\" IS NOT NULL AND \"stopped_at\" IS NULL) OR (\"state\" = 'stopped' AND \"draining_at\" IS NOT NULL AND \"stopped_at\" IS NOT NULL)",
+      "name": "worker_instances_state_check",
+      "entityType": "checks",
+      "table": "worker_instances"
+    },
+    {
+      "value": "\"started_at\" BETWEEN 0 AND 8640000000000000 AND \"heartbeat_at\" BETWEEN 0 AND 8640000000000000 AND \"heartbeat_at\" >= \"started_at\" AND (\"draining_at\" IS NULL OR (\"draining_at\" BETWEEN 0 AND 8640000000000000 AND \"draining_at\" >= \"started_at\")) AND (\"stopped_at\" IS NULL OR (\"stopped_at\" BETWEEN 0 AND 8640000000000000 AND \"stopped_at\" >= \"draining_at\"))",
+      "name": "worker_instances_time_check",
+      "entityType": "checks",
+      "table": "worker_instances"
     }
   ],
   "renames": []

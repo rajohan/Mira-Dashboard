@@ -50,6 +50,8 @@ export function jsonObjectTextSchema(schema: v.StringSchema<undefined>) {
  * @param schema Generated Drizzle Date schema.
  * @returns Refined nonnegative epoch Date schema.
  */
-export function nonnegativeDateSchema(schema: v.DateSchema<undefined>) {
+export function nonnegativeDateSchema(
+    schema: v.DateSchema<v.ErrorMessage<v.DateIssue> | undefined>
+) {
     return v.pipe(schema, nonnegativeDateAction());
 }

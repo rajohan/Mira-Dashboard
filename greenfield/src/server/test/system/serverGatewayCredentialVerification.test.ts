@@ -246,6 +246,21 @@ describe("native Gateway bootstrap verification through the real server", () => 
     test("propagates a real HTTP abort through Effect to the native socket", async () => {
         const system = await openGatewayVerificationSystem("silent", 5000);
         const controller = new AbortController();
+        const protectedTables = [
+            "audit_events",
+            "auth_rate_limit_buckets",
+            "auth_sessions",
+            "users",
+        ] as const;
+        const countsBeforeAbort: Record<(typeof protectedTables)[number], number> = {
+            audit_events: countRows(system.database, "audit_events"),
+            auth_rate_limit_buckets: countRows(
+                system.database,
+                "auth_rate_limit_buckets"
+            ),
+            auth_sessions: countRows(system.database, "auth_sessions"),
+            users: countRows(system.database, "users"),
+        };
         try {
             const request = postAbortableBootstrap(
                 system.server,
@@ -263,13 +278,8 @@ describe("native Gateway bootstrap verification through the real server", () => 
             });
             await waitForGatewayConnectionState(system.gateway, { open: 0 });
             expect(system.gateway.acceptedConnections).toBe(1);
-            for (const table of [
-                "audit_events",
-                "auth_rate_limit_buckets",
-                "auth_sessions",
-                "users",
-            ] as const) {
-                expect(countRows(system.database, table)).toBe(0);
+            for (const table of protectedTables) {
+                expect(countRows(system.database, table)).toBe(countsBeforeAbort[table]);
             }
         } finally {
             controller.abort();

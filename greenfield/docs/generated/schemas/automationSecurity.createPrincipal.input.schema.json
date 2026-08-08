@@ -8,6 +8,8 @@
         "enum": [
           "agents:read",
           "agents:write",
+          "jobs:read",
+          "jobs:write",
           "monitoring:write",
           "notifications:read",
           "notifications:write",
@@ -18,7 +20,7 @@
         ],
         "type": "string"
       },
-      "maxItems": 9,
+      "maxItems": 11,
       "uniqueItems": true
     },
     "id": {

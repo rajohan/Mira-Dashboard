@@ -589,7 +589,7 @@
             "purpose": "Lists recent executions plus queue/worker summary; `?include=claims` adds pause state.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["jobs.listRuns"],
                 "phase": "phase-3"
@@ -602,7 +602,7 @@
             "purpose": "Reads one execution, including its persisted progress/result output snapshot.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["jobs.getRun"],
                 "phase": "phase-3"
@@ -615,7 +615,7 @@
             "purpose": "Lists Dashboard scheduled jobs.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["schedules.list"],
                 "phase": "phase-3"
@@ -628,7 +628,7 @@
             "purpose": "Reads a scheduled job.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["schedules.get"],
                 "phase": "phase-3"
@@ -641,7 +641,7 @@
             "purpose": "Lists job run history.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["schedules.listRuns"],
                 "phase": "phase-3"
@@ -1023,7 +1023,7 @@
             "purpose": "Pauses/resumes new worker claims; running work is not cancelled.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["jobs.setClaimingPaused"],
                 "phase": "phase-3"
@@ -1036,7 +1036,7 @@
             "purpose": "Updates scheduled job settings and intentional-disable metadata.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["schedules.update"],
                 "phase": "phase-3"
@@ -1608,7 +1608,7 @@
             "purpose": "Cancels queued work or requests cooperative cancellation of a running execution.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["jobs.cancelRun"],
                 "phase": "phase-3"
@@ -1621,7 +1621,7 @@
             "purpose": "Queues a scheduled job and returns `202`.",
             "section": "Jobs And Cron",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["schedules.run"],
                 "phase": "phase-3"

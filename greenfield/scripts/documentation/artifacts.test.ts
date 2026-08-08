@@ -108,6 +108,28 @@ describe("generated contract documentation", () => {
                 },
             ],
             [
+                "jobs.runs",
+                "jobs.listRuns",
+                {
+                    anyOf: [
+                        {
+                            format: "uuid",
+                            maxLength: 36,
+                            minLength: 36,
+                            pattern:
+                                "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                            type: "string",
+                        },
+                        {
+                            maxLength: 80,
+                            minLength: 1,
+                            pattern: "^[a-z0-9][a-z0-9._-]*$",
+                            type: "string",
+                        },
+                    ],
+                },
+            ],
+            [
                 "monitoring.incidents",
                 "incidents.list",
                 { maxLength: 200, pattern: "\\S", type: "string" },
@@ -121,6 +143,28 @@ describe("generated contract documentation", () => {
                 "monitoring.reports",
                 "reports.list",
                 { maxLength: 200, pattern: "\\S", type: "string" },
+            ],
+            [
+                "schedules.records",
+                "schedules.list",
+                {
+                    anyOf: [
+                        {
+                            format: "uuid",
+                            maxLength: 36,
+                            minLength: 36,
+                            pattern:
+                                "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                            type: "string",
+                        },
+                        {
+                            maxLength: 80,
+                            minLength: 1,
+                            pattern: "^[a-z0-9][a-z0-9._-]*$",
+                            type: "string",
+                        },
+                    ],
+                },
             ],
             [
                 "tasks.records",
@@ -149,7 +193,10 @@ describe("generated contract documentation", () => {
                 type: "object",
             });
         }
-        expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(5);
+        expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(7);
+        expect(first.get("schemas/schedules.update.input.schema.json")).toContain(
+            "Five-field minute cron; live validation accepts JAN-DEC month and SUN-SAT weekday aliases, normalizes aliases and ASCII whitespace, and requires a future occurrence."
+        );
     });
 
     test("emits JSON Schema from the same Valibot transport schemas", () => {

@@ -6,10 +6,13 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { listAutomationPrincipalsResultSchema } from "../contracts/automationSecurity.ts";
+import { jobRunSummarySchema } from "../contracts/jobModel.ts";
+import { listJobRunsResultSchema } from "../contracts/jobs.ts";
 import {
     monitoringSubmissionResultSchema,
     reportDetailSchema,
 } from "../contracts/monitoring.ts";
+import { listSchedulesResultSchema } from "../contracts/schedules.ts";
 import { automationPrincipalCapabilities } from "../server/database/schema/automationPrincipalCapabilities.ts";
 import { automationPrincipalCapabilityInsertSchema } from "../server/database/validation/automationPrincipalCapabilities.ts";
 import { createWebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
@@ -236,6 +239,134 @@ describe("Dashboard security composition", () => {
                 id: ingestion.reportId,
                 title: snapshot.report.title,
             });
+        } finally {
+            try {
+                await (server === undefined
+                    ? applicationRuntime.dispose()
+                    : server.stop(true));
+            } finally {
+                await rm(stateDirectory, { force: true, recursive: true });
+            }
+        }
+    });
+
+    test("wires durable schedule reconciliation and idempotent enqueue through production HTTP", async () => {
+        const stateDirectory = await mkdtemp(
+            path.join(os.tmpdir(), "dashboard-server-jobs-composition-")
+        );
+        await chmod(stateDirectory, 0o700);
+        const applicationRuntime = createDashboardApplicationRuntime({
+            database: {
+                migrationsDirectory,
+                releaseId: "0".repeat(40),
+                startupMode: "initialize-empty",
+                stateDirectory,
+            },
+            logger: createTestStructuredLogger(),
+        });
+        let server: Awaited<ReturnType<typeof createDashboardServer>> | undefined;
+
+        try {
+            await applicationRuntime.initialize();
+            const database = await applicationRuntime.database.orm();
+            const fixture = seedAuthenticationTestDatabase(
+                database,
+                authenticationTestNow
+            );
+            server = await createDashboardServer({
+                applicationRuntime,
+                browserOrigin: "https://dashboard.example",
+                gatewayUrl: "ws://127.0.0.1:1",
+                now: () => authenticationTestNow,
+                port: 0,
+                readiness: createReadinessController(),
+                totpSecretCipher: testTotpSecretCipher,
+            });
+            const headers = {
+                cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
+            };
+            const listInput = encodeURIComponent(JSON.stringify({ json: {} }));
+            const scheduleResponse = await fetch(
+                new URL(`/trpc/schedules.list?input=${listInput}`, server.url),
+                { headers }
+            );
+            const scheduleBody = (await scheduleResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+
+            expect(scheduleResponse.status).toBe(200);
+            expect(scheduleBody.error).toBeUndefined();
+            const schedules = v.parse(
+                listSchedulesResultSchema,
+                scheduleBody.result?.data?.json
+            );
+            expect(schedules.schedules).toHaveLength(1);
+            expect(schedules.schedules[0]).toMatchObject({
+                actionKey: "system.worker-smoke",
+                enabled: false,
+                id: "system.worker-smoke",
+            });
+
+            const idempotencyKey = "cHJvZHVjdGlvbi1odHRwLWNvbXBvc2l0aW9uLWtleS0x";
+            const enqueue = () =>
+                fetch(new URL("/trpc/schedules.run", server?.url), {
+                    body: JSON.stringify({
+                        json: {
+                            id: "system.worker-smoke",
+                            idempotencyKey,
+                        },
+                    }),
+                    headers: {
+                        ...headers,
+                        "content-type": "application/json",
+                    },
+                    method: "POST",
+                });
+            const firstEnqueueResponse = await enqueue();
+            const firstEnqueueBody = (await firstEnqueueResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+            const secondEnqueueResponse = await enqueue();
+            const secondEnqueueBody = (await secondEnqueueResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+
+            expect(firstEnqueueResponse.status).toBe(200);
+            expect(secondEnqueueResponse.status).toBe(200);
+            expect(firstEnqueueBody.error).toBeUndefined();
+            expect(secondEnqueueBody.error).toBeUndefined();
+            const firstRun = v.parse(
+                jobRunSummarySchema,
+                firstEnqueueBody.result?.data?.json
+            );
+            const replayedRun = v.parse(
+                jobRunSummarySchema,
+                secondEnqueueBody.result?.data?.json
+            );
+            expect(firstRun).toMatchObject({
+                actionKey: "system.worker-smoke",
+                scheduledJobId: "system.worker-smoke",
+                state: "queued",
+                triggerType: "manual",
+            });
+            expect(replayedRun.id).toBe(firstRun.id);
+
+            const runResponse = await fetch(
+                new URL(`/trpc/jobs.listRuns?input=${listInput}`, server.url),
+                { headers }
+            );
+            const runBody = (await runResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+            expect(runResponse.status).toBe(200);
+            expect(runBody.error).toBeUndefined();
+            const runs = v.parse(listJobRunsResultSchema, runBody.result?.data?.json);
+            expect(runs.runs.map(({ id }) => id)).toEqual([firstRun.id]);
+            expect(runs.summary.stateCounts.queued).toBe(1);
         } finally {
             try {
                 await (server === undefined
