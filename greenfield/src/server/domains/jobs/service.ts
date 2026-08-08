@@ -47,6 +47,7 @@ import {
     JobValidationError,
 } from "./errors.ts";
 import {
+    type JobRunRecord,
     toJobRunEvent,
     toJobRunResult,
     toJobRunSummary,
@@ -327,6 +328,45 @@ function mutationSideEffects(
     return createJobMutationSideEffects({ ...input, auditId: generateId() });
 }
 
+type DurableRunMutationDescription = Omit<
+    Parameters<typeof createJobMutationSideEffects>[0],
+    "auditId" | "occurredAt" | "realtime" | "targetId" | "targetType"
+>;
+
+function durableRunMutationSideEffects(
+    generateId: () => string,
+    run: JobRunRecord,
+    description: DurableRunMutationDescription
+): JobMutationSideEffects {
+    const runSideEffects = mutationSideEffects(generateId, {
+        ...description,
+        occurredAt: run.updatedAt,
+        realtime: {
+            id: run.id,
+            kind: "run",
+            operation: "updated",
+        },
+        targetId: run.id,
+        targetType: "job-run",
+    });
+    if (run.scheduledJobId === null) return runSideEffects;
+    const scheduleSideEffects = createJobRealtimeSideEffects({
+        occurredAt: run.updatedAt,
+        realtime: {
+            id: run.scheduledJobId,
+            kind: "schedule",
+            operation: "updated",
+        },
+    });
+    return Object.freeze({
+        auditEvents: runSideEffects.auditEvents,
+        realtimeEvents: Object.freeze([
+            ...runSideEffects.realtimeEvents,
+            ...scheduleSideEffects.realtimeEvents,
+        ]),
+    });
+}
+
 function scheduleInsertShape(registration: JobActionRegistration, at: Date) {
     const schedule = buildRegisteredSchedule(registration, at);
     if (schedule === undefined) {
@@ -374,19 +414,12 @@ export function createJobService(
                     actor: principalActor(principal),
                     at,
                     id: input.id,
-                    ...mutationSideEffects(generateId, {
-                        action: "jobs.run.cancel",
-                        actor: principalAuditActor(principal),
-                        occurredAt: at,
-                        outcome: "accepted",
-                        realtime: {
-                            id: input.id,
-                            kind: "run",
-                            operation: "updated",
-                        },
-                        targetId: input.id,
-                        targetType: "job-run",
-                    }),
+                    sideEffectsForRun: (run) =>
+                        durableRunMutationSideEffects(generateId, run, {
+                            action: "jobs.run.cancel",
+                            actor: principalAuditActor(principal),
+                            outcome: "accepted",
+                        }),
                     terminalCode: "cancelled/operator-request",
                     terminalMessage: "Cancelled by an operator",
                 });
@@ -546,6 +579,13 @@ export function createJobService(
                     throw new JobConflictError({
                         id: input.id,
                         reason: "idempotency-mismatch",
+                        resource: "schedule",
+                    });
+                }
+                if (result.kind === "action-unavailable") {
+                    throw new JobConflictError({
+                        id: input.id,
+                        reason: "action-unavailable",
                         resource: "schedule",
                     });
                 }
@@ -746,18 +786,10 @@ export function createJobService(
                                       "Cancelled because the schedule was disabled",
                               },
                               queuedCancellationSideEffects: (run) =>
-                                  mutationSideEffects(generateId, {
+                                  durableRunMutationSideEffects(generateId, run, {
                                       action: "jobs.run.cancel",
                                       actor: principalAuditActor(principal),
-                                      occurredAt: at,
                                       outcome: "cancelled",
-                                      realtime: {
-                                          id: run.id,
-                                          kind: "run",
-                                          operation: "updated",
-                                      },
-                                      targetId: run.id,
-                                      targetType: "job-run",
                                   }),
                           }
                         : {}),
@@ -814,6 +846,18 @@ export async function reconcileJobSchedules(
     const at = toDate(v.parse(jobTimestampSchema, nowMs()));
     await dependencies.repository.reconcileSchedules({
         at,
+        retiredRunCancellation: {
+            actor: systemActor,
+            sideEffectsForRun: (run) =>
+                durableRunMutationSideEffects(generateId, run, {
+                    action: "jobs.run.cancel",
+                    actor: systemActor,
+                    outcome: "cancelled",
+                }),
+            terminalCode: "cancelled/schedule-retired",
+            terminalMessage:
+                "Cancelled because the schedule was retired from the action registry",
+        },
         schedules: jobActionRegistrations.map((registration) =>
             scheduleInsertShape(registration, at)
         ),

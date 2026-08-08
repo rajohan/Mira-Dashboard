@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
+import * as v from "valibot";
+
+import { scheduleCronExpressionSchema } from "../../../contracts/jobModel.ts";
 import { canonicalScheduleTimeZones } from "../../../contracts/scheduleTimeZones.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 
@@ -368,6 +371,237 @@ describe("jobs baseline schema", () => {
                     timeZone: "UTC",
                 })
             ).toThrow("scheduled_jobs_schedule_shape_check");
+            expect(() =>
+                insertSchedule(database, {
+                    id: "invalid.daily-nul-suffix",
+                    intervalMs: null,
+                    scheduleKind: "daily",
+                    timeOfDay: "09:00\0hidden",
+                    timeZone: "UTC",
+                })
+            ).toThrow("scheduled_jobs_schedule_shape_check");
+            for (const [index, cronExpression] of [
+                "foo foo foo foo foo",
+                "0 9 * JAN MON-FRI",
+                "0\t9 * * *",
+                "0 9 * * *\0hidden",
+            ].entries()) {
+                expect(() =>
+                    insertSchedule(database, {
+                        cronExpression,
+                        id: `invalid.cron.${index}`,
+                        intervalMs: null,
+                        scheduleKind: "cron",
+                        timeZone: "UTC",
+                    })
+                ).toThrow("scheduled_jobs_schedule_shape_check");
+            }
+            for (const [index, cronExpression] of [
+                "99 99 99 99 99",
+                "*/0 * * * *",
+                "60 * * * *",
+                "* 24 * * *",
+                "* * 0 * *",
+                "* * 32 * *",
+                "* * * 0 *",
+                "* * * 13 *",
+                "* * * * 8",
+                "*/60 * * * *",
+                "* */24 * * *",
+                "* * */32 * *",
+                "* * * */13 *",
+                "* * * * */8",
+                "1-0 * * * *",
+                "1//2 * * * *",
+                "1-2-3 * * * *",
+                "1,,2 * * * *",
+                "0 0 30 2 *",
+                "0 0 31 4 *",
+                "0 0 31/1 2 */2",
+                "0 0 30 2 */01",
+                "0 0 31 2 *,1",
+                "0 0 31 2-2/2 *",
+                "0 0 31 2/12 *",
+            ].entries()) {
+                expect(
+                    v.safeParse(scheduleCronExpressionSchema, cronExpression).success
+                ).toBeFalse();
+                expect(() =>
+                    insertSchedule(database, {
+                        cronExpression,
+                        id: `invalid.cron-semantic.${index}`,
+                        intervalMs: null,
+                        scheduleKind: "cron",
+                        timeZone: "UTC",
+                    })
+                ).toThrow("scheduled_jobs cron expression must be semantically valid");
+            }
+            const canonicalCronExpressions = [
+                "* * * * *",
+                "0 9 * 1 1-5",
+                "*/15 0-23/2 1,15 1-12/3 0-7",
+                "00 09 01 01 07",
+                "1/59 1/23 1/31 1/12 0/7",
+                "*,5 *,6 *,7 *,8 *,7",
+                "0-59/59 0-23/23 1-31/31 1-12/12 0-7/7",
+                "0 0 29 2 *",
+                "0 0 31 2 1",
+                "0 0 */31 2 1",
+                "0 0 28,31 2 *",
+                "0 0 31 2/2 *",
+            ] as const;
+            const fieldSamples = [
+                {
+                    baseline: ["0", "0", "1", "1", "*"],
+                    fieldIndex: 0,
+                    tokens: [
+                        "*",
+                        "*/1",
+                        "*/59",
+                        "0",
+                        "59",
+                        "01",
+                        "1/59",
+                        "0-59",
+                        "1-59/2",
+                        "0,15,30,45",
+                        "*,5",
+                    ],
+                },
+                {
+                    baseline: ["0", "0", "1", "1", "*"],
+                    fieldIndex: 1,
+                    tokens: [
+                        "*",
+                        "*/1",
+                        "*/23",
+                        "0",
+                        "23",
+                        "01",
+                        "1/23",
+                        "0-23",
+                        "1-23/2",
+                        "0,6,12,18",
+                        "*,5",
+                    ],
+                },
+                {
+                    baseline: ["0", "0", "1", "*", "*"],
+                    fieldIndex: 2,
+                    tokens: [
+                        "*",
+                        "*/1",
+                        "*/31",
+                        "1",
+                        "31",
+                        "01",
+                        "1/31",
+                        "1-31",
+                        "2-30/2",
+                        "1,15,31",
+                        "*,7",
+                    ],
+                },
+                {
+                    baseline: ["0", "0", "1", "1", "*"],
+                    fieldIndex: 3,
+                    tokens: [
+                        "*",
+                        "*/1",
+                        "*/12",
+                        "1",
+                        "12",
+                        "01",
+                        "1/12",
+                        "1-12",
+                        "2-12/2",
+                        "1,6,12",
+                        "*,7",
+                    ],
+                },
+                {
+                    baseline: ["0", "0", "1", "1", "0"],
+                    fieldIndex: 4,
+                    tokens: [
+                        "*",
+                        "*/1",
+                        "*/7",
+                        "0",
+                        "7",
+                        "01",
+                        "0/7",
+                        "0-7",
+                        "1-7/2",
+                        "0,1,6,7",
+                        "*,5",
+                    ],
+                },
+            ] as const;
+            const generatedContractValidExpressions = fieldSamples.flatMap(
+                ({ baseline, fieldIndex, tokens }) =>
+                    tokens.map((token) => {
+                        const fields: string[] = [...baseline];
+                        fields[fieldIndex] = token;
+                        return fields.join(" ");
+                    })
+            );
+            const contractValidExpressions = [
+                ...new Set([
+                    ...canonicalCronExpressions,
+                    ...generatedContractValidExpressions,
+                ]),
+            ];
+            for (const [index, cronExpression] of contractValidExpressions.entries()) {
+                expect(v.parse(scheduleCronExpressionSchema, cronExpression)).toBe(
+                    cronExpression
+                );
+                insertSchedule(database, {
+                    cronExpression,
+                    id: `valid.canonical-cron.${index}`,
+                    intervalMs: null,
+                    scheduleKind: "cron",
+                    timeZone: "UTC",
+                });
+            }
+            for (const cronExpression of ["*/0 * * * *", "0 0 30 2 *"]) {
+                expect(() =>
+                    database.sqlite.run(
+                        `UPDATE scheduled_jobs
+                         SET cron_expression = ?, updated_at = 2000, version = 2
+                         WHERE id = 'valid.canonical-cron.0'`,
+                        [cronExpression]
+                    )
+                ).toThrow("scheduled_jobs cron expression must be semantically valid");
+            }
+            expect(
+                database.sqlite
+                    .query<{ cron_expression: string; version: number }, []>(
+                        `SELECT cron_expression, version
+                         FROM scheduled_jobs
+                         WHERE id = 'valid.canonical-cron.0'`
+                    )
+                    .get()
+            ).toEqual({ cron_expression: "* * * * *", version: 1 });
+            for (const [index, nextRunAt] of [-1, 8_640_000_000_000_001].entries()) {
+                expect(() =>
+                    insertSchedule(database, {
+                        enabled: 0,
+                        id: `invalid.dormant-cursor.${index}`,
+                        nextRunAt,
+                    })
+                ).toThrow("scheduled_jobs_next_run_check");
+            }
+            insertSchedule(database, {
+                enabled: 0,
+                id: "valid.null-dormant-cursor",
+                nextRunAt: null,
+            });
+            expect(() =>
+                insertSchedule(database, {
+                    id: "invalid.enabled-null-cursor",
+                    nextRunAt: null,
+                })
+            ).toThrow("scheduled_jobs_next_run_check");
             for (const [index, timeZone] of canonicalScheduleTimeZones.entries()) {
                 insertSchedule(database, {
                     id: `valid.time-zone.${index}`,

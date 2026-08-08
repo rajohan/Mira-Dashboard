@@ -281,6 +281,31 @@ function durableRunTransitionSideEffects(
     ]);
 }
 
+function durableRunEventSideEffects(
+    factory: JobWorkerSideEffectFactory,
+    action: string,
+    run: JobRunRecord
+): JobMutationSideEffects {
+    return mergeSideEffects([
+        factory.forRunEvent({
+            action,
+            at: run.updatedAt,
+            outcome: "accepted",
+            targetId: run.id,
+        }),
+        ...(run.scheduledJobId === null
+            ? []
+            : [
+                  factory.forScheduleEvent({
+                      action,
+                      at: run.updatedAt,
+                      outcome: "accepted",
+                      targetId: run.scheduledJobId,
+                  }),
+              ]),
+    ]);
+}
+
 function scheduleInsert(
     registration: JobActionRegistration,
     at: Date
@@ -608,12 +633,11 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
                 : { message: parseJobActionOutputMessage(value as string) }),
             runId: run.id,
             sideEffectsForRun: (updatedRun) =>
-                options.sideEffects.forRunEvent({
-                    action: "jobs.run.event",
-                    at: updatedRun.updatedAt,
-                    outcome: "accepted",
-                    targetId: updatedRun.id,
-                }),
+                durableRunEventSideEffects(
+                    options.sideEffects,
+                    "jobs.run.event",
+                    updatedRun
+                ),
             workerId: options.workerInstanceId,
         });
         if (result.kind === "lost-claim") throw new JobClaimLostError();
@@ -913,12 +937,11 @@ export function createJobWorkerCoordinator(
                         outcome: "accepted",
                         targetId: options.workerInstanceId,
                     }),
-                    options.sideEffects.forRunEvent({
-                        action: "jobs.run.claim",
-                        at: run.updatedAt,
-                        outcome: "accepted",
-                        targetId: run.id,
-                    }),
+                    durableRunEventSideEffects(
+                        options.sideEffects,
+                        "jobs.run.claim",
+                        run
+                    ),
                 ]),
             workerId: options.workerInstanceId,
         });
@@ -994,6 +1017,18 @@ export function createJobWorkerCoordinator(
         );
         await options.repository.reconcileSchedules({
             at,
+            retiredRunCancellation: {
+                actor: { id: "system.jobs-worker", kind: "system" },
+                sideEffectsForRun: (run) =>
+                    durableRunTransitionSideEffects(
+                        options.sideEffects,
+                        "jobs.run.cancelled",
+                        run
+                    ),
+                terminalCode: "cancelled/schedule-retired",
+                terminalMessage:
+                    "Cancelled because the schedule was retired from the action registry",
+            },
             schedules,
             sideEffectsForSchedule: (schedule) =>
                 options.sideEffects.forSchedule({
@@ -1061,13 +1096,14 @@ export function createJobWorkerCoordinator(
         const drainingAt = new Date(nowMs());
         try {
             const result = await options.repository.beginWorkerDrain({
-                ...options.sideEffects.forQueue({
-                    action: "jobs.worker.drain",
-                    at: drainingAt,
-                    outcome: "accepted",
-                    targetId: options.workerInstanceId,
-                }),
                 at: drainingAt,
+                sideEffectsForWorker: (worker) =>
+                    options.sideEffects.forQueue({
+                        action: "jobs.worker.drain",
+                        at: worker.heartbeatAt,
+                        outcome: "accepted",
+                        targetId: worker.id,
+                    }),
                 workerId: options.workerInstanceId,
             });
             if (!workerReachedState(result, "draining")) {
@@ -1102,13 +1138,14 @@ export function createJobWorkerCoordinator(
         const stoppedAt = new Date(nowMs());
         try {
             const result = await options.repository.stopWorker({
-                ...options.sideEffects.forQueue({
-                    action: "jobs.worker.stop",
-                    at: stoppedAt,
-                    outcome: "succeeded",
-                    targetId: options.workerInstanceId,
-                }),
                 at: stoppedAt,
+                sideEffectsForWorker: (worker) =>
+                    options.sideEffects.forQueue({
+                        action: "jobs.worker.stop",
+                        at: worker.heartbeatAt,
+                        outcome: "succeeded",
+                        targetId: worker.id,
+                    }),
                 workerId: options.workerInstanceId,
             });
             if (!workerReachedState(result, "stopped")) {

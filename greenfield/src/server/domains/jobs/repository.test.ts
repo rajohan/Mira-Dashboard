@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { count, eq } from "drizzle-orm";
+import { asc, count, eq } from "drizzle-orm";
 
 import { jobWorkerSummaryMaximum } from "../../../contracts/jobModel.ts";
 import { jobRunEvents } from "../../database/schema/jobRunEvents.ts";
@@ -8,8 +8,10 @@ import { jobRuns } from "../../database/schema/jobRuns.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { resourceLeases } from "../../database/schema/resourceLeases.ts";
 import { scheduledJobs } from "../../database/schema/scheduledJobs.ts";
+import { workerInstances } from "../../database/schema/workerInstances.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
+import type { WorkerInstanceRecord } from "./records.ts";
 import {
     createJobRepository,
     type JobMutationSideEffects,
@@ -216,10 +218,10 @@ describe("durable jobs repository", () => {
             expect(active).toMatchObject({ kind: "active", run: { id: run.id } });
 
             const cancelled = await repository.cancelRun({
-                ...noSideEffects,
                 actor: { id: userId, kind: "user" },
                 at: new Date(3000),
                 id: run.id,
+                sideEffectsForRun: () => noSideEffects,
                 terminalCode: "job/cancelled",
                 terminalMessage: "Cancelled by the operator.",
             });
@@ -227,6 +229,46 @@ describe("durable jobs repository", () => {
                 kind: "cancelled",
                 run: { eventCount: 3, state: "cancelled" },
             });
+
+            const [updatedSchedule] = await repository.reconcileSchedules({
+                at: new Date(4000),
+                schedules: [schedule({ name: "Updated worker smoke" })],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            expect(updatedSchedule).toMatchObject({
+                name: "Updated worker smoke",
+                version: 3,
+            });
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(run),
+                    run,
+                })
+            ).toMatchObject({ kind: "replayed", run: { id: run.id } });
+
+            const staleRun = queuedRun(12, { scheduledJobVersion: 2 });
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(staleRun),
+                    run: staleRun,
+                })
+            ).toEqual({ kind: "action-unavailable" });
+            expect(repository.findRun(staleRun.id)).toBeUndefined();
+
+            const malformedCurrentRun = queuedRun(13, {
+                displayName: "Stale worker smoke",
+                scheduledJobVersion: 3,
+            });
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(malformedCurrentRun),
+                    run: malformedCurrentRun,
+                })
+            ).toEqual({ kind: "action-unavailable" });
+            expect(repository.findRun(malformedCurrentRun.id)).toBeUndefined();
         } finally {
             database.sqlite.close(true);
         }
@@ -291,6 +333,130 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("rolls back cancellation when durable-run side effects fail", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const run = queuedRun(4000);
+        let sideEffectRun: ReturnType<typeof repository.findRun>;
+
+        try {
+            await repository.reconcileSchedules({
+                at: new Date(1000),
+                schedules: [schedule()],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(run),
+                run,
+            });
+
+            const rejected = repository.cancelRun({
+                actor: { id: userId, kind: "user" },
+                at: new Date(2000),
+                id: run.id,
+                sideEffectsForRun: (cancelled) => {
+                    sideEffectRun = cancelled;
+                    throw new Error("reject cancellation side effects");
+                },
+                terminalCode: "job/cancelled",
+                terminalMessage: "Cancelled by the operator.",
+            });
+
+            expect(rejected).rejects.toThrow("reject cancellation side effects");
+            await rejected.catch(() => {});
+            expect(sideEffectRun).toMatchObject({
+                eventCount: 3,
+                finishedAt: new Date(5000),
+                state: "cancelled",
+                updatedAt: new Date(5000),
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                eventCount: 1,
+                finishedAt: null,
+                state: "queued",
+                updatedAt: new Date(5000),
+            });
+            expect(
+                repository
+                    .listRunEvents({ limit: 10, runId: run.id })
+                    .map(({ kind }) => kind)
+            ).toEqual(["queued"]);
+            let successfulSideEffectCount = 0;
+            expect(
+                await repository.cancelRun({
+                    actor: { id: userId, kind: "user" },
+                    at: new Date(2000),
+                    id: run.id,
+                    sideEffectsForRun: (cancelled) => {
+                        successfulSideEffectCount += 1;
+                        expect(cancelled).toMatchObject({
+                            state: "cancelled",
+                            updatedAt: new Date(5000),
+                        });
+                        return noSideEffects;
+                    },
+                    terminalCode: "job/cancelled",
+                    terminalMessage: "Cancelled by the operator.",
+                })
+            ).toMatchObject({ kind: "cancelled" });
+            expect(
+                await repository.cancelRun({
+                    actor: { id: userId, kind: "user" },
+                    at: new Date(6000),
+                    id: run.id,
+                    sideEffectsForRun: () => {
+                        throw new Error("terminal cancellation emitted side effects");
+                    },
+                    terminalCode: "job/cancelled",
+                    terminalMessage: "Cancelled by the operator.",
+                })
+            ).toMatchObject({ kind: "terminal" });
+
+            const [neverCancellableSchedule] = await repository.reconcileSchedules({
+                at: new Date(6000),
+                schedules: [
+                    schedule({
+                        cancellationPolicy: "never",
+                        updatedAt: new Date(6000),
+                    }),
+                ],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            if (neverCancellableSchedule === undefined) {
+                throw new Error("Missing never-cancellable schedule fixture");
+            }
+            const unsupportedRun = queuedRun(4001, {
+                cancellationPolicy: "never",
+                scheduledJobVersion: neverCancellableSchedule.version,
+            });
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(unsupportedRun),
+                run: unsupportedRun,
+            });
+            expect(
+                await repository.cancelRun({
+                    actor: { id: userId, kind: "user" },
+                    at: new Date(6000),
+                    id: unsupportedRun.id,
+                    sideEffectsForRun: () => {
+                        throw new Error("unsupported cancellation emitted side effects");
+                    },
+                    terminalCode: "job/cancelled",
+                    terminalMessage: "Cancelled by the operator.",
+                })
+            ).toMatchObject({ kind: "unsupported" });
+            expect(successfulSideEffectCount).toBe(1);
+            expect(database.orm.select().from(realtimeEvents).all()).toEqual([]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("retires schedules removed from the code-owned action registry", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -342,12 +508,79 @@ describe("durable jobs repository", () => {
                 updatedAt: new Date(10_000),
                 version: 1,
             });
+            const queuedScheduleRun = queuedRun(42, {
+                availableAt: new Date(100_000),
+                queuedAt: new Date(100_000),
+                requestedById: "job-scheduler",
+                requestedByKind: "system",
+                scheduledForAt: new Date(70_000),
+                triggerType: "schedule",
+                updatedAt: new Date(100_000),
+            });
+            expect(
+                await repository.enqueueNextDueSchedule({
+                    ...noSideEffects,
+                    at: new Date(100_000),
+                    nextRunAt: new Date(130_000),
+                    observedNextRunAt: new Date(70_000),
+                    run: queuedScheduleRun,
+                    scheduleId: "system.worker-smoke",
+                })
+            ).toMatchObject({ kind: "inserted" });
+            let rolledBackCancellation: ReturnType<typeof repository.findRun>;
+            const rejectedQueuedRetirement = repository.reconcileSchedules({
+                at: new Date(9000),
+                retiredRunCancellation: {
+                    actor: { id: "job-scheduler", kind: "system" },
+                    sideEffectsForRun: (cancelled) => {
+                        rolledBackCancellation = cancelled;
+                        throw new Error("reject retirement cancellation side effects");
+                    },
+                    terminalCode: "cancelled/schedule-retired",
+                    terminalMessage: "Cancelled because the schedule was retired",
+                },
+                schedules: [replacement],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            expect(rejectedQueuedRetirement).rejects.toThrow(
+                "reject retirement cancellation side effects"
+            );
+            await rejectedQueuedRetirement.catch(() => {});
+            expect(rolledBackCancellation).toMatchObject({
+                eventCount: 3,
+                state: "cancelled",
+                updatedAt: new Date(100_000),
+            });
+            expect(repository.findRun(queuedScheduleRun.id)).toMatchObject({
+                eventCount: 1,
+                state: "queued",
+                updatedAt: new Date(100_000),
+            });
+            expect(repository.findSchedule(replacement.id)).toBeUndefined();
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule
+            ).toMatchObject({
+                enabled: true,
+                nextRunAt: new Date(130_000),
+                updatedAt: new Date(10_000),
+                version: 1,
+            });
             const reconciledRows: Array<{
                 readonly id: string;
                 readonly updatedAt: Date;
             }> = [];
+            let cancellationSideEffectAt: Date | undefined;
             const [registered] = await repository.reconcileSchedules({
                 at: new Date(9000),
+                retiredRunCancellation: {
+                    actor: { id: "job-scheduler", kind: "system" },
+                    sideEffectsForRun: (cancelled) => {
+                        cancellationSideEffectAt = cancelled.updatedAt;
+                        return noSideEffects;
+                    },
+                    terminalCode: "cancelled/schedule-retired",
+                    terminalMessage: "Cancelled because the schedule was retired",
+                },
                 schedules: [replacement],
                 sideEffectsForSchedule: (changedSchedule) => {
                     reconciledRows.push({
@@ -375,6 +608,12 @@ describe("durable jobs repository", () => {
                 { id: "system.worker-smoke-v2", updatedAt: new Date(2000) },
                 { id: "system.worker-smoke", updatedAt: new Date(10_000) },
             ]);
+            expect(cancellationSideEffectAt).toEqual(new Date(100_000));
+            expect(repository.findRun(queuedScheduleRun.id)).toMatchObject({
+                state: "cancelled",
+                terminalCode: "cancelled/schedule-retired",
+                updatedAt: new Date(100_000),
+            });
             expect(
                 repository.listDueSchedules({ at: new Date(70_000) }).map(({ id }) => id)
             ).toEqual(["system.worker-smoke-v2"]);
@@ -561,48 +800,178 @@ describe("durable jobs repository", () => {
                 repository.findSchedule("system.worker-smoke")?.schedule.nextRunAt
             ).toEqual(new Date(121_000));
 
-            const disabled = await repository.updateSchedule({
+            const disableAt = new Date(50_000);
+            const disableIntent = {
+                createdAt: disableAt,
+                createdById: userId,
+                createdByKind: "user" as const,
+                endedAt: null,
+                endedById: null,
+                endedByKind: null,
+                endedReason: null,
+                expiresAt: null,
+                externalJobId: null,
+                externalProvider: null,
+                id: uuid(22),
+                reason: "Operator disabled the recurring smoke check",
+                scheduledJobId: "system.worker-smoke",
+                targetKind: "dashboard-schedule" as const,
+            };
+            let rolledBackCancellation: ReturnType<typeof repository.findRun>;
+            const rejectedDisable = repository.updateSchedule({
                 ...noSideEffects,
-                at: new Date(210_000),
+                at: disableAt,
                 expectedActiveDisableIntentId: null,
                 expectedVersion: 1,
                 id: "system.worker-smoke",
-                insertDisableIntent: {
-                    createdAt: new Date(210_000),
-                    createdById: userId,
-                    createdByKind: "user",
-                    endedAt: null,
-                    endedById: null,
-                    endedByKind: null,
-                    endedReason: null,
-                    expiresAt: null,
-                    externalJobId: null,
-                    externalProvider: null,
-                    id: uuid(22),
-                    reason: "Operator disabled the recurring smoke check",
-                    scheduledJobId: "system.worker-smoke",
-                    targetKind: "dashboard-schedule",
-                },
+                insertDisableIntent: disableIntent,
                 patch: { enabled: false },
                 queuedCancellation: {
-                    at: new Date(210_000),
+                    at: disableAt,
                     terminalCode: "schedule/disabled",
                     terminalMessage: "The schedule was disabled before execution.",
                 },
-                queuedCancellationSideEffects: () => noSideEffects,
+                queuedCancellationSideEffects: (cancelled) => {
+                    rolledBackCancellation = cancelled;
+                    throw new Error("reject schedule cancellation side effects");
+                },
+            });
+            expect(rejectedDisable).rejects.toThrow(
+                "reject schedule cancellation side effects"
+            );
+            await rejectedDisable.catch(() => {});
+            expect(rolledBackCancellation).toMatchObject({
+                eventCount: 3,
+                state: "cancelled",
+                updatedAt: new Date(100_000),
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                eventCount: 1,
+                state: "queued",
+                updatedAt: new Date(100_000),
+            });
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule
+            ).toMatchObject({ enabled: true, updatedAt: new Date(1000), version: 1 });
+            expect(
+                repository.findActiveDisableIntent("system.worker-smoke")
+            ).toBeUndefined();
+
+            let cancellationSideEffectAt: Date | undefined;
+            const disabled = await repository.updateSchedule({
+                ...noSideEffects,
+                at: disableAt,
+                expectedActiveDisableIntentId: null,
+                expectedVersion: 1,
+                id: "system.worker-smoke",
+                insertDisableIntent: disableIntent,
+                patch: { enabled: false },
+                queuedCancellation: {
+                    at: disableAt,
+                    terminalCode: "schedule/disabled",
+                    terminalMessage: "The schedule was disabled before execution.",
+                },
+                queuedCancellationSideEffects: (cancelled) => {
+                    cancellationSideEffectAt = cancelled.updatedAt;
+                    return noSideEffects;
+                },
             });
             expect(disabled).toMatchObject({
                 kind: "updated",
                 schedule: {
                     enabled: false,
                     nextRunAt: new Date(121_000),
+                    updatedAt: disableAt,
                     version: 2,
                 },
             });
+            expect(cancellationSideEffectAt).toEqual(new Date(100_000));
             expect(repository.findRun(run.id)).toMatchObject({
                 eventCount: 3,
                 state: "cancelled",
                 terminalCode: "schedule/disabled",
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("rejects a stale due execution snapshot before enqueueing", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        try {
+            await repository.reconcileSchedules({
+                at: new Date(1000),
+                schedules: [schedule()],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            const staleRun = queuedRun(23, {
+                availableAt: new Date(100_000),
+                queuedAt: new Date(100_000),
+                requestedById: "job-scheduler",
+                requestedByKind: "system",
+                scheduledForAt: new Date(61_000),
+                triggerType: "schedule",
+                updatedAt: new Date(100_000),
+            });
+            const [updatedSchedule] = await repository.reconcileSchedules({
+                at: new Date(2000),
+                schedules: [
+                    schedule({
+                        actionKey: "system.worker-smoke-v2",
+                        name: "Updated worker smoke",
+                        updatedAt: new Date(2000),
+                    }),
+                ],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            expect(updatedSchedule).toMatchObject({
+                actionKey: "system.worker-smoke-v2",
+                nextRunAt: new Date(61_000),
+                version: 2,
+            });
+
+            expect(
+                await repository.enqueueNextDueSchedule({
+                    ...noSideEffects,
+                    at: new Date(100_000),
+                    nextRunAt: new Date(121_000),
+                    observedNextRunAt: new Date(61_000),
+                    run: staleRun,
+                    scheduleId: "system.worker-smoke",
+                })
+            ).toMatchObject({ kind: "state-changed", schedule: { version: 2 } });
+            expect(repository.findRun(staleRun.id)).toBeUndefined();
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule.nextRunAt
+            ).toEqual(new Date(61_000));
+
+            const currentRun = {
+                ...staleRun,
+                actionKey: "system.worker-smoke-v2",
+                displayName: "Updated worker smoke",
+                id: uuid(24),
+                idempotencyKey: idempotencyKey(24),
+                scheduledJobVersion: 2,
+            };
+            const currentInput = {
+                ...noSideEffects,
+                at: new Date(100_000),
+                nextRunAt: new Date(121_000),
+                observedNextRunAt: new Date(61_000),
+                run: currentRun,
+                scheduleId: "system.worker-smoke",
+            };
+            expect(await repository.enqueueNextDueSchedule(currentInput)).toMatchObject({
+                kind: "inserted",
+                run: { id: currentRun.id },
+            });
+            expect(await repository.enqueueNextDueSchedule(currentInput)).toMatchObject({
+                kind: "inserted",
+                run: { id: currentRun.id },
             });
         } finally {
             database.sqlite.close(true);
@@ -810,6 +1179,132 @@ describe("durable jobs repository", () => {
                 cancelRequestedAt: null,
                 eventCount: 1,
                 state: "queued",
+            });
+            const rejectedRetirement = repository.reconcileSchedules({
+                at: new Date(120_000),
+                retiredRunCancellation: {
+                    actor: { id: "job-scheduler", kind: "system" },
+                    sideEffectsForRun: () => noSideEffects,
+                    terminalCode: "cancelled/schedule-retired",
+                    terminalMessage: "Cancelled because the schedule was retired",
+                },
+                schedules: [],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            expect(rejectedRetirement).rejects.toThrow(
+                "Removed schedule has a queued run that forbids cancellation"
+            );
+            await rejectedRetirement.catch(() => {});
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule
+            ).toMatchObject({
+                enabled: true,
+                version: 1,
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                cancelRequestedAt: null,
+                eventCount: 1,
+                state: "queued",
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("retires schedules without cancelling running or manual work", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const runningScheduleId = "system.worker-smoke-running";
+        const manualScheduleId = "system.worker-smoke-manual";
+        const runningRun = queuedRun(75, {
+            availableAt: new Date(100_000),
+            queuedAt: new Date(100_000),
+            requestedById: "job-scheduler",
+            requestedByKind: "system",
+            scheduledForAt: new Date(61_000),
+            scheduledJobId: runningScheduleId,
+            triggerType: "schedule",
+            updatedAt: new Date(100_000),
+        });
+        const manualRun = queuedRun(76, { scheduledJobId: manualScheduleId });
+        const leaseToken = uuid(176);
+
+        try {
+            await repository.reconcileSchedules({
+                at: new Date(1000),
+                schedules: [
+                    schedule({ id: runningScheduleId }),
+                    schedule({ id: manualScheduleId }),
+                ],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            await repository.enqueueNextDueSchedule({
+                ...noSideEffects,
+                at: new Date(100_000),
+                nextRunAt: new Date(121_000),
+                observedNextRunAt: new Date(61_000),
+                run: runningRun,
+                scheduleId: runningScheduleId,
+            });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(101_000),
+                    leaseExpiresAt: new Date(130_000),
+                    leaseToken,
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: runningRun.id } });
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(manualRun),
+                    run: manualRun,
+                })
+            ).toMatchObject({ kind: "inserted" });
+
+            await repository.reconcileSchedules({
+                at: new Date(50_000),
+                retiredRunCancellation: {
+                    actor: { id: "job-scheduler", kind: "system" },
+                    sideEffectsForRun: () => {
+                        throw new Error("retirement touched preserved work");
+                    },
+                    terminalCode: "cancelled/schedule-retired",
+                    terminalMessage: "Cancelled because the schedule was retired",
+                },
+                schedules: [],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+
+            expect(repository.findRun(runningRun.id)).toMatchObject({
+                cancelRequestedAt: null,
+                leaseToken,
+                state: "running",
+                updatedAt: new Date(101_000),
+            });
+            expect(repository.findRun(manualRun.id)).toMatchObject({
+                cancelRequestedAt: null,
+                eventCount: 1,
+                state: "queued",
+            });
+            expect(repository.findSchedule(runningScheduleId)?.schedule).toMatchObject({
+                enabled: false,
+                updatedAt: new Date(50_000),
+                version: 2,
+            });
+            expect(repository.findSchedule(manualScheduleId)?.schedule).toMatchObject({
+                enabled: false,
+                updatedAt: new Date(50_000),
+                version: 2,
             });
         } finally {
             database.sqlite.close(true);
@@ -1096,12 +1591,38 @@ describe("durable jobs repository", () => {
                     workerId: workerOneId,
                 })
             ).toMatchObject({ kind: "claimed", run: { id: run.id } });
+            let rejectedCancelRun: ReturnType<typeof repository.findRun>;
+            const rejectedCancel = repository.cancelRun({
+                actor: { id: userId, kind: "user" },
+                at: new Date(20_000),
+                id: run.id,
+                sideEffectsForRun: (requested) => {
+                    rejectedCancelRun = requested;
+                    throw new Error("reject cancel-request side effects");
+                },
+                terminalCode: "cancelled/operator-request",
+                terminalMessage: "Cancelled by the operator.",
+            });
+            expect(rejectedCancel).rejects.toThrow("reject cancel-request side effects");
+            await rejectedCancel.catch(() => {});
+            expect(rejectedCancelRun).toMatchObject({
+                cancelRequestedAt: new Date(20_000),
+                eventCount: 3,
+                state: "running",
+                updatedAt: new Date(20_000),
+            });
+            expect(repository.findRun(run.id)).toMatchObject({
+                cancelRequestedAt: null,
+                eventCount: 2,
+                state: "running",
+                updatedAt: new Date(3000),
+            });
             expect(
                 await repository.cancelRun({
-                    ...noSideEffects,
                     actor: { id: userId, kind: "user" },
                     at: new Date(20_000),
                     id: run.id,
+                    sideEffectsForRun: () => noSideEffects,
                     terminalCode: "cancelled/operator-request",
                     terminalMessage: "Cancelled by the operator.",
                 })
@@ -1674,6 +2195,259 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("derives worker lifecycle side effects from clock-clamped durable state", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const drainAt = new Date(10_000);
+        const stopAt = new Date(15_000);
+        const callbackWorkers: Array<{
+            readonly heartbeatAt: Date;
+            readonly state: "draining" | "stopped";
+        }> = [];
+        try {
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            await repository.heartbeatWorker({ at: drainAt, workerId: workerOneId });
+
+            expect(
+                await repository.beginWorkerDrain({
+                    at: new Date(7000),
+                    sideEffectsForWorker: (durableWorker) => {
+                        callbackWorkers.push({
+                            heartbeatAt: durableWorker.heartbeatAt,
+                            state: "draining",
+                        });
+                        expect(durableWorker).toMatchObject({
+                            drainingAt: drainAt,
+                            heartbeatAt: drainAt,
+                            state: "draining",
+                        });
+                        return createJobRealtimeSideEffects({
+                            occurredAt: durableWorker.heartbeatAt,
+                            realtime: { id: durableWorker.id, kind: "queue" },
+                        });
+                    },
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({
+                kind: "updated",
+                worker: {
+                    drainingAt: drainAt,
+                    heartbeatAt: drainAt,
+                    state: "draining",
+                },
+            });
+            await repository.heartbeatWorker({ at: stopAt, workerId: workerOneId });
+            expect(
+                await repository.stopWorker({
+                    at: new Date(8000),
+                    sideEffectsForWorker: (durableWorker) => {
+                        callbackWorkers.push({
+                            heartbeatAt: durableWorker.heartbeatAt,
+                            state: "stopped",
+                        });
+                        expect(durableWorker).toMatchObject({
+                            drainingAt: drainAt,
+                            heartbeatAt: stopAt,
+                            state: "stopped",
+                            stoppedAt: stopAt,
+                        });
+                        return createJobRealtimeSideEffects({
+                            occurredAt: durableWorker.heartbeatAt,
+                            realtime: { id: durableWorker.id, kind: "queue" },
+                        });
+                    },
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({
+                kind: "updated",
+                worker: {
+                    drainingAt: drainAt,
+                    heartbeatAt: stopAt,
+                    state: "stopped",
+                    stoppedAt: stopAt,
+                },
+            });
+
+            expect(callbackWorkers).toEqual([
+                { heartbeatAt: drainAt, state: "draining" },
+                { heartbeatAt: stopAt, state: "stopped" },
+            ]);
+            expect(
+                database.orm
+                    .select({ occurredAt: realtimeEvents.occurredAt })
+                    .from(realtimeEvents)
+                    .where(eq(realtimeEvents.entityId, workerOneId))
+                    .orderBy(asc(realtimeEvents.occurredAt))
+                    .all()
+                    .map(({ occurredAt }) => occurredAt)
+            ).toEqual([drainAt, stopAt]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("rolls worker lifecycle mutations back when their callback fails", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const readWorker = () =>
+            database.orm
+                .select()
+                .from(workerInstances)
+                .where(eq(workerInstances.id, workerOneId))
+                .get();
+        try {
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            let drainCallbackCalls = 0;
+            const rejectedDrain = repository.beginWorkerDrain({
+                at: new Date(5000),
+                sideEffectsForWorker: (durableWorker) => {
+                    drainCallbackCalls += 1;
+                    expect(durableWorker).toMatchObject({
+                        drainingAt: new Date(5000),
+                        heartbeatAt: new Date(5000),
+                        state: "draining",
+                    });
+                    throw new Error("reject drain side effects");
+                },
+                workerId: workerOneId,
+            });
+            expect(rejectedDrain).rejects.toThrow("reject drain side effects");
+            await rejectedDrain.catch(() => {});
+            expect(drainCallbackCalls).toBe(1);
+            expect(readWorker()).toMatchObject({
+                drainingAt: null,
+                heartbeatAt: new Date(2000),
+                state: "online",
+                stoppedAt: null,
+            });
+
+            await repository.beginWorkerDrain({
+                at: new Date(5000),
+                sideEffectsForWorker: () => noSideEffects,
+                workerId: workerOneId,
+            });
+            let stopCallbackCalls = 0;
+            const rejectedStop = repository.stopWorker({
+                at: new Date(7000),
+                sideEffectsForWorker: (durableWorker) => {
+                    stopCallbackCalls += 1;
+                    expect(durableWorker).toMatchObject({
+                        heartbeatAt: new Date(7000),
+                        state: "stopped",
+                        stoppedAt: new Date(7000),
+                    });
+                    throw new Error("reject stop side effects");
+                },
+                workerId: workerOneId,
+            });
+            expect(rejectedStop).rejects.toThrow("reject stop side effects");
+            await rejectedStop.catch(() => {});
+            expect(stopCallbackCalls).toBe(1);
+            expect(readWorker()).toMatchObject({
+                drainingAt: new Date(5000),
+                heartbeatAt: new Date(5000),
+                state: "draining",
+                stoppedAt: null,
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("does not invoke worker lifecycle callbacks without a state mutation", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const callbackStates: Array<"draining" | "stopped"> = [];
+        const callback = (durableWorker: WorkerInstanceRecord) => {
+            if (durableWorker.state === "online") {
+                throw new Error("Lifecycle callback received an unmodified worker");
+            }
+            callbackStates.push(durableWorker.state);
+            return noSideEffects;
+        };
+        try {
+            expect(
+                await repository.beginWorkerDrain({
+                    at: new Date(3000),
+                    sideEffectsForWorker: callback,
+                    workerId: workerOneId,
+                })
+            ).toEqual({ kind: "not-found" });
+            expect(
+                await repository.stopWorker({
+                    at: new Date(3000),
+                    sideEffectsForWorker: callback,
+                    workerId: workerOneId,
+                })
+            ).toEqual({ kind: "not-found" });
+            expect(callbackStates).toEqual([]);
+
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            expect(
+                await repository.stopWorker({
+                    at: new Date(3000),
+                    sideEffectsForWorker: callback,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "state-changed", worker: { state: "online" } });
+            expect(callbackStates).toEqual([]);
+
+            expect(
+                await repository.beginWorkerDrain({
+                    at: new Date(3000),
+                    sideEffectsForWorker: callback,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "updated", worker: { state: "draining" } });
+            expect(callbackStates).toEqual(["draining"]);
+            expect(
+                await repository.beginWorkerDrain({
+                    at: new Date(4000),
+                    sideEffectsForWorker: callback,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "state-changed", worker: { state: "draining" } });
+            expect(callbackStates).toEqual(["draining"]);
+
+            expect(
+                await repository.stopWorker({
+                    at: new Date(5000),
+                    sideEffectsForWorker: callback,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "updated", worker: { state: "stopped" } });
+            expect(callbackStates).toEqual(["draining", "stopped"]);
+            expect(
+                await repository.stopWorker({
+                    at: new Date(6000),
+                    sideEffectsForWorker: callback,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "state-changed", worker: { state: "stopped" } });
+            expect(callbackStates).toEqual(["draining", "stopped"]);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("persists claim pause, recovers expired retry-safe work, and drains the worker", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -1777,10 +2551,10 @@ describe("durable jobs repository", () => {
                 workers: [{ activeRunCount: 0, worker: { id: workerOneId } }],
             });
             await repository.cancelRun({
-                ...noSideEffects,
                 actor: { id: userId, kind: "user" },
                 at: new Date(7100),
                 id: run.id,
+                sideEffectsForRun: () => noSideEffects,
                 terminalCode: "job/cancelled",
                 terminalMessage: "Cancelled before the regression fixture.",
             });
@@ -1805,10 +2579,10 @@ describe("durable jobs repository", () => {
                 workerId: workerOneId,
             });
             await repository.cancelRun({
-                ...noSideEffects,
                 actor: { id: userId, kind: "user" },
                 at: new Date(20_000),
                 id: regressedRun.id,
+                sideEffectsForRun: () => noSideEffects,
                 terminalCode: "job/cancel-requested",
                 terminalMessage: "Cancel the clock-regression fixture.",
             });
@@ -1826,15 +2600,15 @@ describe("durable jobs repository", () => {
             expect(recoverySideEffectAt).toEqual(new Date(20_000));
             expect(
                 await repository.beginWorkerDrain({
-                    ...noSideEffects,
                     at: new Date(7000),
+                    sideEffectsForWorker: () => noSideEffects,
                     workerId: workerOneId,
                 })
             ).toMatchObject({ kind: "updated", worker: { state: "draining" } });
             expect(
                 await repository.stopWorker({
-                    ...noSideEffects,
                     at: new Date(8000),
+                    sideEffectsForWorker: () => noSideEffects,
                     workerId: workerOneId,
                 })
             ).toMatchObject({ kind: "updated", worker: { state: "stopped" } });

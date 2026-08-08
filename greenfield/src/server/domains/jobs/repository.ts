@@ -162,6 +162,12 @@ export interface ListJobRunsWithQueueStateInput extends ListJobRunsInput {
 
 export interface ReconcileSchedulesInput {
     readonly at: Date;
+    readonly retiredRunCancellation?: {
+        readonly actor: JobActor;
+        readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
+        readonly terminalCode: string;
+        readonly terminalMessage: string;
+    };
     readonly schedules: readonly ScheduledJobInsert[];
     readonly sideEffectsForSchedule: (
         schedule: ScheduledJobRecord
@@ -175,6 +181,7 @@ export interface EnqueueManualRunInput extends JobMutationSideEffects {
 
 export type EnqueueManualRunResult =
     | { readonly kind: "active"; readonly run: JobRunRecord }
+    | { readonly kind: "action-unavailable" }
     | { readonly kind: "idempotency-mismatch"; readonly run: JobRunRecord }
     | { readonly kind: "inserted"; readonly run: JobRunRecord }
     | { readonly kind: "replayed"; readonly run: JobRunRecord };
@@ -236,10 +243,11 @@ export interface JobOperatorActor {
     readonly kind: "automation" | "user";
 }
 
-export interface CancelRunRepositoryInput extends JobMutationSideEffects {
+export interface CancelRunRepositoryInput {
     readonly actor: JobActor;
     readonly at: Date;
     readonly id: string;
+    readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
     readonly terminalCode: string;
     readonly terminalMessage: string;
 }
@@ -271,8 +279,11 @@ export interface WorkerLifecycleInput {
     readonly workerId: string;
 }
 
-export interface WorkerLifecycleMutationInput
-    extends WorkerLifecycleInput, JobMutationSideEffects {}
+export interface WorkerLifecycleMutationInput extends WorkerLifecycleInput {
+    readonly sideEffectsForWorker: (
+        worker: WorkerInstanceRecord
+    ) => JobMutationSideEffects;
+}
 
 export type WorkerLifecycleResult =
     | { readonly kind: "active-runs"; readonly worker: WorkerInstanceRecord }
@@ -502,6 +513,26 @@ function parseEvent(row: unknown): JobRunEventRecord {
 
 function parseSchedule(row: unknown): ScheduledJobRecord {
     return v.parse(scheduledJobSelectSchema, row);
+}
+
+function runMatchesScheduleExecutionSnapshot(
+    run: JobRunInsert,
+    schedule: ScheduledJobRecord
+): boolean {
+    return (
+        run.scheduledJobId === schedule.id &&
+        run.scheduledJobVersion === schedule.version &&
+        run.actionKey === schedule.actionKey &&
+        run.payloadJson === schedule.actionPayloadJson &&
+        run.displayName === schedule.name &&
+        run.resourceClass === schedule.resourceClass &&
+        run.resourceKeysJson === schedule.resourceKeysJson &&
+        run.priority === schedule.priority &&
+        run.timeoutMs === schedule.timeoutMs &&
+        run.attemptLimit === schedule.attemptLimit &&
+        run.retrySafe === schedule.retrySafe &&
+        run.cancellationPolicy === schedule.cancellationPolicy
+    );
 }
 
 function parseDisableIntent(row: unknown): JobDisableIntentRecord {
@@ -1063,6 +1094,18 @@ class DrizzleJobWriter extends DrizzleJobReader {
             .map((row) => parseSchedule(row))
             .filter((schedule) => !registeredScheduleIds.has(schedule.id));
         for (const schedule of retiredSchedules) {
+            const queuedScheduleRun = this.#findQueuedScheduleRun(schedule.id);
+            if (queuedScheduleRun?.cancellationPolicy === "never") {
+                throw new Error(
+                    "Removed schedule has a queued run that forbids cancellation"
+                );
+            }
+            const retiredRunCancellation = input.retiredRunCancellation;
+            if (queuedScheduleRun !== undefined && retiredRunCancellation === undefined) {
+                throw new Error(
+                    "Removed schedule retirement requires queued-run cancellation metadata"
+                );
+            }
             const retired = this.#transaction
                 .update(scheduledJobs)
                 .set({
@@ -1082,6 +1125,20 @@ class DrizzleJobWriter extends DrizzleJobReader {
             const retiredSchedule = parseSchedule(
                 requiredRow(retired, "removed schedule retirement")
             );
+            if (queuedScheduleRun !== undefined && retiredRunCancellation !== undefined) {
+                const cancelled = this.#cancelQueuedRun(
+                    queuedScheduleRun,
+                    retiredRunCancellation.actor,
+                    {
+                        at: retiredSchedule.updatedAt,
+                        terminalCode: retiredRunCancellation.terminalCode,
+                        terminalMessage: retiredRunCancellation.terminalMessage,
+                    }
+                );
+                this.#insertSideEffects(
+                    retiredRunCancellation.sideEffectsForRun(cancelled)
+                );
+            }
             this.#insertSideEffects(input.sideEffectsForSchedule(retiredSchedule));
         }
         return records;
@@ -1103,6 +1160,13 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 : { kind: "idempotency-mismatch", run: existing };
         }
         if (run.scheduledJobId !== null) {
+            const schedule = this.#findScheduleRecord(run.scheduledJobId);
+            if (
+                schedule === undefined ||
+                !runMatchesScheduleExecutionSnapshot(run, schedule)
+            ) {
+                return { kind: "action-unavailable" };
+            }
             const active = this.findActiveRunForSchedule(run.scheduledJobId);
             if (active !== undefined) return { kind: "active", run: active };
         }
@@ -1128,22 +1192,10 @@ class DrizzleJobWriter extends DrizzleJobReader {
         if ((activeIntent?.id ?? null) !== input.expectedActiveDisableIntentId) {
             return { kind: "version-changed", schedule: current };
         }
-        const queuedScheduleRun =
-            input.patch.enabled === false
-                ? this.#transaction
-                      .select()
-                      .from(jobRuns)
-                      .where(
-                          and(
-                              eq(jobRuns.scheduledJobId, input.id),
-                              eq(jobRuns.triggerType, "schedule"),
-                              eq(jobRuns.state, "queued")
-                          )
-                      )
-                      .get()
-                : undefined;
         const queuedScheduleRunRecord =
-            queuedScheduleRun === undefined ? undefined : parseRun(queuedScheduleRun);
+            input.patch.enabled === false
+                ? this.#findQueuedScheduleRun(input.id)
+                : undefined;
         if (queuedScheduleRunRecord?.cancellationPolicy === "never") {
             return {
                 kind: "cancellation-not-supported",
@@ -1255,6 +1307,9 @@ class DrizzleJobWriter extends DrizzleJobReader {
         }
         const schedule = this.#findScheduleRecord(input.scheduleId);
         if (schedule === undefined) return { kind: "not-found" };
+        if (!runMatchesScheduleExecutionSnapshot(validatedRun, schedule)) {
+            return { kind: "state-changed", schedule };
+        }
         if (
             !schedule.enabled ||
             schedule.nextRunAt === null ||
@@ -1324,7 +1379,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
         }
         if (run.state === "queued") {
             const cancelled = this.#cancelQueuedRun(run, input.actor, input);
-            this.#insertSideEffects(input);
+            this.#insertSideEffects(input.sideEffectsForRun(cancelled));
             return { kind: "cancelled", run: cancelled };
         }
         const at = maximumDate(run.updatedAt, input.at);
@@ -1359,10 +1414,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
             occurredAt: at,
             workerInstanceId: run.leaseOwnerId,
         });
-        this.#insertSideEffects(input);
+        const requested = requiredRow(this.findRun(run.id), "cancel request refresh");
+        this.#insertSideEffects(input.sideEffectsForRun(requested));
         return {
             kind: "requested",
-            run: requiredRow(this.findRun(run.id), "cancel request refresh"),
+            run: requested,
         };
     }
 
@@ -1478,7 +1534,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
             };
         }
         const updated = parseWorker(row);
-        this.#insertSideEffects(input);
+        this.#insertSideEffects(input.sideEffectsForWorker(updated));
         return { kind: "updated", worker: updated };
     }
 
@@ -1518,7 +1574,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
             };
         }
         const updated = parseWorker(row);
-        this.#insertSideEffects(input);
+        this.#insertSideEffects(input.sideEffectsForWorker(updated));
         return { kind: "updated", worker: updated };
     }
 
@@ -2194,6 +2250,21 @@ class DrizzleJobWriter extends DrizzleJobReader {
                     eq(jobRuns.requestedByKind, requestedByKind),
                     eq(jobRuns.requestedById, requestedById),
                     eq(jobRuns.idempotencyKey, idempotencyKey)
+                )
+            )
+            .get();
+        return row === undefined ? undefined : parseRun(row);
+    }
+
+    #findQueuedScheduleRun(scheduleId: string): JobRunRecord | undefined {
+        const row = this.#transaction
+            .select()
+            .from(jobRuns)
+            .where(
+                and(
+                    eq(jobRuns.scheduledJobId, scheduleId),
+                    eq(jobRuns.triggerType, "schedule"),
+                    eq(jobRuns.state, "queued")
                 )
             )
             .get();

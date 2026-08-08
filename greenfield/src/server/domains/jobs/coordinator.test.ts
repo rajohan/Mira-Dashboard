@@ -61,17 +61,21 @@ function deferred<T>() {
     };
 }
 
-function workerRecord(id: string, state: "draining" | "online" | "stopped") {
+function workerRecord(
+    id: string,
+    state: "draining" | "online" | "stopped",
+    heartbeatAt = at
+) {
     return {
         capacity: 1,
-        drainingAt: state === "online" ? null : at,
-        heartbeatAt: at,
+        drainingAt: state === "online" ? null : heartbeatAt,
+        heartbeatAt,
         id,
         pid: 100,
         releaseId,
         startedAt: at,
         state,
-        stoppedAt: state === "stopped" ? at : null,
+        stoppedAt: state === "stopped" ? heartbeatAt : null,
     } satisfies WorkerInstanceRecord;
 }
 
@@ -179,6 +183,7 @@ interface RepositoryFixtureOptions {
     readonly claimGate?: Promise<void>;
     readonly claims?: readonly JobClaimResult[];
     readonly dueSchedules?: readonly ScheduledJobRecord[];
+    readonly drainWorkerAt?: Date;
     readonly expiringSchedule?: ScheduledJobRecord;
     readonly expiryGate?: Promise<void>;
     readonly expiryFailure?: Error;
@@ -189,6 +194,7 @@ interface RepositoryFixtureOptions {
     readonly registrationFailure?: Error;
     readonly settlementAt?: Date;
     readonly settlementRun?: JobRunRecord;
+    readonly stopWorkerAt?: Date;
 }
 
 function repositoryFixture(options: RepositoryFixtureOptions = {}) {
@@ -196,9 +202,17 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const claimSideEffects: JobMutationSideEffects[] = [];
     const claimInputs: Array<Parameters<JobRepository["claimNextRun"]>[0]> = [];
     const enqueues: DueScheduleEnqueueInput[] = [];
+    const eventSideEffects: JobMutationSideEffects[] = [];
     const expiryEligibility: boolean[] = [];
     const expiryNextRuns: Date[] = [];
     const recoverySideEffects: JobMutationSideEffects[] = [];
+    const reconciliationInputs: Array<
+        Parameters<JobRepository["reconcileSchedules"]>[0]
+    > = [];
+    const lifecycleSideEffects: Array<{
+        readonly operation: "drain" | "stop";
+        readonly sideEffects: JobMutationSideEffects;
+    }> = [];
     const settlements: Array<Parameters<JobRepository["settleClaim"]>[0]> = [];
     const settlementSideEffects: JobMutationSideEffects[] = [];
     const claims = [
@@ -215,18 +229,29 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
                 eventRun !== undefined &&
                 (result.kind === "appended" || result.kind === "truncated")
             ) {
-                input.sideEffectsForRun({
-                    ...eventRun,
-                    updatedAt: result.event?.occurredAt ?? eventRun.updatedAt,
-                });
+                eventSideEffects.push(
+                    input.sideEffectsForRun({
+                        ...eventRun,
+                        updatedAt: result.event?.occurredAt ?? eventRun.updatedAt,
+                    })
+                );
             }
             return Promise.resolve(result);
         },
         beginWorkerDrain(input) {
             events.push("drain");
+            const worker = workerRecord(
+                input.workerId,
+                "draining",
+                options.drainWorkerAt
+            );
+            lifecycleSideEffects.push({
+                operation: "drain",
+                sideEffects: input.sideEffectsForWorker(worker),
+            });
             return Promise.resolve({
                 kind: "updated" as const,
-                worker: workerRecord(input.workerId, "draining"),
+                worker,
             });
         },
         async claimNextRun(input) {
@@ -282,6 +307,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         },
         reconcileSchedules(input) {
             events.push(`reconcile:${input.schedules.length}`);
+            reconciliationInputs.push(input);
             return options.reconciliationFailure === undefined
                 ? Promise.resolve([])
                 : Promise.reject(options.reconciliationFailure);
@@ -322,9 +348,14 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         },
         stopWorker(input) {
             events.push("stop");
+            const worker = workerRecord(input.workerId, "stopped", options.stopWorkerAt);
+            lifecycleSideEffects.push({
+                operation: "stop",
+                sideEffects: input.sideEffectsForWorker(worker),
+            });
             return Promise.resolve({
                 kind: "updated" as const,
-                worker: workerRecord(input.workerId, "stopped"),
+                worker,
             });
         },
     } satisfies JobWorkerCoordinatorOptions["repository"];
@@ -332,9 +363,12 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         claimInputs,
         claimSideEffects,
         enqueues,
+        eventSideEffects,
         events,
         expiryEligibility,
         expiryNextRuns,
+        lifecycleSideEffects,
+        reconciliationInputs,
         recoverySideEffects,
         repository,
         settlements,
@@ -397,6 +431,184 @@ describe("durable job worker coordinator", () => {
             fixture.events.indexOf("stop")
         );
         expect(await coordinator.completion).toBeUndefined();
+    });
+
+    test("derives drain and stop queue effects inside durable worker callbacks", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const drainWorkerAt = new Date(at.getTime() + 20_000);
+        const stopWorkerAt = new Date(at.getTime() + 30_000);
+        const fixture = repositoryFixture({ drainWorkerAt, stopWorkerAt });
+        const queueTransitions: JobWorkerSideEffectInput[] = [];
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            sideEffects: {
+                ...sideEffects,
+                forQueue: (input) => {
+                    queueTransitions.push(input);
+                    return createJobRealtimeSideEffects({
+                        occurredAt: input.at,
+                        realtime: { id: input.targetId, kind: "queue" },
+                    });
+                },
+            },
+        });
+
+        await coordinator.initialize();
+        await coordinator.dispose();
+
+        expect(queueTransitions).toEqual([
+            {
+                action: "jobs.worker.register",
+                at,
+                outcome: "accepted",
+                targetId: workerId,
+            },
+            {
+                action: "jobs.worker.drain",
+                at: drainWorkerAt,
+                outcome: "accepted",
+                targetId: workerId,
+            },
+            {
+                action: "jobs.worker.stop",
+                at: stopWorkerAt,
+                outcome: "succeeded",
+                targetId: workerId,
+            },
+        ]);
+        expect(
+            fixture.lifecycleSideEffects.map(({ operation, sideEffects }) => ({
+                operation,
+                realtime: sideEffects.realtimeEvents.map(
+                    ({ entityId, occurredAt, topic }) => ({
+                        entityId,
+                        occurredAt,
+                        topic,
+                    })
+                ),
+            }))
+        ).toEqual([
+            {
+                operation: "drain",
+                realtime: [
+                    {
+                        entityId: workerId,
+                        occurredAt: drainWorkerAt,
+                        topic: "jobs.runs",
+                    },
+                ],
+            },
+            {
+                operation: "stop",
+                realtime: [
+                    {
+                        entityId: workerId,
+                        occurredAt: stopWorkerAt,
+                        topic: "jobs.runs",
+                    },
+                ],
+            },
+        ]);
+    });
+
+    test("supplies durable cancelled-run effects for retired schedules", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const scheduleId = "system.worker-smoke";
+        const cancelledAt = new Date(at.getTime() + 20_000);
+        const cancelledRun: JobRunRecord = {
+            ...claimedRun(workerId),
+            cancelRequestedAt: cancelledAt,
+            cancelRequestedById: "system.jobs-worker",
+            cancelRequestedByKind: "system",
+            finishedAt: cancelledAt,
+            heartbeatAt: null,
+            leaseExpiresAt: null,
+            leaseOwnerId: null,
+            leaseToken: null,
+            scheduledForAt: at,
+            scheduledJobId: scheduleId,
+            scheduledJobVersion: 1,
+            state: "cancelled",
+            stateVersion: 3,
+            terminalCode: "cancelled/schedule-retired",
+            terminalMessage:
+                "Cancelled because the schedule was retired from the action registry",
+            triggerType: "schedule",
+            updatedAt: cancelledAt,
+        };
+        const fixture = repositoryFixture();
+        const runTransitions: JobWorkerSideEffectInput[] = [];
+        const scheduleTransitions: JobWorkerSideEffectInput[] = [];
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            sideEffects: {
+                ...sideEffects,
+                forRun: (input) => {
+                    runTransitions.push(input);
+                    return createJobRealtimeSideEffects({
+                        occurredAt: input.at,
+                        realtime: {
+                            id: input.targetId,
+                            kind: "run",
+                            operation: "updated",
+                        },
+                    });
+                },
+                forScheduleEvent: (input) => {
+                    scheduleTransitions.push(input);
+                    return createJobRealtimeSideEffects({
+                        occurredAt: input.at,
+                        realtime: {
+                            id: input.targetId,
+                            kind: "schedule",
+                            operation: "updated",
+                        },
+                    });
+                },
+            },
+        });
+
+        await coordinator.initialize();
+        const reconciliation = fixture.reconciliationInputs.at(0);
+        const retiredRunCancellation = reconciliation?.retiredRunCancellation;
+        if (retiredRunCancellation === undefined) {
+            throw new Error("Missing retired-run cancellation metadata");
+        }
+        const cancellationSideEffects =
+            retiredRunCancellation.sideEffectsForRun(cancelledRun);
+        await coordinator.dispose();
+
+        expect(retiredRunCancellation).toMatchObject({
+            actor: { id: "system.jobs-worker", kind: "system" },
+            terminalCode: "cancelled/schedule-retired",
+            terminalMessage:
+                "Cancelled because the schedule was retired from the action registry",
+        });
+        expect(runTransitions).toEqual([
+            {
+                action: "jobs.run.cancelled",
+                at: cancelledAt,
+                outcome: "cancelled",
+                targetId: cancelledRun.id,
+            },
+        ]);
+        expect(scheduleTransitions).toEqual([
+            {
+                action: "jobs.run.cancelled",
+                at: cancelledAt,
+                outcome: "cancelled",
+                targetId: scheduleId,
+            },
+        ]);
+        expect(
+            cancellationSideEffects.realtimeEvents.map(({ entityId, topic }) => ({
+                entityId,
+                topic,
+            }))
+        ).toEqual([
+            { entityId: cancelledRun.id, topic: "jobs.runs" },
+            { entityId: scheduleId, topic: "schedules.records" },
+        ]);
     });
 
     test("continues bounded claim pages and resets the cursor after a claim", async () => {
@@ -515,8 +727,9 @@ describe("durable job worker coordinator", () => {
         expect(fixture.settlements[0]?.outcome.kind).toBe("succeeded");
     });
 
-    test("timestamps claim and settlement side effects from durable state", async () => {
+    test("invalidates a claimed schedule projection at the durable claim time", async () => {
         const workerId = Bun.randomUUIDv7();
+        const scheduleId = "system.worker-smoke";
         const durableAt = new Date(at.getTime() + 20_000);
         const run: JobRunRecord = {
             ...claimedRun(workerId),
@@ -524,6 +737,10 @@ describe("durable job worker coordinator", () => {
             heartbeatAt: durableAt,
             lastAttemptStartedAt: durableAt,
             leaseExpiresAt: new Date(durableAt.getTime() + 30_000),
+            scheduledForAt: at,
+            scheduledJobId: scheduleId,
+            scheduledJobVersion: 1,
+            triggerType: "schedule",
             updatedAt: durableAt,
         };
         const fixture = repositoryFixture({
@@ -533,7 +750,7 @@ describe("durable job worker coordinator", () => {
         const observed: Array<{
             readonly action: string;
             readonly at: Date;
-            readonly target: "queue" | "run" | "run-event";
+            readonly target: "queue" | "run" | "run-event" | "schedule-event";
         }> = [];
         const recordingSideEffects: JobWorkerSideEffectFactory = {
             forQueue: (input) => {
@@ -565,7 +782,21 @@ describe("durable job worker coordinator", () => {
                 });
             },
             forSchedule: () => noSideEffects,
-            forScheduleEvent: () => noSideEffects,
+            forScheduleEvent: (input) => {
+                observed.push({
+                    action: input.action,
+                    at: input.at,
+                    target: "schedule-event",
+                });
+                return createJobRealtimeSideEffects({
+                    occurredAt: input.at,
+                    realtime: {
+                        id: input.targetId,
+                        kind: "schedule",
+                        operation: "updated",
+                    },
+                });
+            },
         };
         const coordinator = createJobWorkerCoordinator({
             ...coordinatorOptions(fixture.repository, workerId),
@@ -583,6 +814,11 @@ describe("durable job worker coordinator", () => {
         ).toEqual([
             { action: "jobs.run.claim", at: durableAt, target: "queue" },
             { action: "jobs.run.claim", at: durableAt, target: "run-event" },
+            {
+                action: "jobs.run.claim",
+                at: durableAt,
+                target: "schedule-event",
+            },
             { action: "jobs.run.succeeded", at: durableAt, target: "run" },
         ]);
         expect(fixture.claimSideEffects).toEqual([
@@ -601,9 +837,45 @@ describe("durable job worker coordinator", () => {
                         operation: "updated",
                         topic: "jobs.runs",
                     }),
+                    expect.objectContaining({
+                        entityId: scheduleId,
+                        entityType: "schedule",
+                        operation: "updated",
+                        topic: "schedules.records",
+                    }),
                 ],
             },
         ]);
+    });
+
+    test("fails the claim transaction callback when schedule invalidation fails", async () => {
+        const failure = new Error("schedule invalidation failed");
+        const workerId = Bun.randomUUIDv7();
+        const run: JobRunRecord = {
+            ...claimedRun(workerId),
+            scheduledForAt: at,
+            scheduledJobId: "system.worker-smoke",
+            scheduledJobVersion: 1,
+            triggerType: "schedule",
+        };
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            sideEffects: {
+                ...sideEffects,
+                forScheduleEvent: () => {
+                    throw failure;
+                },
+            },
+        });
+        const completion = coordinator.completion.catch((error: unknown) => error);
+
+        await coordinator.initialize();
+
+        expect(await completion).toBe(failure);
+        await coordinator.dispose();
+        expect(fixture.claimSideEffects).toEqual([]);
+        expect(fixture.settlements).toEqual([]);
     });
 
     test("invalidates the schedule projection in the settlement transaction", async () => {
@@ -994,25 +1266,39 @@ describe("durable job worker coordinator", () => {
         });
     });
 
-    test("provides bounded durable progress and output callbacks to actions", async () => {
+    test("atomically invalidates a manual run's schedule for durable action events", async () => {
         const workerId = Bun.randomUUIDv7();
-        const run = claimedRun(workerId, "test.progress");
+        const scheduleId = "system.worker-smoke";
+        const run: JobRunRecord = {
+            ...claimedRun(workerId, "test.progress"),
+            requestedById: Bun.randomUUIDv7(),
+            requestedByKind: "user",
+            scheduledJobId: scheduleId,
+            scheduledJobVersion: 1,
+            triggerType: "manual",
+        };
         const durableEventAt = new Date(at.getTime() + 20_000);
-        let sequence = 1;
+        const durableEventKinds: string[] = [];
+        let appendCount = 0;
         const fixture = repositoryFixture({
-            appendEvent: (input) => ({
-                event: {
+            appendEvent: (input) => {
+                appendCount += 1;
+                if (appendCount === 5) return { kind: "dropped" };
+                const event = {
                     attempt: run.attemptCount,
                     jobRunId: run.id,
-                    kind: input.kind,
-                    message: input.message ?? null,
+                    kind: appendCount === 4 ? "output-truncated" : input.kind,
+                    message: appendCount === 4 ? null : (input.message ?? null),
                     occurredAt: durableEventAt,
-                    progressJson: input.progressJson ?? null,
-                    sequence: sequence++,
+                    progressJson: appendCount === 4 ? null : (input.progressJson ?? null),
+                    sequence: appendCount,
                     workerInstanceId: workerId,
-                },
-                kind: "appended",
-            }),
+                } as const;
+                durableEventKinds.push(event.kind);
+                return appendCount === 4
+                    ? { event, kind: "truncated" }
+                    : { event, kind: "appended" };
+            },
             claim: { kind: "claimed", run },
         });
         const baseRegistration = jobActionRegistrations.at(0);
@@ -1026,12 +1312,16 @@ describe("durable job worker coordinator", () => {
                 Effect.gen(function* () {
                     yield* context.reportProgress({ completed: 1 });
                     yield* context.writeOutput("stdout", "safe output");
+                    yield* context.writeOutput("stderr", "safe diagnostic");
+                    yield* context.writeOutput("stdout", "truncated output");
+                    yield* context.writeOutput("stdout", "dropped output");
                     return {};
                 }),
         };
         const eventInvalidations: Array<{
             readonly action: string;
             readonly at: Date;
+            readonly targetId: string;
         }> = [];
         const coordinator = createJobWorkerCoordinator({
             ...coordinatorOptions(fixture.repository, workerId),
@@ -1040,8 +1330,34 @@ describe("durable job worker coordinator", () => {
             sideEffects: {
                 ...sideEffects,
                 forRunEvent: (input) => {
-                    eventInvalidations.push({ action: input.action, at: input.at });
-                    return noSideEffects;
+                    eventInvalidations.push({
+                        action: input.action,
+                        at: input.at,
+                        targetId: input.targetId,
+                    });
+                    return createJobRealtimeSideEffects({
+                        occurredAt: input.at,
+                        realtime: {
+                            id: input.targetId,
+                            kind: "run",
+                            operation: "updated",
+                        },
+                    });
+                },
+                forScheduleEvent: (input) => {
+                    eventInvalidations.push({
+                        action: input.action,
+                        at: input.at,
+                        targetId: input.targetId,
+                    });
+                    return createJobRealtimeSideEffects({
+                        occurredAt: input.at,
+                        realtime: {
+                            id: input.targetId,
+                            kind: "schedule",
+                            operation: "updated",
+                        },
+                    });
                 },
             },
         });
@@ -1050,13 +1366,48 @@ describe("durable job worker coordinator", () => {
         await waitUntil(() => fixture.settlements.length === 1);
         await coordinator.dispose();
 
-        expect(fixture.events).toContain("append:progress");
-        expect(fixture.events).toContain("append:stdout");
-        expect(eventInvalidations).toEqual([
-            { action: "jobs.run.claim", at },
-            { action: "jobs.run.event", at: durableEventAt },
-            { action: "jobs.run.event", at: durableEventAt },
+        expect(fixture.events.filter((event) => event.startsWith("append:"))).toEqual([
+            "append:progress",
+            "append:stdout",
+            "append:stderr",
+            "append:stdout",
+            "append:stdout",
         ]);
+        expect(durableEventKinds).toEqual([
+            "progress",
+            "stdout",
+            "stderr",
+            "output-truncated",
+        ]);
+        expect(eventInvalidations).toEqual([
+            { action: "jobs.run.claim", at, targetId: run.id },
+            { action: "jobs.run.claim", at, targetId: scheduleId },
+            ...Array.from({ length: 4 }, () => [
+                { action: "jobs.run.event", at: durableEventAt, targetId: run.id },
+                {
+                    action: "jobs.run.event",
+                    at: durableEventAt,
+                    targetId: scheduleId,
+                },
+            ]).flat(),
+        ]);
+        expect(
+            fixture.eventSideEffects.map(({ auditEvents, realtimeEvents }) => ({
+                auditEventCount: auditEvents.length,
+                realtime: realtimeEvents.map(({ entityId, topic }) => ({
+                    entityId,
+                    topic,
+                })),
+            }))
+        ).toEqual(
+            Array.from({ length: 4 }, () => ({
+                auditEventCount: 0,
+                realtime: [
+                    { entityId: run.id, topic: "jobs.runs" },
+                    { entityId: scheduleId, topic: "schedules.records" },
+                ],
+            }))
+        );
         expect(fixture.settlements[0]?.outcome.kind).toBe("succeeded");
     });
 

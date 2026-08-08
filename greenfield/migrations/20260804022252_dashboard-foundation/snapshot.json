@@ -6484,7 +6484,7 @@
       "table": "scheduled_jobs"
     },
     {
-      "value": "\"enabled\" = 0 OR (\"next_run_at\" IS NOT NULL AND \"next_run_at\" BETWEEN 0 AND 8640000000000000)",
+      "value": "(\"next_run_at\" IS NULL OR \"next_run_at\" BETWEEN 0 AND 8640000000000000) AND (\"enabled\" = 0 OR \"next_run_at\" IS NOT NULL)",
       "name": "scheduled_jobs_next_run_check",
       "entityType": "checks",
       "table": "scheduled_jobs"
@@ -6514,7 +6514,7 @@
       "table": "scheduled_jobs"
     },
     {
-      "value": "(\"schedule_kind\" = 'interval' AND \"interval_ms\" BETWEEN 60000 AND 31536000000 AND \"time_of_day\" IS NULL AND \"cron_expression\" IS NULL AND \"time_zone\" IS NULL) OR (\"schedule_kind\" = 'daily' AND \"interval_ms\" IS NULL AND \"time_of_day\" IS NOT NULL AND \"time_of_day\" GLOB '[0-2][0-9]:[0-5][0-9]' AND CAST(substr(\"time_of_day\", 1, 2) AS INTEGER) BETWEEN 0 AND 23 AND \"cron_expression\" IS NULL AND \"time_zone\" IS NOT NULL) OR (\"schedule_kind\" = 'cron' AND \"interval_ms\" IS NULL AND \"time_of_day\" IS NULL AND \"cron_expression\" IS NOT NULL AND length(\"cron_expression\") BETWEEN 9 AND 200 AND \"cron_expression\" = trim(\"cron_expression\") AND \"cron_expression\" NOT LIKE '%  %' AND length(\"cron_expression\") - length(replace(\"cron_expression\", ' ', '')) = 4 AND \"time_zone\" IS NOT NULL)",
+      "value": "(\"schedule_kind\" = 'interval' AND \"interval_ms\" BETWEEN 60000 AND 31536000000 AND \"time_of_day\" IS NULL AND \"cron_expression\" IS NULL AND \"time_zone\" IS NULL) OR (\"schedule_kind\" = 'daily' AND \"interval_ms\" IS NULL AND \"time_of_day\" IS NOT NULL AND instr(\"time_of_day\", char(0)) = 0 AND \"time_of_day\" GLOB '[0-2][0-9]:[0-5][0-9]' AND CAST(substr(\"time_of_day\", 1, 2) AS INTEGER) BETWEEN 0 AND 23 AND \"cron_expression\" IS NULL AND \"time_zone\" IS NOT NULL) OR (\"schedule_kind\" = 'cron' AND \"interval_ms\" IS NULL AND \"time_of_day\" IS NULL AND \"cron_expression\" IS NOT NULL AND length(\"cron_expression\") BETWEEN 9 AND 200 AND instr(\"cron_expression\", char(0)) = 0 AND \"cron_expression\" = trim(\"cron_expression\") AND \"cron_expression\" NOT LIKE '%  %' AND \"cron_expression\" NOT GLOB '*[^-0-9*,/ ]*' AND length(\"cron_expression\") - length(replace(\"cron_expression\", ' ', '')) = 4 AND \"time_zone\" IS NOT NULL)",
       "name": "scheduled_jobs_schedule_shape_check",
       "entityType": "checks",
       "table": "scheduled_jobs"

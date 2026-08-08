@@ -2,7 +2,11 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { canonicalScheduleTimeZones } from "../../../contracts/scheduleTimeZones.ts";
-import { boundedControlSafeTextCheck, timestampMillisecondsCheck } from "./checks.ts";
+import {
+    boundedControlSafeTextCheck,
+    nulFreeTextCheck,
+    timestampMillisecondsCheck,
+} from "./checks.ts";
 import {
     boundedJobKeyCheck,
     boundedJsonArrayCheck,
@@ -81,7 +85,7 @@ export const scheduledJobs = sqliteTable(
         ),
         check(
             "scheduled_jobs_next_run_check",
-            sql`${table.enabled} = 0 OR (${table.nextRunAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.nextRunAt)})`
+            sql`(${table.nextRunAt} IS NULL OR ${timestampMillisecondsCheck(table.nextRunAt)}) AND (${table.enabled} = 0 OR ${table.nextRunAt} IS NOT NULL)`
         ),
         check(
             "scheduled_jobs_priority_check",
@@ -98,7 +102,7 @@ export const scheduledJobs = sqliteTable(
         check("scheduled_jobs_retry_safe_check", sql`${table.retrySafe} IN (0, 1)`),
         check(
             "scheduled_jobs_schedule_shape_check",
-            sql`(${table.scheduleKind} = 'interval' AND ${table.intervalMs} BETWEEN 60000 AND 31536000000 AND ${table.timeOfDay} IS NULL AND ${table.cronExpression} IS NULL AND ${table.timeZone} IS NULL) OR (${table.scheduleKind} = 'daily' AND ${table.intervalMs} IS NULL AND ${table.timeOfDay} IS NOT NULL AND ${table.timeOfDay} GLOB '[0-2][0-9]:[0-5][0-9]' AND CAST(substr(${table.timeOfDay}, 1, 2) AS INTEGER) BETWEEN 0 AND 23 AND ${table.cronExpression} IS NULL AND ${table.timeZone} IS NOT NULL) OR (${table.scheduleKind} = 'cron' AND ${table.intervalMs} IS NULL AND ${table.timeOfDay} IS NULL AND ${table.cronExpression} IS NOT NULL AND length(${table.cronExpression}) BETWEEN 9 AND 200 AND ${table.cronExpression} = trim(${table.cronExpression}) AND ${table.cronExpression} NOT LIKE '%  %' AND length(${table.cronExpression}) - length(replace(${table.cronExpression}, ' ', '')) = 4 AND ${table.timeZone} IS NOT NULL)`
+            sql`(${table.scheduleKind} = 'interval' AND ${table.intervalMs} BETWEEN 60000 AND 31536000000 AND ${table.timeOfDay} IS NULL AND ${table.cronExpression} IS NULL AND ${table.timeZone} IS NULL) OR (${table.scheduleKind} = 'daily' AND ${table.intervalMs} IS NULL AND ${table.timeOfDay} IS NOT NULL AND ${nulFreeTextCheck(table.timeOfDay)} AND ${table.timeOfDay} GLOB '[0-2][0-9]:[0-5][0-9]' AND CAST(substr(${table.timeOfDay}, 1, 2) AS INTEGER) BETWEEN 0 AND 23 AND ${table.cronExpression} IS NULL AND ${table.timeZone} IS NOT NULL) OR (${table.scheduleKind} = 'cron' AND ${table.intervalMs} IS NULL AND ${table.timeOfDay} IS NULL AND ${table.cronExpression} IS NOT NULL AND length(${table.cronExpression}) BETWEEN 9 AND 200 AND ${nulFreeTextCheck(table.cronExpression)} AND ${table.cronExpression} = trim(${table.cronExpression}) AND ${table.cronExpression} NOT LIKE '%  %' AND ${table.cronExpression} NOT GLOB '*[^-0-9*,/ ]*' AND length(${table.cronExpression}) - length(replace(${table.cronExpression}, ' ', '')) = 4 AND ${table.timeZone} IS NOT NULL)`
         ),
         check(
             "scheduled_jobs_time_zone_check",

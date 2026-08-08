@@ -769,12 +769,12 @@ CREATE TABLE `scheduled_jobs` (
 	CONSTRAINT "scheduled_jobs_enabled_check" CHECK("enabled" IN (0, 1)),
 	CONSTRAINT "scheduled_jobs_id_check" CHECK(length("id") BETWEEN 1 AND 80 AND instr("id", char(0)) = 0 AND "id" = lower("id") AND substr("id", 1, 1) GLOB '[a-z0-9]' AND "id" NOT GLOB '*[^a-z0-9._-]*'),
 	CONSTRAINT "scheduled_jobs_name_check" CHECK(length("name") BETWEEN 1 AND 160 AND instr("name", char(0)) = 0 AND length(trim("name", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "name" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND length(CAST("name" AS BLOB)) <= 640),
-	CONSTRAINT "scheduled_jobs_next_run_check" CHECK("enabled" = 0 OR ("next_run_at" IS NOT NULL AND "next_run_at" BETWEEN 0 AND 8640000000000000)),
+	CONSTRAINT "scheduled_jobs_next_run_check" CHECK(("next_run_at" IS NULL OR "next_run_at" BETWEEN 0 AND 8640000000000000) AND ("enabled" = 0 OR "next_run_at" IS NOT NULL)),
 	CONSTRAINT "scheduled_jobs_priority_check" CHECK("priority" BETWEEN -100 AND 100),
 	CONSTRAINT "scheduled_jobs_resource_class_check" CHECK("resource_class" IN ('exclusive', 'host-heavy', 'interactive', 'light', 'network')),
 	CONSTRAINT "scheduled_jobs_resource_keys_json_check" CHECK(length(CAST("resource_keys_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("resource_keys_json") THEN json_type("resource_keys_json") = 'array' ELSE 0 END),
 	CONSTRAINT "scheduled_jobs_retry_safe_check" CHECK("retry_safe" IN (0, 1)),
-	CONSTRAINT "scheduled_jobs_schedule_shape_check" CHECK(("schedule_kind" = 'interval' AND "interval_ms" BETWEEN 60000 AND 31536000000 AND "time_of_day" IS NULL AND "cron_expression" IS NULL AND "time_zone" IS NULL) OR ("schedule_kind" = 'daily' AND "interval_ms" IS NULL AND "time_of_day" IS NOT NULL AND "time_of_day" GLOB '[0-2][0-9]:[0-5][0-9]' AND CAST(substr("time_of_day", 1, 2) AS INTEGER) BETWEEN 0 AND 23 AND "cron_expression" IS NULL AND "time_zone" IS NOT NULL) OR ("schedule_kind" = 'cron' AND "interval_ms" IS NULL AND "time_of_day" IS NULL AND "cron_expression" IS NOT NULL AND length("cron_expression") BETWEEN 9 AND 200 AND "cron_expression" = trim("cron_expression") AND "cron_expression" NOT LIKE '%  %' AND length("cron_expression") - length(replace("cron_expression", ' ', '')) = 4 AND "time_zone" IS NOT NULL)),
+	CONSTRAINT "scheduled_jobs_schedule_shape_check" CHECK(("schedule_kind" = 'interval' AND "interval_ms" BETWEEN 60000 AND 31536000000 AND "time_of_day" IS NULL AND "cron_expression" IS NULL AND "time_zone" IS NULL) OR ("schedule_kind" = 'daily' AND "interval_ms" IS NULL AND "time_of_day" IS NOT NULL AND instr("time_of_day", char(0)) = 0 AND "time_of_day" GLOB '[0-2][0-9]:[0-5][0-9]' AND CAST(substr("time_of_day", 1, 2) AS INTEGER) BETWEEN 0 AND 23 AND "cron_expression" IS NULL AND "time_zone" IS NOT NULL) OR ("schedule_kind" = 'cron' AND "interval_ms" IS NULL AND "time_of_day" IS NULL AND "cron_expression" IS NOT NULL AND length("cron_expression") BETWEEN 9 AND 200 AND instr("cron_expression", char(0)) = 0 AND "cron_expression" = trim("cron_expression") AND "cron_expression" NOT LIKE '%  %' AND "cron_expression" NOT GLOB '*[^-0-9*,/ ]*' AND length("cron_expression") - length(replace("cron_expression", ' ', '')) = 4 AND "time_zone" IS NOT NULL)),
 	CONSTRAINT "scheduled_jobs_time_zone_check" CHECK("time_zone" IS NULL OR "time_zone" IN ('Africa/Abidjan', 'Africa/Accra', 'Africa/Addis_Ababa', 'Africa/Algiers', 'Africa/Asmara', 'Africa/Bamako', 'Africa/Bangui', 'Africa/Banjul', 'Africa/Bissau', 'Africa/Blantyre', 'Africa/Brazzaville', 'Africa/Bujumbura', 'Africa/Cairo', 'Africa/Casablanca', 'Africa/Ceuta', 'Africa/Conakry', 'Africa/Dakar', 'Africa/Dar_es_Salaam', 'Africa/Djibouti', 'Africa/Douala', 'Africa/El_Aaiun', 'Africa/Freetown', 'Africa/Gaborone', 'Africa/Harare', 'Africa/Johannesburg', 'Africa/Juba', 'Africa/Kampala', 'Africa/Khartoum', 'Africa/Kigali', 'Africa/Kinshasa', 'Africa/Lagos', 'Africa/Libreville', 'Africa/Lome', 'Africa/Luanda', 'Africa/Lubumbashi', 'Africa/Lusaka', 'Africa/Malabo', 'Africa/Maputo', 'Africa/Maseru', 'Africa/Mbabane', 'Africa/Mogadishu', 'Africa/Monrovia', 'Africa/Nairobi', 'Africa/Ndjamena', 'Africa/Niamey', 'Africa/Nouakchott', 'Africa/Ouagadougou', 'Africa/Porto-Novo', 'Africa/Sao_Tome', 'Africa/Tripoli', 'Africa/Tunis', 'Africa/Windhoek', 'America/Adak', 'America/Anchorage', 'America/Anguilla', 'America/Antigua', 'America/Araguaina', 'America/Argentina/Buenos_Aires', 'America/Argentina/Catamarca', 'America/Argentina/Cordoba', 'America/Argentina/Jujuy', 'America/Argentina/La_Rioja', 'America/Argentina/Mendoza', 'America/Argentina/Rio_Gallegos', 'America/Argentina/Salta', 'America/Argentina/San_Juan', 'America/Argentina/San_Luis', 'America/Argentina/Tucuman', 'America/Argentina/Ushuaia', 'America/Aruba', 'America/Asuncion', 'America/Atikokan', 'America/Bahia', 'America/Bahia_Banderas', 'America/Barbados', 'America/Belem', 'America/Belize', 'America/Blanc-Sablon', 'America/Boa_Vista', 'America/Bogota', 'America/Boise', 'America/Cambridge_Bay', 'America/Campo_Grande', 'America/Cancun', 'America/Caracas', 'America/Cayenne', 'America/Cayman', 'America/Chicago', 'America/Chihuahua', 'America/Ciudad_Juarez', 'America/Costa_Rica', 'America/Creston', 'America/Cuiaba', 'America/Curacao', 'America/Danmarkshavn', 'America/Dawson', 'America/Dawson_Creek', 'America/Denver', 'America/Detroit', 'America/Dominica', 'America/Edmonton', 'America/Eirunepe', 'America/El_Salvador', 'America/Fort_Nelson', 'America/Fortaleza', 'America/Glace_Bay', 'America/Goose_Bay', 'America/Grand_Turk', 'America/Grenada', 'America/Guadeloupe', 'America/Guatemala', 'America/Guayaquil', 'America/Guyana', 'America/Halifax', 'America/Havana', 'America/Hermosillo', 'America/Indiana/Indianapolis', 'America/Indiana/Knox', 'America/Indiana/Marengo', 'America/Indiana/Petersburg', 'America/Indiana/Tell_City', 'America/Indiana/Vevay', 'America/Indiana/Vincennes', 'America/Indiana/Winamac', 'America/Inuvik', 'America/Iqaluit', 'America/Jamaica', 'America/Juneau', 'America/Kentucky/Louisville', 'America/Kentucky/Monticello', 'America/Kralendijk', 'America/La_Paz', 'America/Lima', 'America/Los_Angeles', 'America/Lower_Princes', 'America/Maceio', 'America/Managua', 'America/Manaus', 'America/Marigot', 'America/Martinique', 'America/Matamoros', 'America/Mazatlan', 'America/Menominee', 'America/Merida', 'America/Metlakatla', 'America/Mexico_City', 'America/Miquelon', 'America/Moncton', 'America/Monterrey', 'America/Montevideo', 'America/Montserrat', 'America/Nassau', 'America/New_York', 'America/Nome', 'America/Noronha', 'America/North_Dakota/Beulah', 'America/North_Dakota/Center', 'America/North_Dakota/New_Salem', 'America/Nuuk', 'America/Ojinaga', 'America/Panama', 'America/Paramaribo', 'America/Phoenix', 'America/Port-au-Prince', 'America/Port_of_Spain', 'America/Porto_Velho', 'America/Puerto_Rico', 'America/Punta_Arenas', 'America/Rankin_Inlet', 'America/Recife', 'America/Regina', 'America/Resolute', 'America/Rio_Branco', 'America/Santarem', 'America/Santiago', 'America/Santo_Domingo', 'America/Sao_Paulo', 'America/Scoresbysund', 'America/Sitka', 'America/St_Barthelemy', 'America/St_Johns', 'America/St_Kitts', 'America/St_Lucia', 'America/St_Thomas', 'America/St_Vincent', 'America/Swift_Current', 'America/Tegucigalpa', 'America/Thule', 'America/Tijuana', 'America/Toronto', 'America/Tortola', 'America/Vancouver', 'America/Whitehorse', 'America/Winnipeg', 'America/Yakutat', 'Antarctica/Casey', 'Antarctica/Davis', 'Antarctica/DumontDUrville', 'Antarctica/Macquarie', 'Antarctica/Mawson', 'Antarctica/McMurdo', 'Antarctica/Palmer', 'Antarctica/Rothera', 'Antarctica/Syowa', 'Antarctica/Troll', 'Antarctica/Vostok', 'Arctic/Longyearbyen', 'Asia/Aden', 'Asia/Almaty', 'Asia/Amman', 'Asia/Anadyr', 'Asia/Aqtau', 'Asia/Aqtobe', 'Asia/Ashgabat', 'Asia/Atyrau', 'Asia/Baghdad', 'Asia/Bahrain', 'Asia/Baku', 'Asia/Bangkok', 'Asia/Barnaul', 'Asia/Beirut', 'Asia/Bishkek', 'Asia/Brunei', 'Asia/Chita', 'Asia/Choibalsan', 'Asia/Colombo', 'Asia/Damascus', 'Asia/Dhaka', 'Asia/Dili', 'Asia/Dubai', 'Asia/Dushanbe', 'Asia/Famagusta', 'Asia/Gaza', 'Asia/Hebron', 'Asia/Ho_Chi_Minh', 'Asia/Hong_Kong', 'Asia/Hovd', 'Asia/Irkutsk', 'Asia/Jakarta', 'Asia/Jayapura', 'Asia/Jerusalem', 'Asia/Kabul', 'Asia/Kamchatka', 'Asia/Karachi', 'Asia/Kathmandu', 'Asia/Khandyga', 'Asia/Kolkata', 'Asia/Krasnoyarsk', 'Asia/Kuala_Lumpur', 'Asia/Kuching', 'Asia/Kuwait', 'Asia/Macau', 'Asia/Magadan', 'Asia/Makassar', 'Asia/Manila', 'Asia/Muscat', 'Asia/Nicosia', 'Asia/Novokuznetsk', 'Asia/Novosibirsk', 'Asia/Omsk', 'Asia/Oral', 'Asia/Phnom_Penh', 'Asia/Pontianak', 'Asia/Pyongyang', 'Asia/Qatar', 'Asia/Qostanay', 'Asia/Qyzylorda', 'Asia/Riyadh', 'Asia/Sakhalin', 'Asia/Samarkand', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Srednekolymsk', 'Asia/Taipei', 'Asia/Tashkent', 'Asia/Tbilisi', 'Asia/Tehran', 'Asia/Thimphu', 'Asia/Tokyo', 'Asia/Tomsk', 'Asia/Ulaanbaatar', 'Asia/Urumqi', 'Asia/Ust-Nera', 'Asia/Vientiane', 'Asia/Vladivostok', 'Asia/Yakutsk', 'Asia/Yangon', 'Asia/Yekaterinburg', 'Asia/Yerevan', 'Atlantic/Azores', 'Atlantic/Bermuda', 'Atlantic/Canary', 'Atlantic/Cape_Verde', 'Atlantic/Faroe', 'Atlantic/Madeira', 'Atlantic/Reykjavik', 'Atlantic/South_Georgia', 'Atlantic/St_Helena', 'Atlantic/Stanley', 'Australia/Adelaide', 'Australia/Brisbane', 'Australia/Broken_Hill', 'Australia/Darwin', 'Australia/Eucla', 'Australia/Hobart', 'Australia/Lindeman', 'Australia/Lord_Howe', 'Australia/Melbourne', 'Australia/Perth', 'Australia/Sydney', 'Etc/GMT+1', 'Etc/GMT+10', 'Etc/GMT+11', 'Etc/GMT+12', 'Etc/GMT+2', 'Etc/GMT+3', 'Etc/GMT+4', 'Etc/GMT+5', 'Etc/GMT+6', 'Etc/GMT+7', 'Etc/GMT+8', 'Etc/GMT+9', 'Etc/GMT-1', 'Etc/GMT-10', 'Etc/GMT-11', 'Etc/GMT-12', 'Etc/GMT-13', 'Etc/GMT-14', 'Etc/GMT-2', 'Etc/GMT-3', 'Etc/GMT-4', 'Etc/GMT-5', 'Etc/GMT-6', 'Etc/GMT-7', 'Etc/GMT-8', 'Etc/GMT-9', 'Europe/Amsterdam', 'Europe/Andorra', 'Europe/Astrakhan', 'Europe/Athens', 'Europe/Belgrade', 'Europe/Berlin', 'Europe/Bratislava', 'Europe/Brussels', 'Europe/Bucharest', 'Europe/Budapest', 'Europe/Busingen', 'Europe/Chisinau', 'Europe/Copenhagen', 'Europe/Dublin', 'Europe/Gibraltar', 'Europe/Guernsey', 'Europe/Helsinki', 'Europe/Isle_of_Man', 'Europe/Istanbul', 'Europe/Jersey', 'Europe/Kaliningrad', 'Europe/Kirov', 'Europe/Kyiv', 'Europe/Lisbon', 'Europe/Ljubljana', 'Europe/London', 'Europe/Luxembourg', 'Europe/Madrid', 'Europe/Malta', 'Europe/Mariehamn', 'Europe/Minsk', 'Europe/Monaco', 'Europe/Moscow', 'Europe/Oslo', 'Europe/Paris', 'Europe/Podgorica', 'Europe/Prague', 'Europe/Riga', 'Europe/Rome', 'Europe/Samara', 'Europe/San_Marino', 'Europe/Sarajevo', 'Europe/Saratov', 'Europe/Simferopol', 'Europe/Skopje', 'Europe/Sofia', 'Europe/Stockholm', 'Europe/Tallinn', 'Europe/Tirane', 'Europe/Ulyanovsk', 'Europe/Vaduz', 'Europe/Vatican', 'Europe/Vienna', 'Europe/Vilnius', 'Europe/Volgograd', 'Europe/Warsaw', 'Europe/Zagreb', 'Europe/Zurich', 'Indian/Antananarivo', 'Indian/Chagos', 'Indian/Christmas', 'Indian/Cocos', 'Indian/Comoro', 'Indian/Kerguelen', 'Indian/Mahe', 'Indian/Maldives', 'Indian/Mauritius', 'Indian/Mayotte', 'Indian/Reunion', 'Pacific/Apia', 'Pacific/Auckland', 'Pacific/Bougainville', 'Pacific/Chatham', 'Pacific/Chuuk', 'Pacific/Easter', 'Pacific/Efate', 'Pacific/Fakaofo', 'Pacific/Fiji', 'Pacific/Funafuti', 'Pacific/Galapagos', 'Pacific/Gambier', 'Pacific/Guadalcanal', 'Pacific/Guam', 'Pacific/Honolulu', 'Pacific/Kanton', 'Pacific/Kiritimati', 'Pacific/Kosrae', 'Pacific/Kwajalein', 'Pacific/Majuro', 'Pacific/Marquesas', 'Pacific/Midway', 'Pacific/Nauru', 'Pacific/Niue', 'Pacific/Norfolk', 'Pacific/Noumea', 'Pacific/Pago_Pago', 'Pacific/Palau', 'Pacific/Pitcairn', 'Pacific/Pohnpei', 'Pacific/Port_Moresby', 'Pacific/Rarotonga', 'Pacific/Saipan', 'Pacific/Tahiti', 'Pacific/Tarawa', 'Pacific/Tongatapu', 'Pacific/Wake', 'Pacific/Wallis', 'UTC')),
 	CONSTRAINT "scheduled_jobs_timeout_check" CHECK("timeout_ms" BETWEEN 1000 AND 86400000),
 	CONSTRAINT "scheduled_jobs_updated_at_check" CHECK("updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"),
@@ -862,6 +862,514 @@ WHEN json_array_length(NEW.resource_keys_json) > 32
     )
 BEGIN
 	SELECT RAISE(ABORT, 'scheduled_jobs resource keys must be canonical');
+END;
+--> statement-breakpoint
+CREATE TRIGGER scheduled_jobs_validate_cron_insert
+BEFORE INSERT ON scheduled_jobs
+WHEN NEW.schedule_kind = 'cron'
+    AND NEW.cron_expression IS NOT NULL
+    AND length(NEW.cron_expression) BETWEEN 9 AND 200
+    AND instr(NEW.cron_expression, char(0)) = 0
+    AND NEW.cron_expression = trim(NEW.cron_expression)
+    AND NEW.cron_expression NOT LIKE '%  %'
+    AND NEW.cron_expression NOT GLOB '*[^-0-9*,/ ]*'
+    AND length(NEW.cron_expression) - length(replace(NEW.cron_expression, ' ', '')) = 4
+    AND EXISTS (
+        WITH RECURSIVE
+        cron_fields(field_index, field_value, remaining, minimum_value, maximum_value) AS (
+            SELECT
+                0,
+                substr(NEW.cron_expression, 1, instr(NEW.cron_expression, ' ') - 1),
+                substr(NEW.cron_expression, instr(NEW.cron_expression, ' ') + 1),
+                0,
+                59
+            UNION ALL
+            SELECT
+                field_index + 1,
+                CASE
+                    WHEN instr(remaining, ' ') = 0 THEN remaining
+                    ELSE substr(remaining, 1, instr(remaining, ' ') - 1)
+                END,
+                CASE
+                    WHEN instr(remaining, ' ') = 0 THEN ''
+                    ELSE substr(remaining, instr(remaining, ' ') + 1)
+                END,
+                CASE field_index + 1 WHEN 2 THEN 1 WHEN 3 THEN 1 ELSE 0 END,
+                CASE field_index + 1
+                    WHEN 0 THEN 59
+                    WHEN 1 THEN 23
+                    WHEN 2 THEN 31
+                    WHEN 3 THEN 12
+                    ELSE 7
+                END
+            FROM cron_fields
+            WHERE field_index < 4
+        ),
+        cron_parts(
+            field_index,
+            part_index,
+            minimum_value,
+            maximum_value,
+            part_value,
+            remaining
+        ) AS (
+            SELECT
+                field_index,
+                0,
+                minimum_value,
+                maximum_value,
+                substr(field_value || ',', 1, instr(field_value || ',', ',') - 1),
+                substr(field_value || ',', instr(field_value || ',', ',') + 1)
+            FROM cron_fields
+            UNION ALL
+            SELECT
+                field_index,
+                part_index + 1,
+                minimum_value,
+                maximum_value,
+                substr(remaining, 1, instr(remaining, ',') - 1),
+                substr(remaining, instr(remaining, ',') + 1)
+            FROM cron_parts
+            WHERE remaining <> ''
+        ),
+        parsed_parts AS (
+            SELECT
+                *,
+                length(part_value) - length(replace(part_value, '/', '')) AS slash_count,
+                CASE
+                    WHEN instr(part_value, '/') = 0 THEN part_value
+                    ELSE substr(part_value, 1, instr(part_value, '/') - 1)
+                END AS base_value,
+                CASE
+                    WHEN instr(part_value, '/') = 0 THEN NULL
+                    ELSE substr(part_value, instr(part_value, '/') + 1)
+                END AS step_value
+            FROM cron_parts
+        ),
+        parsed_ranges AS (
+            SELECT
+                *,
+                length(base_value) - length(replace(base_value, '-', '')) AS range_count,
+                CASE
+                    WHEN instr(base_value, '-') = 0 THEN base_value
+                    ELSE substr(base_value, 1, instr(base_value, '-') - 1)
+                END AS left_value,
+                CASE
+                    WHEN instr(base_value, '-') = 0 THEN NULL
+                    ELSE substr(base_value, instr(base_value, '-') + 1)
+                END AS right_value
+            FROM parsed_parts
+        ),
+        invalid_parts AS (
+            SELECT 1
+            FROM parsed_ranges
+            WHERE length(part_value) = 0
+               OR slash_count > 1
+               OR (
+                    slash_count = 1
+                    AND (
+                        length(step_value) = 0
+                        OR step_value GLOB '*[^0-9]*'
+                        OR CAST(step_value AS INTEGER) < 1
+                        OR CAST(step_value AS INTEGER) > maximum_value
+                    )
+               )
+               OR (
+                    base_value <> '*'
+                    AND (
+                        range_count > 1
+                        OR (
+                            range_count = 0
+                            AND (
+                                length(left_value) = 0
+                                OR left_value GLOB '*[^0-9]*'
+                                OR CAST(left_value AS INTEGER) < minimum_value
+                                OR CAST(left_value AS INTEGER) > maximum_value
+                            )
+                        )
+                        OR (
+                            range_count = 1
+                            AND (
+                                length(left_value) = 0
+                                OR left_value GLOB '*[^0-9]*'
+                                OR length(right_value) = 0
+                                OR right_value GLOB '*[^0-9]*'
+                                OR CAST(left_value AS INTEGER) < minimum_value
+                                OR CAST(left_value AS INTEGER) > maximum_value
+                                OR CAST(right_value AS INTEGER) < minimum_value
+                                OR CAST(right_value AS INTEGER) > maximum_value
+                                OR CAST(left_value AS INTEGER) > CAST(right_value AS INTEGER)
+                            )
+                        )
+                    )
+               )
+        ),
+        field_modes AS (
+            SELECT
+                field_index,
+                max(
+                    CASE
+                        WHEN part_index = 0 AND base_value = '*' THEN 1
+                        ELSE 0
+                    END
+                ) AS starts_with_wildcard,
+                max(
+                    CASE
+                        WHEN part_index = 0
+                            AND base_value = '*'
+                            AND (
+                                step_value IS NULL
+                                OR CAST(step_value AS INTEGER) = 1
+                            )
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS unrestricted
+            FROM parsed_ranges
+            GROUP BY field_index
+        ),
+        domain_values(value) AS (
+            SELECT 0
+            UNION ALL
+            SELECT value + 1
+            FROM domain_values
+            WHERE value < 59
+        ),
+        expanded_values(field_index, value) AS (
+            SELECT DISTINCT
+                parsed_ranges.field_index,
+                CASE
+                    WHEN parsed_ranges.field_index = 4 AND domain_values.value = 7
+                    THEN 0
+                    ELSE domain_values.value
+                END
+            FROM parsed_ranges
+            JOIN domain_values
+              ON domain_values.value BETWEEN parsed_ranges.minimum_value
+                 AND parsed_ranges.maximum_value
+            WHERE (
+                    parsed_ranges.base_value = '*'
+                    AND (
+                        domain_values.value - parsed_ranges.minimum_value
+                    ) % coalesce(CAST(parsed_ranges.step_value AS INTEGER), 1) = 0
+                )
+                OR (
+                    parsed_ranges.base_value <> '*'
+                    AND parsed_ranges.range_count = 0
+                    AND domain_values.value >= CAST(parsed_ranges.left_value AS INTEGER)
+                    AND domain_values.value <= CASE
+                        WHEN parsed_ranges.step_value IS NULL
+                        THEN CAST(parsed_ranges.left_value AS INTEGER)
+                        ELSE parsed_ranges.maximum_value
+                    END
+                    AND (
+                        domain_values.value - CAST(parsed_ranges.left_value AS INTEGER)
+                    ) % coalesce(CAST(parsed_ranges.step_value AS INTEGER), 1) = 0
+                )
+                OR (
+                    parsed_ranges.base_value <> '*'
+                    AND parsed_ranges.range_count = 1
+                    AND domain_values.value BETWEEN
+                        CAST(parsed_ranges.left_value AS INTEGER)
+                        AND CAST(parsed_ranges.right_value AS INTEGER)
+                    AND (
+                        domain_values.value - CAST(parsed_ranges.left_value AS INTEGER)
+                    ) % coalesce(CAST(parsed_ranges.step_value AS INTEGER), 1) = 0
+                )
+        ),
+        viability_required AS (
+            SELECT 1
+            FROM field_modes AS day_field
+            JOIN field_modes AS weekday_field
+              ON weekday_field.field_index = 4
+            WHERE day_field.field_index = 2
+              AND day_field.unrestricted = 0
+              AND (
+                    weekday_field.unrestricted = 1
+                    OR day_field.starts_with_wildcard = 1
+                    OR weekday_field.starts_with_wildcard = 1
+              )
+        ),
+        viable_day_month AS (
+            SELECT 1
+            FROM expanded_values AS day_value
+            JOIN expanded_values AS month_value
+              ON month_value.field_index = 3
+            WHERE day_value.field_index = 2
+              AND day_value.value <= CASE month_value.value
+                    WHEN 2 THEN 29
+                    WHEN 4 THEN 30
+                    WHEN 6 THEN 30
+                    WHEN 9 THEN 30
+                    WHEN 11 THEN 30
+                    ELSE 31
+              END
+            LIMIT 1
+        )
+        SELECT 1
+        FROM invalid_parts
+        UNION ALL
+        SELECT 1
+        WHERE EXISTS (SELECT 1 FROM viability_required)
+          AND NOT EXISTS (SELECT 1 FROM viable_day_month)
+        LIMIT 1
+    )
+BEGIN
+	SELECT RAISE(ABORT, 'scheduled_jobs cron expression must be semantically valid');
+END;
+--> statement-breakpoint
+CREATE TRIGGER scheduled_jobs_validate_cron_update
+BEFORE UPDATE OF schedule_kind, cron_expression ON scheduled_jobs
+WHEN NEW.schedule_kind = 'cron'
+    AND NEW.cron_expression IS NOT NULL
+    AND length(NEW.cron_expression) BETWEEN 9 AND 200
+    AND instr(NEW.cron_expression, char(0)) = 0
+    AND NEW.cron_expression = trim(NEW.cron_expression)
+    AND NEW.cron_expression NOT LIKE '%  %'
+    AND NEW.cron_expression NOT GLOB '*[^-0-9*,/ ]*'
+    AND length(NEW.cron_expression) - length(replace(NEW.cron_expression, ' ', '')) = 4
+    AND EXISTS (
+        WITH RECURSIVE
+        cron_fields(field_index, field_value, remaining, minimum_value, maximum_value) AS (
+            SELECT
+                0,
+                substr(NEW.cron_expression, 1, instr(NEW.cron_expression, ' ') - 1),
+                substr(NEW.cron_expression, instr(NEW.cron_expression, ' ') + 1),
+                0,
+                59
+            UNION ALL
+            SELECT
+                field_index + 1,
+                CASE
+                    WHEN instr(remaining, ' ') = 0 THEN remaining
+                    ELSE substr(remaining, 1, instr(remaining, ' ') - 1)
+                END,
+                CASE
+                    WHEN instr(remaining, ' ') = 0 THEN ''
+                    ELSE substr(remaining, instr(remaining, ' ') + 1)
+                END,
+                CASE field_index + 1 WHEN 2 THEN 1 WHEN 3 THEN 1 ELSE 0 END,
+                CASE field_index + 1
+                    WHEN 0 THEN 59
+                    WHEN 1 THEN 23
+                    WHEN 2 THEN 31
+                    WHEN 3 THEN 12
+                    ELSE 7
+                END
+            FROM cron_fields
+            WHERE field_index < 4
+        ),
+        cron_parts(
+            field_index,
+            part_index,
+            minimum_value,
+            maximum_value,
+            part_value,
+            remaining
+        ) AS (
+            SELECT
+                field_index,
+                0,
+                minimum_value,
+                maximum_value,
+                substr(field_value || ',', 1, instr(field_value || ',', ',') - 1),
+                substr(field_value || ',', instr(field_value || ',', ',') + 1)
+            FROM cron_fields
+            UNION ALL
+            SELECT
+                field_index,
+                part_index + 1,
+                minimum_value,
+                maximum_value,
+                substr(remaining, 1, instr(remaining, ',') - 1),
+                substr(remaining, instr(remaining, ',') + 1)
+            FROM cron_parts
+            WHERE remaining <> ''
+        ),
+        parsed_parts AS (
+            SELECT
+                *,
+                length(part_value) - length(replace(part_value, '/', '')) AS slash_count,
+                CASE
+                    WHEN instr(part_value, '/') = 0 THEN part_value
+                    ELSE substr(part_value, 1, instr(part_value, '/') - 1)
+                END AS base_value,
+                CASE
+                    WHEN instr(part_value, '/') = 0 THEN NULL
+                    ELSE substr(part_value, instr(part_value, '/') + 1)
+                END AS step_value
+            FROM cron_parts
+        ),
+        parsed_ranges AS (
+            SELECT
+                *,
+                length(base_value) - length(replace(base_value, '-', '')) AS range_count,
+                CASE
+                    WHEN instr(base_value, '-') = 0 THEN base_value
+                    ELSE substr(base_value, 1, instr(base_value, '-') - 1)
+                END AS left_value,
+                CASE
+                    WHEN instr(base_value, '-') = 0 THEN NULL
+                    ELSE substr(base_value, instr(base_value, '-') + 1)
+                END AS right_value
+            FROM parsed_parts
+        ),
+        invalid_parts AS (
+            SELECT 1
+            FROM parsed_ranges
+            WHERE length(part_value) = 0
+               OR slash_count > 1
+               OR (
+                    slash_count = 1
+                    AND (
+                        length(step_value) = 0
+                        OR step_value GLOB '*[^0-9]*'
+                        OR CAST(step_value AS INTEGER) < 1
+                        OR CAST(step_value AS INTEGER) > maximum_value
+                    )
+               )
+               OR (
+                    base_value <> '*'
+                    AND (
+                        range_count > 1
+                        OR (
+                            range_count = 0
+                            AND (
+                                length(left_value) = 0
+                                OR left_value GLOB '*[^0-9]*'
+                                OR CAST(left_value AS INTEGER) < minimum_value
+                                OR CAST(left_value AS INTEGER) > maximum_value
+                            )
+                        )
+                        OR (
+                            range_count = 1
+                            AND (
+                                length(left_value) = 0
+                                OR left_value GLOB '*[^0-9]*'
+                                OR length(right_value) = 0
+                                OR right_value GLOB '*[^0-9]*'
+                                OR CAST(left_value AS INTEGER) < minimum_value
+                                OR CAST(left_value AS INTEGER) > maximum_value
+                                OR CAST(right_value AS INTEGER) < minimum_value
+                                OR CAST(right_value AS INTEGER) > maximum_value
+                                OR CAST(left_value AS INTEGER) > CAST(right_value AS INTEGER)
+                            )
+                        )
+                    )
+               )
+        ),
+        field_modes AS (
+            SELECT
+                field_index,
+                max(
+                    CASE
+                        WHEN part_index = 0 AND base_value = '*' THEN 1
+                        ELSE 0
+                    END
+                ) AS starts_with_wildcard,
+                max(
+                    CASE
+                        WHEN part_index = 0
+                            AND base_value = '*'
+                            AND (
+                                step_value IS NULL
+                                OR CAST(step_value AS INTEGER) = 1
+                            )
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS unrestricted
+            FROM parsed_ranges
+            GROUP BY field_index
+        ),
+        domain_values(value) AS (
+            SELECT 0
+            UNION ALL
+            SELECT value + 1
+            FROM domain_values
+            WHERE value < 59
+        ),
+        expanded_values(field_index, value) AS (
+            SELECT DISTINCT
+                parsed_ranges.field_index,
+                CASE
+                    WHEN parsed_ranges.field_index = 4 AND domain_values.value = 7
+                    THEN 0
+                    ELSE domain_values.value
+                END
+            FROM parsed_ranges
+            JOIN domain_values
+              ON domain_values.value BETWEEN parsed_ranges.minimum_value
+                 AND parsed_ranges.maximum_value
+            WHERE (
+                    parsed_ranges.base_value = '*'
+                    AND (
+                        domain_values.value - parsed_ranges.minimum_value
+                    ) % coalesce(CAST(parsed_ranges.step_value AS INTEGER), 1) = 0
+                )
+                OR (
+                    parsed_ranges.base_value <> '*'
+                    AND parsed_ranges.range_count = 0
+                    AND domain_values.value >= CAST(parsed_ranges.left_value AS INTEGER)
+                    AND domain_values.value <= CASE
+                        WHEN parsed_ranges.step_value IS NULL
+                        THEN CAST(parsed_ranges.left_value AS INTEGER)
+                        ELSE parsed_ranges.maximum_value
+                    END
+                    AND (
+                        domain_values.value - CAST(parsed_ranges.left_value AS INTEGER)
+                    ) % coalesce(CAST(parsed_ranges.step_value AS INTEGER), 1) = 0
+                )
+                OR (
+                    parsed_ranges.base_value <> '*'
+                    AND parsed_ranges.range_count = 1
+                    AND domain_values.value BETWEEN
+                        CAST(parsed_ranges.left_value AS INTEGER)
+                        AND CAST(parsed_ranges.right_value AS INTEGER)
+                    AND (
+                        domain_values.value - CAST(parsed_ranges.left_value AS INTEGER)
+                    ) % coalesce(CAST(parsed_ranges.step_value AS INTEGER), 1) = 0
+                )
+        ),
+        viability_required AS (
+            SELECT 1
+            FROM field_modes AS day_field
+            JOIN field_modes AS weekday_field
+              ON weekday_field.field_index = 4
+            WHERE day_field.field_index = 2
+              AND day_field.unrestricted = 0
+              AND (
+                    weekday_field.unrestricted = 1
+                    OR day_field.starts_with_wildcard = 1
+                    OR weekday_field.starts_with_wildcard = 1
+              )
+        ),
+        viable_day_month AS (
+            SELECT 1
+            FROM expanded_values AS day_value
+            JOIN expanded_values AS month_value
+              ON month_value.field_index = 3
+            WHERE day_value.field_index = 2
+              AND day_value.value <= CASE month_value.value
+                    WHEN 2 THEN 29
+                    WHEN 4 THEN 30
+                    WHEN 6 THEN 30
+                    WHEN 9 THEN 30
+                    WHEN 11 THEN 30
+                    ELSE 31
+              END
+            LIMIT 1
+        )
+        SELECT 1
+        FROM invalid_parts
+        UNION ALL
+        SELECT 1
+        WHERE EXISTS (SELECT 1 FROM viability_required)
+          AND NOT EXISTS (SELECT 1 FROM viable_day_month)
+        LIMIT 1
+    )
+BEGIN
+	SELECT RAISE(ABORT, 'scheduled_jobs cron expression must be semantically valid');
 END;
 --> statement-breakpoint
 CREATE TRIGGER scheduled_jobs_reject_replace

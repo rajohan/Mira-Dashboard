@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { asc, gt, max } from "drizzle-orm";
+import { and, asc, eq, gt, max } from "drizzle-orm";
 import { Effect } from "effect";
 
 import { jobWorkerFreshnessMs } from "../../../contracts/jobModel.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
+import { auditEvents } from "../../database/schema/auditEvents.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import {
@@ -13,8 +14,17 @@ import {
     openAuthenticationTestDatabase,
 } from "../security/testSupport/authentication.ts";
 import { JobConflictError, JobValidationError } from "./errors.ts";
-import type { JobRunEventRecord, WorkerInstanceRecord } from "./records.ts";
-import { createJobRepository, type JobRepository } from "./repository.ts";
+import type {
+    JobRunEventRecord,
+    ScheduledJobRecord,
+    WorkerInstanceRecord,
+} from "./records.ts";
+import {
+    createJobRepository,
+    type JobMutationSideEffects,
+    type JobRepository,
+    type JobRunInsert,
+} from "./repository.ts";
 import { createJobService, reconcileJobSchedules } from "./service.ts";
 
 function createIdGenerator(): () => string {
@@ -23,6 +33,54 @@ function createIdGenerator(): () => string {
 }
 
 const serviceNowMs = () => authenticationTestNow.getTime();
+const noSideEffects: JobMutationSideEffects = Object.freeze({
+    auditEvents: Object.freeze([]),
+    realtimeEvents: Object.freeze([]),
+});
+
+function scheduledRun(schedule: ScheduledJobRecord, at: Date, id: string): JobRunInsert {
+    if (schedule.nextRunAt === null) {
+        throw new Error("Expected an enabled schedule cursor");
+    }
+    return {
+        actionKey: schedule.actionKey,
+        attemptLimit: schedule.attemptLimit,
+        availableAt: at,
+        cancellationPolicy: schedule.cancellationPolicy,
+        cancelRequestedAt: null,
+        cancelRequestedById: null,
+        cancelRequestedByKind: null,
+        displayName: schedule.name,
+        enqueueSha256: "2".repeat(64),
+        finishedAt: null,
+        firstStartedAt: null,
+        heartbeatAt: null,
+        id,
+        idempotencyKey: "2".repeat(32),
+        lastAttemptStartedAt: null,
+        leaseExpiresAt: null,
+        leaseOwnerId: null,
+        leaseToken: null,
+        payloadJson: schedule.actionPayloadJson,
+        priority: schedule.priority,
+        queuedAt: at,
+        requestedById: "system.scheduler",
+        requestedByKind: "system",
+        resourceClass: schedule.resourceClass,
+        resourceKeysJson: schedule.resourceKeysJson,
+        resultJson: null,
+        retrySafe: schedule.retrySafe,
+        scheduledForAt: schedule.nextRunAt,
+        scheduledJobId: schedule.id,
+        scheduledJobVersion: schedule.version,
+        state: "queued",
+        terminalCode: null,
+        terminalMessage: null,
+        timeoutMs: schedule.timeoutMs,
+        triggerType: "schedule",
+        updatedAt: at,
+    };
+}
 
 describe("durable jobs service", () => {
     test("accepts a full-form cadence edit while an enabled schedule stays enabled", async () => {
@@ -158,6 +216,267 @@ describe("durable jobs service", () => {
                 { entityId: "system.worker-smoke", topic: "schedules.records" },
             ]);
             expect(repository.findRun(run.id)).toBeDefined();
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("builds direct cancellation side effects from the durable run snapshot", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+        const workerId = "019fdf20-0000-7000-8000-000000000900";
+        const leaseToken = "019fdf20-0000-7000-8000-000000000901";
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const setupService = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+            const queued = await Effect.runPromise(
+                setupService.runSchedule(principal, {
+                    id: "system.worker-smoke",
+                    idempotencyKey: "3".repeat(32),
+                })
+            );
+            const queuedRecord = repository.findRun(queued.id);
+            if (queuedRecord === undefined) throw new Error("Missing queued run");
+            const transitionAt = new Date(authenticationTestNow.getTime() + 60_000);
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: {
+                    capacity: 1,
+                    drainingAt: null,
+                    heartbeatAt: transitionAt,
+                    id: workerId,
+                    pid: 1234,
+                    releaseId: "a".repeat(40),
+                    startedAt: transitionAt,
+                    state: "online",
+                    stoppedAt: null,
+                },
+            });
+            expect(
+                await repository.claimNextRun({
+                    at: transitionAt,
+                    leaseExpiresAt: new Date(transitionAt.getTime() + 30_000),
+                    leaseToken,
+                    minimumHeartbeatAt: transitionAt,
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId,
+                })
+            ).toMatchObject({
+                kind: "claimed",
+                run: { id: queued.id, updatedAt: transitionAt },
+            });
+            const previousEventId =
+                fixture.database.orm
+                    .select({ value: max(realtimeEvents.id) })
+                    .from(realtimeEvents)
+                    .get()?.value ?? 0;
+            const staleReadRepository: JobRepository = {
+                ...repository,
+                findRun: (id) =>
+                    id === queued.id ? queuedRecord : repository.findRun(id),
+            };
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository: staleReadRepository,
+            });
+
+            const result = await Effect.runPromise(
+                service.cancelRun(principal, { id: queued.id })
+            );
+            const replay = await Effect.runPromise(
+                service.cancelRun(principal, { id: queued.id })
+            );
+            const addedEvents = fixture.database.orm
+                .select({
+                    entityId: realtimeEvents.entityId,
+                    occurredAt: realtimeEvents.occurredAt,
+                    topic: realtimeEvents.topic,
+                })
+                .from(realtimeEvents)
+                .where(gt(realtimeEvents.id, previousEventId))
+                .orderBy(asc(realtimeEvents.id))
+                .all();
+            const cancellationAudits = fixture.database.orm
+                .select({
+                    action: auditEvents.action,
+                    occurredAt: auditEvents.occurredAt,
+                    outcome: auditEvents.outcome,
+                })
+                .from(auditEvents)
+                .where(
+                    and(
+                        eq(auditEvents.action, "jobs.run.cancel"),
+                        eq(auditEvents.targetId, queued.id)
+                    )
+                )
+                .all();
+
+            expect(result).toMatchObject({
+                cancelRequestedAtMs: transitionAt.getTime(),
+                id: queued.id,
+                state: "running",
+                updatedAtMs: transitionAt.getTime(),
+            });
+            expect(replay).toEqual(result);
+            expect(addedEvents).toEqual([
+                {
+                    entityId: queued.id,
+                    occurredAt: transitionAt,
+                    topic: "jobs.runs",
+                },
+                {
+                    entityId: "system.worker-smoke",
+                    occurredAt: transitionAt,
+                    topic: "schedules.records",
+                },
+            ]);
+            expect(cancellationAudits).toEqual([
+                {
+                    action: "jobs.run.cancel",
+                    occurredAt: transitionAt,
+                    outcome: "accepted",
+                },
+            ]);
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("timestamps disable cancellation side effects from the cancelled run", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+            await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 1,
+                    id: "system.worker-smoke",
+                    patch: { disableIntent: null, enabled: true },
+                })
+            );
+            const relation = repository.findSchedule("system.worker-smoke");
+            if (relation === undefined) throw new Error("Missing enabled schedule");
+            const schedule = relation.schedule;
+            const runAt = schedule.nextRunAt;
+            if (runAt === null) throw new Error("Missing enabled schedule cursor");
+            if (schedule.intervalMs === null) {
+                throw new Error("Expected the smoke interval schedule");
+            }
+            const run = scheduledRun(
+                schedule,
+                runAt,
+                "019fdf20-0000-7000-8000-000000000902"
+            );
+            expect(
+                await repository.enqueueNextDueSchedule({
+                    ...noSideEffects,
+                    at: runAt,
+                    nextRunAt: new Date(runAt.getTime() + schedule.intervalMs),
+                    observedNextRunAt: runAt,
+                    run,
+                    scheduleId: schedule.id,
+                })
+            ).toMatchObject({ kind: "inserted", run: { id: run.id } });
+            const previousEventId =
+                fixture.database.orm
+                    .select({ value: max(realtimeEvents.id) })
+                    .from(realtimeEvents)
+                    .get()?.value ?? 0;
+
+            await Effect.runPromise(
+                service.updateSchedule(principal, {
+                    expectedVersion: 2,
+                    id: schedule.id,
+                    patch: {
+                        disableIntent: { reason: "Clock-regression maintenance" },
+                        enabled: false,
+                    },
+                })
+            );
+            const cancelled = repository.findRun(run.id);
+            const addedEvents = fixture.database.orm
+                .select({
+                    entityId: realtimeEvents.entityId,
+                    occurredAt: realtimeEvents.occurredAt,
+                    topic: realtimeEvents.topic,
+                })
+                .from(realtimeEvents)
+                .where(gt(realtimeEvents.id, previousEventId))
+                .orderBy(asc(realtimeEvents.id))
+                .all();
+            const cancellationAudits = fixture.database.orm
+                .select({
+                    occurredAt: auditEvents.occurredAt,
+                    outcome: auditEvents.outcome,
+                })
+                .from(auditEvents)
+                .where(
+                    and(
+                        eq(auditEvents.action, "jobs.run.cancel"),
+                        eq(auditEvents.targetId, run.id)
+                    )
+                )
+                .all();
+
+            expect(cancelled).toMatchObject({
+                state: "cancelled",
+                updatedAt: runAt,
+            });
+            expect(addedEvents).toEqual([
+                { entityId: run.id, occurredAt: runAt, topic: "jobs.runs" },
+                {
+                    entityId: schedule.id,
+                    occurredAt: runAt,
+                    topic: "schedules.records",
+                },
+                {
+                    entityId: schedule.id,
+                    occurredAt: authenticationTestNow,
+                    topic: "schedules.records",
+                },
+            ]);
+            expect(cancellationAudits).toEqual([
+                { occurredAt: runAt, outcome: "cancelled" },
+            ]);
+            expect(repository.findSchedule(schedule.id)?.schedule).toMatchObject({
+                enabled: false,
+                updatedAt: authenticationTestNow,
+                version: 3,
+            });
         } finally {
             fixture.database.sqlite.close(true);
         }
@@ -363,6 +682,127 @@ describe("durable jobs service", () => {
         }
     });
 
+    test("atomically cancels queued schedule work retired from the registry", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const retiredScheduleId = "system.worker-smoke-retired";
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const registered = repository.findSchedule("system.worker-smoke")?.schedule;
+            if (registered === undefined) throw new Error("Missing registered schedule");
+            const runAt = new Date(authenticationTestNow.getTime() + 60_000);
+            await repository.reconcileSchedules({
+                at: authenticationTestNow,
+                schedules: [
+                    registered,
+                    {
+                        ...registered,
+                        enabled: true,
+                        id: retiredScheduleId,
+                        nextRunAt: runAt,
+                    },
+                ],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            const retiredSchedule = repository.findSchedule(retiredScheduleId)?.schedule;
+            if (retiredSchedule === undefined) {
+                throw new Error("Missing retired schedule fixture");
+            }
+            if (retiredSchedule.intervalMs === null) {
+                throw new Error("Expected the smoke interval schedule");
+            }
+            const run = scheduledRun(
+                retiredSchedule,
+                runAt,
+                "019fdf20-0000-7000-8000-000000000903"
+            );
+            await repository.enqueueNextDueSchedule({
+                ...noSideEffects,
+                at: runAt,
+                nextRunAt: new Date(runAt.getTime() + retiredSchedule.intervalMs),
+                observedNextRunAt: runAt,
+                run,
+                scheduleId: retiredScheduleId,
+            });
+            const previousEventId =
+                fixture.database.orm
+                    .select({ value: max(realtimeEvents.id) })
+                    .from(realtimeEvents)
+                    .get()?.value ?? 0;
+
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+
+            expect(repository.findRun(run.id)).toMatchObject({
+                eventCount: 3,
+                state: "cancelled",
+                terminalCode: "cancelled/schedule-retired",
+                updatedAt: runAt,
+            });
+            expect(repository.findSchedule(retiredScheduleId)?.schedule).toMatchObject({
+                enabled: false,
+                updatedAt: authenticationTestNow,
+                version: 2,
+            });
+            expect(
+                fixture.database.orm
+                    .select({
+                        entityId: realtimeEvents.entityId,
+                        occurredAt: realtimeEvents.occurredAt,
+                        topic: realtimeEvents.topic,
+                    })
+                    .from(realtimeEvents)
+                    .where(gt(realtimeEvents.id, previousEventId))
+                    .orderBy(asc(realtimeEvents.id))
+                    .all()
+            ).toEqual([
+                { entityId: run.id, occurredAt: runAt, topic: "jobs.runs" },
+                {
+                    entityId: retiredScheduleId,
+                    occurredAt: runAt,
+                    topic: "schedules.records",
+                },
+                {
+                    entityId: retiredScheduleId,
+                    occurredAt: authenticationTestNow,
+                    topic: "schedules.records",
+                },
+            ]);
+            expect(
+                fixture.database.orm
+                    .select({
+                        action: auditEvents.action,
+                        actorId: auditEvents.actorId,
+                        actorKind: auditEvents.actorKind,
+                        occurredAt: auditEvents.occurredAt,
+                        outcome: auditEvents.outcome,
+                    })
+                    .from(auditEvents)
+                    .where(
+                        and(
+                            eq(auditEvents.action, "jobs.run.cancel"),
+                            eq(auditEvents.targetId, run.id)
+                        )
+                    )
+                    .all()
+            ).toEqual([
+                {
+                    action: "jobs.run.cancel",
+                    actorId: "jobs-scheduler",
+                    actorKind: "system",
+                    occurredAt: runAt,
+                    outcome: "cancelled",
+                },
+            ]);
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
     test("rejects mutations for a schedule outside the exact action registry pair", async () => {
         const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
         const repository = createJobRepository(
@@ -416,6 +856,76 @@ describe("durable jobs service", () => {
             expect(
                 repository.findSchedule("system.worker-smoke-retired")?.schedule
             ).toMatchObject({ enabled: false, version: 1 });
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("rejects a manual enqueue when code metadata changes after the service read", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+        const principal: AuthenticatedPrincipal = {
+            authorizationVersion: 1,
+            authenticatorId: fixture.session.prefix,
+            capabilities: ["jobs:read", "jobs:write"],
+            id: authenticationTestUserId,
+            kind: "session",
+        };
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            let attemptedRunId: string | undefined;
+            const interleavedRepository: JobRepository = {
+                ...repository,
+                enqueueManualRun: async (input) => {
+                    attemptedRunId = input.run.id;
+                    const current = repository.findSchedule(
+                        input.run.scheduledJobId ?? ""
+                    )?.schedule;
+                    if (current === undefined) {
+                        throw new Error("Missing schedule for interleaved enqueue");
+                    }
+                    await repository.reconcileSchedules({
+                        at: new Date(authenticationTestNow.getTime() + 1),
+                        schedules: [
+                            {
+                                ...current,
+                                name: "Worker smoke from the next release",
+                                updatedAt: new Date(authenticationTestNow.getTime() + 1),
+                            },
+                        ],
+                        sideEffectsForSchedule: () => noSideEffects,
+                    });
+                    return repository.enqueueManualRun(input);
+                },
+            };
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository: interleavedRepository,
+            });
+
+            const error = await Effect.runPromise(
+                service.runSchedule(principal, {
+                    id: "system.worker-smoke",
+                    idempotencyKey: "d".repeat(32),
+                })
+            ).catch((error: unknown) => error);
+
+            expect(error).toBeInstanceOf(JobConflictError);
+            expect(error).toMatchObject({ reason: "action-unavailable" });
+            expect(attemptedRunId).toBeDefined();
+            expect(repository.findRun(attemptedRunId ?? "")).toBeUndefined();
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule
+            ).toMatchObject({
+                name: "Worker smoke from the next release",
+                version: 2,
+            });
         } finally {
             fixture.database.sqlite.close(true);
         }
