@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import { DashboardProtocolError } from "../api/trpcClient.ts";
 import {
+    cacheAttemptLabel,
     cacheAttemptVariant,
     cacheBrowserFailureMessage,
+    cacheFreshnessLabel,
     cacheFreshnessVariant,
     formatCacheBytes,
     formatCacheDuration,
@@ -17,6 +19,11 @@ describe("cache presentation", () => {
         expect(cacheFreshnessVariant("missing")).toBe("default");
         expect(cacheAttemptVariant("succeeded")).toBe("success");
         expect(cacheAttemptVariant("failed")).toBe("danger");
+        expect(cacheFreshnessLabel("fresh")).toBe("Up to date");
+        expect(cacheFreshnessLabel("stale")).toBe("Out of date");
+        expect(cacheFreshnessLabel("missing")).toBe("No saved data");
+        expect(cacheAttemptLabel("succeeded")).toBe("Succeeded");
+        expect(cacheAttemptLabel("failed")).toBe("Failed");
     });
 
     test("formats bounded capacity, attempt duration, and uptime", () => {
@@ -34,13 +41,13 @@ describe("cache presentation", () => {
     test("never renders an untrusted transport message", () => {
         const secret = "do-not-render-this-secret";
         expect(cacheBrowserFailureMessage(new TypeError(secret))).toBe(
-            "The cache request could not be completed. Try again."
+            "The request could not be completed. Try again."
         );
         expect(cacheBrowserFailureMessage(new DashboardProtocolError())).toBe(
-            "The server returned an invalid cache response. Reload before trying again."
+            "The server returned unexpected saved data. Reload before trying again."
         );
         expect(cacheBrowserFailureMessage({ data: { code: "NOT_FOUND" } })).toBe(
-            "The selected cache entry is no longer available."
+            "The selected data source is no longer available."
         );
     });
 });

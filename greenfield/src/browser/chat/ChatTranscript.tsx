@@ -207,7 +207,7 @@ export function ChatTranscript({
         return (
             <EmptyState
                 className="m-3 flex min-h-0 flex-1 flex-col justify-center border-0 bg-transparent"
-                description="Send a message to start this session. Provider history will appear here after reconciliation."
+                description="Send a message to start this chat. OpenClaw history will appear here when it is ready."
                 icon={MessagesSquare}
                 title="No messages yet"
             />

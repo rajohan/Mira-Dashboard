@@ -36,7 +36,7 @@ const incidents = Object.freeze(
                 occurrenceCount: 2,
                 severity: "warning",
                 state: "active",
-                title: "A durable worker heartbeat is delayed",
+                title: "A background worker has not checked in",
             },
             {
                 fingerprint: "c".repeat(64),
@@ -50,7 +50,7 @@ const incidents = Object.freeze(
                 resolvedAtMs: timestampMs - 2 * 60 * 60_000,
                 severity: "error",
                 state: "resolved",
-                title: "Host projection exceeded its freshness window",
+                title: "Host status is out of date",
             },
             {
                 fingerprint: "d".repeat(64),
@@ -116,7 +116,7 @@ export const LifecycleAndSeverity: Story = {
 
         await userEvent.click(
             within(canvasElement).getByRole("button", {
-                name: `${incident.title}; ${incident.monitorKey}; generation ${incident.generation}`,
+                name: `${incident.title}; ${incident.monitorKey}; occurrence group ${incident.generation}`,
             })
         );
         await expect(args.onSelect).toHaveBeenCalledWith(incident.id);

@@ -113,7 +113,7 @@ export const VirtualizedInventory: Story = {
     play: async ({ canvasElement }) => {
         await expectVirtualizedTable({
             canvasElement,
-            label: "Cache entries",
+            label: "Saved data sources",
             rowCount: virtualizedEntries.length,
         });
     },

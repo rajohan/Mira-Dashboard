@@ -174,7 +174,7 @@ export function ChatSettingsPanel({
                             </FormField>
                             {modelInventoryError !== undefined && (
                                 <div
-                                    aria-label="Chat model inventory warning"
+                                    aria-label="Available models warning"
                                     className="border-primary-500 bg-primary-800 rounded-lg border p-2"
                                     role="alert"
                                 >
@@ -188,7 +188,7 @@ export function ChatSettingsPanel({
                                             size="sm"
                                             variant="secondary"
                                         >
-                                            Retry model inventory
+                                            Try loading models again
                                         </Button>
                                     )}
                                 </div>
@@ -303,7 +303,7 @@ export function ChatSettingsPanel({
                                 variant="secondary"
                             >
                                 <Icon icon={Sparkles} size="sm" tone="inherit" />
-                                Compact context
+                                Shorten chat history
                             </Button>
                             <Button
                                 className="w-full min-w-0 justify-center"
@@ -315,7 +315,7 @@ export function ChatSettingsPanel({
                                 variant="danger"
                             >
                                 <Icon icon={RotateCcw} size="sm" tone="inherit" />
-                                Reset provider transcript
+                                Reset chat history
                             </Button>
                         </div>
                     </PopoverPanel>

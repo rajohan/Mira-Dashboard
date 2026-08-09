@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate } from "@tanstack/react-router";
-import { Activity, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
@@ -45,49 +45,39 @@ export function AuthenticationBoundary({ children }: AuthenticationBoundaryProps
 
     const verifiedIdentityIsCurrent =
         releasedIdentity !== undefined && releasedIdentity === authenticatedIdentity;
-    const preservedChildren = verifiedIdentityIsCurrent ? (
-        <Activity
-            mode={verificationSettled && status.isSuccess ? "visible" : "hidden"}
-            name="authenticated-route"
-        >
-            {children}
-        </Activity>
-    ) : null;
 
-    if (!verificationSettled) {
-        return (
-            <>
-                {preservedChildren}
-                <output aria-label="Authentication status" className="text-primary-300">
-                    Checking your session…
-                </output>
-            </>
-        );
+    // Once this exact session has been verified, a background auth.status request
+    // must not collapse the route while its previous authenticated result remains
+    // current. A resolved identity change still fails closed below and the root
+    // cache boundary replaces every session-owned query and collection.
+    if (verifiedIdentityIsCurrent && status.isSuccess && !verificationSettled) {
+        return children;
     }
+
     if (status.isError) {
         return (
-            <>
-                {preservedChildren}
-                <Card
-                    aria-labelledby="session-check-error"
-                    className="max-w-xl"
-                    role="alert"
+            <Card aria-labelledby="session-check-error" className="max-w-xl" role="alert">
+                <Heading id="session-check-error" level={1} size="panel">
+                    Session check failed
+                </Heading>
+                <Text className="mt-3">
+                    {dashboardBrowserFailureMessage(status.error)}
+                </Text>
+                <Button
+                    busy={status.isFetching}
+                    className="mt-5"
+                    onClick={() => void status.refetch()}
                 >
-                    <Heading id="session-check-error" level={1} size="panel">
-                        Session check failed
-                    </Heading>
-                    <Text className="mt-3">
-                        {dashboardBrowserFailureMessage(status.error)}
-                    </Text>
-                    <Button
-                        busy={status.isFetching}
-                        className="mt-5"
-                        onClick={() => void status.refetch()}
-                    >
-                        Try again
-                    </Button>
-                </Card>
-            </>
+                    Try again
+                </Button>
+            </Card>
+        );
+    }
+    if (!verificationSettled) {
+        return (
+            <output aria-label="Authentication status" className="text-primary-300">
+                Checking your session…
+            </output>
         );
     }
     if (status.data?.state !== "authenticated") {
@@ -100,5 +90,5 @@ export function AuthenticationBoundary({ children }: AuthenticationBoundaryProps
             </output>
         );
     }
-    return preservedChildren;
+    return children;
 }

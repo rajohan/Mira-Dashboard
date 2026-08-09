@@ -41,7 +41,7 @@ export function JobsRoute() {
     return (
         <div>
             <PageHeader
-                description="Dashboard-local durable jobs and separately owned OpenClaw Gateway cron automations."
+                description="View Dashboard background jobs and manage OpenClaw's own scheduled jobs."
                 eyebrow="Operations"
                 title="Jobs"
             />
@@ -59,7 +59,7 @@ export function JobsRoute() {
                     onClick={() => selectSource("openclaw")}
                     variant={source === "openclaw" ? "primary" : "ghost"}
                 >
-                    OpenClaw cron
+                    OpenClaw schedules
                 </Button>
             </fieldset>
             <div className="mt-8">

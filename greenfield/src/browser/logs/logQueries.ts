@@ -1,0 +1,74 @@
+import { queryOptions } from "@tanstack/react-query";
+
+import { logTailDefaultRows, type LogSnapshotOutput } from "../../contracts/logs.ts";
+import type { LogClient } from "./logClient.ts";
+
+export const logQueryRoot = ["logs"] as const;
+export const logSourcesQueryKey = [...logQueryRoot, "sources"] as const;
+export const logMaintenanceQueryKey = [...logQueryRoot, "maintenance"] as const;
+
+export type LogSnapshotSelection =
+    | { readonly mode: "tail"; readonly sourceId: string }
+    | { readonly mode: "search"; readonly query: string; readonly sourceId: string };
+
+/** @returns Bounded named-source inventory query options. */
+export function logSourcesQueryOptions(client: LogClient) {
+    return queryOptions({
+        queryFn: ({ signal }) => client.query("logs.listSources", {}, { signal }),
+        queryKey: logSourcesQueryKey,
+        retry: false,
+        staleTime: 10_000,
+    });
+}
+
+/** @returns Availability for the fixed worker-owned maintenance policies. */
+export function logMaintenanceQueryOptions(client: LogClient) {
+    return queryOptions({
+        queryFn: ({ signal }) => client.query("logs.maintenanceStatus", {}, { signal }),
+        queryKey: logMaintenanceQueryKey,
+        retry: false,
+        staleTime: 10_000,
+    });
+}
+
+/** @returns One exact tail/search query with no path-bearing browser input. */
+export function logSnapshotQueryOptions(
+    client: LogClient,
+    selection: LogSnapshotSelection | undefined,
+    sourceAvailable: boolean
+) {
+    return queryOptions<LogSnapshotOutput>({
+        enabled: selection !== undefined && sourceAvailable,
+        queryFn: ({ signal }) => {
+            if (selection === undefined) {
+                return Promise.reject(new TypeError("Log source is not selected"));
+            }
+            return selection.mode === "tail"
+                ? client.query(
+                      "logs.tail",
+                      { limit: logTailDefaultRows, sourceId: selection.sourceId },
+                      { signal }
+                  )
+                : client.query(
+                      "logs.search",
+                      {
+                          limit: logTailDefaultRows,
+                          query: selection.query,
+                          sourceId: selection.sourceId,
+                      },
+                      { signal }
+                  );
+        },
+        queryKey: [
+            ...logQueryRoot,
+            "snapshot",
+            selection?.sourceId ?? null,
+            selection?.mode ?? null,
+            selection?.mode === "search" ? selection.query : null,
+        ],
+        refetchInterval: selection?.mode === "tail" ? 5000 : false,
+        refetchIntervalInBackground: false,
+        retry: false,
+        staleTime: selection?.mode === "tail" ? 2000 : 30_000,
+    });
+}

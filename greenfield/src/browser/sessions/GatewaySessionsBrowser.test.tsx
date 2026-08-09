@@ -253,7 +253,7 @@ describe("Gateway sessions browser", () => {
 
             expect(
                 await screen.findByText(
-                    "Outcome could not be confirmed; reconciliation is required before retry."
+                    "We could not confirm whether that action finished. Refresh the session list before trying again."
                 )
             ).toBeTruthy();
             await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
@@ -264,7 +264,7 @@ describe("Gateway sessions browser", () => {
             });
             expect(
                 within(unresolvedDialog).getByText(
-                    "The action outcome could not be confirmed, and reconciliation failed. Retry reconciliation before another action."
+                    "We could not confirm whether the action finished, and the session list could not be refreshed. Try refreshing again before another action."
                 )
             ).toBeTruthy();
             expect(
@@ -276,7 +276,7 @@ describe("Gateway sessions browser", () => {
 
             expect(
                 within(unresolvedDialog).getByRole("button", {
-                    name: "Retry reconciliation",
+                    name: "Try refresh again",
                 })
             ).toBeTruthy();
             await user.click(
@@ -287,9 +287,7 @@ describe("Gateway sessions browser", () => {
                     screen.queryByRole("dialog", { name: "Reset session?" })
                 ).toBeNull()
             );
-            await user.click(
-                screen.getByRole("button", { name: "Retry reconciliation" })
-            );
+            await user.click(screen.getByRole("button", { name: "Try refresh again" }));
 
             expect(
                 await screen.findByText("Primary main after reconciliation")
@@ -301,12 +299,12 @@ describe("Gateway sessions browser", () => {
             );
             expect(
                 screen.getByText(
-                    "Current projection reconciled. Review the session before choosing another action."
+                    "Session list refreshed. Review the session before choosing another action."
                 )
             ).toBeTruthy();
             expect(
                 screen.queryByText(
-                    "Outcome could not be confirmed; reconciliation is required before retry."
+                    "We could not confirm whether that action finished. Refresh the session list before trying again."
                 )
             ).toBeNull();
             expect(mutation).toHaveBeenCalledTimes(1);
@@ -439,14 +437,14 @@ describe("Gateway sessions browser", () => {
             ).toBeDisabled();
             expect(
                 within(blockedDialog).getByText(
-                    "The action outcome could not be confirmed, and reconciliation failed. Retry reconciliation before another action."
+                    "We could not confirm whether the action finished, and the session list could not be refreshed. Try refreshing again before another action."
                 )
             ).toBeTruthy();
             expect(mutation).toHaveBeenCalledTimes(1);
 
             await user.click(
                 within(blockedDialog).getByRole("button", {
-                    name: "Retry reconciliation",
+                    name: "Try refresh again",
                 })
             );
 
@@ -520,7 +518,7 @@ describe("Gateway sessions browser", () => {
 
             await user.click(
                 within(blockedDialog).getByRole("button", {
-                    name: "Retry reconciliation",
+                    name: "Try refresh again",
                 })
             );
 
@@ -600,7 +598,9 @@ describe("Gateway sessions browser", () => {
                 name: "Reset session?",
             });
             expect(
-                await within(blockedDialog).findByText(/reconciliation failed/u)
+                await within(blockedDialog).findByText(
+                    /session list could not be refreshed/u
+                )
             ).toBeVisible();
             expect(
                 within(blockedDialog).getByRole("button", {
@@ -684,7 +684,9 @@ describe("Gateway sessions browser", () => {
         try {
             expect(await screen.findByText("Truncated")).toBeTruthy();
             expect(
-                screen.getByText("Metadata omitted: channel, model, modelProvider")
+                screen.getByText(
+                    "Some details were not shown: channel, model, modelProvider"
+                )
             ).toBeTruthy();
             expect(screen.getByText("Unknown")).toBeTruthy();
         } finally {

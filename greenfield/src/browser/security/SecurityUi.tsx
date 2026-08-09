@@ -53,8 +53,8 @@ export function OneTimeSecretPanel({
                 {title}
             </Heading>
             <Text className="mt-1" tone="warning">
-                Store this now. It is held only in this component and cannot be shown
-                again.
+                Save this now. For your security, it disappears when you dismiss it and
+                cannot be shown again.
             </Text>
             <div className="mt-3 font-mono text-sm break-all text-amber-50">
                 {children}

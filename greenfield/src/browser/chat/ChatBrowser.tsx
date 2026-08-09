@@ -213,10 +213,10 @@ function chatQueryError(
         return dashboardBrowserFailureMessage(input.sessionsError);
     }
     if (input.sessionsError !== null || input.historyFailed) {
-        return "Some chat data could not be refreshed. Last-known rows remain visible.";
+        return "Some chat data could not be updated. The latest available messages remain visible.";
     }
     if (input.runtimeFailed) {
-        return "Live runtime data is unavailable. Drafts remain local.";
+        return "Live updates are unavailable. Drafts remain saved in this browser.";
     }
     return input.actionError;
 }
@@ -345,11 +345,9 @@ export function ChatBrowser({
     });
     const requestedTaskId = selectedTasks[selectedSessionKey];
     const selectableTaskRows = [...taskRows, ...retainedTaskRows];
-    const selectedTaskId =
-        requestedTaskId !== undefined &&
-        selectableTaskRows.some((task) => task.id === requestedTaskId)
-            ? requestedTaskId
-            : selectableTaskRows[0]?.id;
+    const selectedTaskId = selectableTaskRows.some((task) => task.id === requestedTaskId)
+        ? requestedTaskId
+        : undefined;
     const taskDetailQuery = useQuery(
         openClawTaskDetailQueryOptions(client, selectedTaskId)
     );
@@ -683,7 +681,7 @@ export function ChatBrowser({
         }
         if (command === "/reset") {
             setActionNotice(
-                "Open Chat settings and confirm Reset provider transcript to continue."
+                "Open Chat settings and choose Reset chat history to continue."
             );
             return;
         }
@@ -782,7 +780,7 @@ export function ChatBrowser({
                     error: "Outcome is unknown",
                 });
                 setActionError(
-                    "Send outcome could not be confirmed. It remains under runtime reconciliation; do not retry it."
+                    "Dashboard could not confirm whether the message was sent. It will check automatically; do not send it again."
                 );
                 return;
             }
@@ -914,12 +912,12 @@ export function ChatBrowser({
             if (result.outcomeError !== undefined) {
                 setActionError(
                     isDashboardOperationOutcomeUnknown(result.outcomeError)
-                        ? "Stop outcome could not be confirmed. Runtime reconciliation will resolve it."
+                        ? "Dashboard could not confirm whether the response stopped. It will check automatically."
                         : dashboardBrowserFailureMessage(result.outcomeError)
                 );
             } else if (!advanced) {
                 setActionError(
-                    "Stop was accepted, but controls remain blocked until an explicit newer runtime observation arrives."
+                    "The stop request was accepted. Controls remain paused until OpenClaw reports a newer status."
                 );
             }
             if (
@@ -1070,8 +1068,8 @@ export function ChatBrowser({
             if (!reconciled) {
                 setActionError(
                     outcomeUnknown
-                        ? "Settings outcome could not be confirmed. Controls remain blocked until an explicit newer fresh session read arrives."
-                        : "Settings were accepted, but controls remain blocked until an explicit newer fresh session read arrives."
+                        ? "Dashboard could not confirm the settings change. It will check automatically before the controls become available again."
+                        : "Settings were saved. Dashboard is checking OpenClaw before the controls become available again."
                 );
             }
         } catch (error) {
@@ -1142,8 +1140,8 @@ export function ChatBrowser({
             if (!reconciled) {
                 setActionError(
                     outcomeUnknown
-                        ? "Compact outcome could not be confirmed. Controls remain blocked until an explicit newer fresh session read arrives."
-                        : "Compact completed, but controls remain blocked until an explicit newer fresh session read arrives."
+                        ? "Dashboard could not confirm whether the chat history was shortened. It will check automatically before the controls become available again."
+                        : "Chat history was shortened. Dashboard is checking OpenClaw before the controls become available again."
                 );
             }
         } catch (error) {
@@ -1211,8 +1209,8 @@ export function ChatBrowser({
             if (!reconciled) {
                 setActionError(
                     outcomeUnknown
-                        ? "Reset outcome could not be confirmed. Controls remain blocked until an explicit newer fresh session read arrives."
-                        : "Reset completed, but controls remain blocked until an explicit newer fresh session read arrives."
+                        ? "Dashboard could not confirm whether the chat history was reset. It will check automatically before the controls become available again."
+                        : "Chat history was reset. Dashboard is checking OpenClaw before the controls become available again."
                 );
             }
         } catch (error) {
@@ -1424,7 +1422,7 @@ export function ChatBrowser({
                 setCompanionOverride((current) => ({
                     ...current,
                     [sessionKey]: {
-                        error: "Companion outcome could not be confirmed. Waiting for a newer companion-state observation; do not submit the question again.",
+                        error: "Dashboard could not confirm whether the chat helper received the question. It will check automatically; do not submit it again.",
                         question,
                         status: "answering",
                     },
@@ -1573,7 +1571,7 @@ export function ChatBrowser({
                     [sessionKey]: companionOperationView(
                         companionBeforeReset,
                         "resetting",
-                        "Companion reset outcome could not be confirmed. Waiting for a newer companion-state observation; do not reset again."
+                        "Dashboard could not confirm whether the chat helper was reset. It will check automatically; do not reset it again."
                     ),
                 }));
                 try {
@@ -1915,7 +1913,7 @@ export function ChatBrowser({
         ...(taskQueryFailed
             ? {
                   backgroundTasksError: taskQueryHasData
-                      ? "Background tasks could not be refreshed. Last-known tasks remain visible."
+                      ? "Background tasks could not be updated. The latest available tasks remain visible."
                       : "Background tasks are unavailable. Retry to load them.",
               }
             : {}),
@@ -1936,8 +1934,8 @@ export function ChatBrowser({
             : {
                   companionError:
                       companionQuery.data === undefined
-                          ? "Companion state is unavailable. Retry to load it."
-                          : "Companion state could not be refreshed. The last-known exchange remains visible.",
+                          ? "The chat helper is unavailable. Try loading it again."
+                          : "The chat helper could not be updated. The latest available answer remains visible.",
               }),
         connection,
         historyHasNextPage:
@@ -1953,7 +1951,7 @@ export function ChatBrowser({
             ? {}
             : {
                   modelInventoryError:
-                      "Configured models could not be refreshed. Current session controls remain available.",
+                      "Available models could not be updated. Current chat controls remain available.",
               }),
         selectedSessionKey,
         sessionsLoading: sessionsQuery.isPending && sessionsQuery.data === undefined,
@@ -2129,10 +2127,15 @@ export function ChatBrowser({
             }}
             onSelectSession={onSelectedSessionChange}
             onSelectTask={(taskId) =>
-                setSelectedTasks((current) => ({
-                    ...current,
-                    [selectedSessionKey]: taskId,
-                }))
+                setSelectedTasks((current) => {
+                    const next = { ...current };
+                    if (taskId === undefined) {
+                        delete next[selectedSessionKey];
+                    } else {
+                        next[selectedSessionKey] = taskId;
+                    }
+                    return next;
+                })
             }
             onSend={() => void send()}
             onSendSettingsChange={(settings) => void updateProviderSettings(settings)}

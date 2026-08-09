@@ -236,6 +236,30 @@
         },
         {
             "kind": "query",
+            "name": "files.getWriteStatus"
+        },
+        {
+            "kind": "query",
+            "name": "files.list"
+        },
+        {
+            "kind": "query",
+            "name": "files.listRoots"
+        },
+        {
+            "kind": "query",
+            "name": "files.prepareContent"
+        },
+        {
+            "kind": "mutation",
+            "name": "files.prepareUpload"
+        },
+        {
+            "kind": "mutation",
+            "name": "files.prepareWrite"
+        },
+        {
+            "kind": "query",
             "name": "gateway.connection.get"
         },
         {
@@ -277,6 +301,26 @@
         {
             "kind": "mutation",
             "name": "jobs.setClaimingPaused"
+        },
+        {
+            "kind": "query",
+            "name": "logs.listSources"
+        },
+        {
+            "kind": "query",
+            "name": "logs.maintenanceStatus"
+        },
+        {
+            "kind": "mutation",
+            "name": "logs.requestMaintenance"
+        },
+        {
+            "kind": "query",
+            "name": "logs.search"
+        },
+        {
+            "kind": "query",
+            "name": "logs.tail"
         },
         {
             "kind": "mutation",
@@ -437,6 +481,26 @@
         {
             "kind": "mutation",
             "name": "tasks.updateProgress"
+        },
+        {
+            "kind": "query",
+            "name": "terminal.getActiveSession"
+        },
+        {
+            "kind": "query",
+            "name": "terminal.getRuntime"
+        },
+        {
+            "kind": "mutation",
+            "name": "terminal.prepareResume"
+        },
+        {
+            "kind": "mutation",
+            "name": "terminal.prepareSession"
+        },
+        {
+            "kind": "mutation",
+            "name": "terminal.terminateSession"
         }
     ],
     "rawHttp": [
@@ -451,6 +515,11 @@
             "path": "/api/chat/speech/capabilities"
         },
         {
+            "id": "GET /api/files/content/:ticketId",
+            "method": "GET",
+            "path": "/api/files/content/:ticketId"
+        },
+        {
             "id": "GET /api/health/live",
             "method": "GET",
             "path": "/api/health/live"
@@ -461,9 +530,19 @@
             "path": "/api/health/ready"
         },
         {
+            "id": "GET /api/terminal/sessions/:sessionId/socket",
+            "method": "GET",
+            "path": "/api/terminal/sessions/:sessionId/socket"
+        },
+        {
             "id": "HEAD /api/chat/media/:attachmentId",
             "method": "HEAD",
             "path": "/api/chat/media/:attachmentId"
+        },
+        {
+            "id": "HEAD /api/files/content/:ticketId",
+            "method": "HEAD",
+            "path": "/api/files/content/:ticketId"
         },
         {
             "id": "HEAD /api/health/live",
@@ -489,6 +568,11 @@
             "id": "PUT /api/chat/attachments/:ticketId/:attachmentId",
             "method": "PUT",
             "path": "/api/chat/attachments/:ticketId/:attachmentId"
+        },
+        {
+            "id": "PUT /api/files/uploads/:ticketId",
+            "method": "PUT",
+            "path": "/api/files/uploads/:ticketId"
         }
     ],
     "schemaVersion": 1,

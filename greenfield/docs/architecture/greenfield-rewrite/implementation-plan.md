@@ -87,10 +87,18 @@ including restart during streaming.
 
 - implement files/logs, Docker, database, Moltbook, settings, terminal/exec,
   GitHub/PR/release/deploy/rollback, backup, and OpenClaw operations through worker adapters.
-- make the privileged log-rotation adapter own separate reviewed policies for managed Docker
-  regular-file logs beneath `/opt/docker/data` and allowlisted host text logs beneath `/var/log`.
-  The host policy must not recursively discover files or rotate journald storage, binary login/audit
-  databases, sockets, devices, or symlink escapes.
+- keep `/opt/docker` as the separate Docker-stack project and source of truth. Dashboard is its
+  control plane: reviewed worker adapters may inspect or queue bounded operations, but compose
+  files, application data, and deployment ownership do not move into Dashboard state.
+- use Dashboard's worker-owned rotation engine for an exact manifest of reviewed Dashboard,
+  OpenClaw, and application/container regular-file logs, including the selected files beneath
+  `/opt/docker/data`. Use Ubuntu's system logrotate only through a fixed broker for the exact
+  `rsyslog`, `apport`, `dpkg`, and `alternatives` policies. Neither path may recursively discover
+  files or rotate journald storage, binary login/audit databases, sockets, devices, or symlink
+  escapes.
+- treat the configured Terminal workspace root as an initial working-directory catalog only. A
+  real interactive shell can change directory and access anything permitted by its OS identity;
+  filesystem isolation requires a separate mount, namespace, or container sandbox.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

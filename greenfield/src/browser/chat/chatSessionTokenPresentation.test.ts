@@ -11,7 +11,7 @@ describe("chat session token presentation", () => {
                 totalTokensFresh: true,
             })
         ).toEqual({
-            accessibleLabel: "Session token use: 42,000 of 200,000, fresh",
+            accessibleLabel: "Session token use: 42,000 of 200,000, current",
             compactLabel: "42k / 200k",
         });
         expect(
@@ -28,7 +28,7 @@ describe("chat session token presentation", () => {
                 totalTokensFresh: false,
             })
         ).toEqual({
-            accessibleLabel: "Session token use: 1,250,000 of 2,000,000, stale",
+            accessibleLabel: "Session token use: 1,250,000 of 2,000,000, out of date",
             compactLabel: "~1.3m / 2m",
         });
         expect(chatSessionTokenPresentation({ totalTokensFresh: false })).toEqual({

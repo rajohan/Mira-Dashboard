@@ -80,7 +80,7 @@ describe("incident table", () => {
         const table = screen.getByRole("table", { name: "Incidents" });
         expect(
             screen.getByRole("button", {
-                name: "Incident 0; monitor-0; generation 1",
+                name: "Incident 0; monitor-0; occurrence group 1",
             })
         ).toBeTruthy();
         expect(screen.queryByText("Incident 49")).toBeNull();

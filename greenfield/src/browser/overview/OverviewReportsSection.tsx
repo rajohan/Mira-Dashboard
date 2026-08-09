@@ -18,7 +18,7 @@ export function OverviewReportsSection() {
     if (query.isPending && query.data === undefined) {
         return (
             <Card aria-label="Reports overview">
-                <PageState label="Loading reports overview…" status="loading" />
+                <PageState label="Loading recent reports…" status="loading" />
             </Card>
         );
     }
@@ -30,7 +30,7 @@ export function OverviewReportsSection() {
                 onRetry={() => void query.refetch()}
                 retryBusy={query.isFetching}
                 status="error"
-                title="Reports overview unavailable"
+                title="Recent reports unavailable"
             />
         );
     }

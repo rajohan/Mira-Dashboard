@@ -153,7 +153,9 @@ export const DisabledUntilDate: Story = {
             const panel =
                 panelId === null
                     ? undefined
-                    : canvasElement.ownerDocument.getElementById(panelId);
+                    : canvasElement.ownerDocument.querySelector<HTMLElement>(
+                          `#${CSS.escape(panelId)}`
+                      );
             if (!(panel instanceof HTMLElement)) {
                 throw new Error("The disable date calendar did not open.");
             }
@@ -176,6 +178,6 @@ export const FailureAndBusy: Story = {
         await expect(
             canvas.getByText("The schedule update could not be persisted.")
         ).toBeVisible();
-        await expect(canvas.getByRole("button", { name: "Enqueuing…" })).toBeDisabled();
+        await expect(canvas.getByRole("button", { name: "Starting…" })).toBeDisabled();
     },
 };

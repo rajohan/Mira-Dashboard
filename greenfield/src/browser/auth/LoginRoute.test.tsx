@@ -168,15 +168,23 @@ describe("Dashboard login route", () => {
 
         await screen.findByRole("heading", {
             level: 1,
-            name: "Secure first-user setup",
+            name: "Set up Mira Dashboard",
         });
+        expect(screen.getByLabelText("Username")).toHaveAttribute(
+            "placeholder",
+            "Example: operator"
+        );
         await userActions.type(screen.getByLabelText("Username"), "operator");
         await userActions.type(screen.getByLabelText("Dashboard password"), password);
         await userActions.type(
-            screen.getByLabelText("Gateway credential"),
+            screen.getByLabelText("OpenClaw Gateway credential"),
             gatewayCredential
         );
-        await userActions.click(screen.getByRole("button", { name: "Create operator" }));
+        expect(screen.getByLabelText("OpenClaw Gateway credential")).toHaveAttribute(
+            "placeholder",
+            "Paste the Gateway credential"
+        );
+        await userActions.click(screen.getByRole("button", { name: "Create account" }));
 
         expect(
             await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" })
@@ -200,7 +208,11 @@ describe("Dashboard login route", () => {
         await screen.findByRole("heading", { level: 1, name: "Sign in" });
         await userActions.type(screen.getByLabelText("Username"), "operator");
         await userActions.type(screen.getByLabelText("Password"), password);
-        await userActions.click(screen.getByRole("button", { name: "Continue" }));
+        expect(screen.getByLabelText("Password")).toHaveAttribute(
+            "placeholder",
+            "Enter your password"
+        );
+        await userActions.click(screen.getByRole("button", { name: "Sign in" }));
 
         expect(
             await screen.findByRole("heading", {
@@ -233,6 +245,10 @@ describe("Dashboard login route", () => {
             level: 1,
             name: "Multi-factor authentication",
         });
+        expect(screen.getByLabelText("Authenticator code")).toHaveAttribute(
+            "placeholder",
+            "Example: 123456"
+        );
         await userActions.type(screen.getByLabelText("Authenticator code"), code);
         expect(screen.getByLabelText<HTMLInputElement>("Recovery code").value).toBe("");
         await userActions.click(screen.getByRole("button", { name: "Verify code" }));
@@ -378,7 +394,7 @@ describe("Dashboard login route", () => {
             screen.getByLabelText("Password"),
             "correct horse battery staple"
         );
-        await userActions.click(screen.getByRole("button", { name: "Continue" }));
+        await userActions.click(screen.getByRole("button", { name: "Sign in" }));
 
         const alert = await screen.findByRole("alert");
         expect(alert.textContent).toContain("Too many attempts");
@@ -404,7 +420,7 @@ describe("Dashboard login route", () => {
             screen.getByLabelText("Password"),
             "correct horse battery staple"
         );
-        await userActions.click(screen.getByRole("button", { name: "Continue" }));
+        await userActions.click(screen.getByRole("button", { name: "Sign in" }));
 
         const alert = await screen.findByRole("alert");
         expect(alert.textContent).toContain("Too many attempts");

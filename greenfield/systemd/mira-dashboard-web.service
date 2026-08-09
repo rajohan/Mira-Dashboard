@@ -9,7 +9,9 @@ UMask=0077
 WorkingDirectory=%h/projects/mira-dashboard/production/releases/current
 Environment=NODE_ENV=production
 Environment=MIRA_DASHBOARD_PROJECT_ROOT=%h/projects/mira-dashboard
-ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- %h/projects/mira-dashboard/production/runtimes/bun/current/bun %h/projects/mira-dashboard/production/releases/current/server/web.js
+Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw
+Environment=MIRA_DASHBOARD_WORKSPACE_ROOT=%h/.openclaw/workspace
+ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT -- %h/projects/mira-dashboard/production/runtimes/bun/current/bun %h/projects/mira-dashboard/production/releases/current/server/web.js
 StandardOutput=append:%h/projects/mira-dashboard/production/state/logs/web-stdout.log
 StandardError=append:%h/projects/mira-dashboard/production/state/logs/web-stderr.log
 Restart=on-failure
@@ -18,6 +20,8 @@ KillMode=control-group
 TimeoutStopSec=45
 NoNewPrivileges=true
 PrivateTmp=true
+BindReadOnlyPaths=/tmp/openclaw
+ReadOnlyPaths=%h/.openclaw
 CPUWeight=100
 IOWeight=100
 CPUQuota=100%

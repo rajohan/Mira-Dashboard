@@ -101,12 +101,14 @@ describe("schedule detail disable form", () => {
         await user.click(screen.getByRole("radio", { name: /Indefinitely/u }));
         expect(screen.queryByRole("group", { name: "Disabled until" })).toBeNull();
         const reason = screen.getByLabelText("Comment");
+        expect(reason).toHaveAttribute(
+            "placeholder",
+            "Example: Waiting for the maintenance window to finish"
+        );
         fireEvent.change(reason, { target: { value: "Unsafe\nreason" } });
         await user.click(screen.getByRole("button", { name: "Disable schedule" }));
 
-        const error = screen.getByText(
-            "Use 1–1000 visible characters without control characters."
-        );
+        const error = screen.getByText("Enter between 1 and 1,000 characters.");
         expect(reason.getAttribute("aria-describedby")?.split(" ")).toContain(error.id);
         expect(reason).toHaveAttribute("data-invalid");
         expect(onDisable).not.toHaveBeenCalled();

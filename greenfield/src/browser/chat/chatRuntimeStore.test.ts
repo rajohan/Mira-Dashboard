@@ -463,7 +463,7 @@ describe("chat runtime store", () => {
                         },
                     ],
                     runId: "provider:provider-1",
-                    title: "Provider-origin plan",
+                    title: "OpenClaw plan",
                 },
                 projectionTruncated: false,
                 providerRunId: "provider-1",

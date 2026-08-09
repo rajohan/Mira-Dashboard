@@ -13,10 +13,13 @@ function preparedPaths(root: string): PreparedProductionStatePaths {
     return {
         backupsDirectory: `${root}/production/state/backups`,
         jobOutputDirectory: `${root}/production/state/job-output`,
+        logMaintenanceDirectory: `${root}/production/state/log-maintenance`,
         logsDirectory: `${root}/production/state/logs`,
         productionDirectory: `${root}/production`,
         projectRoot: root,
         stateDirectory: `${root}/production/state`,
+        terminalBrokerDirectory: `${root}/production/state/terminal-broker`,
+        workspaceFileUploadsDirectory: `${root}/production/state/workspace-file-uploads`,
     };
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 
@@ -13,6 +13,8 @@ import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient
 import { noOpDashboardRealtimeClient } from "./test/realtime.ts";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
+const userEventModule = await import("@testing-library/user-event");
+const userEvent = userEventModule.default;
 const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
     authenticate: () => Promise.reject(new TypeError("Unexpected authentication")),
     register: () => Promise.reject(new TypeError("Unexpected registration")),
@@ -26,16 +28,71 @@ describe("Dashboard browser application", () => {
             createMemoryHistory({ initialEntries: ["/"] })
         );
         let touchCalls = 0;
+        let logoutCalls = 0;
         let notificationCalls = 0;
         let cacheStatusCalls = 0;
+        const readinessFetch = jest
+            .spyOn(globalThis, "fetch")
+            .mockResolvedValue(Response.json({ status: "ready" }));
         const trpcClient = createDashboardTrpcClient({
             mutation(path, input) {
-                expect(path).toBe("auth.touch");
                 expect(input).toEqual({});
-                touchCalls += 1;
-                return Promise.resolve({ lastSeenAtMs: timestampMs });
+                if (path === "auth.touch") {
+                    touchCalls += 1;
+                    return Promise.resolve({ lastSeenAtMs: timestampMs });
+                }
+                if (path === "auth.logout") {
+                    logoutCalls += 1;
+                    return Promise.resolve({ isOk: true });
+                }
+                return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
             },
             query(path, input) {
+                if (path === "gateway.connection.get") {
+                    expect(input).toEqual({});
+                    return Promise.resolve({
+                        checkedAtMs: timestampMs,
+                        connectedAtMs: timestampMs - 1000,
+                        connectionGeneration: 1,
+                        freshness: "fresh",
+                        lastActivityAtMs: timestampMs,
+                        phase: "connected",
+                        reconnectAttempt: 0,
+                    });
+                }
+                if (path === "jobs.listRuns") {
+                    expect(input).toEqual({ limit: 1 });
+                    return Promise.resolve({
+                        runs: [],
+                        summary: {
+                            activeResourceClasses: [],
+                            control: {
+                                claimingPaused: true,
+                                updatedAtMs: timestampMs,
+                                version: 1,
+                            },
+                            stateCounts: {
+                                cancelled: 0,
+                                failed: 0,
+                                queued: 0,
+                                running: 0,
+                                succeeded: 0,
+                                "timed-out": 0,
+                            },
+                            workers: [
+                                {
+                                    activeRunCount: 0,
+                                    capacity: 1,
+                                    heartbeatAtMs: timestampMs,
+                                    id: "019fe300-0000-7000-8000-000000000001",
+                                    releaseId: "a".repeat(40),
+                                    startedAtMs: timestampMs - 60_000,
+                                    state: "online",
+                                },
+                            ],
+                        },
+                    });
+                }
                 if (path === "cache.getStatus") {
                     expect(input).toEqual({});
                     cacheStatusCalls += 1;
@@ -57,6 +114,9 @@ describe("Dashboard browser application", () => {
                 }
                 if (path !== "auth.status") {
                     return Promise.reject(new TypeError(`Unexpected query: ${path}`));
+                }
+                if (logoutCalls > 0) {
+                    return Promise.resolve({ state: "anonymous" });
                 }
                 return Promise.resolve({
                     session: {
@@ -98,13 +158,28 @@ describe("Dashboard browser application", () => {
             });
             expect(heading.textContent).toBe("Mira Dashboard");
             expect(
+                screen
+                    .getByText("Dashboard", { selector: "header > p" })
+                    .closest("header")
+            ).toHaveClass("bg-primary-950", "h-16", "shrink-0", "border-b");
+            expect(screen.getByRole("complementary").firstElementChild).toHaveClass(
+                "h-16",
+                "shrink-0",
+                "border-b"
+            );
+            expect(
                 screen.getByRole("link", { name: "Skip to content" }).getAttribute("href")
             ).toBe("#dashboard-content");
-            expect(screen.getByRole("heading", { level: 2, name: "Cache" })).toBeTruthy();
             expect(
-                screen.getByRole("heading", { level: 3, name: "No cache attempts yet" })
+                screen.getByRole("heading", {
+                    level: 2,
+                    name: "Saved system data",
+                })
             ).toBeTruthy();
-            expect(screen.queryByText("Select a cache entry")).toBeNull();
+            expect(
+                screen.getByRole("heading", { level: 3, name: "No saved data yet" })
+            ).toBeTruthy();
+            expect(screen.queryByText("Select a data source")).toBeNull();
             await waitFor(() => expect(touchCalls).toBe(1));
             await waitFor(() => expect(notificationCalls).toBe(1));
             await waitFor(() => expect(cacheStatusCalls).toBe(1));
@@ -121,10 +196,49 @@ describe("Dashboard browser application", () => {
             expect(
                 screen.getByRole("button", { name: "Notifications, none unread" })
             ).toBeTruthy();
+            const statusButton = await screen.findByRole("button", {
+                name: "System status: one or more systems need attention. Open details",
+            });
+            expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
+            await userEvent.click(statusButton);
+            expect(
+                screen.getByRole("heading", { level: 2, name: "System status" })
+            ).toBeTruthy();
+            expect(screen.getByText("Dashboard backend")).toBeTruthy();
+            expect(screen.getByText("Dashboard worker")).toBeTruthy();
+            expect(screen.getByText("OpenClaw Gateway")).toBeTruthy();
+            const statusValues = [
+                ...screen.getAllByText("Online ●"),
+                screen.getByText("Needs attention ○"),
+            ];
+            expect(statusValues).toHaveLength(3);
+            for (const statusValue of statusValues) {
+                expect(statusValue).toHaveClass("text-xs", "leading-5", "font-medium");
+                expect(statusValue).not.toHaveClass("text-sm");
+            }
+            expect(readinessFetch).toHaveBeenCalledWith(
+                "/api/health/ready",
+                expect.objectContaining({
+                    cache: "no-store",
+                    credentials: "same-origin",
+                })
+            );
+            await userEvent.click(screen.getByRole("button", { name: "Log out" }));
+            await waitFor(() => expect(logoutCalls).toBe(1));
+            await waitFor(() =>
+                expect(queryClient.getQueryData(authStatusQueryKey)).toEqual({
+                    state: "anonymous",
+                })
+            );
+            await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+            expect(
+                await screen.findByRole("heading", { level: 1, name: "Sign in" })
+            ).toBeTruthy();
         } finally {
             view.unmount();
             await collections.cleanup();
             queryClient.clear();
+            readinessFetch.mockRestore();
         }
     });
 

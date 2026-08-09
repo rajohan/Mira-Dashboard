@@ -314,7 +314,7 @@ export function projectChatRuntimeSnapshot(
                 parts: [
                     {
                         kind: "control",
-                        text: "Runtime projection detail was omitted by the bounded response. Refreshing canonical history…",
+                        text: "Some live response details were not returned. Refreshing chat history…",
                         tone: "warning",
                     },
                 ],
@@ -379,7 +379,7 @@ export function projectChatRuntimeSnapshot(
     if (snapshot.run.state === "unresolved") {
         parts.push({
             kind: "control",
-            text: "Provider outcome remains unresolved after the reconciliation deadline. Refresh canonical history before retrying.",
+            text: "OpenClaw still has not confirmed the result. Refresh chat history before trying again.",
             tone: "warning",
         });
     }
@@ -448,27 +448,27 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
     }
     parts.push({
         kind: "control",
-        text: "Provider-origin activity is shown without a local Dashboard admission.",
+        text: "This activity started outside the Dashboard.",
         tone: "muted",
     });
     if (run.projectionTruncated) {
         parts.push({
             kind: "control",
-            text: "Provider-origin projection detail was omitted by the bounded response.",
+            text: "Some OpenClaw activity details were not returned.",
             tone: "warning",
         });
     }
     if (run.continuity === "interrupted") {
         parts.push({
             kind: "control",
-            text: "Provider-origin continuity was interrupted; some activity may be missing.",
+            text: "Activity updates were interrupted, so some details may be missing.",
             tone: "warning",
         });
     }
     if (run.hasUnprojectedActivity) {
         parts.push({
             kind: "control",
-            text: "Additional provider-origin activity could not be projected.",
+            text: "Some additional OpenClaw activity could not be shown.",
             tone: "warning",
         });
     }
@@ -496,7 +496,7 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                                   : step.status,
                       })),
                       runId: `provider:${run.providerRunId}`,
-                      title: "Provider-origin plan",
+                      title: "OpenClaw plan",
                   },
               }
             : {}),

@@ -407,7 +407,7 @@ describe("Dashboard account security route", () => {
             "Verification and password",
             "Multi-factor authentication",
             "Browser sessions",
-            "Automation credentials",
+            "Automation access",
             "Security audit",
         ]) {
             expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
@@ -524,29 +524,32 @@ describe("Dashboard account security route", () => {
             );
         });
 
-        await userActions.type(screen.getByLabelText("Password proof"), "password proof");
+        await userActions.type(
+            screen.getByLabelText("Password to confirm your identity"),
+            "password proof"
+        );
         await userActions.click(screen.getByRole("button", { name: "Verify password" }));
-        await screen.findByText("Recent password verification refreshed.");
+        await screen.findByText("Password confirmed.");
 
-        await userActions.type(screen.getByLabelText("Authenticator proof"), "123456");
+        await userActions.type(screen.getByLabelText("Authenticator code"), "123456");
         await userActions.click(
             screen.getByRole("button", { name: "Verify authenticator" })
         );
-        await screen.findByText("Recent MFA verification refreshed.");
+        await screen.findByText("Authenticator code accepted.");
 
         await userActions.type(
-            screen.getByLabelText("Recovery proof"),
+            screen.getByLabelText("Recovery code"),
             recoveryCodes()[0]!
         );
         await userActions.click(
             screen.getByRole("button", { name: "Use recovery code" })
         );
-        await screen.findByText("Recovery proof accepted and recent MFA refreshed.");
+        await screen.findByText("Recovery code accepted.");
 
         await userActions.click(
             screen.getByRole("button", { name: "Verify security key" })
         );
-        await screen.findByText("Security-key verification refreshed recent MFA.");
+        await screen.findByText("Security key confirmed.");
 
         await userActions.type(
             screen.getByLabelText("Current password"),
@@ -711,7 +714,9 @@ describe("Dashboard account security route", () => {
                 queryCallCountBeforeDelayedResponse
             );
             expect(
-                screen.queryByText("Password changed and other sessions revoked.")
+                screen.queryByText(
+                    "Password changed. Your other browsers were signed out."
+                )
             ).toBeNull();
 
             await act(() => deferredCollections?.release(1));
@@ -755,15 +760,16 @@ describe("Dashboard account security route", () => {
         };
         const queryClient = renderAccountSecurity(transport);
         const userActions = userEvent.setup();
-        await screen.findByRole("heading", { level: 1, name: "Account security" });
+        const addAuthenticatorButton = await screen.findByRole("button", {
+            name: "Add authenticator app",
+        });
 
-        await userActions.type(
-            screen.getByLabelText("Authenticator label"),
-            "Phone authenticator"
-        );
-        await userActions.click(
-            screen.getByRole("button", { name: "Begin authenticator enrollment" })
-        );
+        expect(screen.queryByLabelText("Name")).toBeNull();
+        await userActions.click(addAuthenticatorButton);
+        const authenticatorName = screen.getByLabelText("Name");
+        expect(authenticatorName).toHaveFocus();
+        await userActions.type(authenticatorName, "Phone authenticator");
+        await userActions.click(screen.getByRole("button", { name: "Continue" }));
         expect(await screen.findByText(enrollment.secret)).toBeTruthy();
         expect(cachedData(queryClient)).not.toContain(enrollment.secret);
 
@@ -825,18 +831,48 @@ describe("Dashboard account security route", () => {
         };
         renderAccountSecurity(transport, webAuthnClient);
         const userActions = userEvent.setup();
-        await screen.findByRole("heading", { level: 1, name: "Account security" });
+        const addSecurityKeyButton = await screen.findByRole("button", {
+            name: "Add security key",
+        });
 
-        await userActions.type(
-            screen.getByLabelText("Security-key label"),
-            credential.label
-        );
-        await userActions.click(
-            screen.getByRole("button", { name: "Enroll security key" })
-        );
+        await userActions.click(addSecurityKeyButton);
+        await userActions.type(screen.getByLabelText("Name"), credential.label);
+        await userActions.click(screen.getByRole("button", { name: "Continue" }));
 
         expect(await screen.findByText(credential.label)).toBeTruthy();
         expect(registrationInputs).toEqual([registrationOptions]);
+    });
+
+    test("does not begin MFA enrollment before the name step continues", async () => {
+        const transport = new SecurityTransport(disabledSummary);
+        renderAccountSecurity(transport);
+        const userActions = userEvent.setup();
+        const addAuthenticatorButton = await screen.findByRole("button", {
+            name: "Add authenticator app",
+        });
+
+        await userActions.click(addAuthenticatorButton);
+        const authenticatorName = screen.getByLabelText("Name");
+        expect(authenticatorName).toHaveFocus();
+        await userActions.type(authenticatorName, "Phone authenticator");
+        await userActions.click(screen.getByRole("button", { name: "Cancel" }));
+        await waitForDialogExit();
+        expect(addAuthenticatorButton).toHaveFocus();
+        expect(transport.calls.filter((call) => call.kind === "mutation")).toHaveLength(
+            0
+        );
+
+        const addSecurityKeyButton = screen.getByRole("button", {
+            name: "Add security key",
+        });
+        await userActions.click(addSecurityKeyButton);
+        expect(screen.getByLabelText("Name")).toHaveFocus();
+        await userActions.keyboard("{Escape}");
+        await waitForDialogExit();
+        expect(addSecurityKeyButton).toHaveFocus();
+        expect(transport.calls.filter((call) => call.kind === "mutation")).toHaveLength(
+            0
+        );
     });
 
     test("confirms destructive MFA actions before mutation", async () => {
@@ -903,7 +939,7 @@ describe("Dashboard account security route", () => {
         await waitForDialogExit();
 
         await userActions.click(
-            screen.getByRole("button", { name: "Rotate recovery codes" })
+            screen.getByRole("button", { name: "Create new recovery codes" })
         );
         expect(
             transport.calls.filter(
@@ -911,7 +947,7 @@ describe("Dashboard account security route", () => {
             )
         ).toHaveLength(0);
         await userActions.click(
-            screen.getByRole("button", { name: "Rotate recovery codes" })
+            screen.getByRole("button", { name: "Create new recovery codes" })
         );
         await waitForDialogExit();
         expect(screen.getByText(codes[0]!)).toBeTruthy();
@@ -962,12 +998,12 @@ describe("Dashboard account security route", () => {
         await screen.findByText(automationPrincipal.label);
 
         await userActions.click(
-            screen.getByRole("button", { name: /Manage credentials/u })
+            screen.getByRole("button", { name: /Manage access tokens/u })
         );
         await screen.findByText(automationCredential.label);
         await userActions.click(
             screen.getByRole("button", {
-                name: `Revoke credential ${automationCredential.label}`,
+                name: `Revoke access token ${automationCredential.label}`,
             })
         );
         expect(
@@ -976,7 +1012,7 @@ describe("Dashboard account security route", () => {
             )
         ).toHaveLength(0);
         await userActions.click(
-            screen.getByRole("button", { name: "Revoke credential" })
+            screen.getByRole("button", { name: "Revoke access token" })
         );
         expect(await screen.findByText(/revoked /u)).toBeTruthy();
         await waitForDialogExit();
@@ -988,7 +1024,7 @@ describe("Dashboard account security route", () => {
 
         await userActions.click(
             screen.getByRole("button", {
-                name: `Disable principal ${automationPrincipal.label}`,
+                name: `Disable automation account ${automationPrincipal.label}`,
             })
         );
         expect(
@@ -996,9 +1032,7 @@ describe("Dashboard account security route", () => {
                 (call) => call.path === "automationSecurity.disablePrincipal"
             )
         ).toHaveLength(0);
-        await userActions.click(
-            screen.getByRole("button", { name: "Disable principal" })
-        );
+        await userActions.click(screen.getByRole("button", { name: "Disable account" }));
         await waitFor(() =>
             expect(
                 transport.calls.filter(
@@ -1034,7 +1068,7 @@ describe("Dashboard account security route", () => {
         await screen.findByText(automationPrincipal.label);
 
         await userActions.click(
-            screen.getByRole("button", { name: /Manage credentials/u })
+            screen.getByRole("button", { name: /Manage access tokens/u })
         );
 
         const credentialLabel = await screen.findByText(expiredCredential.label);
@@ -1042,12 +1076,12 @@ describe("Dashboard account security route", () => {
         expect(credentialItem?.textContent).toContain("expired ");
         expect(
             screen.queryByRole("button", {
-                name: `Stage replacement for ${expiredCredential.label}`,
+                name: `Create replacement access token for ${expiredCredential.label}`,
             })
         ).toBeNull();
         expect(
             screen.queryByRole("button", {
-                name: `Revoke credential ${expiredCredential.label}`,
+                name: `Revoke access token ${expiredCredential.label}`,
             })
         ).toBeNull();
     });
@@ -1074,21 +1108,21 @@ describe("Dashboard account security route", () => {
         await screen.findByText("Other browser");
 
         await userActions.click(
-            screen.getByRole("button", { name: "Revoke session Other browser" })
+            screen.getByRole("button", { name: "Sign out browser Other browser" })
         );
         expect(
-            screen.getByRole("dialog", { name: "Revoke browser session?" })
+            screen.getByRole("dialog", { name: "Sign out this browser?" })
         ).toBeTruthy();
         expect(
             transport.calls.filter((call) => call.path === "auth.revokeSession")
         ).toHaveLength(0);
-        await userActions.click(screen.getByRole("button", { name: "Revoke session" }));
+        await userActions.click(screen.getByRole("button", { name: "Sign out browser" }));
         await waitFor(() => expect(screen.queryByText("Other browser")).toBeNull());
         await userActions.click(
-            screen.getByRole("button", { name: "Revoke other sessions" })
+            screen.getByRole("button", { name: "Sign out other browsers" })
         );
         await userActions.click(
-            screen.getByRole("button", { name: "Revoke other sessions" })
+            screen.getByRole("button", { name: "Sign out other browsers" })
         );
         await waitFor(() =>
             expect(
@@ -1096,10 +1130,10 @@ describe("Dashboard account security route", () => {
             ).toHaveLength(1)
         );
         await userActions.click(
-            screen.getByRole("button", { name: "Revoke every session" })
+            screen.getByRole("button", { name: "Sign out every browser" })
         );
         await userActions.click(
-            screen.getByRole("button", { name: "Revoke every session" })
+            screen.getByRole("button", { name: "Sign out every browser" })
         );
 
         await screen.findByRole("heading", { level: 1, name: "Sign in" });
@@ -1136,23 +1170,26 @@ describe("Dashboard account security route", () => {
         };
         const queryClient = renderAccountSecurity(transport);
         const userActions = userEvent.setup();
-        await screen.findByRole("heading", { level: 1, name: "Account security" });
+        await screen.findByRole("heading", {
+            level: 3,
+            name: "Create automation account",
+        });
 
         await userActions.type(
-            screen.getByLabelText("Principal ID"),
+            screen.getByLabelText("Account ID"),
             automationPrincipal.id
         );
         await userActions.type(
-            screen.getByLabelText("Principal label"),
+            screen.getByLabelText("Account name"),
             automationPrincipal.label
         );
         await userActions.type(
-            screen.getByLabelText("Initial credential label"),
+            screen.getByLabelText("First token name"),
             automationCredential.label
         );
         await userActions.click(screen.getByLabelText("notifications:read"));
         await userActions.click(
-            screen.getByRole("button", { name: "Create principal and credential" })
+            screen.getByRole("button", { name: "Create account and token" })
         );
 
         expect(await screen.findByText(token)).toBeTruthy();

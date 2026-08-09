@@ -29,6 +29,15 @@ export type JobManualExposure = "cache-write" | "jobs-write" | "none";
 export type JobActionEventWriteResult = "appended" | "dropped" | "truncated";
 export type JobCacheAttemptWriteResult = "committed" | "lost-claim";
 
+/** Exact durable action identity for worker-owned fixed-policy log maintenance. */
+export const logMaintenanceJobActionKey = "maintenance.rotate-logs";
+/** Automatic schedule runs only the custom managed application/container policy. */
+export const logMaintenanceJobScheduleId = "maintenance.rotate-managed-logs";
+/** Worker-only dynamic action used for one already-spooled structural file write. */
+export const workspaceFileWriteJobActionKey = "workspace-files.apply-write";
+/** Retry-safe worker action backed by a durable replace intent and atomic exchange. */
+export const workspaceFileReplaceJobActionKey = "workspace-files.apply-replacement";
+
 export type JobCacheAttemptCommit =
     | {
           readonly durationMs: number;
@@ -93,23 +102,36 @@ export interface JobActionExecutionContext {
 }
 
 /** Code-owned action metadata reconciled into schedules and captured into each run. */
-export interface JobActionDefinition {
+export interface JobExecutableActionDefinition {
     readonly actionKey: string;
-    readonly actionPayload: JsonObject;
     readonly attemptLimit: number;
     readonly cancellationPolicy: JobCancellationPolicy;
-    readonly defaultEnabled: boolean;
-    readonly defaultSchedule: ScheduleConfiguration;
     readonly description: string;
     readonly displayName: string;
-    readonly initialDue: JobInitialDuePolicy;
     readonly manualExposure: JobManualExposure;
     readonly priority: number;
     readonly resourceClass: JobResourceClass;
     readonly resourceKeys: readonly string[];
     readonly retrySafe: boolean;
-    readonly scheduleId: string;
     readonly timeoutMs: number;
+}
+
+/** Release-owned action whose fixed payload is reconciled into one durable schedule. */
+export interface JobActionDefinition extends JobExecutableActionDefinition {
+    readonly actionPayload: JsonObject;
+    readonly defaultEnabled: boolean;
+    readonly defaultSchedule: ScheduleConfiguration;
+    readonly initialDue: JobInitialDuePolicy;
+    readonly scheduleId: string;
+}
+
+/** Dynamic action accepted only through a domain-specific durable queue. */
+export interface JobUnscheduledActionDefinition extends JobExecutableActionDefinition {
+    readonly actionPayload?: never;
+    readonly defaultEnabled?: never;
+    readonly defaultSchedule?: never;
+    readonly initialDue?: never;
+    readonly scheduleId?: never;
 }
 
 /** Worker-owned authority for one exact action definition. */
@@ -119,8 +141,35 @@ export type JobActionExecutor = (
 ) => Effect.Effect<JobRunResult, unknown>;
 
 /** Combined definition and executor accepted only at the worker composition boundary. */
-export interface JobActionRegistration extends JobActionDefinition {
-    readonly execute: JobActionExecutor;
+export type JobActionRegistration = (
+    | JobActionDefinition
+    | JobUnscheduledActionDefinition
+) & { readonly execute: JobActionExecutor };
+
+function isScheduledJobActionRegistration(
+    registration: JobActionRegistration
+): registration is JobActionDefinition & { readonly execute: JobActionExecutor } {
+    return registration.scheduleId !== undefined;
+}
+
+function validateExecutableActionDefinition<T extends JobExecutableActionDefinition>(
+    definition: T
+): T {
+    v.parse(jobActionKeySchema, definition.actionKey);
+    v.parse(jobAttemptLimitSchema, definition.attemptLimit);
+    v.parse(jobCancellationPolicySchema, definition.cancellationPolicy);
+    v.parse(jobDescriptionSchema, definition.description);
+    v.parse(jobDisplayNameSchema, definition.displayName);
+    v.parse(jobPrioritySchema, definition.priority);
+    v.parse(jobResourceClassSchema, definition.resourceClass);
+    const resourceKeys = v.parse(jobResourceKeysSchema, definition.resourceKeys);
+    v.parse(jobManualExposureSchema, definition.manualExposure);
+    v.parse(v.boolean("Job retry-safe flag is invalid"), definition.retrySafe);
+    v.parse(jobTimeoutSchema, definition.timeoutMs);
+    return Object.freeze({
+        ...definition,
+        resourceKeys: Object.freeze([...resourceKeys]),
+    });
 }
 
 /**
@@ -131,31 +180,31 @@ export interface JobActionRegistration extends JobActionDefinition {
 export function validateJobActionDefinition(
     definition: JobActionDefinition
 ): JobActionDefinition {
-    v.parse(jobActionKeySchema, definition.actionKey);
+    const executable = validateExecutableActionDefinition(definition);
     const actionPayload = v.parse(jobPayloadSchema, definition.actionPayload);
-    v.parse(jobAttemptLimitSchema, definition.attemptLimit);
-    v.parse(jobCancellationPolicySchema, definition.cancellationPolicy);
     v.parse(v.boolean("Job default-enabled flag is invalid"), definition.defaultEnabled);
     const defaultSchedule = v.parse(
         scheduleConfigurationSchema,
         definition.defaultSchedule
     );
-    v.parse(jobDescriptionSchema, definition.description);
-    v.parse(jobDisplayNameSchema, definition.displayName);
     v.parse(jobInitialDuePolicySchema, definition.initialDue);
-    v.parse(jobPrioritySchema, definition.priority);
-    v.parse(jobResourceClassSchema, definition.resourceClass);
-    const resourceKeys = v.parse(jobResourceKeysSchema, definition.resourceKeys);
-    v.parse(jobManualExposureSchema, definition.manualExposure);
-    v.parse(v.boolean("Job retry-safe flag is invalid"), definition.retrySafe);
     v.parse(scheduleIdSchema, definition.scheduleId);
-    v.parse(jobTimeoutSchema, definition.timeoutMs);
     return Object.freeze({
-        ...definition,
+        ...executable,
         actionPayload: Object.freeze({ ...actionPayload }),
         defaultSchedule: Object.freeze({ ...defaultSchedule }),
-        resourceKeys: Object.freeze([...resourceKeys]),
     });
+}
+
+/**
+ * Validates dynamic worker metadata that deliberately has no schedule identity.
+ * @param definition Candidate unscheduled worker action.
+ * @returns Frozen validated action metadata.
+ */
+export function validateJobUnscheduledActionDefinition(
+    definition: JobUnscheduledActionDefinition
+): JobUnscheduledActionDefinition {
+    return validateExecutableActionDefinition(definition);
 }
 
 /**
@@ -166,7 +215,9 @@ export function validateJobActionDefinition(
 export function validateJobActionRegistration(
     registration: JobActionRegistration
 ): JobActionRegistration {
-    const definition = validateJobActionDefinition(registration);
+    const definition = isScheduledJobActionRegistration(registration)
+        ? validateJobActionDefinition(registration)
+        : validateJobUnscheduledActionDefinition(registration);
     v.parse(v.function("Job action executor is invalid"), registration.execute);
     return Object.freeze({ ...definition, execute: registration.execute });
 }
@@ -216,9 +267,66 @@ const systemHostCacheDefinition = validateJobActionDefinition({
     timeoutMs: 30_000,
 });
 
+const logMaintenanceDefinition = validateJobActionDefinition({
+    actionKey: logMaintenanceJobActionKey,
+    actionPayload: Object.freeze({ policyId: "docker-managed" }),
+    attemptLimit: 1,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: 15 * 60_000,
+        kind: "interval",
+    }),
+    description:
+        "Runs the fixed worker-owned managed log policy; reviewed host policies remain explicit operator requests.",
+    displayName: "Managed log maintenance",
+    initialDue: "immediate",
+    manualExposure: "none",
+    priority: 0,
+    resourceClass: "host-heavy",
+    resourceKeys: Object.freeze(["host.logs"]),
+    retrySafe: false,
+    scheduleId: logMaintenanceJobScheduleId,
+    timeoutMs: 5 * 60_000,
+});
+
+/** Honest non-retryable create definition; its payload is supplied by the actor-bound Files queue. */
+export const workspaceFileWriteJobActionDefinition =
+    validateJobUnscheduledActionDefinition({
+        actionKey: workspaceFileWriteJobActionKey,
+        attemptLimit: 1,
+        cancellationPolicy: "cooperative",
+        description: "Creates one bounded descriptor-rooted workspace file.",
+        displayName: "Workspace file create",
+        manualExposure: "none",
+        priority: 10,
+        resourceClass: "host-heavy",
+        resourceKeys: Object.freeze(["workspace.files"]),
+        retrySafe: false,
+        timeoutMs: 2 * 60_000,
+    });
+
+/** Durable-intent-backed replacement definition that can recover after worker restart. */
+export const workspaceFileReplaceJobActionDefinition =
+    validateJobUnscheduledActionDefinition({
+        actionKey: workspaceFileReplaceJobActionKey,
+        attemptLimit: 3,
+        cancellationPolicy: "cooperative",
+        description:
+            "Replaces one bounded descriptor-rooted workspace file with durable CAS recovery.",
+        displayName: "Workspace file replacement",
+        manualExposure: "none",
+        priority: 10,
+        resourceClass: "host-heavy",
+        resourceKeys: Object.freeze(["workspace.files"]),
+        retrySafe: true,
+        timeoutMs: 2 * 60_000,
+    });
+
 /** Complete reviewed pure-definition registry for this slice. */
 export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
+    logMaintenanceDefinition,
     workerSmokeDefinition,
 ]);
 

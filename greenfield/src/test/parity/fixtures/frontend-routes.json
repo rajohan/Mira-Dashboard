@@ -257,7 +257,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "terminal",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/terminal",
                 "phase": "phase-5"
             }

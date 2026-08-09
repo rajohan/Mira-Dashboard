@@ -270,6 +270,9 @@ describe("production user-systemd service control", () => {
                 "Environment=MIRA_DASHBOARD_PROJECT_ROOT=%h/projects/mira-dashboard"
             );
             expect(unit).toContain(
+                "Environment=MIRA_DASHBOARD_WORKSPACE_ROOT=%h/.openclaw/workspace"
+            );
+            expect(unit).toContain(
                 "WorkingDirectory=%h/projects/mira-dashboard/production/releases/current"
             );
             expect(unit).toMatch(
@@ -280,8 +283,22 @@ describe("production user-systemd service control", () => {
             );
         }
         expect(web).toContain("MemoryHigh=768M");
+        expect(web).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
+        expect(web).toContain(
+            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
+        );
+        expect(worker).not.toContain("MIRA_DASHBOARD_OPENCLAW_ROOT");
+        expect(worker).toContain(
+            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
+        );
         expect(web).toContain("MemoryMax=1G");
         expect(web).toContain("TasksMax=96");
+        expect(web).toContain("ReadOnlyPaths=%h/.openclaw");
+        expect(web).toContain("PrivateTmp=true\nBindReadOnlyPaths=/tmp/openclaw");
+        expect(web).not.toContain("\nBindPaths=/tmp/openclaw");
+        expect(worker).not.toContain("ReadOnlyPaths=%h/.openclaw");
+        expect(worker).toContain("PrivateTmp=true\nBindPaths=/tmp/openclaw");
+        expect(worker).not.toContain("BindReadOnlyPaths=/tmp/openclaw");
         expect(web).toContain("CPUQuota=100%");
         expect(worker).toContain("MemoryHigh=768M");
         expect(worker).toContain("MemoryMax=1536M");

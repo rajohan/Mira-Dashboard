@@ -3,9 +3,11 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
 import {
+    createJobWorkerActionResolver,
+    createLogMaintenanceJobExecutor,
     createSystemHostExecutor,
+    createWorkspaceFileWriteJobExecutor,
     createJobWorkerActionRegistry,
-    findJobWorkerAction,
 } from "./actionExecutors.ts";
 import {
     type JobActionExecutionContext,
@@ -32,20 +34,26 @@ const successfulExecutor = () => Effect.succeed({});
 
 describe("worker-only job executor registry", () => {
     test("matches every pure definition with one exact executor", () => {
-        expect(findJobWorkerAction("system.worker-smoke")).toBeDefined();
-        expect(findJobWorkerAction("cache.refresh.system-host")).toBeDefined();
-        expect(findJobWorkerAction("system.shell")).toBeUndefined();
+        const findAction = createJobWorkerActionResolver({
+            run: () => Promise.resolve(),
+        });
+        expect(findAction("system.worker-smoke")).toBeDefined();
+        expect(findAction("cache.refresh.system-host")).toBeDefined();
+        expect(findAction("maintenance.rotate-logs")).toBeDefined();
+        expect(findAction("system.shell")).toBeUndefined();
     });
 
     test("fails closed for missing, extra, and duplicate executor keys", () => {
         expect(() =>
             createJobWorkerActionRegistry(jobActionDefinitions, [
+                { actionKey: "maintenance.rotate-logs", execute: successfulExecutor },
                 { actionKey: "system.worker-smoke", execute: successfulExecutor },
             ])
         ).toThrow("do not exactly match");
         expect(() =>
             createJobWorkerActionRegistry(jobActionDefinitions, [
                 { actionKey: "cache.refresh.system-host", execute: successfulExecutor },
+                { actionKey: "maintenance.rotate-logs", execute: successfulExecutor },
                 { actionKey: "system.worker-smoke", execute: successfulExecutor },
                 { actionKey: "system.extra", execute: successfulExecutor },
             ])
@@ -53,10 +61,124 @@ describe("worker-only job executor registry", () => {
         expect(() =>
             createJobWorkerActionRegistry(jobActionDefinitions, [
                 { actionKey: "cache.refresh.system-host", execute: successfulExecutor },
+                { actionKey: "maintenance.rotate-logs", execute: successfulExecutor },
                 { actionKey: "system.worker-smoke", execute: successfulExecutor },
                 { actionKey: "system.worker-smoke", execute: successfulExecutor },
             ])
         ).toThrow("do not exactly match");
+    });
+
+    test("validates a fixed log policy and propagates Effect cancellation", async () => {
+        const calls: Array<{
+            policyId: string;
+            signal: AbortSignal | undefined;
+        }> = [];
+        const executor = createLogMaintenanceJobExecutor({
+            run(policyId, signal) {
+                calls.push({ policyId, signal });
+                return Promise.resolve();
+            },
+        });
+        expect(
+            await Effect.runPromise(
+                executor(executionContext([]), { policyId: "docker-managed" })
+            )
+        ).toEqual({
+            completedAtMs: 5000,
+            policyId: "docker-managed",
+            status: "completed",
+        });
+        expect(calls).toHaveLength(1);
+        expect(calls[0]?.policyId).toBe("docker-managed");
+        expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
+
+        expect(
+            Effect.runPromise(
+                executor(executionContext([]), {
+                    policyId: "/etc/logrotate.d/rsyslog",
+                })
+            )
+        ).rejects.toBeInstanceOf(Error);
+        expect(calls).toHaveLength(1);
+    });
+
+    test("keeps the dynamic workspace write executor worker-only and path-free", async () => {
+        const calls: unknown[] = [];
+        const executor = createWorkspaceFileWriteJobExecutor({
+            apply(command, signal) {
+                calls.push({ command, signal });
+                return Promise.resolve({
+                    modifiedAtMs: 4000,
+                    revision: "b".repeat(64),
+                    sizeBytes: 12,
+                });
+            },
+        });
+        const payload = {
+            actorBindingSha256: "a".repeat(64),
+            command: {
+                fileName: "notes.txt",
+                locator: { rootId: "workspace", segments: [] },
+                mimeType: "text/plain",
+                operation: "create",
+                sha256: "c".repeat(64),
+                sizeBytes: 12,
+                spoolId: "019fdf50-0000-4000-8000-000000000001",
+                ticketId: "019fdf50-0000-4000-8000-000000000002",
+            },
+        } as const;
+
+        expect(await Effect.runPromise(executor(executionContext([]), payload))).toEqual({
+            modifiedAtMs: 4000,
+            revision: "b".repeat(64),
+            sizeBytes: 12,
+            status: "completed",
+            ticketId: payload.command.ticketId,
+        });
+        expect(calls).toMatchObject([
+            {
+                command: payload.command,
+                signal: expect.any(AbortSignal),
+            },
+        ]);
+
+        const findAction = createJobWorkerActionResolver(
+            { run: () => Promise.resolve() },
+            { apply: () => Promise.reject(new Error("not executed")) }
+        );
+        expect(findAction("workspace-files.apply-write")).toBeDefined();
+        expect(findAction("workspace-files.apply-write")).not.toHaveProperty(
+            "scheduleId"
+        );
+        expect(findAction("workspace-files.apply-replacement")).toMatchObject({
+            attemptLimit: 3,
+            retrySafe: true,
+        });
+
+        const failedExecutor = createWorkspaceFileWriteJobExecutor({
+            apply: () => Promise.reject(new Error("private write failure")),
+        });
+        const createFailure = await Effect.runPromise(
+            failedExecutor(executionContext([]), payload)
+        ).catch((error: unknown) => error);
+        expect(createFailure).toBeInstanceOf(Error);
+        expect(createFailure).not.toBeInstanceOf(JobActionRetryableError);
+
+        const replaceFailure = await Effect.runPromise(
+            failedExecutor(executionContext([]), {
+                ...payload,
+                command: {
+                    ...payload.command,
+                    expectedRevision: "d".repeat(64),
+                    locator: {
+                        rootId: "workspace",
+                        segments: [payload.command.fileName],
+                    },
+                    operation: "replace",
+                },
+            })
+        ).catch((error: unknown) => error);
+        expect(replaceFailure).toBeInstanceOf(JobActionRetryableError);
     });
 
     test("commits bounded host data and persists only redacted provider failures", async () => {

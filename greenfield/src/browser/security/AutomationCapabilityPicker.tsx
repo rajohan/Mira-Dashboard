@@ -21,7 +21,12 @@ export function AutomationCapabilityPicker({
     value,
 }: AutomationCapabilityPickerProps) {
     return (
-        <Fieldset className="mt-4" disabled={disabled} legend="Capabilities">
+        <Fieldset
+            className="mt-4"
+            description="Choose exactly what this automation account can access."
+            disabled={disabled}
+            legend="Permissions"
+        >
             <div className="mt-2 flex flex-wrap gap-4">
                 {applicationCapabilities.map((capability) => (
                     <Checkbox

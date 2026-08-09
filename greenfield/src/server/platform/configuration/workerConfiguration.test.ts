@@ -14,6 +14,7 @@ function validEnvironment(): Record<string, unknown> {
     return {
         MIRA_DASHBOARD_LOG_LEVEL: "warn",
         MIRA_DASHBOARD_PROJECT_ROOT: "/srv/mira-dashboard",
+        MIRA_DASHBOARD_WORKSPACE_ROOT: "/srv/mira-workspace",
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "worker-gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
@@ -43,6 +44,7 @@ describe("worker application configuration", () => {
             logLevel: "info",
             nodeEnvironment: "production",
             projectRoot: "/srv/mira-dashboard",
+            workspaceRoot: "/srv/mira-workspace",
         });
         expect(Redacted.value(configuration.gatewayToken)).toBe(
             "worker-gateway-token-test-value"
@@ -123,6 +125,8 @@ describe("worker application configuration", () => {
             ["MIRA_DASHBOARD_LOG_LEVEL", "verbose", "invalid"],
             ["MIRA_DASHBOARD_PROJECT_ROOT", "relative", "invalid"],
             ["MIRA_DASHBOARD_PROJECT_ROOT", undefined, "missing"],
+            ["MIRA_DASHBOARD_WORKSPACE_ROOT", "relative", "invalid"],
+            ["MIRA_DASHBOARD_WORKSPACE_ROOT", undefined, "missing"],
             ["OPENCLAW_GATEWAY_TOKEN", undefined, "missing"],
             ["OPENCLAW_GATEWAY_URL", "wss://gateway.example.com", "invalid"],
         ] as const) {

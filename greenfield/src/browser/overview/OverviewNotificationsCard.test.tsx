@@ -45,7 +45,7 @@ describe("OverviewNotificationsCard", () => {
         ).toBeTruthy();
         expect(within(metric("Unread")).getByText("3")).toBeTruthy();
         expect(within(metric("Read")).getByText("8")).toBeTruthy();
-        expect(within(metric("Newest 100")).getByText("1")).toBeTruthy();
+        expect(within(metric("Shown")).getByText("1")).toBeTruthy();
         expect(screen.getByText("Operational warning")).toBeTruthy();
         expect(screen.getByText("warning")).toBeTruthy();
         expect(screen.getByText("unread")).toBeTruthy();
@@ -57,7 +57,9 @@ describe("OverviewNotificationsCard", () => {
             "href",
             "/reports?reportId=019fe300-0000-7000-8000-000000000040"
         );
-        expect(screen.getByText(/Older notifications are available/u)).toBeTruthy();
+        expect(
+            screen.getByText(/Use the notification bell to see older notifications/u)
+        ).toBeTruthy();
         expect(screen.queryByRole("button")).toBeNull();
     });
 
@@ -70,7 +72,7 @@ describe("OverviewNotificationsCard", () => {
 
         expect(screen.getByText("No notifications.")).toBeTruthy();
         expect(within(metric("Unread")).getByText("0")).toBeTruthy();
-        expect(within(metric("Newest 100")).getByText("0")).toBeTruthy();
+        expect(within(metric("Shown")).getByText("0")).toBeTruthy();
         expect(screen.queryByText(/Older notifications/u)).toBeNull();
     });
 });

@@ -13,7 +13,16 @@ import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Text } from "../ui/Text.tsx";
 import type { OpenClawCronRunsView } from "./openClawCronQueries.ts";
-import { openClawCronScheduleLabel } from "./presentation.ts";
+import {
+    openClawCronDeliveryModeLabel,
+    openClawCronDeliveryStatusLabel,
+    openClawCronPayloadLabel,
+    openClawCronRunStatusLabel,
+    openClawCronScheduleLabel,
+    openClawCronSessionTargetLabel,
+    openClawCronSynchronizationLabel,
+    openClawCronWakeModeLabel,
+} from "./presentation.ts";
 
 interface OpenClawCronDetailProps {
     readonly actionBusy: boolean;
@@ -82,38 +91,41 @@ export function OpenClawCronDetail({
     const definitionRows: readonly (readonly [string, ReactNode])[] = [
         ["Schedule", openClawCronScheduleLabel(job)],
         ...(job.agentId === undefined ? [] : ([["Agent", job.agentId]] as const)),
-        ["Session target", job.sessionTarget],
-        ["Payload kind", job.payload.kind],
-        ...(payloadRedacted
-            ? ([["Payload content", "Redacted privileged content"]] as const)
-            : []),
-        ["Delivery", job.deliveryMode],
+        ["Session", openClawCronSessionTargetLabel(job.sessionTarget)],
+        ["Task type", openClawCronPayloadLabel(job.payload.kind)],
+        ...(payloadRedacted ? ([["Task content", "Hidden for security"]] as const) : []),
+        ["Delivery", openClawCronDeliveryModeLabel(job.deliveryMode)],
         ...(delivery === undefined
             ? []
             : ([
                   [
                       "Delivery target",
                       delivery.targetConfigured
-                          ? "Configured (write-only)"
+                          ? "Configured (hidden for security)"
                           : "Not configured",
                   ],
                   [
                       "Completion webhook",
                       delivery.completionDestinationConfigured
-                          ? "Configured (write-only)"
+                          ? "Configured (hidden for security)"
                           : "Not configured",
                   ],
                   [
                       "Failure target",
                       delivery.failureDestination?.targetConfigured === true
-                          ? "Configured (write-only)"
+                          ? "Configured (hidden for security)"
                           : "Not configured",
                   ],
               ] as const)),
-        ["Wake mode", job.wakeMode],
+        ["Start timing", openClawCronWakeModeLabel(job.wakeMode)],
         ["Next run", dateTime(job.state.nextRunAtMs)],
         ["Last run", dateTime(job.state.lastRunAtMs)],
-        ["Last status", job.state.lastRunStatus ?? "—"],
+        [
+            "Last status",
+            job.state.lastRunStatus === undefined
+                ? "—"
+                : openClawCronRunStatusLabel(job.state.lastRunStatus),
+        ],
         ["Updated", dateTime(job.updatedAtMs)],
     ];
     return (
@@ -138,14 +150,14 @@ export function OpenClawCronDetail({
                         </Text>
                     </div>
                     <section
-                        aria-label="Cron job status"
+                        aria-label="Scheduled job status"
                         className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end"
                     >
                         <Badge
                             className="max-w-full shrink-0 whitespace-nowrap"
                             variant={job.enabled ? "success" : "default"}
                         >
-                            Gateway {job.enabled ? "enabled" : "disabled"}
+                            OpenClaw {job.enabled ? "enabled" : "disabled"}
                         </Badge>
                         <Badge
                             className="max-w-full shrink-0 whitespace-nowrap"
@@ -153,7 +165,7 @@ export function OpenClawCronDetail({
                                 job.synchronization.state
                             )}
                         >
-                            {job.synchronization.state}
+                            {openClawCronSynchronizationLabel(job.synchronization.state)}
                         </Badge>
                     </section>
                 </header>
@@ -164,8 +176,8 @@ export function OpenClawCronDetail({
                         focusOnError={false}
                         message={
                             job.synchronization.state === "pending"
-                                ? "Dashboard has saved a desired enabled state that still awaits Gateway confirmation."
-                                : "Dashboard intent and authoritative Gateway state disagree. Refresh before another control action."
+                                ? "Dashboard is waiting for OpenClaw to confirm this change."
+                                : "Dashboard and OpenClaw report different settings. Refresh before taking another action."
                         }
                         variant="info"
                     />
@@ -179,7 +191,7 @@ export function OpenClawCronDetail({
                     <Alert
                         className="mt-4"
                         focusOnError={false}
-                        message="One or more definition values are bounded or sanitized. Incomplete fields are omitted from the editor so an unrelated change cannot overwrite the authoritative Gateway value."
+                        message="Some details were shortened or hidden. Hidden fields will not be changed when you edit this job."
                         variant="info"
                     />
                 )}
@@ -198,7 +210,7 @@ export function OpenClawCronDetail({
                 {job.synchronization.disableIntent !== undefined && (
                     <div className="border-primary-700 mt-5 border-t pt-4">
                         <Text size="sm" tone="muted">
-                            Disable intent
+                            Reason for disabling
                         </Text>
                         <Text className="mt-1 max-w-full wrap-anywhere">
                             {job.synchronization.disableIntent.reason}
@@ -212,7 +224,7 @@ export function OpenClawCronDetail({
                     </div>
                 )}
                 <div
-                    aria-label="Cron job actions"
+                    aria-label="Scheduled job actions"
                     className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap"
                     role="toolbar"
                 >
@@ -241,7 +253,7 @@ export function OpenClawCronDetail({
                         variant="secondary"
                     >
                         <Icon icon={Pencil} size="sm" tone="inherit" />
-                        Edit reviewed fields
+                        Edit settings
                     </Button>
                     <Button
                         className="w-full sm:w-auto"
@@ -260,7 +272,8 @@ export function OpenClawCronDetail({
                     OpenClaw run history
                 </Heading>
                 <Text className="mt-1" tone="muted">
-                    These are Gateway cron runs, not Dashboard durable job runs.
+                    These runs belong to OpenClaw and are separate from Dashboard
+                    background jobs.
                 </Text>
                 {runsLoading && runs === undefined && (
                     <LoadingState
@@ -290,13 +303,13 @@ export function OpenClawCronDetail({
                     <Alert
                         className="mt-5"
                         focusOnError={false}
-                        message="Showing last-known-good OpenClaw run history while Gateway refresh is unavailable."
+                        message="The latest refresh failed, so the most recent available run history is shown."
                         variant="info"
                     />
                 )}
                 {runs !== undefined && runs.runs.length === 0 && (
                     <Text className="mt-5" tone="muted">
-                        No bounded run history is available for this OpenClaw job.
+                        No run history is available for this OpenClaw job.
                     </Text>
                 )}
                 {runs !== undefined && runs.runs.length > 0 && (
@@ -324,7 +337,7 @@ export function OpenClawCronDetail({
                                         </dt>
                                         <dd className="mt-1">
                                             <Badge variant={runBadgeVariant(run.status)}>
-                                                {run.status}
+                                                {openClawCronRunStatusLabel(run.status)}
                                             </Badge>
                                         </dd>
                                     </div>
@@ -333,7 +346,9 @@ export function OpenClawCronDetail({
                                             Delivery
                                         </dt>
                                         <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                            {run.deliveryStatus}
+                                            {openClawCronDeliveryStatusLabel(
+                                                run.deliveryStatus
+                                            )}
                                         </dd>
                                     </div>
                                     <div className="min-w-0">
@@ -352,7 +367,7 @@ export function OpenClawCronDetail({
                                         </dt>
                                         <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
                                             {run.model ?? "—"}
-                                            {run.modelTruncated && " (bounded)"}
+                                            {run.modelTruncated && " (shortened)"}
                                         </dd>
                                     </div>
                                     <div className="min-w-0">
@@ -361,7 +376,7 @@ export function OpenClawCronDetail({
                                         </dt>
                                         <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
                                             {run.provider ?? "—"}
-                                            {run.providerTruncated && " (bounded)"}
+                                            {run.providerTruncated && " (shortened)"}
                                         </dd>
                                     </div>
                                     <div className="min-w-0 sm:col-span-2 lg:col-span-3">
@@ -370,7 +385,8 @@ export function OpenClawCronDetail({
                                         </dt>
                                         <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere whitespace-pre-wrap">
                                             {run.summary ?? run.errorReason ?? "—"}
-                                            {run.summaryTruncated && " (bounded preview)"}
+                                            {run.summaryTruncated &&
+                                                " (shortened preview)"}
                                         </dd>
                                     </div>
                                 </dl>
@@ -391,8 +407,7 @@ export function OpenClawCronDetail({
                 )}
                 {runs?.hasMore && onLoadMoreRuns === undefined && (
                     <Text className="mt-3" size="sm" tone="muted">
-                        More Gateway run history exists beyond this bounded browser
-                        window.
+                        More OpenClaw run history is available.
                     </Text>
                 )}
             </Card>

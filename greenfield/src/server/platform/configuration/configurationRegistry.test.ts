@@ -13,6 +13,8 @@ describe("application configuration registry", () => {
         expect(applicationConfigurationEnvironmentNames).toEqual([
             "NODE_ENV",
             "MIRA_DASHBOARD_PROJECT_ROOT",
+            "MIRA_DASHBOARD_OPENCLAW_ROOT",
+            "MIRA_DASHBOARD_WORKSPACE_ROOT",
             "PORT",
             "MIRA_DASHBOARD_PUBLIC_ORIGIN",
             "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
@@ -27,7 +29,7 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_TOTP_KEYRING",
             "MIRA_DASHBOARD_LOG_LEVEL",
         ]);
-        expect(applicationConfigurationRegistry).toHaveLength(15);
+        expect(applicationConfigurationRegistry).toHaveLength(17);
         expect(
             applicationConfigurationRegistry
                 .map((entry) => entry.environmentName)
@@ -88,6 +90,7 @@ describe("application configuration registry", () => {
         ).toEqual({
             ELEVENLABS_API_KEY: "elevenLabsApiKey",
             MIRA_DASHBOARD_LOG_LEVEL: "logLevel",
+            MIRA_DASHBOARD_OPENCLAW_ROOT: "openClawRoot",
             MIRA_DASHBOARD_PROJECT_ROOT: "projectRoot",
             MIRA_DASHBOARD_PUBLIC_ORIGIN: "publicOrigin",
             MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "recentAuthenticationWindowMs",
@@ -97,6 +100,7 @@ describe("application configuration registry", () => {
             MIRA_DASHBOARD_WEBAUTHN_ORIGINS: "webAuthnRelyingParty.allowedOrigins",
             MIRA_DASHBOARD_WEBAUTHN_RP_ID: "webAuthnRelyingParty.rpId",
             MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "webAuthnRelyingParty.rpName",
+            MIRA_DASHBOARD_WORKSPACE_ROOT: "workspaceRoot",
             NODE_ENV: "nodeEnvironment",
             OPENCLAW_GATEWAY_TOKEN: "gatewayToken",
             OPENCLAW_GATEWAY_URL: "gatewayUrl",
@@ -127,6 +131,7 @@ describe("application configuration registry", () => {
         expect(Object.keys(workerEnvironment)).toEqual([
             "NODE_ENV",
             "MIRA_DASHBOARD_PROJECT_ROOT",
+            "MIRA_DASHBOARD_WORKSPACE_ROOT",
             "OPENCLAW_GATEWAY_URL",
             "OPENCLAW_GATEWAY_TOKEN",
             "MIRA_DASHBOARD_LOG_LEVEL",

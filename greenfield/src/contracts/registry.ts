@@ -132,6 +132,12 @@ export function assertProcedureContractErrors(
 export type RawHttpBodyContract =
     | { kind: "none" }
     | {
+          clientMaximumMessageBytes: number;
+          kind: "websocket";
+          protocol: string;
+          serverMaximumMessageBytes: number;
+      }
+    | {
           contentTypes: readonly string[];
           kind: "binary";
           maximumBytes: number;

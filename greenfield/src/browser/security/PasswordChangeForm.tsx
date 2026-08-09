@@ -65,7 +65,7 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                     mutation.isActive
                 );
                 if (!published) throw new AuthenticatedMutationExpiredError();
-            }, "Password changed and other sessions revoked.");
+            }, "Password changed. Your other browsers were signed out.");
         },
         validators: { onSubmit: passwordChangeInputSchema },
     });
@@ -92,6 +92,7 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                                 onChange={(event) =>
                                     field.handleChange(event.currentTarget.value)
                                 }
+                                placeholder="Enter your current password"
                                 required
                                 type="password"
                                 value={field.state.value}
@@ -114,6 +115,7 @@ export function PasswordChangeForm({ action, complete }: PasswordChangeFormProps
                                 onChange={(event) =>
                                     field.handleChange(event.currentTarget.value)
                                 }
+                                placeholder="Use at least 8 characters"
                                 required
                                 type="password"
                                 value={field.state.value}

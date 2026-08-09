@@ -19,7 +19,7 @@ export function IncidentsRoute() {
                         Browse reports
                     </ActionLink>
                 }
-                description="Active and resolved incident generations produced by complete monitoring snapshots. Updates automatically from incident events, with 30-second safety polling if realtime disconnects."
+                description="See current and resolved problems reported by monitoring. This page updates automatically and checks again every 30 seconds if live updates stop."
                 eyebrow="Monitoring"
                 title="Incidents"
             />

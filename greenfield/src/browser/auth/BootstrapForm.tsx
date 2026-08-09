@@ -36,9 +36,9 @@ export function BootstrapForm() {
 
     return (
         <LoginPanel
-            description="Verify the existing Gateway credential and create the sole Dashboard operator."
+            description="Connect the Dashboard to OpenClaw and create the first account."
             icon={UserRoundPlus}
-            title="Secure first-user setup"
+            title="Set up Mira Dashboard"
         >
             <Alert className="mb-5" message={error} />
             <Form onSubmit={() => void form.handleSubmit()}>
@@ -59,6 +59,7 @@ export function BootstrapForm() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Example: operator"
                                     required
                                     spellCheck={false}
                                     value={field.state.value}
@@ -81,6 +82,7 @@ export function BootstrapForm() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Create a strong password"
                                     required
                                     type="password"
                                     value={field.state.value}
@@ -93,7 +95,8 @@ export function BootstrapForm() {
                             <FormField
                                 disabled={busy}
                                 error={firstFormFieldError(field.state.meta.errors)}
-                                label="Gateway credential"
+                                description="Use the credential configured for your OpenClaw Gateway."
+                                label="OpenClaw Gateway credential"
                             >
                                 <Input
                                     autoComplete="off"
@@ -103,6 +106,7 @@ export function BootstrapForm() {
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="Paste the Gateway credential"
                                     required
                                     spellCheck={false}
                                     type="password"
@@ -118,14 +122,14 @@ export function BootstrapForm() {
                     {([canSubmit, isSubmitting]) => (
                         <Button
                             busy={busy || isSubmitting}
-                            busyLabel="Creating operator…"
+                            busyLabel="Creating account…"
                             className="mt-5"
                             disabled={!canSubmit}
                             fullWidth
                             type="submit"
                         >
                             <Icon icon={UserRoundPlus} size="sm" tone="inherit" />
-                            Create operator
+                            Create account
                         </Button>
                     )}
                 </form.Subscribe>

@@ -19,6 +19,7 @@ import {
     type ChatMessage,
     type ChatPlanStep,
 } from "../../../contracts/chatModel.ts";
+import { jobIdempotencyKeySchema } from "../../../contracts/jobModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import {
     boundedControlSafeTextSchema,
@@ -52,6 +53,7 @@ import {
 } from "../../domains/chat/provider.ts";
 import {
     parsePersistentGatewayChatSendAcknowledgement,
+    persistentGatewayChatHistoryMaximumChars,
     type PersistentGatewayChatReadMethod,
     type PersistentGatewayChatReadMutationMethod,
     type PersistentGatewayChatWriteMethod,
@@ -255,6 +257,11 @@ function safeInteger(value: unknown): number | undefined {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
         ? value
         : undefined;
+}
+
+function canonicalIdempotencyKey(value: unknown): string | undefined {
+    const parsed = v.safeParse(jobIdempotencyKeySchema, value);
+    return parsed.success ? parsed.output : undefined;
 }
 
 function safeJsonText(value: unknown, maximum: number): string | undefined {
@@ -569,9 +576,8 @@ function projectHistoryMessage(
             : { kind: "complete" as const, parts },
         createdAtMs: safeInteger(message.timestamp ?? message.createdAtMs),
         id,
-        idempotencyKey: boundedControlString(
-            metadata.idempotencyKey ?? message.idempotencyKey,
-            128
+        idempotencyKey: canonicalIdempotencyKey(
+            metadata.idempotencyKey ?? message.idempotencyKey
         ),
         model: boundedControlString(message.model, 256),
         provider: boundedControlString(message.provider, 128),
@@ -806,7 +812,10 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
             "chat.history",
             {
                 limit: request.limit,
-                maxChars: request.maxChars,
+                maxChars: Math.min(
+                    request.maxChars,
+                    persistentGatewayChatHistoryMaximumChars
+                ),
                 offset: request.offset,
                 sessionKey: request.sessionKey,
             },

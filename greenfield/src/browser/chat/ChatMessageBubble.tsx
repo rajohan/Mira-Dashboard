@@ -522,7 +522,7 @@ export function ChatMessageBubble({
             {onHide !== undefined && (
                 <ConfirmModal
                     confirmLabel="Hide message"
-                    description="This hides the selected message only in this browser for this OpenClaw session. It does not delete or change the provider transcript."
+                    description="This hides the selected message only in this browser. It does not delete or change the OpenClaw chat history."
                     onCancel={() => setHideConfirmationOpen(false)}
                     onConfirm={() => {
                         onHide(message.id);

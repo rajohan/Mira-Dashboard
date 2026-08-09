@@ -8,9 +8,35 @@ const { act, fireEvent, render, screen } = await import("@testing-library/react"
 
 const hadOwnResizeObserver = Object.hasOwn(globalThis, "ResizeObserver");
 const originalResizeObserver = Reflect.get(globalThis, "ResizeObserver");
+const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetHeight"
+);
+const originalOffsetWidth = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetWidth"
+);
+
+function fixtureOffsetHeight(this: HTMLElement): number {
+    return Number(this.style.height.slice(0, -2)) || 0;
+}
+
+function fixtureOffsetWidth(this: HTMLElement): number {
+    return Number(this.style.width.slice(0, -2)) || 320;
+}
 
 beforeAll(() => {
     Reflect.set(globalThis, "ResizeObserver", undefined);
+    Object.defineProperties(HTMLElement.prototype, {
+        offsetHeight: {
+            configurable: true,
+            get: fixtureOffsetHeight,
+        },
+        offsetWidth: {
+            configurable: true,
+            get: fixtureOffsetWidth,
+        },
+    });
 });
 
 afterAll(() => {
@@ -18,6 +44,20 @@ afterAll(() => {
         Reflect.set(globalThis, "ResizeObserver", originalResizeObserver);
     } else {
         Reflect.deleteProperty(globalThis, "ResizeObserver");
+    }
+    if (originalOffsetHeight === undefined) {
+        Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+    } else {
+        Object.defineProperty(
+            HTMLElement.prototype,
+            "offsetHeight",
+            originalOffsetHeight
+        );
+    }
+    if (originalOffsetWidth === undefined) {
+        Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+    } else {
+        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
     }
 });
 
@@ -128,6 +168,17 @@ function setScrollGeometry(
 }
 
 describe("shared virtualizer follow-to-end controller", () => {
+    test("renders a short followed list whose content is smaller than its viewport", async () => {
+        const rendered = render(<FollowFixture items={["first", "latest"]} />);
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => 200 });
+        await flushAnimationFrames();
+
+        expect(log).toHaveTextContent("first");
+        expect(log).toHaveTextContent("latest");
+        act(() => rendered.unmount());
+    });
+
     test("keeps follow behavior opt-in for existing consumers", () => {
         render(<DefaultFixture />);
 

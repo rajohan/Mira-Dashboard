@@ -80,6 +80,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/chat.ts");
             return module.chatProcedureContracts;
         }
+        case "files": {
+            const module = await import("../../contracts/files.ts");
+            return module.workspaceFileProcedureContracts;
+        }
         case "gatewaySessions": {
             const module = await import("../../contracts/gatewaySessions.ts");
             return module.gatewaySessionProcedureContracts;
@@ -95,6 +99,10 @@ async function procedureContractsFor(
         case "jobs": {
             const module = await import("../../contracts/jobs.ts");
             return module.jobProcedureContracts;
+        }
+        case "logs": {
+            const module = await import("../../contracts/logs.ts");
+            return module.logProcedureContracts;
         }
         case "notifications": {
             const module = await import("../../contracts/notifications.ts");
@@ -139,6 +147,10 @@ async function procedureContractsFor(
         case "tasks": {
             const module = await import("../../contracts/tasks.ts");
             return module.taskProcedureContracts;
+        }
+        case "terminal": {
+            const module = await import("../../contracts/terminal.ts");
+            return module.terminalProcedureContracts;
         }
         default: {
             throw new DashboardProtocolError();

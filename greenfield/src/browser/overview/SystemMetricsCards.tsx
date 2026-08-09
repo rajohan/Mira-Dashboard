@@ -20,7 +20,7 @@ function networkValue(
     state: SystemMetrics["network"]["state"],
     bitsPerSecond: number
 ): string {
-    return state === "warming" ? "Sampling…" : formatBitsPerSecond(bitsPerSecond);
+    return state === "warming" ? "Measuring…" : formatBitsPerSecond(bitsPerSecond);
 }
 
 interface SystemMetricsCardsProps {
@@ -29,15 +29,14 @@ interface SystemMetricsCardsProps {
 
 /** @returns Six identity-free operational metric cards. */
 export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
-    const coreLabel =
-        metrics.cpu.logicalCoreCount === 1 ? "logical core" : "logical cores";
+    const coreLabel = metrics.cpu.logicalCoreCount === 1 ? "CPU core" : "CPU cores";
     return (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <MetricCard
-                description={`1 minute load ${formatLoadValue(metrics.cpu.loadAverage[0])} · ${metrics.cpu.logicalCoreCount} ${coreLabel}`}
+                description={`Average load over 1 minute: ${formatLoadValue(metrics.cpu.loadAverage[0])} · ${metrics.cpu.logicalCoreCount} ${coreLabel}`}
                 icon={Cpu}
                 meter={{
-                    label: "CPU normalized load",
+                    label: "CPU load",
                     maximum: 100,
                     value: metrics.cpu.loadPercent,
                 }}
@@ -73,7 +72,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                 value={formatUptime(metrics.uptimeSeconds)}
             />
             <MetricCard
-                description="Current aggregate receive throughput"
+                description="Current total download speed"
                 icon={ArrowDown}
                 title="Download"
                 value={networkValue(
@@ -82,7 +81,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                 )}
             />
             <MetricCard
-                description="Current aggregate transmit throughput"
+                description="Current total upload speed"
                 icon={ArrowUp}
                 title="Upload"
                 value={networkValue(

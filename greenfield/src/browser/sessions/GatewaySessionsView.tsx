@@ -50,8 +50,8 @@ function successMessage(result: GatewaySessionActionResult): string {
         case "compact": {
             action =
                 result.outcome === "changed"
-                    ? "Session compacted."
-                    : "Session did not need compaction.";
+                    ? "Older session context summarized."
+                    : "This session did not need summarizing.";
             break;
         }
         case "reset": {
@@ -65,7 +65,7 @@ function successMessage(result: GatewaySessionActionResult): string {
     }
     return result.refresh.status === "available"
         ? action
-        : `${action} The current projection could not be refreshed yet.`;
+        : `${action} The session list has not updated yet.`;
 }
 
 /**
@@ -102,10 +102,10 @@ export function GatewaySessionsView({
     let reconciliationError: string | undefined;
     if (reconciliationState === "refreshing") {
         reconciliationError =
-            "The action outcome could not be confirmed. Reconciling the current projection before another action is allowed.";
+            "We could not confirm whether the action finished. Refreshing the session list before another action is allowed.";
     } else if (reconciliationState === "failed") {
         reconciliationError =
-            "The action outcome could not be confirmed, and reconciliation failed. Retry reconciliation before another action.";
+            "We could not confirm whether the action finished, and the session list could not be refreshed. Try refreshing again before another action.";
     }
 
     function restoreActionFocus(action: PendingGatewaySessionAction) {
@@ -143,7 +143,7 @@ export function GatewaySessionsView({
         setReconciliationState(undefined);
         setPendingAction(undefined);
         setStatusMessage(
-            "Current projection reconciled. Review the session before choosing another action."
+            "Session list refreshed. Review the session before choosing another action."
         );
         if (action !== undefined) restoreActionFocus(action);
     }
@@ -179,14 +179,14 @@ export function GatewaySessionsView({
                                 level={2}
                                 size="subsection"
                             >
-                                Current projection
+                                Current status
                             </Heading>
                             <Badge variant={stale ? "warning" : "success"}>
                                 {stale ? "Last known" : "Connected"}
                             </Badge>
                         </div>
                         <Text className="mt-1" tone="muted">
-                            Observed{" "}
+                            Last updated{" "}
                             <time
                                 dateTime={new Date(
                                     snapshot.source.observedAtMs
@@ -194,22 +194,22 @@ export function GatewaySessionsView({
                             >
                                 {formatDashboardDateTime(snapshot.source.observedAtMs)}
                             </time>
-                            . Statistics describe these same bounded rows.
+                            . The totals below use this data.
                         </Text>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Updates automatically every 10 seconds and after Gateway
-                            session events.
+                            Updates automatically every 10 seconds and when OpenClaw
+                            reports a change.
                         </Text>
                     </div>
                     {unknownOutcomeBlocked && pendingAction === undefined && (
                         <Button
                             busy={reconciliationState === "refreshing"}
-                            busyLabel="Reconciling…"
+                            busyLabel="Refreshing sessions…"
                             onClick={() => void reconcileUnknownOutcome(undefined)}
                             size="sm"
                             variant="secondary"
                         >
-                            Retry reconciliation
+                            Try refresh again
                         </Button>
                     )}
                 </div>
@@ -281,8 +281,8 @@ export function GatewaySessionsView({
                 </dl>
                 {snapshot.projectionTruncated && (
                     <Text className="mt-3" size="sm" tone="warning">
-                        OpenClaw returned at least {snapshot.stats.shown} current
-                        sessions; this page shows the bounded first projection.
+                        OpenClaw returned more sessions than this page can show. Showing
+                        the first {snapshot.stats.shown}.
                     </Text>
                 )}
             </Card>
@@ -292,8 +292,8 @@ export function GatewaySessionsView({
                     focusOnError={false}
                     message={
                         backgroundUnavailable && snapshot.source.freshness === "fresh"
-                            ? "A background refresh failed. Showing the last validated current-session projection."
-                            : `OpenClaw is disconnected. Showing the last-known-good projection observed ${formatDashboardDateTime(snapshot.source.observedAtMs)}.`
+                            ? "A background refresh failed. Showing the most recent session data."
+                            : `OpenClaw is disconnected. Showing session data from ${formatDashboardDateTime(snapshot.source.observedAtMs)}.`
                     }
                     variant="error"
                 />
@@ -323,8 +323,8 @@ export function GatewaySessionsView({
                                 OpenClaw sessions
                             </Heading>
                             <Text className="mt-1" tone="muted">
-                                Filter and sort the current bounded projection. The
-                                primary main session remains first.
+                                Filter and sort current sessions. The main session stays
+                                first.
                             </Text>
                         </div>
                         <fieldset>
@@ -355,15 +355,15 @@ export function GatewaySessionsView({
                         className="text-primary-400 mt-3 block text-xs"
                     >
                         {visibleSessions.length} visible of {snapshot.stats.shown}
-                        {snapshot.projectionTruncated ? "+" : ""} bounded rows
+                        {snapshot.projectionTruncated ? "+" : ""} sessions
                     </output>
                     <div className="mt-5">
                         {visibleSessions.length === 0 ? (
                             <EmptyState
                                 description={
                                     filter === "ALL"
-                                        ? "Current OpenClaw sessions will appear after the Gateway reports them."
-                                        : `No ${filter.toLowerCase()} sessions are present in this bounded projection.`
+                                        ? "Sessions will appear when OpenClaw reports them."
+                                        : `No ${filter.toLowerCase()} sessions are in the current list.`
                                 }
                                 icon={filter === "ALL" ? Radio : Unplug}
                                 title={
@@ -405,7 +405,7 @@ export function GatewaySessionsView({
                 }
                 open={pendingAction !== undefined}
                 retryBusy={reconciliationState === "refreshing"}
-                retryLabel="Retry reconciliation"
+                retryLabel="Try refresh again"
                 title={confirmation?.title ?? "Confirm session action"}
             />
         </div>

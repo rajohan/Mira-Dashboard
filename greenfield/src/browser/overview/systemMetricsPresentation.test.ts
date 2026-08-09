@@ -7,14 +7,14 @@ describe("system metrics presentation", () => {
     test("maps failures to fixed text without raw transport details", () => {
         const secret = "private /proc failure";
         expect(systemMetricsFailureMessage(new TypeError(secret))).toBe(
-            "The system metrics request could not be completed. Try again."
+            "The system usage request could not be completed. Try again."
         );
         expect(systemMetricsFailureMessage(new DashboardProtocolError())).toBe(
-            "The server returned an invalid system metrics response. Reload before retrying."
+            "The server returned unexpected system data. Reload before retrying."
         );
         expect(
             systemMetricsFailureMessage({ data: { code: "SERVICE_UNAVAILABLE" } })
-        ).toBe("System metrics are temporarily unavailable. Try again shortly.");
+        ).toBe("System usage is temporarily unavailable. Try again shortly.");
         expect(systemMetricsFailureMessage(new TypeError(secret))).not.toContain(secret);
     });
 });

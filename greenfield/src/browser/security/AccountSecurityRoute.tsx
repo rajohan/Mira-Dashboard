@@ -37,8 +37,8 @@ export function AccountSecurityRoute() {
     return (
         <div>
             <PageHeader
-                description="Manage recent verification, possession factors, browser sessions, immutable audit history, and scoped automation credentials."
-                eyebrow="Operator controls"
+                description="Manage your password, multi-factor authentication, signed-in browsers, automation access, and security history."
+                eyebrow="Security"
                 title="Account security"
             />
             <div className="mt-8 grid gap-6">

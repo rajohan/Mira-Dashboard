@@ -16,12 +16,14 @@ const meta = {
                         autoComplete="username"
                         className="mt-2"
                         defaultValue="operator"
+                        placeholder="Example: operator"
                     />
                 </FormField>
                 <FormField label="Password">
                     <Input
                         autoComplete="current-password"
                         className="mt-2"
+                        placeholder="Enter your password"
                         type="password"
                     />
                 </FormField>
@@ -59,7 +61,7 @@ export const VerificationStep: Story = {
                         autoComplete="one-time-code"
                         className="mt-2"
                         inputMode="numeric"
-                        placeholder="000000"
+                        placeholder="Example: 123456"
                     />
                 </FormField>
                 <Button fullWidth onClick={fn()}>
@@ -67,7 +69,7 @@ export const VerificationStep: Story = {
                 </Button>
             </div>
         ),
-        description: "Complete the required second authentication factor.",
+        description: "Enter one more verification method to finish signing in.",
         icon: KeyRound,
         title: "Verify your identity",
     },

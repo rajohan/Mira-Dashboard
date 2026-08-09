@@ -3,9 +3,11 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
+import type { WorkspaceFilesService } from "../server/domains/files/service.ts";
 import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
 import type { GatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
 import type { JobService } from "../server/domains/jobs/service.ts";
+import type { LogsService } from "../server/domains/logs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../server/domains/openClawCron/service.ts";
@@ -16,6 +18,7 @@ import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/
 import type { MfaLoginLifecycleService } from "../server/domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
 import type { TaskService } from "../server/domains/tasks/service.ts";
+import type { TerminalService } from "../server/domains/terminal/service.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { createAuthenticationClientSourceResolver } from "../server/rawHttp/authenticationClientSource.ts";
 import { readAuthenticationHttpCredentials } from "../server/rawHttp/authenticationCredentials.ts";
@@ -46,17 +49,20 @@ export interface TrpcHttpHandlerOptions {
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
     readonly chatService?: ChatService;
+    readonly workspaceFilesService?: WorkspaceFilesService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
+    readonly logsService?: LogsService;
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
     readonly openClawTasksService?: OpenClawTasksService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly taskService: TaskService["Service"];
+    readonly terminalService?: TerminalService;
     readonly trustedProxyAddresses?: readonly string[];
 }
 
@@ -233,11 +239,17 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     ...(options.chatService === undefined
                         ? {}
                         : { chatService: options.chatService }),
+                    ...(options.workspaceFilesService === undefined
+                        ? {}
+                        : { workspaceFilesService: options.workspaceFilesService }),
                     gatewayConnectionService: options.gatewayConnectionService,
                     gatewaySessionsService: options.gatewaySessionsService,
                     mfaAccountLifecycle: options.mfaAccountLifecycle,
                     mfaLoginLifecycle: options.mfaLoginLifecycle,
                     jobService: options.jobService,
+                    ...(options.logsService === undefined
+                        ? {}
+                        : { logsService: options.logsService }),
                     monitoringCatalogService: options.monitoringCatalogService,
                     monitoringService: options.monitoringService,
                     openClawCronService: options.openClawCronService,
@@ -250,6 +262,9 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     responseHeaders: resHeaders,
                     securityAuditLifecycle: options.securityAuditLifecycle,
                     taskService: options.taskService,
+                    ...(options.terminalService === undefined
+                        ? {}
+                        : { terminalService: options.terminalService }),
                 }),
             endpoint: trpcEndpoint,
             maxBatchSize: trpcMaximumBatchSize,

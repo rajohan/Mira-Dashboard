@@ -43,7 +43,7 @@ export function SecurityProofControls({
             await complete(async () => {
                 await client.mutation("accountSecurity.reauthenticatePassword", value);
                 formApi.setFieldValue("password", "");
-            }, "Recent password verification refreshed.");
+            }, "Password confirmed.");
         },
         validators: { onSubmit: passwordReauthenticationInputSchema },
     });
@@ -53,7 +53,7 @@ export function SecurityProofControls({
             await complete(async () => {
                 await client.mutation("accountSecurity.stepUpTotp", value);
                 formApi.setFieldValue("code", "");
-            }, "Recent MFA verification refreshed.");
+            }, "Authenticator code accepted.");
         },
         validators: { onSubmit: totpStepUpInputSchema },
     });
@@ -63,7 +63,7 @@ export function SecurityProofControls({
             await complete(async () => {
                 await client.mutation("accountSecurity.stepUpRecovery", value);
                 formApi.setFieldValue("code", "");
-            }, "Recovery proof accepted and recent MFA refreshed.");
+            }, "Recovery code accepted.");
         },
         validators: { onSubmit: recoveryStepUpInputSchema },
     });
@@ -76,7 +76,7 @@ export function SecurityProofControls({
             );
             const response = await webAuthn.authenticate(challenge.options);
             await client.mutation("accountSecurity.stepUpWebAuthn", { response });
-        }, "Security-key verification refreshed recent MFA.");
+        }, "Security key confirmed.");
     }
 
     return (
@@ -87,7 +87,7 @@ export function SecurityProofControls({
                         <FormField
                             disabled={action.busy}
                             error={firstFormFieldError(field.state.meta.errors)}
-                            label="Password proof"
+                            label="Password to confirm your identity"
                         >
                             <Input
                                 autoComplete="current-password"
@@ -97,6 +97,7 @@ export function SecurityProofControls({
                                 onChange={(event) =>
                                     field.handleChange(event.currentTarget.value)
                                 }
+                                placeholder="Enter your current password"
                                 required
                                 type="password"
                                 value={field.state.value}
@@ -128,7 +129,7 @@ export function SecurityProofControls({
                             <FormField
                                 disabled={action.busy}
                                 error={firstFormFieldError(field.state.meta.errors)}
-                                label="Authenticator proof"
+                                label="Authenticator code"
                             >
                                 <Input
                                     autoComplete="one-time-code"
@@ -139,6 +140,7 @@ export function SecurityProofControls({
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="123456"
                                     required
                                     value={field.state.value}
                                 />
@@ -172,7 +174,7 @@ export function SecurityProofControls({
                             <FormField
                                 disabled={action.busy}
                                 error={firstFormFieldError(field.state.meta.errors)}
-                                label="Recovery proof"
+                                label="Recovery code"
                             >
                                 <Input
                                     autoComplete="off"
@@ -182,6 +184,7 @@ export function SecurityProofControls({
                                     onChange={(event) =>
                                         field.handleChange(event.currentTarget.value)
                                     }
+                                    placeholder="00000000000000000000000000000000-11111111111111111111111111111111"
                                     required
                                     spellCheck={false}
                                     type="password"
@@ -214,7 +217,7 @@ export function SecurityProofControls({
             {methods.includes("webauthn") && (
                 <div>
                     <p className="text-primary-300 text-sm">
-                        Verify with one enrolled roaming security key.
+                        Confirm your identity with one of your security keys.
                     </p>
                     <Button
                         busy={action.busy}

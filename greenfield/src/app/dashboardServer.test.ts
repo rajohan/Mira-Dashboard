@@ -696,6 +696,7 @@ describe("Dashboard security composition", () => {
             );
             expect(schedules.schedules.map(({ id }) => id)).toEqual([
                 "cache.system-host",
+                "maintenance.rotate-managed-logs",
                 "system.worker-smoke",
             ]);
             expect(schedules.schedules[0]).toMatchObject({
@@ -704,6 +705,11 @@ describe("Dashboard security composition", () => {
                 id: "cache.system-host",
             });
             expect(schedules.schedules[1]).toMatchObject({
+                actionKey: "maintenance.rotate-logs",
+                enabled: true,
+                id: "maintenance.rotate-managed-logs",
+            });
+            expect(schedules.schedules[2]).toMatchObject({
                 actionKey: "system.worker-smoke",
                 enabled: false,
                 id: "system.worker-smoke",

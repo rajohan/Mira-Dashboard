@@ -165,7 +165,7 @@ export function AutomationCredentialPanel({
         <div>
             <Alert className="mb-4" message={action.error} />
             {credentials.isPending && (
-                <LoadingState label="Loading credentials…" size="sm" />
+                <LoadingState label="Loading access tokens…" size="sm" />
             )}
             {credentials.isError && (
                 <div>
@@ -193,9 +193,9 @@ export function AutomationCredentialPanel({
                                 (page) => page.credentials.length === 0
                             ) && (
                                 <EmptyState
-                                    description="Create the first scoped credential for this principal."
+                                    description="Create an access token for this automation account."
                                     icon={KeyRound}
-                                    title="No credentials"
+                                    title="No access tokens"
                                 />
                             )}
                         {credentials.isSuccess && (
@@ -228,9 +228,9 @@ export function AutomationCredentialPanel({
                                                 {!principal.disabled && usable && (
                                                     <div className="mt-3 flex flex-wrap gap-2">
                                                         <Button
-                                                            aria-label={`Stage replacement for ${credential.label}`}
+                                                            aria-label={`Create replacement access token for ${credential.label}`}
                                                             busy={action.busy}
-                                                            busyLabel="Staging…"
+                                                            busyLabel="Creating…"
                                                             disabled={
                                                                 credentialLabel.length ===
                                                                 0
@@ -249,10 +249,10 @@ export function AutomationCredentialPanel({
                                                                 size="sm"
                                                                 tone="inherit"
                                                             />
-                                                            Stage replacement
+                                                            Create replacement
                                                         </Button>
                                                         <Button
-                                                            aria-label={`Revoke credential ${credential.label}`}
+                                                            aria-label={`Revoke access token ${credential.label}`}
                                                             busy={action.busy}
                                                             busyLabel="Revoking…"
                                                             onClick={() =>
@@ -291,7 +291,7 @@ export function AutomationCredentialPanel({
                                 size="sm"
                                 variant="secondary"
                             >
-                                Load older credentials
+                                Load older tokens
                             </Button>
                         )}
                         {!principal.disabled && (
@@ -303,11 +303,11 @@ export function AutomationCredentialPanel({
                                     {(field) => (
                                         <FormField
                                             disabled={action.busy}
-                                            description="This label is also used when staging a replacement above."
+                                            description="This name is used for a new token or a replacement created above."
                                             error={firstFormFieldError(
                                                 field.state.meta.errors
                                             )}
-                                            label="New or replacement credential label"
+                                            label="New token name"
                                         >
                                             <Input
                                                 className="mt-2"
@@ -318,6 +318,7 @@ export function AutomationCredentialPanel({
                                                         event.currentTarget.value
                                                     )
                                                 }
+                                                placeholder="Example: August rotation"
                                                 required
                                                 value={field.state.value}
                                             />
@@ -332,7 +333,7 @@ export function AutomationCredentialPanel({
                                     type="submit"
                                 >
                                     <Icon icon={Plus} size="sm" tone="inherit" />
-                                    Create credential
+                                    Create access token
                                 </Button>
                             </Form>
                         )}
@@ -341,13 +342,13 @@ export function AutomationCredentialPanel({
             </credentialForm.Subscribe>
             <ConfirmModal
                 busy={action.busy}
-                confirmLabel="Revoke credential"
+                confirmLabel="Revoke access token"
                 danger
-                description={`Revoke “${credentialConfirmation?.label ?? ""}”. Requests using its token will stop authenticating immediately.`}
+                description={`Revoke “${credentialConfirmation?.label ?? ""}”. Any script using this token will lose access immediately.`}
                 onCancel={() => setCredentialConfirmation(undefined)}
                 onConfirm={() => void confirmCredentialRevocation()}
                 open={credentialConfirmation !== undefined}
-                title="Revoke automation credential?"
+                title="Revoke access token?"
             />
         </div>
     );

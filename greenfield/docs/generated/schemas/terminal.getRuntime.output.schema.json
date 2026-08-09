@@ -1,0 +1,139 @@
+{
+  "$id": "urn:mira-dashboard:terminal.getRuntime.output",
+  "type": "object",
+  "properties": {
+    "clientMessageMaximumBytes": {
+      "const": 16384
+    },
+    "defaultLocation": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^\\/(?:[^/\\r\\n]+(?:\\/[^/\\r\\n]+)*)?$",
+          "$comment": "Live Valibot validation additionally rejects dot and parent segments in the root-relative initial terminal path."
+        },
+        "rootId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48,
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        }
+      },
+      "required": [
+        "path",
+        "rootId"
+      ],
+      "additionalProperties": false
+    },
+    "idleTimeoutMs": {
+      "const": 600000
+    },
+    "mode": {
+      "const": "pty"
+    },
+    "outputReplayMaximumBytes": {
+      "const": 262144
+    },
+    "reconnectGraceMs": {
+      "const": 15000
+    },
+    "roots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "defaultPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^\\/(?:[^/\\r\\n]+(?:\\/[^/\\r\\n]+)*)?$",
+            "$comment": "Live Valibot validation additionally rejects dot and parent segments in the root-relative initial terminal path."
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              },
+              {
+                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+              }
+            ]
+          }
+        },
+        "required": [
+          "defaultPath",
+          "id",
+          "label"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 8,
+      "$comment": "Live Valibot validation additionally requires unique terminal root IDs in canonical ascending order."
+    },
+    "serverMessageMaximumBytes": {
+      "const": 32768
+    },
+    "sessionMaximumDurationMs": {
+      "const": 1800000
+    },
+    "supportsInput": {
+      "const": true
+    },
+    "supportsPty": {
+      "const": true
+    },
+    "supportsResize": {
+      "const": true
+    },
+    "supportsSignals": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "const": "SIGINT"
+        },
+        {
+          "const": "SIGTERM"
+        },
+        {
+          "const": "SIGHUP"
+        }
+      ],
+      "minItems": 3
+    },
+    "webSocketProtocol": {
+      "const": "mira-terminal-v1"
+    }
+  },
+  "required": [
+    "clientMessageMaximumBytes",
+    "defaultLocation",
+    "idleTimeoutMs",
+    "mode",
+    "outputReplayMaximumBytes",
+    "reconnectGraceMs",
+    "roots",
+    "serverMessageMaximumBytes",
+    "sessionMaximumDurationMs",
+    "supportsInput",
+    "supportsPty",
+    "supportsResize",
+    "supportsSignals",
+    "webSocketProtocol"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

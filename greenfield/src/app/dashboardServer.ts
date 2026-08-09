@@ -16,6 +16,16 @@ import { createChatRepository } from "../server/domains/chat/repository.ts";
 import { createChatService, type ChatService } from "../server/domains/chat/service.ts";
 import { chatSessionSubscriptionIdleMilliseconds } from "../server/domains/chat/subscriptionManager.ts";
 import { createChatTranscriptLifecycleCoordinator } from "../server/domains/chat/transcriptLifecycle.ts";
+import { createWorkspaceFileJobScheduler } from "../server/domains/files/jobScheduler.ts";
+import type { WorkspaceFileRootConfiguration } from "../server/domains/files/ports.ts";
+import {
+    createWorkspaceFileRawHttpHandler,
+    type WorkspaceFileRawHttpHandler,
+} from "../server/domains/files/rawHttp.ts";
+import {
+    createWorkspaceFilesService,
+    type WorkspaceFilesService,
+} from "../server/domains/files/service.ts";
 import {
     createGatewayConnectionService,
     unavailableGatewayConnectionStateProvider,
@@ -89,6 +99,13 @@ import {
     type WebConfiguration,
     parseWebConfiguration,
 } from "../server/platform/configuration/webConfiguration.ts";
+import { createDescriptorWorkspaceFileReader } from "../server/platform/files/descriptorWorkspaceFileReader.ts";
+import { createDescriptorWorkspaceFileUploadSpool } from "../server/platform/files/descriptorWorkspaceFileUploadSpool.ts";
+import {
+    assertReviewedOpenClawFileRoot,
+    resolveReviewedOpenClawFileRoot,
+} from "../server/platform/files/openClawFileRootConfiguration.ts";
+import { resolveReviewedWorkspaceFileRoot } from "../server/platform/files/workspaceFileRootConfiguration.ts";
 import {
     type DashboardProjectLayout,
     resolveDashboardProjectLayout,
@@ -144,6 +161,8 @@ import {
     startDashboardChatRuntimeMaintenance,
     type DashboardChatRuntimeMaintenance,
 } from "./dashboardChatRuntimeMaintenance.ts";
+import { createDashboardLogsService } from "./dashboardLogs.ts";
+import { createDashboardTerminalComposition } from "./dashboardTerminal.ts";
 import { environmentSource } from "./environmentSource.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
 
@@ -159,6 +178,8 @@ export interface DashboardServerOptions extends Omit<
     | "cacheService"
     | "chatRawHttpHandler"
     | "chatService"
+    | "workspaceFileRawHttpHandler"
+    | "workspaceFilesService"
     | "disposeBeforeRuntime"
     | "gatewayConnectionService"
     | "gatewaySessionsService"
@@ -166,17 +187,22 @@ export interface DashboardServerOptions extends Omit<
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
     | "jobService"
+    | "logsService"
     | "monitoringCatalogService"
     | "monitoringService"
     | "openClawCronService"
     | "openClawTasksService"
     | "securityAuditLifecycle"
     | "taskService"
+    | "terminalService"
+    | "terminalSocketBoundary"
 > {
     readonly applicationRuntime: DashboardApplicationRuntime;
     readonly authenticationLeaseDurationMs?: number;
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
+    /** Optional only for isolated composition tests; production always supplies it. */
+    readonly dashboardLogsRoot?: string;
     /** Optional server-only speech credential; absence keeps both voice controls hidden. */
     readonly elevenLabsApiKey?: Redacted.Redacted<string>;
     /** Direct-loopback endpoint shared by bootstrap verification and persistent Gateway traffic. */
@@ -186,13 +212,21 @@ export interface DashboardServerOptions extends Omit<
     readonly gatewayVerificationTimeoutMs?: number;
     /** Shared composition clock for deterministic lifecycle and request-auth behavior. */
     readonly now?: () => Date;
+    /** Exact read-only OpenClaw configuration manifest; never passed to a writer. */
+    readonly openClawFileRoot?: WorkspaceFileRootConfiguration;
     readonly recentAuthenticationWindowMs?: number;
     readonly sessionIdleDurationMs?: number;
+    /** Optional only for isolated composition tests; production supplies both paths. */
+    readonly terminalBrokerDirectory?: string;
+    readonly terminalBrokerSocket?: string;
     readonly totpSecretCipher: TotpSecretCipher;
     readonly trustedProxyAddresses?: readonly string[];
     /** Explicit WebAuthn trust configuration; request host headers are never used. */
     readonly webAuthnRelyingParty?: WebAuthnRelyingPartyConfiguration;
     readonly webAuthnVerificationTimeoutMs?: number;
+    /** Optional only for isolated composition tests; production always supplies both. */
+    readonly workspaceFileRoot?: WorkspaceFileRootConfiguration;
+    readonly workspaceFileUploadSpoolRoot?: string;
 }
 
 interface DashboardChatMediaReferenceRefreshDependencies {
@@ -391,6 +425,7 @@ export async function createDashboardServer(
     let chatMaintenance: DashboardChatRuntimeMaintenance | undefined;
     let chatTranscriptLifecycleSupervisor: ChatTranscriptLifecycleSupervisor | undefined;
     let openClawTasksService: OpenClawTasksService | undefined;
+    let workspaceFilesService: WorkspaceFilesService | undefined;
     let openClawTasksSupervisor:
         | ReturnType<typeof createOpenClawTasksSubscriptionSupervisor>
         | undefined;
@@ -410,6 +445,11 @@ export async function createDashboardServer(
         }
         try {
             await openClawTasksSupervisor?.stop();
+        } catch (error) {
+            failure ??= error;
+        }
+        try {
+            await workspaceFilesService?.dispose();
         } catch (error) {
             failure ??= error;
         }
@@ -568,6 +608,116 @@ export async function createDashboardServer(
             repository: jobRepository,
             wakeEventPump,
         });
+        const logsService =
+            options.dashboardLogsRoot === undefined
+                ? undefined
+                : createDashboardLogsService({
+                      dashboardLogsRoot: options.dashboardLogsRoot,
+                      database,
+                      jobRepository,
+                      ...(domainNow === undefined ? {} : { now: domainNow }),
+                      onAuditSettlementFailure: ({ policyId, settlement }) =>
+                          options.applicationRuntime.logger.error({
+                              component: "logs-maintenance-audit",
+                              event: "logs.maintenance.audit_settlement_failed",
+                              fields: {
+                                  kind: "logs-maintenance-audit-settlement",
+                                  policyId,
+                                  settlement,
+                              },
+                              outcome: "server-error",
+                          }),
+                      wakeEventPump,
+                      writeAdmission: databaseRuntime,
+                  });
+        if (
+            (options.workspaceFileRoot === undefined) !==
+            (options.workspaceFileUploadSpoolRoot === undefined)
+        ) {
+            throw new TypeError(
+                "Workspace Files root and upload spool must be configured together"
+            );
+        }
+        if (
+            options.openClawFileRoot !== undefined &&
+            options.workspaceFileRoot === undefined
+        ) {
+            throw new TypeError(
+                "OpenClaw Files root requires the workspace Files composition"
+            );
+        }
+        if (options.openClawFileRoot !== undefined) {
+            assertReviewedOpenClawFileRoot(options.openClawFileRoot);
+        }
+        const terminalBrokerConfigured =
+            options.terminalBrokerDirectory !== undefined ||
+            options.terminalBrokerSocket !== undefined;
+        if (
+            terminalBrokerConfigured &&
+            (options.workspaceFileRoot === undefined ||
+                options.terminalBrokerDirectory === undefined ||
+                options.terminalBrokerSocket === undefined)
+        ) {
+            throw new TypeError(
+                "Terminal broker paths and workspace starting root must be configured together"
+            );
+        }
+        const terminalComposition =
+            options.workspaceFileRoot === undefined ||
+            options.terminalBrokerDirectory === undefined ||
+            options.terminalBrokerSocket === undefined
+                ? undefined
+                : await createDashboardTerminalComposition({
+                      authenticateCredential: (credential) =>
+                          authenticator.authenticate(credential),
+                      authenticationLifecycle,
+                      browserOrigin,
+                      database,
+                      ...(domainNow === undefined ? {} : { now: domainNow }),
+                      terminalBrokerDirectory: options.terminalBrokerDirectory,
+                      terminalBrokerSocket: options.terminalBrokerSocket,
+                      workspaceRoot: options.workspaceFileRoot,
+                      writeAdmission: databaseRuntime,
+                  });
+        let workspaceFileRawHttpHandler: WorkspaceFileRawHttpHandler | undefined;
+        if (
+            options.workspaceFileRoot !== undefined &&
+            options.workspaceFileUploadSpoolRoot !== undefined
+        ) {
+            workspaceFilesService = createWorkspaceFilesService({
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                reader: createDescriptorWorkspaceFileReader({
+                    roots: [
+                        options.workspaceFileRoot,
+                        ...(options.openClawFileRoot === undefined
+                            ? []
+                            : [options.openClawFileRoot]),
+                    ],
+                }),
+                scheduler: createWorkspaceFileJobScheduler({
+                    ...(domainNow === undefined
+                        ? {}
+                        : { nowMs: () => domainNow().getTime() }),
+                    repository: jobRepository,
+                    wakeEventPump,
+                }),
+                spool: createDescriptorWorkspaceFileUploadSpool(
+                    options.workspaceFileUploadSpoolRoot,
+                    domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }
+                ),
+            });
+            await workspaceFilesService.cleanupUploadOrphans();
+            workspaceFileRawHttpHandler = createWorkspaceFileRawHttpHandler({
+                authenticateCredential: (credential) =>
+                    authenticator.authenticate(credential),
+                authorizeWrite: (identity) =>
+                    authenticationLifecycle.authorizeRecentMfa(identity),
+                browserOrigin,
+                service: workspaceFilesService,
+            });
+        }
         const gatewayConnectionService = createGatewayConnectionService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             provider:
@@ -869,6 +1019,10 @@ export async function createDashboardServer(
             cacheService,
             ...(chatRawHttpHandler === undefined ? {} : { chatRawHttpHandler }),
             ...(chatService === undefined ? {} : { chatService }),
+            ...(workspaceFileRawHttpHandler === undefined
+                ? {}
+                : { workspaceFileRawHttpHandler }),
+            ...(workspaceFilesService === undefined ? {} : { workspaceFilesService }),
             disposeBeforeRuntime: disposeComposition,
             gatewayConnectionService,
             gatewaySessionsService,
@@ -878,6 +1032,7 @@ export async function createDashboardServer(
             mfaAccountLifecycle,
             mfaLoginLifecycle,
             jobService,
+            ...(logsService === undefined ? {} : { logsService }),
             monitoringCatalogService,
             monitoringService,
             openClawCronService,
@@ -886,6 +1041,12 @@ export async function createDashboardServer(
             readiness: options.readiness,
             securityAuditLifecycle,
             taskService,
+            ...(terminalComposition === undefined
+                ? {}
+                : {
+                      terminalService: terminalComposition.service,
+                      terminalSocketBoundary: terminalComposition.socketBoundary,
+                  }),
             trustedProxyAddresses: options.trustedProxyAddresses,
         };
         serverOwnsRuntimeCleanup = true;
@@ -950,6 +1111,8 @@ export interface DashboardWebProcessDependencies {
     readonly resolveProjectLayout: (
         projectRoot: string
     ) => Promise<DashboardProjectLayout>;
+    readonly resolveOpenClawFileRoot: typeof resolveReviewedOpenClawFileRoot;
+    readonly resolveWorkspaceFileRoot: typeof resolveReviewedWorkspaceFileRoot;
 }
 
 const defaultWebProcessDependencies = Object.freeze({
@@ -977,6 +1140,8 @@ const defaultWebProcessDependencies = Object.freeze({
     loadRelease: (releasesDirectory, releaseRoot, processRole) =>
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
     resolveProjectLayout: resolveDashboardProjectLayout,
+    resolveOpenClawFileRoot: resolveReviewedOpenClawFileRoot,
+    resolveWorkspaceFileRoot: resolveReviewedWorkspaceFileRoot,
 } satisfies DashboardWebProcessDependencies);
 
 function createWebLogger(
@@ -1021,6 +1186,14 @@ export async function runDashboardWebProcess(
         options.releaseRoot,
         "web"
     );
+    const workspaceFileRoot = await dependencies.resolveWorkspaceFileRoot(
+        configuration.workspaceRoot,
+        layout
+    );
+    const openClawFileRoot = await dependencies.resolveOpenClawFileRoot(
+        configuration.openClawRoot,
+        layout.production.root
+    );
     const destination = dependencies.createLogDestination(
         layout.production.state.logs,
         "web"
@@ -1053,19 +1226,25 @@ export async function runDashboardWebProcess(
         server = await dependencies.createServer({
             applicationRuntime,
             browserOrigin: configuration.publicOrigin,
+            dashboardLogsRoot: layout.production.state.logs,
             ...(configuration.elevenLabsApiKey === undefined
                 ? {}
                 : { elevenLabsApiKey: configuration.elevenLabsApiKey }),
             frontendAssets,
             gatewayUrl: configuration.gatewayUrl,
             gatewayToken: configuration.gatewayToken,
+            openClawFileRoot,
             port: configuration.port,
             readiness,
             recentAuthenticationWindowMs: configuration.recentAuthenticationWindowMs,
             sessionIdleDurationMs: configuration.sessionIdleDurationMs,
+            terminalBrokerDirectory: layout.production.state.terminalBroker,
+            terminalBrokerSocket: layout.production.state.terminalBrokerSocket,
             totpSecretCipher,
             trustedProxyAddresses: configuration.trustedProxyAddresses,
             webAuthnRelyingParty: configuration.webAuthnRelyingParty,
+            workspaceFileRoot,
+            workspaceFileUploadSpoolRoot: layout.production.state.workspaceFileUploads,
         });
         readiness.markReady();
         logger.info({

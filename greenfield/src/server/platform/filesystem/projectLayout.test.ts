@@ -52,6 +52,18 @@ describe("Dashboard project layout", () => {
         expect(layout.production.state.jobOutput).toBe(
             path.join(root, "production/state/job-output")
         );
+        expect(layout.production.state.logMaintenance).toBe(
+            path.join(root, "production/state/log-maintenance")
+        );
+        expect(layout.production.state.terminalBroker).toBe(
+            path.join(root, "production/state/terminal-broker")
+        );
+        expect(layout.production.state.terminalBrokerSocket).toBe(
+            path.join(root, "production/state/terminal-broker/terminal.sock")
+        );
+        expect(layout.production.state.workspaceFileUploads).toBe(
+            path.join(root, "production/state/workspace-file-uploads")
+        );
         expect(layout.development.worktrees).toBe(
             path.join(root, "development/worktrees")
         );

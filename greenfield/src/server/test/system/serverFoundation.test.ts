@@ -239,6 +239,51 @@ describe("system foundation", () => {
         expect(frontendPaths).toEqual([]);
     });
 
+    test("mounts Files GET, HEAD, and PUT before chat and browser fallbacks", async () => {
+        const observed: string[] = [];
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime(),
+            chatRawHttpHandler: (_request, requestUrl) => {
+                observed.push(`chat:${requestUrl.pathname}`);
+                return Promise.resolve(new Response("chat-fallback"));
+            },
+            frontendAssets: (_request, requestUrl) => {
+                observed.push(`frontend:${requestUrl.pathname}`);
+                return Promise.resolve(new Response("browser-fallback"));
+            },
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+            workspaceFileRawHttpHandler: async (request, requestUrl) => {
+                if (!requestUrl.pathname.startsWith("/api/files/")) return;
+                observed.push(`files:${request.method}:${requestUrl.pathname}`);
+                await request.body?.cancel("fixture Files handler owns the upload");
+                return new Response(request.method === "HEAD" ? null : "files", {
+                    status: request.method === "PUT" ? 204 : 200,
+                });
+            },
+        });
+        servers.push(server);
+
+        const get = await fetch(new URL("/api/files/content/fixture-ticket", server.url));
+        const head = await fetch(
+            new URL("/api/files/content/fixture-ticket", server.url),
+            { method: "HEAD" }
+        );
+        const put = await fetch(
+            new URL("/api/files/uploads/fixture-ticket", server.url),
+            { body: "x", method: "PUT" }
+        );
+
+        expect([get.status, head.status, put.status]).toEqual([200, 200, 204]);
+        expect(observed).toEqual([
+            "files:GET:/api/files/content/fixture-ticket",
+            "files:HEAD:/api/files/content/fixture-ticket",
+            "files:PUT:/api/files/uploads/fixture-ticket",
+        ]);
+    });
+
     test("emits one correlated response-created event for every response class", async () => {
         const { logger, logLines } = createCapturingTestStructuredLogger();
         const server = await createServer({

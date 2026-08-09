@@ -158,6 +158,7 @@ function useFollowToEndController<TItemElement extends Element>({
     const previousScrollTop = useRef(0);
     const stableFrames = useRef(0);
     const structuralFollow = useRef(false);
+    const userScrollIntent = useRef(false);
     const wasFollowingWhenHidden = useRef(false);
     const followingReference = useRef(true);
     const [atEnd, setAtEnd] = useState(true);
@@ -190,6 +191,7 @@ function useFollowToEndController<TItemElement extends Element>({
         if (element === null) return;
         element.scrollTop = element.scrollHeight;
         previousScrollTop.current = element.scrollTop;
+        userScrollIntent.current = false;
         setFollowState(true);
         setAtEnd(true);
     }
@@ -242,6 +244,7 @@ function useFollowToEndController<TItemElement extends Element>({
     }
 
     function followLatest(): void {
+        userScrollIntent.current = false;
         setFollowState(true);
         setAtEnd(true);
         scheduleFollow(true, true);
@@ -262,16 +265,25 @@ function useFollowToEndController<TItemElement extends Element>({
         const structuralCorrectionPending =
             movedUp && structuralFollow.current && frame.current !== undefined;
         if (nextAtEnd) {
+            userScrollIntent.current = false;
             setFollowState(true);
-        } else if (movedUp && !structuralCorrectionPending) {
+        } else if (movedUp && userScrollIntent.current && !structuralCorrectionPending) {
             cancelScheduledFollow();
+            userScrollIntent.current = false;
             setFollowState(false);
+        } else if (movedUp && !structuralCorrectionPending) {
+            // TanStack and the browser may move scrollTop while reconciling
+            // measured row sizes. Keep an existing follow anchor unless an
+            // explicit wheel/touch/key/scrollbar gesture preceded the move.
+            scheduleFollow(true);
         }
         previousScrollTop.current = element.scrollTop;
         setAtEnd(nextAtEnd);
     });
     const handleUserScrollIntent = useEffectEvent(() => {
-        if (enabled) cancelScheduledFollow();
+        if (!enabled) return;
+        userScrollIntent.current = true;
+        cancelScheduledFollow();
     });
     const restoreVisibleFollow = useEffectEvent(() => {
         if (!enabled) return;
@@ -307,6 +319,7 @@ function useFollowToEndController<TItemElement extends Element>({
 
         if (scopeChanged) {
             previousScrollTop.current = 0;
+            userScrollIntent.current = false;
             setFollowState(true);
             setAtEnd(true);
             if (currentKeys.length > 0) scheduleFollow(true, true);
@@ -321,6 +334,7 @@ function useFollowToEndController<TItemElement extends Element>({
         }
     });
     const cancelOnCleanup = useEffectEvent(cancelScheduledFollow);
+    const scheduleFollowAfterContentMutation = useEffectEvent(() => scheduleFollow(true));
     const scheduleFollowAfterResize = useEffectEvent(() => scheduleFollow());
 
     useLayoutEffect(() => {
@@ -345,6 +359,10 @@ function useFollowToEndController<TItemElement extends Element>({
             typeof ResizeObserver === "undefined"
                 ? undefined
                 : new ResizeObserver(() => scheduleFollowAfterResize());
+        const mutationObserver =
+            typeof MutationObserver === "undefined"
+                ? undefined
+                : new MutationObserver(() => scheduleFollowAfterContentMutation());
         element.addEventListener("keydown", onKeyDown);
         element.addEventListener("pointerdown", onPointerDown);
         element.addEventListener("scroll", onScroll, { passive: true });
@@ -352,6 +370,12 @@ function useFollowToEndController<TItemElement extends Element>({
         element.addEventListener("wheel", onWheel, { passive: true });
         document.addEventListener("visibilitychange", onVisibilityChange);
         resizeObserver?.observe(element);
+        mutationObserver?.observe(element, {
+            attributeFilter: ["style"],
+            attributes: true,
+            childList: true,
+            subtree: true,
+        });
         return () => {
             element.removeEventListener("keydown", onKeyDown);
             element.removeEventListener("pointerdown", onPointerDown);
@@ -359,6 +383,7 @@ function useFollowToEndController<TItemElement extends Element>({
             element.removeEventListener("touchmove", onTouchMove);
             element.removeEventListener("wheel", onWheel);
             document.removeEventListener("visibilitychange", onVisibilityChange);
+            mutationObserver?.disconnect();
             resizeObserver?.disconnect();
         };
     }, [enabled, scrollContainerRef]);

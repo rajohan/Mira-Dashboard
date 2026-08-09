@@ -484,6 +484,18 @@ describe("Drizzle-generated Valibot row schemas", () => {
 
         expect(v.parse(jobRunInsertSchema, validJobRunInsert)).toBeDefined();
         expect(v.parse(jobRunSelectSchema, validJobRunRow)).toBeDefined();
+        expect(
+            v.parse(jobRunInsertSchema, {
+                ...validJobRunInsert,
+                actionKey: "workspace-files.apply-write",
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+            })
+        ).toMatchObject({
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+            triggerType: "manual",
+        });
 
         const jobEvent = {
             attempt: 0,
@@ -646,6 +658,13 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 firstStartedAt: jobUpdatedAt,
                 lastAttemptStartedAt: jobUpdatedAt,
                 state: "running",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...validJobRunRow,
+                scheduledJobId: null,
+                scheduledJobVersion: 1,
             })
         ).toThrow();
         expect(() =>

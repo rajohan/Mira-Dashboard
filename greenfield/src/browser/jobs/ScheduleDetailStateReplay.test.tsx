@@ -53,7 +53,7 @@ describe("schedule detail interaction state", () => {
         });
         const user = userEvent.setup();
 
-        const retry = screen.getByRole("button", { name: "Retry run request" });
+        const retry = screen.getByRole("button", { name: "Try starting again" });
         expect(retry).toBeEnabled();
         await user.click(retry);
         expect(onRun).toHaveBeenCalledTimes(1);

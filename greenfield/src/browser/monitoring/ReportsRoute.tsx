@@ -19,7 +19,7 @@ export function ReportsRoute() {
                         Browse incidents
                     </ActionLink>
                 }
-                description="Daily briefs, summaries, heartbeats, and custom immutable monitoring documents. Updates automatically from report events, with 30-second safety polling if realtime disconnects."
+                description="Read daily briefs, summaries, health checks, and other monitoring reports. This page updates automatically and checks again every 30 seconds if live updates stop."
                 eyebrow="Monitoring"
                 title="Reports"
             />

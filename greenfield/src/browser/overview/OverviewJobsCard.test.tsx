@@ -85,19 +85,21 @@ describe("OverviewJobsCard", () => {
         expect(
             await screen.findByRole("heading", {
                 level: 2,
-                name: "Dashboard job queue",
+                name: "Dashboard background jobs",
             })
         ).toBeTruthy();
-        expect(screen.getByText("Claiming active")).toBeTruthy();
+        expect(screen.getByText("Accepting new jobs")).toBeTruthy();
         expect(within(metric("queued")).getByText("1")).toBeTruthy();
         expect(within(metric("running")).getByText("2")).toBeTruthy();
         expect(within(metric("failed")).getByText("3")).toBeTruthy();
         expect(within(metric("timed out")).getByText("1")).toBeTruthy();
-        expect(within(metric("Fresh workers")).getByText("2")).toBeTruthy();
+        expect(within(metric("Workers recently available")).getByText("2")).toBeTruthy();
         expect(
             screen.getByText(formatDashboardDateTime(summary.oldestQueuedAtMs))
         ).toHaveAttribute("dateTime", new Date(summary.oldestQueuedAtMs).toISOString());
-        expect(screen.getByText(/OpenClaw cron is not included/u)).toBeTruthy();
+        expect(
+            screen.getByText(/OpenClaw scheduled jobs are listed separately/u)
+        ).toBeTruthy();
         expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
             "href",
             "/jobs"
@@ -123,10 +125,10 @@ describe("OverviewJobsCard", () => {
             },
         });
 
-        expect(await screen.findByText("Claiming paused")).toBeTruthy();
+        expect(await screen.findByText("New jobs paused")).toBeTruthy();
         expect(within(metric("queued")).getByText("0")).toBeTruthy();
-        expect(within(metric("Fresh workers")).getByText("0")).toBeTruthy();
-        expect(within(metric("Oldest queued at")).getByText("None")).toBeTruthy();
+        expect(within(metric("Workers recently available")).getByText("0")).toBeTruthy();
+        expect(within(metric("Oldest waiting since")).getByText("None")).toBeTruthy();
         expect(screen.queryByRole("button", { name: /claim/u })).toBeNull();
     });
 
@@ -142,10 +144,12 @@ describe("OverviewJobsCard", () => {
 
         await screen.findByRole("heading", {
             level: 2,
-            name: "Dashboard job queue",
+            name: "Dashboard background jobs",
         });
         expect(
-            within(metric("Fresh workers")).getByText(`${jobWorkerSummaryMaximum}+`)
+            within(metric("Workers recently available")).getByText(
+                `${jobWorkerSummaryMaximum}+`
+            )
         ).toBeTruthy();
     });
 });

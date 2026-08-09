@@ -34,7 +34,7 @@ function RunStateCount({ state, value }: RunStateCountProps) {
             </dt>
             <dd className="text-primary-50 mt-2 text-2xl font-semibold tabular-nums">
                 {value}
-                <span className="sr-only"> persistent job runs</span>
+                <span className="sr-only"> background jobs</span>
             </dd>
         </div>
     );
@@ -65,11 +65,11 @@ export function OverviewJobsCard({ summary }: OverviewJobsCardProps) {
                     </span>
                     <div className="min-w-0">
                         <Heading id={headingId} level={2} size="subsection">
-                            Dashboard job queue
+                            Dashboard background jobs
                         </Heading>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Global persistent Dashboard-local run states and the bounded
-                            fresh-worker window. OpenClaw cron is not included.
+                            See recent Dashboard background jobs and whether processing is
+                            available. OpenClaw scheduled jobs are listed separately.
                         </Text>
                     </div>
                 </div>
@@ -80,8 +80,9 @@ export function OverviewJobsCard({ summary }: OverviewJobsCardProps) {
                                 summary.control.claimingPaused ? "warning" : "success"
                             }
                         >
-                            Claiming{" "}
-                            {summary.control.claimingPaused ? "paused" : "active"}
+                            {summary.control.claimingPaused
+                                ? "New jobs paused"
+                                : "Accepting new jobs"}
                         </Badge>
                     </output>
                     <ActionLink size="sm" to="/jobs" variant="secondary">
@@ -99,13 +100,15 @@ export function OverviewJobsCard({ summary }: OverviewJobsCardProps) {
                     />
                 ))}
                 <div className="border-primary-700 bg-primary-900/35 rounded-lg border p-3">
-                    <dt className="text-primary-400 text-sm">Fresh workers</dt>
+                    <dt className="text-primary-400 text-sm">
+                        Workers recently available
+                    </dt>
                     <dd className="text-primary-50 mt-2 text-2xl font-semibold tabular-nums">
                         {freshWorkerCount}
                     </dd>
                 </div>
                 <div className="border-primary-700 bg-primary-900/35 rounded-lg border p-3">
-                    <dt className="text-primary-400 text-sm">Oldest queued at</dt>
+                    <dt className="text-primary-400 text-sm">Oldest waiting since</dt>
                     <dd className="text-primary-100 mt-2 text-sm">
                         {summary.oldestQueuedAtMs === undefined ? (
                             "None"

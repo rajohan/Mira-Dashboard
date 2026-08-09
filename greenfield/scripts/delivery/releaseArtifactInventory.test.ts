@@ -48,6 +48,23 @@ describe("release artifact inventory", () => {
         expect(inventory.every((record) => Object.isFrozen(record))).toBe(true);
     });
 
+    test("admits reviewed systemd template names without broad path characters", async () => {
+        const root = await releaseTree();
+        await writeFile(
+            path.join(root, "mira-dashboard-log-maintenance@.service"),
+            "service"
+        );
+
+        const inventory = await inventoryReleaseArtifactTree(root);
+        expect(inventory.map(({ path: artifactPath }) => artifactPath)).toContain(
+            "mira-dashboard-log-maintenance@.service"
+        );
+        await writeFile(path.join(root, "invalid name.service"), "invalid");
+        expect(inventoryReleaseArtifactTree(root)).rejects.toThrow(
+            "Release artifact tree is invalid"
+        );
+    });
+
     test("rejects symlinks, hardlinks, empty files and noncanonical names", async () => {
         for (const invalidKind of ["symlink", "hardlink", "empty", "name"] as const) {
             const root = await releaseTree();

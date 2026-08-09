@@ -77,18 +77,18 @@ function confirmationDescription(
     job: OpenClawCronJob
 ): string {
     if (confirmation === "run") {
-        return `Request an immediate Gateway run for ${job.name}? This is not a Dashboard job run.`;
+        return `Run ${job.name} in OpenClaw now? This is separate from Dashboard background jobs.`;
     }
     if (confirmation === "enable") {
-        return `Clear the Dashboard disable intent and reconcile ${job.name} to enabled?`;
+        return `Enable ${job.name} in OpenClaw now?`;
     }
-    return `Delete ${job.name} from the OpenClaw Gateway? Success is reported only after absence readback.`;
+    return `Delete ${job.name} from OpenClaw? Dashboard will confirm that it was removed before reporting success.`;
 }
 
 function confirmationTitle(confirmation: Confirmation): string {
-    if (confirmation === "run") return "Run OpenClaw cron job";
-    if (confirmation === "enable") return "Enable OpenClaw cron job";
-    return "Delete OpenClaw cron job";
+    if (confirmation === "run") return "Run OpenClaw scheduled job";
+    if (confirmation === "enable") return "Enable OpenClaw scheduled job";
+    return "Delete OpenClaw scheduled job";
 }
 
 /**
@@ -140,9 +140,9 @@ export function OpenClawCronSectionView({
         return (
             <section aria-labelledby={headingId} className="max-w-full min-w-0">
                 <Heading id={headingId} level={2}>
-                    OpenClaw cron
+                    OpenClaw scheduled jobs
                 </Heading>
-                <PageState label="Loading OpenClaw cron jobs…" status="loading" />
+                <PageState label="Loading OpenClaw scheduled jobs…" status="loading" />
             </section>
         );
     }
@@ -150,15 +150,15 @@ export function OpenClawCronSectionView({
         return (
             <section aria-labelledby={headingId} className="max-w-full min-w-0">
                 <Heading className="sr-only" id={headingId} level={2}>
-                    OpenClaw cron
+                    OpenClaw scheduled jobs
                 </Heading>
                 <PageState
                     headingLevel={2}
                     message={state.message}
                     onRetry={onRetry}
-                    retryLabel="Retry OpenClaw cron"
+                    retryLabel="Try again"
                     status="error"
-                    title="OpenClaw cron unavailable"
+                    title="OpenClaw scheduled jobs unavailable"
                 />
             </section>
         );
@@ -191,7 +191,7 @@ export function OpenClawCronSectionView({
             return "confirmed";
         } catch (error) {
             if (!isDashboardOperationOutcomeUnknown(error)) {
-                setActionError("The OpenClaw cron action failed. Refresh and try again.");
+                setActionError("The OpenClaw action failed. Refresh and try again.");
                 throw error;
             }
             setActionError(openClawCronUnknownOutcomeMessage);
@@ -200,13 +200,13 @@ export function OpenClawCronSectionView({
                 const reconciled = await reconcileAuthoritativeState();
                 if (!reconciled) throw error;
                 setActionError(
-                    "The OpenClaw cron outcome was uncertain. Authoritative data was refreshed; review the current state before another action."
+                    "Dashboard could not confirm the result, so it refreshed the current OpenClaw status. Check the status before taking another action."
                 );
                 setReconciliation("ready");
                 return "reconciled";
             } catch {
                 setActionError(
-                    `${openClawCronUnknownOutcomeMessage} The authoritative refresh failed; refresh successfully before another control.`
+                    `${openClawCronUnknownOutcomeMessage} The refresh also failed, so actions remain unavailable.`
                 );
                 setReconciliation("blocked");
                 throw error;
@@ -218,19 +218,19 @@ export function OpenClawCronSectionView({
 
     async function retryReconciliation(): Promise<void> {
         setReconciliation("checking");
-        setActionError("Refreshing authoritative OpenClaw cron state…");
+        setActionError("Refreshing the current OpenClaw status…");
         try {
             const reconciled = await reconcileAuthoritativeState();
             if (!reconciled) {
                 setReconciliation("blocked");
                 setActionError(
-                    `${openClawCronUnknownOutcomeMessage} The authoritative refresh failed; refresh successfully before another control.`
+                    `${openClawCronUnknownOutcomeMessage} The refresh also failed, so actions remain unavailable.`
                 );
                 return;
             }
             setReconciliation("ready");
             setActionError(
-                "Authoritative OpenClaw cron data was refreshed. Review the current state before retrying."
+                "The current OpenClaw status was refreshed. Check it before trying again."
             );
             setConfirmation(undefined);
             setDisableOpen(false);
@@ -238,7 +238,7 @@ export function OpenClawCronSectionView({
         } catch {
             setReconciliation("blocked");
             setActionError(
-                `${openClawCronUnknownOutcomeMessage} The authoritative refresh failed; refresh successfully before another control.`
+                `${openClawCronUnknownOutcomeMessage} The refresh also failed, so actions remain unavailable.`
             );
         }
     }
@@ -246,7 +246,7 @@ export function OpenClawCronSectionView({
     function requiresConfigRevision(job: OpenClawCronJob): string {
         if (job.configRevision !== undefined) return job.configRevision;
         setActionError(
-            "The Gateway did not provide a configuration revision. Refresh before changing this definition."
+            "OpenClaw did not provide the version needed to change this job. Refresh and try again."
         );
         throw new Error("OpenClaw cron configuration revision is unavailable");
     }
@@ -286,20 +286,19 @@ export function OpenClawCronSectionView({
                     <div className="flex items-center gap-2">
                         <Icon icon={CloudCog} tone="accent" />
                         <Heading id={headingId} level={2} tabIndex={-1}>
-                            OpenClaw cron
+                            OpenClaw scheduled jobs
                         </Heading>
                     </div>
                     <Text className="mt-2 max-w-3xl" tone="muted">
-                        Gateway-owned automations and their Gateway run history. These are
-                        separate from Dashboard schedules, durable queues, workers, and
-                        job runs.
+                        OpenClaw automations and their run history. These are separate
+                        from Dashboard schedules and background jobs.
                     </Text>
                     <Text className="mt-1 max-w-3xl" size="sm" tone="muted">
-                        Showing {result.jobs.length} of {result.total} Gateway jobs from
-                        this bounded browser window.
+                        Showing {result.jobs.length} of {result.total} OpenClaw jobs.
                     </Text>
                     <Text className="mt-1 max-w-3xl" size="sm" tone="muted">
-                        Updates automatically every 10 seconds and after Gateway events.
+                        Updates automatically every 10 seconds and when OpenClaw reports
+                        changes.
                     </Text>
                 </div>
                 {reconciliation === "blocked" && (
@@ -308,7 +307,7 @@ export function OpenClawCronSectionView({
                         onClick={() => void retryReconciliation()}
                         variant="secondary"
                     >
-                        Refresh authoritative state
+                        Refresh current status
                     </Button>
                 )}
             </div>
@@ -318,7 +317,7 @@ export function OpenClawCronSectionView({
                 <Alert
                     className="mt-5"
                     focusOnError={false}
-                    message="Showing last-known-good OpenClaw cron data while the Gateway refresh is unavailable. Controls should be retried only after a fresh preflight."
+                    message="The latest refresh failed, so the last available OpenClaw data is shown. Refresh successfully before trying an action."
                     variant="info"
                 />
             )}
@@ -326,11 +325,11 @@ export function OpenClawCronSectionView({
             {result.jobs.length === 0 ? (
                 <div className="mt-6">
                     <PageState
-                        description="The authoritative Gateway inventory returned no jobs for this bounded page. Dashboard schedules may still exist above this section."
+                        description="OpenClaw returned no scheduled jobs. Dashboard schedules may still exist above this section."
                         headingLevel={3}
                         icon={CloudCog}
                         status="empty"
-                        title="No OpenClaw cron jobs"
+                        title="No OpenClaw scheduled jobs"
                     />
                 </div>
             ) : (
@@ -359,8 +358,7 @@ export function OpenClawCronSectionView({
                         )}
                         {result.hasMore && onLoadMoreJobs === undefined && (
                             <Text className="mt-3" size="sm" tone="muted">
-                                More Gateway jobs exist beyond this bounded browser
-                                window.
+                                More OpenClaw jobs are available.
                             </Text>
                         )}
                     </div>
@@ -460,7 +458,7 @@ export function OpenClawCronSectionView({
                             : undefined
                     }
                     retryBusy={reconciliation === "checking"}
-                    retryLabel="Refresh authoritative state"
+                    retryLabel="Refresh current status"
                     title={confirmationTitle(confirmation)}
                 />
             )}

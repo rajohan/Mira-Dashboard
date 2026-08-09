@@ -6,7 +6,10 @@ import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { createCacheRepository } from "../cache/repository.ts";
-import { createSystemHostExecutor, findJobWorkerAction } from "./actionExecutors.ts";
+import {
+    createJobWorkerActionResolver,
+    createSystemHostExecutor,
+} from "./actionExecutors.ts";
 import {
     findJobActionDefinition,
     jobActionDefinitions,
@@ -26,6 +29,9 @@ const noSideEffects: JobMutationSideEffects = Object.freeze({
     realtimeEvents: Object.freeze([]),
 });
 const terminalRunStates = new Set(["cancelled", "failed", "succeeded", "timed-out"]);
+const findJobWorkerAction = createJobWorkerActionResolver({
+    run: () => Promise.resolve(),
+});
 
 async function waitForTerminal(
     readState: () => string | undefined

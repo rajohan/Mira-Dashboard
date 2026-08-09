@@ -7,6 +7,8 @@ import { Heading } from "../ui/Heading.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
     cacheAttemptVariant,
+    cacheAttemptLabel,
+    cacheFreshnessLabel,
     cacheFreshnessVariant,
     formatCacheBytes,
     formatCacheUptime,
@@ -58,11 +60,10 @@ export function SystemHostCard({ entry }: SystemHostCardProps) {
         return (
             <Card aria-labelledby="system-host-heading" className="border-amber-900/60">
                 <Heading id="system-host-heading" level={3}>
-                    Host projection unavailable
+                    Host data unavailable
                 </Heading>
                 <Text className="mt-2" tone="warning">
-                    The cached host payload does not match the reviewed system.host
-                    schema.
+                    The saved host data is not in the expected format.
                 </Text>
             </Card>
         );
@@ -73,7 +74,7 @@ export function SystemHostCard({ entry }: SystemHostCardProps) {
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
                     <Text size="sm" tone="muted">
-                        Host projection
+                        System host
                     </Text>
                     <Heading
                         className="mt-1 wrap-break-word"
@@ -88,10 +89,10 @@ export function SystemHostCard({ entry }: SystemHostCardProps) {
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Badge variant={cacheFreshnessVariant(entry.freshness)}>
-                        {entry.freshness}
+                        {cacheFreshnessLabel(entry.freshness)}
                     </Badge>
                     <Badge variant={cacheAttemptVariant(entry.lastAttemptStatus)}>
-                        last attempt {entry.lastAttemptStatus}
+                        Last refresh {cacheAttemptLabel(entry.lastAttemptStatus)}
                     </Badge>
                 </div>
             </div>

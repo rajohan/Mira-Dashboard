@@ -5,7 +5,11 @@ import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Text } from "../ui/Text.tsx";
-import { openClawCronScheduleLabel } from "./presentation.ts";
+import {
+    openClawCronRunStatusLabel,
+    openClawCronScheduleLabel,
+    openClawCronSynchronizationLabel,
+} from "./presentation.ts";
 
 interface OpenClawCronTableProps {
     readonly jobs: readonly OpenClawCronJob[];
@@ -54,7 +58,7 @@ export function OpenClawCronTable({
 
     return (
         <ul
-            aria-label="OpenClaw cron jobs"
+            aria-label="OpenClaw scheduled jobs"
             className="grid max-w-full min-w-0 grid-cols-1 gap-3"
         >
             {jobs.map((job) => {
@@ -100,7 +104,7 @@ export function OpenClawCronTable({
 
                         <dl className="mt-4 grid max-w-full min-w-0 grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
                             <div className="min-w-0">
-                                {definitionLabel("Gateway state")}
+                                {definitionLabel("OpenClaw status")}
                                 <dd className="mt-1">
                                     <Badge variant={job.enabled ? "success" : "default"}>
                                         {job.enabled ? "enabled" : "disabled"}
@@ -108,14 +112,16 @@ export function OpenClawCronTable({
                                 </dd>
                             </div>
                             <div className="min-w-0">
-                                {definitionLabel("Dashboard sync")}
+                                {definitionLabel("Dashboard status")}
                                 <dd className="mt-1">
                                     <Badge
                                         variant={synchronizationVariant(
                                             job.synchronization.state
                                         )}
                                     >
-                                        {job.synchronization.state}
+                                        {openClawCronSynchronizationLabel(
+                                            job.synchronization.state
+                                        )}
                                     </Badge>
                                 </dd>
                             </div>
@@ -140,7 +146,11 @@ export function OpenClawCronTable({
                             <div className="min-w-0 sm:col-span-2">
                                 {definitionLabel("Last status")}
                                 <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                    {job.state.lastRunStatus ?? "—"}
+                                    {job.state.lastRunStatus === undefined
+                                        ? "—"
+                                        : openClawCronRunStatusLabel(
+                                              job.state.lastRunStatus
+                                          )}
                                 </dd>
                             </div>
                         </dl>

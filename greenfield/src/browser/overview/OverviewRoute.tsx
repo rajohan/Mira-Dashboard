@@ -13,7 +13,7 @@ export function OverviewRoute() {
     return (
         <div>
             <PageHeader
-                description="Validated operational projections stay visible through transient refresh failures while the remaining overview providers are rewritten."
+                description="See current system activity, recent work, alerts, and saved background-check results in one place."
                 eyebrow="Operations"
                 title="Mira Dashboard"
             />

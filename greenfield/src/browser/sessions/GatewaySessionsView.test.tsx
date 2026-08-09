@@ -98,7 +98,7 @@ describe("Gateway sessions view", () => {
         expect(screen.getByText("Connected")).toBeTruthy();
         expect(
             screen.getByText(
-                "Updates automatically every 10 seconds and after Gateway session events."
+                "Updates automatically every 10 seconds and when OpenClaw reports a change."
             )
         ).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
@@ -110,7 +110,14 @@ describe("Gateway sessions view", () => {
             new Date(timestampMs).toISOString()
         );
         const table = screen.getByRole("table", { name: "Current OpenClaw sessions" });
-        expect(table).toBeTruthy();
+        expect(table).toHaveClass("border-separate", "border-spacing-0");
+        expect(table.parentElement).toHaveClass(
+            "overflow-x-auto",
+            "overscroll-x-contain"
+        );
+        expect(within(table).getByRole("columnheader", { name: "Type" })).toHaveClass(
+            "bg-primary-950"
+        );
         expect(table.querySelector(".dashboard-data-table-label")).toHaveTextContent(
             "Type"
         );
@@ -250,7 +257,7 @@ describe("Gateway sessions view", () => {
 
         expect(
             screen.getByText(
-                `~${new Intl.NumberFormat().format(1200)} / ${new Intl.NumberFormat().format(200_000)} (stale)`
+                `~${new Intl.NumberFormat().format(1200)} / ${new Intl.NumberFormat().format(200_000)} (last known)`
             )
         ).toBeTruthy();
     });
@@ -262,17 +269,23 @@ describe("Gateway sessions view", () => {
         );
         render(<GatewaySessionsView onAction={onAction} snapshot={snapshot()} />);
         const trigger = screen.getByRole("button", {
-            name: `Compact Primary main; key ${gatewayPrimarySessionKey}`,
+            name: `Summarize Primary main; key ${gatewayPrimarySessionKey}`,
         });
         await user.click(trigger);
-        const dialog = screen.getByRole("dialog", { name: "Compact session?" });
-        await user.click(within(dialog).getByRole("button", { name: "Compact session" }));
+        const dialog = screen.getByRole("dialog", {
+            name: "Summarize older context?",
+        });
+        await user.click(
+            within(dialog).getByRole("button", { name: "Summarize session" })
+        );
 
         await waitFor(() =>
             expect(onAction).toHaveBeenCalledWith("compact", sessions[0])
         );
-        expect(await screen.findByText("Session compacted.")).toBeTruthy();
-        expect(screen.queryByRole("dialog", { name: "Compact session?" })).toBeNull();
+        expect(await screen.findByText("Older session context summarized.")).toBeTruthy();
+        expect(
+            screen.queryByRole("dialog", { name: "Summarize older context?" })
+        ).toBeNull();
         expect(onAction).toHaveBeenCalledTimes(1);
         await waitFor(() => expect(document.activeElement).toBe(trigger));
     });
@@ -293,9 +306,7 @@ describe("Gateway sessions view", () => {
         );
 
         expect(screen.getByText("Last known")).toBeTruthy();
-        expect(screen.getByRole("alert")).toHaveTextContent(
-            "Showing the last-known-good projection"
-        );
+        expect(screen.getByRole("alert")).toHaveTextContent("Showing session data from");
         expect(
             screen.getByRole("table", { name: "Current OpenClaw sessions" })
         ).toBeTruthy();

@@ -136,3 +136,46 @@ export function configurationProjectRoot(input: PickedApplicationEnvironment): s
     }
     return value;
 }
+
+/**
+ * Parses the explicit lexical workspace root before descriptor adapters open it.
+ * @returns Normalized absolute non-root workspace candidate.
+ */
+export function configurationWorkspaceRoot(input: PickedApplicationEnvironment): string {
+    const field = "MIRA_DASHBOARD_WORKSPACE_ROOT" as const;
+    const value = requiredConfigurationString(
+        input,
+        field,
+        applicationConfigurationLimits.workspaceRootMaximumLength
+    );
+    if (
+        !path.isAbsolute(value) ||
+        value === path.parse(value).root ||
+        path.resolve(value) !== value
+    ) {
+        configurationError(field, "invalid");
+    }
+    return value;
+}
+
+/**
+ * Parses the explicit OpenClaw home without consulting HOME or runtime discovery.
+ * @param input Registry-projected web configuration.
+ * @returns Normalized absolute non-root OpenClaw path.
+ */
+export function configurationOpenClawRoot(input: PickedApplicationEnvironment): string {
+    const field = "MIRA_DASHBOARD_OPENCLAW_ROOT" as const;
+    const value = requiredConfigurationString(
+        input,
+        field,
+        applicationConfigurationLimits.openClawRootMaximumLength
+    );
+    if (
+        !path.isAbsolute(value) ||
+        value === path.parse(value).root ||
+        path.resolve(value) !== value
+    ) {
+        configurationError(field, "invalid");
+    }
+    return value;
+}

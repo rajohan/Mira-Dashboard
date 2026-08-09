@@ -36,13 +36,12 @@ interface OpenClawCronDisableDialogProps {
 const disableExpiryModeOptions = Object.freeze([
     {
         description:
-            "The Dashboard expiry worker enables the Gateway job again after this local time.",
+            "Dashboard will enable the OpenClaw job again at this local date and time.",
         label: "Until a date",
         value: "until",
     },
     {
-        description:
-            "The desired state stays disabled until an operator enables the job.",
+        description: "The job stays disabled until someone enables it.",
         label: "Indefinitely",
         value: "indefinite",
     },
@@ -193,7 +192,7 @@ export function OpenClawCronDisableDialog({
             setError(
                 isDashboardOperationOutcomeUnknown(error)
                     ? openClawCronUnknownOutcomeMessage
-                    : "The desired disabled state could not be saved. Refresh and try again."
+                    : "This job could not be disabled. Refresh and try again."
             );
         } finally {
             setBusy(false);
@@ -207,27 +206,28 @@ export function OpenClawCronDisableDialog({
             open
             title={<span className="wrap-anywhere">Disable {job.name}</span>}
         >
-            <Form aria-label="Disable OpenClaw cron job" id={formId} onSubmit={submit}>
+            <Form
+                aria-label="Disable OpenClaw scheduled job"
+                id={formId}
+                onSubmit={submit}
+            >
                 <Alert className="mb-4" message={error} />
                 <Alert className="mb-4" message={reconciliationError} />
                 <p className="text-primary-300 mb-4 text-sm leading-6">
-                    This records Dashboard operator intent separately from the
-                    Gateway-owned enabled state. The section will show pending or conflict
-                    until readback confirms both agree.
+                    Dashboard saves the requested change and then asks OpenClaw to apply
+                    it. The status shows Updating or Needs attention until both agree.
                 </p>
                 {job.dashboardOpenLinkedTask !== undefined && (
                     <div className="border-primary-700 bg-primary-900/40 mb-4 max-w-full min-w-0 rounded-lg border p-3">
                         <p className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                            Dashboard open linked task
+                            Linked Dashboard task
                         </p>
                         <p className="text-primary-100 mt-1 max-w-full text-sm font-medium wrap-anywhere">
                             {job.dashboardOpenLinkedTask.title}
                         </p>
                         <p className="text-primary-400 mt-1 max-w-full text-xs wrap-anywhere">
-                            Status: {job.dashboardOpenLinkedTask.status}. This
-                            relationship comes from the Dashboard task database, not the
-                            OpenClaw Gateway. Disabling the cron job does not close the
-                            task.
+                            Status: {job.dashboardOpenLinkedTask.status}. Disabling the
+                            OpenClaw job does not close this Dashboard task.
                         </p>
                     </div>
                 )}
@@ -259,7 +259,7 @@ export function OpenClawCronDisableDialog({
                     <FormField
                         error={reasonError}
                         label="Disable reason"
-                        description="Required operator annotation."
+                        description="Required. Explain why this job is being disabled."
                     >
                         <Textarea
                             disabled={busy || reconciliationBlocked || reconciliationBusy}
@@ -268,6 +268,7 @@ export function OpenClawCronDisableDialog({
                                 setReason(event.target.value);
                                 setReasonError(undefined);
                             }}
+                            placeholder="Example: Paused during database maintenance"
                             value={reason}
                         />
                     </FormField>
@@ -291,7 +292,7 @@ export function OpenClawCronDisableDialog({
                             type="button"
                             variant="secondary"
                         >
-                            Refresh authoritative state
+                            Refresh current status
                         </Button>
                     )}
                     <Button
@@ -302,7 +303,7 @@ export function OpenClawCronDisableDialog({
                         type="submit"
                         variant="danger"
                     >
-                        Save disabled state
+                        Disable job
                     </Button>
                 </div>
             </Form>

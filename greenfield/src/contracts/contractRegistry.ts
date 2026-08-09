@@ -13,12 +13,17 @@ import {
 } from "./chatRealtime.ts";
 import { chatSpeechRawHttpContracts } from "./chatSpeech.ts";
 import { eventsStreamContract } from "./events.ts";
+import {
+    workspaceFileProcedureContracts,
+    workspaceFileRawHttpContracts,
+} from "./files.ts";
 import { gatewayConnectionProcedureContracts } from "./gatewayConnection.ts";
 import { gatewayRealtimeEventContracts } from "./gatewayRealtime.ts";
 import { gatewaySessionProcedureContracts } from "./gatewaySessions.ts";
 import { incidentProcedureContracts } from "./incidents.ts";
 import { jobRealtimeEventContracts } from "./jobRealtime.ts";
 import { jobProcedureContracts } from "./jobs.ts";
+import { logProcedureContracts } from "./logs.ts";
 import { monitoringProcedureContracts } from "./monitoringIngestion.ts";
 import { monitoringRealtimeEventContracts } from "./monitoringRealtime.ts";
 import { notificationProcedureContracts } from "./notifications.ts";
@@ -37,6 +42,7 @@ import { securityAuditProcedureContracts } from "./securityAudit.ts";
 import { systemProcedureContracts, systemRawHttpContracts } from "./system.ts";
 import { taskRealtimeEventContract } from "./taskRealtime.ts";
 import { taskProcedureContracts } from "./tasks.ts";
+import { terminalProcedureContracts, terminalRawHttpContracts } from "./terminal.ts";
 
 /** Implemented tRPC procedure metadata used by runtime wiring and docs. */
 const registeredProcedureContracts = [
@@ -47,10 +53,12 @@ const registeredProcedureContracts = [
     ...cacheProcedureContracts,
     ...chatProcedureContracts,
     eventsStreamContract,
+    ...workspaceFileProcedureContracts,
     ...gatewayConnectionProcedureContracts,
     ...gatewaySessionProcedureContracts,
     ...incidentProcedureContracts,
     ...jobProcedureContracts,
+    ...logProcedureContracts,
     ...monitoringProcedureContracts,
     ...notificationProcedureContracts,
     ...openClawTaskProcedureContracts,
@@ -60,6 +68,7 @@ const registeredProcedureContracts = [
     ...securityAuditProcedureContracts,
     ...systemProcedureContracts,
     ...taskProcedureContracts,
+    ...terminalProcedureContracts,
 ] as const satisfies readonly ProcedureContract[];
 
 /** Exact registered procedure union used by environment-neutral typed clients. */
@@ -100,7 +109,9 @@ export const procedureContracts = Object.freeze(
 export const rawHttpContracts: readonly RawHttpContract[] = [
     ...chatRawHttpContracts,
     ...chatSpeechRawHttpContracts,
+    ...workspaceFileRawHttpContracts,
     ...systemRawHttpContracts,
+    ...terminalRawHttpContracts,
 ];
 
 /** Implemented realtime topics used by runtime wiring and docs. */

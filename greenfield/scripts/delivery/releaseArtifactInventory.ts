@@ -10,7 +10,7 @@ const maximumArtifactCount = 4096;
 const maximumArtifactDirectoryCount = 512;
 const maximumArtifactDepth = 16;
 const maximumArtifactTreeBytes = 512 * 1024 * 1024;
-const artifactPathSegmentPattern = /^[A-Za-z0-9._+-]+$/u;
+const artifactPathSegmentPattern = /^[A-Za-z0-9.@_+-]+$/u;
 
 function compareCanonicalText(left: string, right: string): number {
     if (left < right) return -1;

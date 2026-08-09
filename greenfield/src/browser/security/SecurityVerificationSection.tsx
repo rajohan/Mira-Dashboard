@@ -40,7 +40,7 @@ export function SecurityVerificationSection({
     const methods: readonly MultiFactorAuthenticationMethod[] = summary.mfa.methods;
     return (
         <SecuritySection
-            description="Refresh recent proof before sensitive changes and rotate the Dashboard password."
+            description="Confirm your identity before sensitive changes, or change your Dashboard password."
             id="security-verification-heading"
             title="Verification and password"
         >
@@ -48,15 +48,15 @@ export function SecurityVerificationSection({
             <Alert className="mb-4" message={notice} variant="success" />
             <dl className="mb-6 grid gap-3 text-sm sm:grid-cols-2">
                 <div>
-                    <dt className="text-primary-400">Recent password</dt>
+                    <dt className="text-primary-400">Password confirmed recently</dt>
                     <dd className="text-primary-100 font-medium">
-                        {summary.recentAuth.password.recent ? "Valid" : "Required"}
+                        {summary.recentAuth.password.recent ? "Yes" : "Needed"}
                     </dd>
                 </div>
                 <div>
-                    <dt className="text-primary-400">Recent MFA</dt>
+                    <dt className="text-primary-400">MFA confirmed recently</dt>
                     <dd className="text-primary-100 font-medium">
-                        {summary.recentAuth.mfa.recent ? "Valid" : "Required"}
+                        {summary.recentAuth.mfa.recent ? "Yes" : "Needed"}
                     </dd>
                 </div>
             </dl>

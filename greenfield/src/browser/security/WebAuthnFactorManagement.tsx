@@ -1,18 +1,14 @@
-import { useForm } from "@tanstack/react-form";
 import { Fingerprint, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import type { AccountSecuritySummary } from "../../contracts/accountSecurity.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Button } from "../ui/Button.tsx";
-import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
-import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { Input } from "../ui/Input.tsx";
-import { optionalFactorLabelFormSchema } from "./mfaFormSchemas.ts";
+import { MfaEnrollmentLabelModal } from "./MfaEnrollmentLabelModal.tsx";
 import { useDashboardWebAuthnClient } from "./webauthn/webauthnContextValue.ts";
 
 interface WebAuthnFactorManagementProps {
@@ -40,27 +36,22 @@ export function WebAuthnFactorManagement({
 }: WebAuthnFactorManagementProps) {
     const client = useDashboardTrpcClient();
     const webAuthn = useDashboardWebAuthnClient();
-    const labelForm = useForm({
-        defaultValues: { label: "" },
-        onSubmit: async ({ formApi, value }) => {
-            const succeeded = await refreshAfter(async () => {
-                const challenge = await client.mutation(
-                    "accountSecurity.beginWebAuthnEnrollment",
-                    {}
-                );
-                const response = await webAuthn.register(challenge.options);
-                const result = await client.mutation(
-                    "accountSecurity.confirmWebAuthnEnrollment",
-                    value.label.length === 0
-                        ? { response }
-                        : { label: value.label, response }
-                );
-                if (result.enabledNow) onRecoveryCodes(result.recoveryCodes);
-            });
-            if (succeeded) formApi.setFieldValue("label", "");
-        },
-        validators: { onSubmit: optionalFactorLabelFormSchema },
-    });
+    const [labelModalOpen, setLabelModalOpen] = useState(false);
+
+    async function enrollSecurityKey(label: string): Promise<boolean> {
+        return refreshAfter(async () => {
+            const challenge = await client.mutation(
+                "accountSecurity.beginWebAuthnEnrollment",
+                {}
+            );
+            const response = await webAuthn.register(challenge.options);
+            const result = await client.mutation(
+                "accountSecurity.confirmWebAuthnEnrollment",
+                label.length === 0 ? { response } : { label, response }
+            );
+            if (result.enabledNow) onRecoveryCodes(result.recoveryCodes);
+        });
+    }
 
     return (
         <div>
@@ -74,7 +65,7 @@ export function WebAuthnFactorManagement({
                         <p className="text-primary-100 font-medium">{credential.label}</p>
                         <p className="text-primary-400 mt-1">
                             Added {formatDashboardDateTime(credential.createdAtMs)} ·
-                            {credential.usable ? " usable" : " unavailable"}
+                            {credential.usable ? " ready to use" : " unavailable"}
                         </p>
                         <Button
                             aria-label={`Remove security key ${credential.label}`}
@@ -92,49 +83,33 @@ export function WebAuthnFactorManagement({
                 ))}
             </ul>
             {available ? (
-                <Form className="mt-4" onSubmit={() => void labelForm.handleSubmit()}>
-                    <labelForm.Field name="label">
-                        {(field) => (
-                            <FormField
-                                disabled={factorCapacityReached || action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
-                                label="Security-key label"
-                            >
-                                <Input
-                                    className="mt-2"
-                                    name={field.name}
-                                    onBlur={field.handleBlur}
-                                    onChange={(event) =>
-                                        field.handleChange(event.currentTarget.value)
-                                    }
-                                    placeholder="Primary security key"
-                                    value={field.state.value}
-                                />
-                            </FormField>
-                        )}
-                    </labelForm.Field>
-                    <labelForm.Subscribe
-                        selector={(state) =>
-                            [state.canSubmit, state.isSubmitting] as const
-                        }
+                <>
+                    <Button
+                        className="mt-4"
+                        disabled={factorCapacityReached || action.busy}
+                        onClick={() => setLabelModalOpen(true)}
                     >
-                        {([canSubmit, isSubmitting]) => (
-                            <Button
-                                busy={action.busy || isSubmitting}
-                                busyLabel="Waiting for security key…"
-                                className="mt-3"
-                                disabled={factorCapacityReached || !canSubmit}
-                                type="submit"
-                            >
-                                <Icon icon={Fingerprint} size="sm" tone="inherit" />
-                                Enroll security key
-                            </Button>
-                        )}
-                    </labelForm.Subscribe>
-                </Form>
+                        <Icon icon={Fingerprint} size="sm" tone="inherit" />
+                        Add security key
+                    </Button>
+                    {labelModalOpen && (
+                        <MfaEnrollmentLabelModal
+                            busy={action.busy}
+                            busyLabel="Waiting for your security key…"
+                            description="Give this key a name so you can recognize it later. You can leave the name blank."
+                            icon={Fingerprint}
+                            inputLabel="Name"
+                            onClose={() => setLabelModalOpen(false)}
+                            onSubmit={enrollSecurityKey}
+                            placeholder="Example: Primary security key"
+                            submitLabel="Continue"
+                            title="Add security key"
+                        />
+                    )}
+                </>
             ) : (
                 <p className="text-primary-400 mt-3 text-sm">
-                    WebAuthn is unavailable for this origin.
+                    Security keys are not available in this browser or at this address.
                 </p>
             )}
         </div>

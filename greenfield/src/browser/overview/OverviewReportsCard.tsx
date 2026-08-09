@@ -7,7 +7,6 @@ import {
     reportKindLabel,
     reportStatusVariant,
 } from "../monitoring/monitoringPresentation.ts";
-import { reportListPageSize } from "../monitoring/monitoringQueries.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
@@ -58,11 +57,11 @@ export function OverviewReportsCard({ hasMore, reports }: OverviewReportsCardPro
                     </span>
                     <div className="min-w-0">
                         <Heading id={headingId} level={2} size="subsection">
-                            Reports overview
+                            Recent reports
                         </Heading>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Bounded immutable summaries; report bodies stay on the reports
-                            route.
+                            See the newest report summaries. Open Reports to read a full
+                            report.
                         </Text>
                     </div>
                 </div>
@@ -75,17 +74,14 @@ export function OverviewReportsCard({ hasMore, reports }: OverviewReportsCardPro
                 <div className="border-primary-700 bg-primary-900/35 mt-5 rounded-lg border p-4">
                     <Text>No reports yet.</Text>
                     <Text className="mt-1" size="sm" tone="muted">
-                        New immutable monitoring reports will appear here.
+                        New monitoring reports will appear here.
                     </Text>
                 </div>
             ) : (
                 <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]">
                     <div className="border-primary-700 bg-primary-900/35 rounded-lg border p-4">
                         <dl className="space-y-3">
-                            <CountRow
-                                label={`Newest ${reportListPageSize}`}
-                                value={reports.length}
-                            />
+                            <CountRow label="Shown" value={reports.length} />
                             <CountRow
                                 label="Warnings"
                                 value={warningCount}
@@ -99,7 +95,7 @@ export function OverviewReportsCard({ hasMore, reports }: OverviewReportsCardPro
                         </dl>
                         {hasMore && (
                             <Text className="mt-3" size="sm" tone="muted">
-                                Older reports are available on the reports route.
+                                Open Reports to see older reports.
                             </Text>
                         )}
                     </div>

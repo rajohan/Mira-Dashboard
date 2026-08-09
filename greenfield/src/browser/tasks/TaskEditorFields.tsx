@@ -55,6 +55,7 @@ export function TaskEditorFields({ busy, creating, form }: TaskEditorFieldsProps
                             onChange={(event) =>
                                 field.handleChange(event.currentTarget.value)
                             }
+                            placeholder="Example: Review database backups"
                             required
                             value={field.state.value}
                         />
@@ -153,6 +154,7 @@ export function TaskEditorFields({ busy, creating, form }: TaskEditorFieldsProps
                             onChange={(event) =>
                                 field.handleChange(event.currentTarget.value)
                             }
+                            placeholder="Example: Check the latest backup report and resolve any warnings."
                             value={field.state.value}
                         />
                     </FormField>

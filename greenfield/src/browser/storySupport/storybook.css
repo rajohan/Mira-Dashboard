@@ -1,5 +1,6 @@
 @import "tailwindcss" source(none);
 @import "../base.css";
+@import "@xterm/xterm/css/xterm.css";
 @config "../../../tailwind.config.ts";
 @source "../**/*.{js,ts,jsx,tsx}";
 

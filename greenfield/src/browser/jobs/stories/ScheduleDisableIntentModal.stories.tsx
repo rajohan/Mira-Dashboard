@@ -216,9 +216,7 @@ export const InvalidSubmission: Story = {
 
         await userEvent.click(modal.getByRole("button", { name: "Disable schedule" }));
 
-        const error = await modal.findByText(
-            "Use 1–1000 visible characters without control characters."
-        );
+        const error = await modal.findByText("Enter between 1 and 1,000 characters.");
         const descriptionIds = comment.getAttribute("aria-describedby")?.split(" ");
         await expect(error).toBeVisible();
         await expect(comment).toHaveAttribute("data-invalid");

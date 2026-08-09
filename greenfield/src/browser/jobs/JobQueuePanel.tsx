@@ -56,7 +56,7 @@ const workerColumns = workerColumnHelper.columns([
                 {getValue()}
             </Badge>
         ),
-        header: "State",
+        header: "Status",
     }),
     workerColumnHelper.accessor("activeRunCount", {
         cell: ({ getValue, row }) => (
@@ -64,7 +64,7 @@ const workerColumns = workerColumnHelper.columns([
                 {getValue()} / {row.original.capacity}
             </Text>
         ),
-        header: "Active / capacity",
+        header: "Running / limit",
     }),
     workerColumnHelper.accessor("releaseId", {
         cell: ({ getValue }) => (
@@ -88,7 +88,7 @@ const workerColumns = workerColumnHelper.columns([
                 {formatDashboardDateTime(getValue())}
             </time>
         ),
-        header: "Heartbeat",
+        header: "Last check-in",
     }),
 ]);
 
@@ -113,8 +113,8 @@ export function JobQueuePanel({
         getRowId: (worker) => worker.id,
     });
     const claimingPaused = summary.control.claimingPaused;
-    const actionLabel = claimingPaused ? "Resume claiming" : "Pause claiming";
-    const actionBusyLabel = claimingPaused ? "Resuming claiming…" : "Pausing claiming…";
+    const actionLabel = claimingPaused ? "Resume new jobs" : "Pause new jobs";
+    const actionBusyLabel = claimingPaused ? "Resuming new jobs…" : "Pausing new jobs…";
 
     return (
         <Card aria-label="Job queue and workers">
@@ -122,17 +122,17 @@ export function JobQueuePanel({
                 <div>
                     <Heading level={2}>Queue and workers</Heading>
                     <Text className="mt-1" tone="muted">
-                        Durable claim state and the currently registered worker fleet.
+                        See waiting jobs and the workers that can run them.
                     </Text>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-3">
                     <output aria-atomic="true" aria-live="polite">
                         <Badge variant={claimingPaused ? "warning" : "success"}>
-                            Claiming {claimingPaused ? "paused" : "active"}
+                            {claimingPaused ? "New jobs paused" : "Accepting new jobs"}
                         </Badge>
                     </output>
                     <Button
-                        aria-label={`${actionLabel} for new job runs`}
+                        aria-label={actionLabel}
                         busy={controlBusy}
                         busyLabel={actionBusyLabel}
                         disabled={controlDisabled}
@@ -190,7 +190,7 @@ export function JobQueuePanel({
                 </div>
                 <div className="border-primary-700 rounded-lg border p-3">
                     <Text size="sm" tone="muted">
-                        Active resource classes
+                        Work types in use
                     </Text>
                     <Text className="mt-1 wrap-break-word capitalize">
                         {summary.activeResourceClasses.length === 0
@@ -200,14 +200,13 @@ export function JobQueuePanel({
                 </div>
                 <div className="border-primary-700 rounded-lg border p-3">
                     <Text size="sm" tone="muted">
-                        Claim control updated
+                        Queue setting updated
                     </Text>
                     <time
                         className="text-primary-200 mt-1 block text-sm"
                         dateTime={new Date(summary.control.updatedAtMs).toISOString()}
                     >
-                        {formatDashboardDateTime(summary.control.updatedAtMs)} · version{" "}
-                        {summary.control.version}
+                        {formatDashboardDateTime(summary.control.updatedAtMs)}
                     </time>
                 </div>
             </div>

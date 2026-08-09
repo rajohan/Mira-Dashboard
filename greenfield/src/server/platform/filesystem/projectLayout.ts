@@ -18,8 +18,12 @@ export interface DashboardProjectLayout {
             readonly backups: string;
             readonly database: string;
             readonly jobOutput: string;
+            readonly logMaintenance: string;
             readonly logs: string;
             readonly root: string;
+            readonly terminalBroker: string;
+            readonly terminalBrokerSocket: string;
+            readonly workspaceFileUploads: string;
         };
     };
     readonly root: string;
@@ -104,8 +108,12 @@ export function deriveDashboardProjectLayout(
         backups: path.join(stateRoot, "backups"),
         database: path.join(stateRoot, "mira-dashboard.db"),
         jobOutput: path.join(stateRoot, "job-output"),
+        logMaintenance: path.join(stateRoot, "log-maintenance"),
         logs: path.join(stateRoot, "logs"),
         root: stateRoot,
+        terminalBroker: path.join(stateRoot, "terminal-broker"),
+        terminalBrokerSocket: path.join(stateRoot, "terminal-broker", "terminal.sock"),
+        workspaceFileUploads: path.join(stateRoot, "workspace-file-uploads"),
     });
     const production = Object.freeze({
         checkout: path.join(productionRoot, "checkout"),

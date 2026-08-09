@@ -4,7 +4,7 @@ import { Effect } from "effect";
 
 import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
-import { findJobWorkerAction } from "./actionExecutors.ts";
+import { createJobWorkerActionResolver } from "./actionExecutors.ts";
 import {
     type JobActionRegistration,
     type JobActionExecutionContext,
@@ -38,6 +38,10 @@ import {
     type ListDueSchedulesInput,
 } from "./repository.ts";
 import { createJobRealtimeSideEffects } from "./sideEffects.ts";
+
+const findJobWorkerAction = createJobWorkerActionResolver({
+    run: () => Promise.resolve(),
+});
 
 const releaseId = "a".repeat(40);
 const at = new Date("2026-08-08T00:00:00.000Z");

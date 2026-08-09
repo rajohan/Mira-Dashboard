@@ -28,7 +28,7 @@ const incidentColumns = incidentColumnHelper.columns([
         cell: ({ getValue, row }) => (
             <button
                 aria-current={row.original.selected ? "true" : undefined}
-                aria-label={`${row.original.incident.title}; ${row.original.incident.monitorKey}; generation ${row.original.incident.generation}`}
+                aria-label={`${row.original.incident.title}; ${row.original.incident.monitorKey}; occurrence group ${row.original.incident.generation}`}
                 className={cn(
                     "text-primary-100 hover:text-accent-300 text-left font-medium wrap-break-word",
                     row.original.selected && "text-accent-300"
@@ -48,7 +48,7 @@ const incidentColumns = incidentColumnHelper.columns([
                 {getValue()}
             </Badge>
         ),
-        header: "State",
+        header: "Status",
         id: "state",
     }),
     incidentColumnHelper.accessor((row) => row.incident.severity, {
@@ -60,12 +60,12 @@ const incidentColumns = incidentColumnHelper.columns([
     }),
     incidentColumnHelper.accessor((row) => row.incident.monitorKey, {
         cell: ({ getValue }) => <Text className="wrap-break-word">{getValue()}</Text>,
-        header: "Monitor",
+        header: "Check",
         id: "monitorKey",
     }),
     incidentColumnHelper.accessor((row) => row.incident.kind, {
         cell: ({ getValue }) => <Text className="wrap-break-word">{getValue()}</Text>,
-        header: "Kind",
+        header: "Type",
         id: "kind",
     }),
     incidentColumnHelper.accessor((row) => row.incident.lastSeenAtMs, {

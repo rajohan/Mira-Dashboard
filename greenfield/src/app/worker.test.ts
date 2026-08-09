@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 
 import { Redacted } from "effect";
 
@@ -12,13 +13,16 @@ import {
     releaseBuildCommands,
     releaseProcessRoles,
 } from "../shared/releaseManifest.ts";
+import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
 import type { DashboardWorkerRuntime } from "../worker/runtime.ts";
 import {
+    createWorkerLogMaintenanceExecutor,
     type DashboardWorkerProcessDependencies,
     runDashboardWorkerProcess,
 } from "./worker.ts";
 
 const projectRoot = "/srv/mira-dashboard";
+const workspaceRoot = "/srv/mira-workspace";
 const releaseId = "b".repeat(40);
 const revision = "a".repeat(40);
 const checksum = "c".repeat(64);
@@ -142,6 +146,7 @@ function processFixture(
             return Promise.resolve();
         },
     });
+    let terminalBrokerStopped = false;
     const dependencies = Object.freeze({
         createGatewayTransport(options) {
             events.push("gateway-create");
@@ -154,11 +159,22 @@ function processFixture(
             events.push(`logs:${processRole}:${logsDirectory}`);
             return destination;
         },
-        createRuntime(observedLayout, observedRelease, logger, observedGatewayTransport) {
+        createRuntime(
+            observedLayout,
+            observedRelease,
+            logger,
+            observedGatewayTransport,
+            observedWorkspaceRoot
+        ) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
             expect(logger).toBeDefined();
             expect(observedGatewayTransport).toBe(gatewayTransport);
+            expect(observedWorkspaceRoot).toEqual({
+                id: "workspace",
+                path: workspaceRoot,
+                writable: true,
+            });
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
                 "start",
                 "stop",
@@ -182,6 +198,35 @@ function processFixture(
             events.push(`layout:${observedProjectRoot}`);
             return Promise.resolve(layout);
         },
+        resolveWorkspaceFileRoot(observedWorkspaceRoot, observedProductionRoot) {
+            expect(observedWorkspaceRoot).toBe(workspaceRoot);
+            expect(observedProductionRoot).toBe(layout.production.root);
+            events.push(`workspace:${observedWorkspaceRoot}`);
+            return Promise.resolve(
+                Object.freeze({
+                    id: "workspace",
+                    path: workspaceRoot,
+                    writable: true,
+                })
+            );
+        },
+        startTerminalBroker(options) {
+            expect(options.projectRoot).toBe(layout.root);
+            events.push("terminal-broker-start");
+            return Promise.resolve(
+                Object.freeze({
+                    broker: {} as never,
+                    socketPath: layout.production.state.terminalBrokerSocket,
+                    stop() {
+                        if (!terminalBrokerStopped) {
+                            terminalBrokerStopped = true;
+                            events.push("terminal-broker-stop");
+                        }
+                        return Promise.resolve();
+                    },
+                })
+            );
+        },
     } satisfies DashboardWorkerProcessDependencies);
     return {
         dependencies,
@@ -197,6 +242,7 @@ const processOptions = Object.freeze({
     configurationSource: {
         MIRA_DASHBOARD_LOG_LEVEL: "debug",
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+        MIRA_DASHBOARD_WORKSPACE_ROOT: workspaceRoot,
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "worker-gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
@@ -205,6 +251,51 @@ const processOptions = Object.freeze({
 });
 
 describe("Dashboard worker process", () => {
+    test("binds managed rotation state to protected project-local paths", () => {
+        let observedManifest: ManagedLogManifest | undefined;
+        const executor = createWorkerLogMaintenanceExecutor(layout, {
+            createManaged(manifest) {
+                observedManifest = manifest;
+                return {
+                    run: () =>
+                        Promise.resolve({
+                            checkedTargets: 0,
+                            dryRun: false,
+                            finishedAtMs: 1,
+                            ok: true,
+                            results: [],
+                            startedAtMs: 0,
+                        }),
+                    status: () =>
+                        Promise.resolve({
+                            observedAtMs: 1,
+                            policyId: "docker-managed",
+                            targetCount: 0,
+                        }),
+                };
+            },
+            createSystem: () => ({
+                availablePolicies: () => Promise.resolve([]),
+                run: () => Promise.resolve(),
+            }),
+        });
+
+        expect(executor).toBeDefined();
+        expect(observedManifest?.lockPath).toBe(
+            path.join(layout.production.state.logMaintenance, "managed.lock")
+        );
+        expect(observedManifest?.statePath).toBe(
+            path.join(layout.production.state.logMaintenance, "managed-state.json")
+        );
+        expect(
+            observedManifest?.fileTargets
+                .filter(({ id }) => id.startsWith("dashboard."))
+                .every(({ filePath }) =>
+                    filePath.startsWith(`${layout.production.state.logs}/`)
+                )
+        ).toBe(true);
+    });
+
     test("validates its release and database before waiting for shutdown", async () => {
         const fixture = processFixture();
 
@@ -213,11 +304,14 @@ describe("Dashboard worker process", () => {
         expect(fixture.events).toEqual([
             `layout:${projectRoot}`,
             `release:worker:${layout.production.releases}:${release.releaseRoot}`,
+            `workspace:${workspaceRoot}`,
             `logs:worker:${layout.production.state.logs}`,
             "signals-create",
+            "terminal-broker-start",
             "gateway-create",
             "runtime-create",
             "runtime-initialize",
+            "terminal-broker-stop",
             "runtime-dispose",
             "signals-dispose",
             "log-flush",

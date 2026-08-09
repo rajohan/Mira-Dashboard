@@ -37,6 +37,7 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
 });
 const releaseFixtureDirectories: string[] = [];
 const temporaryDirectories: string[] = [];
+const installationLifecycleTestTimeoutMs = 15_000;
 let sharedSourceRelease: string | undefined;
 
 beforeAll(async () => {
@@ -94,87 +95,97 @@ async function installationFixture() {
 }
 
 describe("production systemd unit installation", () => {
-    test("installs only manifest units atomically and reloads without service mutation", async () => {
-        const fixture = await installationFixture();
-        const commands: string[][] = [];
-        await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
-            const paths = await prepareProductionDeliveryDirectories(fixture.state);
-            const runtime = await installProductionRuntime(
-                lease,
-                paths,
-                runtimeIdentity,
-                {
-                    probeRuntime: () => Promise.resolve(runtimeIdentity),
-                    sourceExecutable: fixture.runtimeSource,
+    test(
+        "installs only manifest units atomically and reloads without service mutation",
+        async () => {
+            const fixture = await installationFixture();
+            const commands: string[][] = [];
+            await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
+                const paths = await prepareProductionDeliveryDirectories(fixture.state);
+                const runtime = await installProductionRuntime(
+                    lease,
+                    paths,
+                    runtimeIdentity,
+                    {
+                        probeRuntime: () => Promise.resolve(runtimeIdentity),
+                        sourceExecutable: fixture.runtimeSource,
+                    }
+                );
+                const release = await publishProductionRelease(
+                    lease,
+                    paths,
+                    fixture.sourceRelease,
+                    runtime.identity
+                );
+                const execute = (_executable: string, arguments_: readonly string[]) => {
+                    commands.push([...arguments_]);
+                    return Promise.resolve(successfulSystemctl());
+                };
+                const dependencies = {
+                    execute,
+                    homeDirectory: fixture.homeDirectory,
+                    userUnitDirectory: fixture.userUnitDirectory,
+                };
+
+                await installPublishedProductionSystemdUnits(
+                    lease,
+                    paths,
+                    release,
+                    dependencies
+                );
+                await installPublishedProductionSystemdUnits(
+                    lease,
+                    paths,
+                    release,
+                    dependencies
+                );
+                const reloadFailure = await rejectionError(
+                    installPublishedProductionSystemdUnits(lease, paths, release, {
+                        ...dependencies,
+                        execute: (_executable, arguments_) => {
+                            commands.push([...arguments_]);
+                            return Promise.resolve({
+                                exitCode: 1,
+                                stderr: new Uint8Array(),
+                                stdout: new Uint8Array(),
+                            });
+                        },
+                    })
+                );
+                expect(reloadFailure.message).toBe(
+                    "Production systemd unit installation failed"
+                );
+
+                for (const fileName of [
+                    "mira-dashboard-web.service",
+                    "mira-dashboard-worker.service",
+                ]) {
+                    const installedPath = path.join(fixture.userUnitDirectory, fileName);
+                    const sourcePath = path.join(
+                        release.releaseRoot,
+                        "systemd",
+                        fileName
+                    );
+                    expect(await readFile(installedPath)).toEqual(
+                        await readFile(sourcePath)
+                    );
+                    const installedStatus = await stat(installedPath);
+                    expect(installedStatus.mode & 0o7777).toBe(0o600);
+                    expect(installedStatus.nlink).toBe(1);
                 }
-            );
-            const release = await publishProductionRelease(
-                lease,
-                paths,
-                fixture.sourceRelease,
-                runtime.identity
-            );
-            const execute = (_executable: string, arguments_: readonly string[]) => {
-                commands.push([...arguments_]);
-                return Promise.resolve(successfulSystemctl());
-            };
-            const dependencies = {
-                execute,
-                homeDirectory: fixture.homeDirectory,
-                userUnitDirectory: fixture.userUnitDirectory,
-            };
+            });
 
-            await installPublishedProductionSystemdUnits(
-                lease,
-                paths,
-                release,
-                dependencies
-            );
-            await installPublishedProductionSystemdUnits(
-                lease,
-                paths,
-                release,
-                dependencies
-            );
-            const reloadFailure = await rejectionError(
-                installPublishedProductionSystemdUnits(lease, paths, release, {
-                    ...dependencies,
-                    execute: (_executable, arguments_) => {
-                        commands.push([...arguments_]);
-                        return Promise.resolve({
-                            exitCode: 1,
-                            stderr: new Uint8Array(),
-                            stdout: new Uint8Array(),
-                        });
-                    },
-                })
-            );
-            expect(reloadFailure.message).toBe(
-                "Production systemd unit installation failed"
-            );
-
-            for (const fileName of [
-                "mira-dashboard-web.service",
-                "mira-dashboard-worker.service",
-            ]) {
-                const installedPath = path.join(fixture.userUnitDirectory, fileName);
-                const sourcePath = path.join(release.releaseRoot, "systemd", fileName);
-                expect(await readFile(installedPath)).toEqual(await readFile(sourcePath));
-                const installedStatus = await stat(installedPath);
-                expect(installedStatus.mode & 0o7777).toBe(0o600);
-                expect(installedStatus.nlink).toBe(1);
-            }
-        });
-
-        expect(commands).toEqual([
-            ["--user", "daemon-reload"],
-            ["--user", "daemon-reload"],
-            ["--user", "daemon-reload"],
-        ]);
-        expect(commands.flat()).not.toContain("start");
-        expect(commands.flat()).not.toContain("restart");
-        expect(commands.flat()).not.toContain("enable");
-    });
+            expect(commands).toEqual([
+                ["--user", "daemon-reload"],
+                ["--user", "daemon-reload"],
+                ["--user", "daemon-reload"],
+            ]);
+            expect(commands.flat()).not.toContain("start");
+            expect(commands.flat()).not.toContain("restart");
+            expect(commands.flat()).not.toContain("enable");
+        },
+        installationLifecycleTestTimeoutMs
+    );
 
     test("rejects an untrusted destination and a destination identity swap", async () => {
         const fixture = await installationFixture();

@@ -55,6 +55,9 @@ async function releaseFixture(): Promise<{
         mkdir(path.join(releaseRoot, "browser/assets"), { recursive: true }),
         mkdir(path.join(releaseRoot, "docs"), { recursive: true }),
         mkdir(path.join(releaseRoot, "metadata"), { recursive: true }),
+        mkdir(path.join(releaseRoot, "scripts/delivery/provisioning"), {
+            recursive: true,
+        }),
         mkdir(path.join(releaseRoot, "server"), { recursive: true }),
         mkdir(path.join(releaseRoot, "systemd"), { recursive: true }),
     ]);
@@ -113,6 +116,10 @@ async function releaseFixture(): Promise<{
             path.join(sourceProjectRoot, "migrations"),
             path.join(releaseRoot, "migrations")
         ),
+        copyDirectory(
+            path.join(sourceProjectRoot, "scripts/delivery/provisioning/log-maintenance"),
+            path.join(releaseRoot, "scripts/delivery/provisioning/log-maintenance")
+        ),
     ]);
     return { releaseRoot, repositoryRoot };
 }
@@ -158,6 +165,19 @@ describe("release identity", () => {
         ).toEqual([
             "systemd/mira-dashboard-web.service",
             "systemd/mira-dashboard-worker.service",
+        ]);
+        expect(
+            created.artifacts
+                .filter(({ path: artifactPath }) => artifactPath.startsWith("scripts/"))
+                .map(({ path: artifactPath }) => artifactPath)
+        ).toEqual([
+            "scripts/delivery/provisioning/log-maintenance/60-mira-dashboard-log-maintenance.rules",
+            "scripts/delivery/provisioning/log-maintenance/README.md",
+            "scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts",
+            "scripts/delivery/provisioning/log-maintenance/logMaintenanceProvisioningFilesystem.ts",
+            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
+            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance@.service",
+            "scripts/delivery/provisioning/log-maintenance/policy.ts",
         ]);
         const manifestText = await readFile(
             path.join(fixture.releaseRoot, "release-manifest.json"),

@@ -2,6 +2,7 @@ import {
     createRootRoute,
     createRoute,
     createRouter,
+    type ParsedLocation,
     type RouterHistory,
 } from "@tanstack/react-router";
 
@@ -40,6 +41,18 @@ const chatRoute = createRoute({
     path: "/chat",
     validateSearch: parseChatRouteSearch,
 }).lazy(() => import("./routes/chat.lazy.tsx").then((module) => module.Route));
+const filesRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/files",
+}).lazy(() => import("./routes/files.lazy.tsx").then((module) => module.Route));
+const logsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/logs",
+}).lazy(() => import("./routes/logs.lazy.tsx").then((module) => module.Route));
+const terminalRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/terminal",
+}).lazy(() => import("./routes/terminal.lazy.tsx").then((module) => module.Route));
 const jobsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/jobs",
@@ -65,12 +78,27 @@ const routeTree = rootRoute.addChildren([
     accountSecurityRoute,
     agentsRoute,
     chatRoute,
+    filesRoute,
     incidentsRoute,
     jobsRoute,
+    logsRoute,
     reportsRoute,
     sessionsRoute,
     tasksRoute,
+    terminalRoute,
 ]);
+
+/**
+ * Keeps scroll state stable while filters/search parameters update within one page,
+ * while still giving each pathname an independent restoration position.
+ * @param location Resolved Dashboard location.
+ * @returns Stable pathname-scoped scroll restoration key.
+ */
+export function dashboardScrollRestorationKey(
+    location: Pick<ParsedLocation, "pathname">
+): string {
+    return location.pathname;
+}
 
 /**
  * Creates one browser router owned by the browser composition root.
@@ -83,8 +111,10 @@ export function createDashboardRouter(history?: RouterHistory) {
         defaultPreload: "intent",
         defaultPreloadStaleTime: 30_000,
         ...(history === undefined ? {} : { history }),
+        getScrollRestorationKey: dashboardScrollRestorationKey,
         routeTree,
         scrollRestoration: true,
+        scrollToTopSelectors: ["#dashboard-content"],
     });
 }
 

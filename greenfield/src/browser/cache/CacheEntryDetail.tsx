@@ -21,6 +21,8 @@ import { useRefreshCacheEntryMutation } from "./cacheMutations.ts";
 import {
     cacheAttemptVariant,
     cacheBrowserFailureMessage,
+    cacheAttemptLabel,
+    cacheFreshnessLabel,
     cacheFreshnessVariant,
     formatCacheDuration,
 } from "./cachePresentation.ts";
@@ -55,20 +57,20 @@ function CacheProjection({ entry }: { readonly entry: CacheEntry }) {
     if (entry.payload === undefined) {
         return (
             <EmptyState
-                description="The latest attempt has not produced a last-known-good projection yet."
+                description="The latest refresh has not produced saved data yet."
                 headingLevel={3}
                 icon={DatabaseZap}
-                title="No cached payload"
+                title="No saved data"
             />
         );
     }
     if (entry.key === "system.host") return <SystemHostCard entry={entry} />;
     return (
         <Card>
-            <Heading level={3}>Projection available</Heading>
+            <Heading level={3}>Saved data available</Heading>
             <Text className="mt-2" tone="muted">
-                This provider has no reviewed browser renderer yet. Its bounded payload is
-                retained server-side and is not displayed generically.
+                This data source does not have a Dashboard viewer yet. The saved data
+                remains on the server and is not shown here.
             </Text>
         </Card>
     );
@@ -86,39 +88,40 @@ function cacheRefreshRunFeedback(state: JobRunState): {
         case "queued": {
             return {
                 message:
-                    "Refresh queued. Cache data changes only after the worker commits the provider attempt.",
+                    "Refresh requested. Saved data updates when the background job finishes.",
                 variant: "info",
             };
         }
         case "running": {
             return {
                 message:
-                    "Refresh run is in progress. Cache realtime will reconcile the projection after the provider attempt.",
+                    "The refresh is running. This page will update when it finishes.",
                 variant: "info",
             };
         }
         case "succeeded": {
             return {
-                message:
-                    "Refresh run succeeded. The cache projection is being reconciled.",
+                message: "The refresh finished. The latest saved data is loading now.",
                 variant: "success",
             };
         }
         case "cancelled": {
             return {
-                message: "Refresh run was cancelled. Open the run for reviewed details.",
+                message:
+                    "The refresh was cancelled. Open the background job for details.",
                 variant: "error",
             };
         }
         case "failed": {
             return {
-                message: "Refresh run failed. Open the run for reviewed details.",
+                message: "The refresh failed. Open the background job for details.",
                 variant: "error",
             };
         }
         case "timed-out": {
             return {
-                message: "Refresh run timed out. Open the run for reviewed details.",
+                message:
+                    "The refresh took too long. Open the background job for details.",
                 variant: "error",
             };
         }
@@ -149,7 +152,7 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
     if (detail.isPending && detail.data === undefined) {
         return (
             <Card className="min-w-0">
-                <PageState label="Loading cache entry…" status="loading" />
+                <PageState label="Loading saved data…" status="loading" />
             </Card>
         );
     }
@@ -161,7 +164,7 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                 onRetry={() => void detail.refetch()}
                 retryBusy={detail.isFetching}
                 status="error"
-                title="Cache entry unavailable"
+                title="Saved data unavailable"
             />
         );
     }
@@ -180,7 +183,7 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
                         <Text size="sm" tone="muted">
-                            Exact cache entry
+                            Data source
                         </Text>
                         <Heading
                             className="mt-1 font-mono wrap-break-word"
@@ -190,16 +193,16 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                             {entry.key}
                         </Heading>
                         <Text className="mt-2 wrap-break-word" tone="muted">
-                            {entry.source ?? "No successful source"} ·{" "}
-                            {entry.schemaId ?? "No schema"}
+                            {entry.source ?? "Source unavailable"} ·{" "}
+                            {entry.schemaId ?? "Format unavailable"}
                         </Text>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={cacheFreshnessVariant(entry.freshness)}>
-                            {entry.freshness}
+                            {cacheFreshnessLabel(entry.freshness)}
                         </Badge>
                         <Badge variant={cacheAttemptVariant(entry.lastAttemptStatus)}>
-                            last attempt {entry.lastAttemptStatus}
+                            Last refresh {cacheAttemptLabel(entry.lastAttemptStatus)}
                         </Badge>
                     </div>
                 </div>
@@ -232,7 +235,7 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                     <CacheTimestamp label="Expires" value={entry.expiresAtMs} />
                     <div>
                         <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                            Attempt
+                            Latest attempt
                         </dt>
                         <dd className="text-primary-100 mt-1 text-sm">
                             #{entry.lastAttemptNumber} ·{" "}
@@ -249,7 +252,7 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                     </div>
                     <div>
                         <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-                            Attempt run
+                            Background job
                         </dt>
                         <dd className="mt-1 text-sm">
                             <Link
@@ -266,13 +269,13 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                     {entry.manualRunAvailable ? (
                         <Button
                             busy={refresh.isPending}
-                            busyLabel="Queueing refresh…"
+                            busyLabel="Starting refresh…"
                             onClick={() => refresh.mutate({ key: entry.key })}
                         >
                             <Icon icon={RefreshCw} size="sm" tone="inherit" />
                             {refresh.hasPendingRequest(entry.key)
-                                ? "Retry refresh request"
-                                : "Queue refresh"}
+                                ? "Try refresh again"
+                                : "Refresh now"}
                         </Button>
                     ) : (
                         <Text tone="muted">Manual refresh is unavailable.</Text>
@@ -286,7 +289,7 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                             search={{ runId: refreshRun.id }}
                             to="/jobs"
                         >
-                            Open refresh run
+                            View background job
                         </Link>
                     )}
                 </div>

@@ -39,12 +39,12 @@ export function MfaRecoveryControls({
         <div className="border-primary-700 mt-8 border-t pt-6">
             <Button
                 busy={action.busy}
-                busyLabel="Rotating…"
+                busyLabel="Creating…"
                 onClick={onRequestRecoveryCodeRotation}
                 variant="secondary"
             >
                 <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                Rotate recovery codes
+                Create new recovery codes
             </Button>
             <Form
                 className="mt-6 max-w-md"
@@ -55,7 +55,7 @@ export function MfaRecoveryControls({
                         <FormField
                             disabled={action.busy}
                             error={firstFormFieldError(field.state.meta.errors)}
-                            label="Current password to disable MFA"
+                            label="Password to turn off MFA"
                         >
                             <Input
                                 autoComplete="current-password"
@@ -65,6 +65,7 @@ export function MfaRecoveryControls({
                                 onChange={(event) =>
                                     field.handleChange(event.currentTarget.value)
                                 }
+                                placeholder="Enter your current password"
                                 required
                                 type="password"
                                 value={field.state.value}
@@ -78,14 +79,14 @@ export function MfaRecoveryControls({
                     {([canSubmit, isSubmitting]) => (
                         <Button
                             busy={action.busy || isSubmitting}
-                            busyLabel="Disabling MFA…"
+                            busyLabel="Turning off MFA…"
                             className="mt-3"
                             disabled={!canSubmit}
                             type="submit"
                             variant="danger"
                         >
                             <Icon icon={ShieldOff} size="sm" tone="inherit" />
-                            Disable MFA
+                            Turn off MFA
                         </Button>
                     )}
                 </disableForm.Subscribe>

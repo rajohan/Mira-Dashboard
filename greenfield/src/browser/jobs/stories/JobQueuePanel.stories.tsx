@@ -66,7 +66,7 @@ export const ActiveFleet: Story = {
     play: async ({ args, canvasElement }) => {
         await userEvent.click(
             within(canvasElement).getByRole("button", {
-                name: "Pause claiming for new job runs",
+                name: "Pause new jobs",
             })
         );
         await expect(args.onSetClaimingPaused).toHaveBeenCalledWith(true);

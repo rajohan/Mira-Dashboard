@@ -32,7 +32,7 @@ export function chatSessionTokenPresentation(
     }
     const formatter = new Intl.NumberFormat();
     const exact = `${formatter.format(session.totalTokens)} of ${formatter.format(session.contextTokens)}`;
-    const freshness = session.totalTokensFresh ? "fresh" : "stale";
+    const freshness = session.totalTokensFresh ? "current" : "out of date";
     return {
         accessibleLabel: `Session token use: ${exact}, ${freshness}`,
         compactLabel: `${session.totalTokensFresh ? "" : "~"}${compactTokenCount(session.totalTokens)} / ${compactTokenCount(session.contextTokens)}`,

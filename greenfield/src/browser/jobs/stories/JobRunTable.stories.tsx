@@ -39,7 +39,7 @@ function queuedRun(
 
 const runs = Object.freeze(
     v.parse(jobRunPageSchema, [
-        queuedRun("019fe300-0000-7000-8000-000000000004", "Refresh host projection"),
+        queuedRun("019fe300-0000-7000-8000-000000000004", "Refresh host status"),
         queuedRun("019fe300-0000-7000-8000-000000000003", "Rotate durable logs", {
             attemptCount: 1,
             cancellationPolicy: "cooperative",
@@ -135,7 +135,7 @@ export const VirtualizedInventory: Story = {
     play: async ({ canvasElement }) => {
         await expectVirtualizedTable({
             canvasElement,
-            label: "Durable job runs",
+            label: "Job runs",
             rowCount: virtualizedRuns.length,
         });
     },

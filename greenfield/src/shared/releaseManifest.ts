@@ -45,7 +45,7 @@ function canonicalRelativePathSchema() {
                     segment.length > 0 &&
                     segment !== "." &&
                     segment !== ".." &&
-                    /^[A-Za-z0-9._+-]+$/u.test(segment)
+                    /^[A-Za-z0-9.@_+-]+$/u.test(segment)
             );
         }, invalidReleaseManifest)
     );

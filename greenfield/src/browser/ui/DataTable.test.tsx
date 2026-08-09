@@ -127,11 +127,22 @@ describe("Dashboard data table and virtualizer", () => {
             "dashboard-data-table-container",
             "w-full",
             "min-w-0",
-            "max-w-full"
+            "max-w-full",
+            "overflow-x-auto",
+            "overscroll-x-contain"
         );
         expect(scrollRegion).not.toHaveAttribute("data-virtualized");
         const table = screen.getByRole("table", { name: "Fixture rows" });
-        expect(table).toHaveClass("dashboard-data-table", "w-full", "min-w-full");
+        expect(table).toHaveClass(
+            "dashboard-data-table",
+            "w-full",
+            "min-w-full",
+            "border-separate",
+            "border-spacing-0"
+        );
+        expect(within(table).getByRole("columnheader", { name: "Label" })).toHaveClass(
+            "bg-primary-950"
+        );
         const firstCell = within(table).getByText("First row").closest("td");
         expect(firstCell).not.toBeNull();
         const mobileLabel = firstCell?.querySelector(".dashboard-data-table-label");
@@ -152,7 +163,8 @@ describe("Dashboard data table and virtualizer", () => {
         expect(scrollRegion).toHaveAttribute("tabindex", "0");
         expect(scrollRegion).toHaveClass(
             "max-h-128",
-            "overflow-auto",
+            "overflow-x-auto",
+            "overflow-y-auto",
             "overscroll-x-contain",
             "[-webkit-overflow-scrolling:touch]",
             "focus-visible:ring-2"

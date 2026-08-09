@@ -75,9 +75,9 @@ describe("OverviewReportsCard", () => {
         renderCard({ hasMore: true, reports });
 
         expect(
-            await screen.findByRole("heading", { level: 2, name: "Reports overview" })
+            await screen.findByRole("heading", { level: 2, name: "Recent reports" })
         ).toBeTruthy();
-        expect(within(countRow("Newest 50")).getByText("3")).toBeTruthy();
+        expect(within(countRow("Shown")).getByText("3")).toBeTruthy();
         expect(within(countRow("Warnings")).getByText("1")).toBeTruthy();
         expect(within(countRow("Errors")).getByText("1")).toBeTruthy();
         expect(
@@ -91,9 +91,7 @@ describe("OverviewReportsCard", () => {
         expect(
             screen.getByText(formatDashboardDateTime(reports[0].occurredAtMs))
         ).toHaveAttribute("dateTime", new Date(reports[0].occurredAtMs).toISOString());
-        expect(
-            screen.getByText("Older reports are available on the reports route.")
-        ).toBeTruthy();
+        expect(screen.getByText("Open Reports to see older reports.")).toBeTruthy();
         expect(screen.getByRole("link", { name: "View reports" })).toHaveAttribute(
             "href",
             "/reports"
@@ -104,7 +102,7 @@ describe("OverviewReportsCard", () => {
         renderCard({ hasMore: false, reports: [] });
 
         expect(await screen.findByText("No reports yet.")).toBeTruthy();
-        expect(screen.queryByText("Newest 50")).toBeNull();
+        expect(screen.queryByText("Shown")).toBeNull();
         expect(screen.getByRole("link", { name: "View reports" })).toBeTruthy();
     });
 });

@@ -62,6 +62,11 @@ class DeferredAuthenticationTransport implements DashboardTrpcTransport {
         this.#statusRequestPending = false;
         this.#statusRequest.resolve(status);
     }
+
+    rejectStatus(error: unknown): void {
+        this.#statusRequestPending = false;
+        this.#statusRequest.reject(error);
+    }
 }
 
 class ProtectedDraftLifecycle {
@@ -105,7 +110,7 @@ function ProtectedDraft({ lifecycle }: { readonly lifecycle: ProtectedDraftLifec
 }
 
 describe("authenticated route boundary", () => {
-    test("preserves a verified draft while a same-identity check stays fail-closed", async () => {
+    test("keeps a verified draft active while a same-identity background check runs", async () => {
         const timestampMs = Date.now();
         const queryClient = createDashboardQueryClient();
         const transport = new DeferredAuthenticationTransport();
@@ -164,11 +169,12 @@ describe("authenticated route boundary", () => {
                     queryKey: authStatusQueryKey,
                 });
             });
-            expect(await screen.findByLabelText("Authentication status")).toBeTruthy();
-            expect(screen.queryByRole("textbox", { name: "Protected draft" })).toBeNull();
+            await waitFor(() => expect(queryClient.isFetching()).toBe(1));
+            expect(screen.queryByLabelText("Authentication status")).toBeNull();
+            expect(screen.getByRole("textbox", { name: "Protected draft" })).toBe(draft);
             expect(draft.isConnected).toBeTrue();
             expect(draft.value).toBe("keep this draft");
-            await waitFor(() => expect(lifecycle.deactivations).toBe(1));
+            expect(lifecycle.deactivations).toBe(0);
 
             await act(async () => {
                 transport.resolveStatus(authenticatedStatus);
@@ -178,7 +184,7 @@ describe("authenticated route boundary", () => {
                 draft
             );
             expect(draft.value).toBe("keep this draft");
-            await waitFor(() => expect(lifecycle.activations).toBe(2));
+            expect(lifecycle.activations).toBe(1);
 
             transport.deferStatus();
             let changedIdentityCheck = Promise.resolve();
@@ -188,7 +194,15 @@ describe("authenticated route boundary", () => {
                     queryKey: authStatusQueryKey,
                 });
             });
-            await screen.findByLabelText("Authentication status");
+            await waitFor(() =>
+                expect(
+                    queryClient.isFetching({
+                        exact: true,
+                        queryKey: authStatusQueryKey,
+                    })
+                ).toBe(1)
+            );
+            expect(screen.getByRole("textbox", { name: "Protected draft" })).toBe(draft);
             await act(async () => {
                 transport.resolveStatus({
                     ...authenticatedStatus,
@@ -208,7 +222,113 @@ describe("authenticated route boundary", () => {
         }
     });
 
-    test("hides protected content during fresh and background session checks", async () => {
+    test("fails closed after a background session check settles with an error", async () => {
+        const timestampMs = Date.now();
+        const queryClient = createDashboardQueryClient();
+        const transport = new DeferredAuthenticationTransport();
+        const authenticatedStatus = Object.freeze({
+            session: {
+                authenticatedAtMs: timestampMs,
+                authMethod: "password",
+                createdAtMs: timestampMs,
+                expiresAtMs: timestampMs + 86_400_000,
+                id: "a".repeat(32),
+                isCurrent: true,
+                lastSeenAtMs: timestampMs,
+            },
+            state: "authenticated",
+            user: {
+                id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                username: "operator",
+            },
+        } satisfies AuthStatus);
+        queryClient.setQueryData(authStatusQueryKey, authenticatedStatus);
+        const trpcClient = createDashboardTrpcClient(transport);
+        const lifecycle = new ProtectedDraftLifecycle();
+        const view = render(
+            <QueryClientProvider client={queryClient}>
+                <DashboardTrpcProvider client={trpcClient}>
+                    <AuthenticationBoundary>
+                        <ProtectedDraft lifecycle={lifecycle} />
+                    </AuthenticationBoundary>
+                </DashboardTrpcProvider>
+            </QueryClientProvider>
+        );
+
+        try {
+            await screen.findByLabelText("Authentication status");
+            await act(async () => {
+                transport.resolveStatus(authenticatedStatus);
+                await Promise.resolve();
+            });
+            const draft = await screen.findByRole("textbox", {
+                name: "Protected draft",
+            });
+
+            transport.deferStatus();
+            let backgroundCheck = Promise.resolve();
+            act(() => {
+                backgroundCheck = queryClient.refetchQueries({
+                    exact: true,
+                    queryKey: authStatusQueryKey,
+                });
+            });
+            await waitFor(() =>
+                expect(
+                    queryClient.isFetching({
+                        exact: true,
+                        queryKey: authStatusQueryKey,
+                    })
+                ).toBe(1)
+            );
+            expect(screen.getByRole("textbox", { name: "Protected draft" })).toBe(draft);
+
+            await act(async () => {
+                transport.rejectStatus(new Error("Session status unavailable"));
+                await backgroundCheck;
+            });
+            expect(
+                await screen.findByRole("heading", {
+                    level: 1,
+                    name: "Session check failed",
+                })
+            ).toBeTruthy();
+            expect(draft.isConnected).toBeFalse();
+            expect(lifecycle.deactivations).toBe(1);
+
+            transport.deferStatus();
+            await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+            await waitFor(() =>
+                expect(
+                    queryClient.isFetching({
+                        exact: true,
+                        queryKey: authStatusQueryKey,
+                    })
+                ).toBe(1)
+            );
+            expect(
+                screen.getByRole("heading", {
+                    level: 1,
+                    name: "Session check failed",
+                })
+            ).toBeTruthy();
+            expect(screen.queryByRole("textbox", { name: "Protected draft" })).toBeNull();
+
+            await act(async () => {
+                transport.resolveStatus(authenticatedStatus);
+                await Promise.resolve();
+            });
+            expect(
+                await screen.findByRole("textbox", { name: "Protected draft" })
+            ).toBeTruthy();
+            expect(lifecycle.activations).toBe(2);
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("keeps the route and its scroll position during focus-driven session checks", async () => {
         const timestampMs = Date.now();
         const queryClient = createDashboardQueryClient();
         const transport = new DeferredAuthenticationTransport();
@@ -231,14 +351,15 @@ describe("authenticated route boundary", () => {
         queryClient.setQueryData(authStatusQueryKey, cachedAuthenticatedStatus);
         const trpcClient = createDashboardTrpcClient(transport);
         const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+        const router = createDashboardRouter(
+            createMemoryHistory({ initialEntries: ["/"] })
+        );
         const view = render(
             <DashboardBrowserApplication
                 collections={collections}
                 queryClient={queryClient}
                 realtimeClient={noOpDashboardRealtimeClient}
-                router={createDashboardRouter(
-                    createMemoryHistory({ initialEntries: ["/"] })
-                )}
+                router={router}
                 trpcClient={trpcClient}
                 webAuthnClient={unexpectedWebAuthnClient}
             />
@@ -261,23 +382,43 @@ describe("authenticated route boundary", () => {
                     name: "Mira Dashboard",
                 })
             ).toBeTruthy();
+            const routeMarker = screen.getByRole("heading", {
+                level: 1,
+                name: "Mira Dashboard",
+            });
+            const dashboardContent =
+                document.querySelector<HTMLElement>("#dashboard-content");
+            expect(dashboardContent).not.toBeNull();
+            if (dashboardContent === null) throw new Error("Missing Dashboard scroller");
+            dashboardContent.scrollTop = 640;
+            const routePath = router.history.location.pathname;
+            const statusQueryCount = transport.statusQueryCount;
 
             transport.deferStatus();
-            let backgroundCheck = Promise.resolve();
             act(() => {
-                backgroundCheck = queryClient.refetchQueries({
-                    exact: true,
-                    queryKey: authStatusQueryKey,
-                });
+                globalThis.dispatchEvent(new Event("focus"));
             });
-            expect(await screen.findByLabelText("Authentication status")).toBeTruthy();
+            await waitFor(() =>
+                expect(
+                    queryClient.isFetching({
+                        exact: true,
+                        queryKey: authStatusQueryKey,
+                    })
+                ).toBe(1)
+            );
+            expect(transport.statusQueryCount).toBe(statusQueryCount + 1);
+            expect(screen.queryByLabelText("Authentication status")).toBeNull();
             expect(
-                screen.queryByRole("heading", { level: 1, name: "Mira Dashboard" })
-            ).toBeNull();
+                screen.getByRole("heading", { level: 1, name: "Mira Dashboard" })
+            ).toBe(routeMarker);
+            expect(routeMarker.isConnected).toBeTrue();
+            expect(document.querySelector("#dashboard-content")).toBe(dashboardContent);
+            expect(dashboardContent.scrollTop).toBe(640);
+            expect(router.history.location.pathname).toBe(routePath);
 
             await act(async () => {
                 transport.resolveStatus({ state: "anonymous" });
-                await backgroundCheck;
+                await Promise.resolve();
             });
             expect(
                 await screen.findByRole("heading", { level: 1, name: "Sign in" })

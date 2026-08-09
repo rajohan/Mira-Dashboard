@@ -128,7 +128,8 @@ function scheduleProvenanceIsConsistent(run: StoredJobRun): boolean {
     const hasSchedule = run.scheduledJobId !== null;
     if (hasSchedule !== (run.scheduledJobVersion !== null)) return false;
     if (
-        (run.triggerType === "manual" || run.triggerType === "schedule") !== hasSchedule
+        (run.triggerType === "schedule" && !hasSchedule) ||
+        (["startup", "system"].includes(run.triggerType) && hasSchedule)
     ) {
         return false;
     }

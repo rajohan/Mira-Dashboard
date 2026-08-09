@@ -60,7 +60,7 @@ describe("Gateway session presentation", () => {
             gatewaySessionTokenLabel(
                 session("cron:a", "cron", "Cron", { totalTokens: 1200 })
             )
-        ).toBe("~1,200 (stale)");
+        ).toBe("~1,200 (last known)");
         expect(
             gatewaySessionTokenLabel(
                 session("cron:a", "cron", "Cron", {

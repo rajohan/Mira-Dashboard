@@ -18,6 +18,7 @@ import {
 } from "../buildSourceIdentity.ts";
 import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import { resolveDirectPackageVersions } from "../packageIdentity.ts";
+import { logMaintenanceProvisioningReleaseArtifactPaths } from "./logMaintenanceProvisioningPolicy.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
 import {
     inventoryReleaseArtifactTree,
@@ -53,6 +54,7 @@ const exactMetadataPaths = Object.freeze([
 const exactSystemdPaths = Object.freeze(
     productionSystemdUnits.map(({ artifactPath }) => artifactPath)
 );
+const exactScriptPaths = logMaintenanceProvisioningReleaseArtifactPaths;
 
 /** Bun identity observed by release creation and activation verification. */
 export interface ReleaseRuntimeIdentity {
@@ -238,6 +240,15 @@ function assertArtifactShape(
     if (
         systemdPaths.length !== exactSystemdPaths.length ||
         exactSystemdPaths.some((expected, index) => systemdPaths[index] !== expected)
+    ) {
+        throw invalidReleaseIdentity();
+    }
+    const scriptPaths = artifacts
+        .filter(({ path: artifactPath }) => artifactPath.startsWith("scripts/"))
+        .map(({ path: artifactPath }) => artifactPath);
+    if (
+        scriptPaths.length !== exactScriptPaths.length ||
+        exactScriptPaths.some((expected, index) => scriptPaths[index] !== expected)
     ) {
         throw invalidReleaseIdentity();
     }

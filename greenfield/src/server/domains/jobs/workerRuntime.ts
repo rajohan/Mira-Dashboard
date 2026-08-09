@@ -15,7 +15,11 @@ import {
 import type { PersistentGatewayTaskNotificationTransport } from "../../platform/gateway/persistentGatewayTransport.ts";
 import { createCacheRepository, type CacheRepository } from "../cache/repository.ts";
 import { createTaskNotificationQueue } from "../tasks/taskNotificationQueue.ts";
-import { findJobWorkerAction } from "./actionExecutors.ts";
+import {
+    createJobWorkerActionResolver,
+    type LogMaintenanceExecutionPort,
+    type WorkspaceFileWriteExecutionPort,
+} from "./actionExecutors.ts";
 import { jobActionDefinitions } from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
@@ -31,6 +35,10 @@ import {
 
 export interface DashboardWorkerRuntimeOptions {
     readonly database: DatabaseRuntimeLayerOptions;
+    readonly logMaintenance: LogMaintenanceExecutionPort;
+    readonly workspaceFiles?: WorkspaceFileWriteExecutionPort & {
+        readonly dispose: () => Promise<void> | void;
+    };
     readonly persistentGatewayTransport: PersistentGatewayTaskNotificationTransport;
     readonly pid: number;
     readonly releaseId: string;
@@ -356,6 +364,13 @@ export function createDashboardWorkerRuntime(
                 failure ??= normalizeWorkerRuntimeFailure(error);
             }
         }
+        if (options.workspaceFiles !== undefined) {
+            try {
+                await options.workspaceFiles.dispose();
+            } catch (error) {
+                failure ??= normalizeWorkerRuntimeFailure(error);
+            }
+        }
         try {
             await options.persistentGatewayTransport.stop();
         } catch (error) {
@@ -380,11 +395,15 @@ export function createDashboardWorkerRuntime(
                 database.database,
                 database.writeAdmission
             );
+            const findAction = createJobWorkerActionResolver(
+                options.logMaintenance,
+                options.workspaceFiles
+            );
             coordinator = dependencies.createCoordinator({
                 actionDefinitions: jobActionDefinitions,
                 commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
                 databaseReleaseId: options.releaseId,
-                findAction: findJobWorkerAction,
+                findAction,
                 pid: options.pid,
                 repository,
                 sideEffects: options.sideEffects,

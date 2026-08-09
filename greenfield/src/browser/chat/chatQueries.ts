@@ -371,7 +371,10 @@ export function openClawTaskListQueryOptions(
                 { signal }
             );
         },
-        getNextPageParam: (page) => page.nextCursor,
+        getNextPageParam: (page, _pages, pageParam) =>
+            page.tasks.length === 0 || page.nextCursor === pageParam
+                ? undefined
+                : page.nextCursor,
         queryKey: openClawTaskListQueryKey(sessionKey, projection),
         retry: false,
         staleTime: 5000,

@@ -104,7 +104,7 @@ const messages: readonly ChatDisplayMessage[] = [
             {
                 kind: "thinking",
                 status: "running",
-                text: "I should inspect the bounded deployment state.",
+                text: "I should inspect the latest deployment state.",
             },
             {
                 callId: "tool-1",
@@ -138,7 +138,7 @@ function view(overrides: Partial<ChatWorkspaceView> = {}): ChatWorkspaceView {
         ],
         backgroundTasks: [
             {
-                detail: "Inspect the latest bounded deployment logs.",
+                detail: "Inspect the latest deployment logs.",
                 id: "task-1",
                 label: "Review deployment",
                 status: "running",
@@ -174,6 +174,7 @@ function InteractiveChatWorkspace(
     const [selectedSessionKey, setSelectedSessionKey] = useState(
         args.view.selectedSessionKey
     );
+    const [selectedTaskId, setSelectedTaskId] = useState(args.selectedTaskId);
     const [sendSettings, setSendSettings] = useState(args.sendSettings);
     return (
         <ChatWorkspace
@@ -192,11 +193,16 @@ function InteractiveChatWorkspace(
                 args.onSelectSession(nextSessionKey);
                 setSelectedSessionKey(nextSessionKey);
             }}
+            onSelectTask={(nextTaskId) => {
+                args.onSelectTask(nextTaskId);
+                setSelectedTaskId(nextTaskId);
+            }}
             onSendSettingsChange={(nextSendSettings) => {
                 args.onSendSettingsChange(nextSendSettings);
                 setSendSettings(nextSendSettings);
             }}
             sendSettings={sendSettings}
+            selectedTaskId={selectedTaskId}
             view={{ ...args.view, selectedSessionKey }}
         />
     );
@@ -402,6 +408,39 @@ export const PopulatedStreaming: Story = {
     },
 };
 
+export const TaskDetailCanClose: Story = {
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            canvas.getByRole("button", { name: "Open activity panel" })
+        );
+        const task = () =>
+            canvas.getByRole("button", {
+                name: "Review deployment Running",
+            });
+        await expect(task()).toHaveAttribute("aria-expanded", "true");
+        await expect(
+            canvas.getByRole("region", { name: "Task detail: Review deployment" })
+        ).toBeVisible();
+
+        await userEvent.click(
+            canvas.getByRole("button", {
+                name: "Close details for Review deployment",
+            })
+        );
+        await expect(task()).toHaveAttribute("aria-expanded", "false");
+        await expect(task()).toHaveFocus();
+        await expect(
+            canvas.queryByRole("region", { name: "Task detail: Review deployment" })
+        ).not.toBeInTheDocument();
+
+        await userEvent.click(task());
+        await expect(task()).toHaveAttribute("aria-expanded", "true");
+        await userEvent.click(task());
+        await expect(task()).toHaveAttribute("aria-expanded", "false");
+    },
+};
+
 export const SlashSuggestions: Story = {
     args: { draft: "/m" },
 };
@@ -567,7 +606,7 @@ export const LongCompanionMobile: Story = {
             companion: {
                 answer: Array.from(
                     { length: 24 },
-                    (_, index) => `Evidence line ${index + 1}: bounded companion detail.`
+                    (_, index) => `Evidence line ${index + 1}: chat helper detail.`
                 ).join("\n"),
                 question:
                     "Summarize every relevant deployment observation without clipping the final action.",
@@ -576,7 +615,7 @@ export const LongCompanionMobile: Story = {
         }),
     },
     globals: { viewport: { isRotated: false, value: "mobile1" } },
-    name: "Long companion — activity open (mobile)",
+    name: "Long chat helper answer — activity open (mobile)",
     play: async ({ canvasElement }) => {
         await expectStoryViewport(canvasElement, mobileViewport);
         const canvas = within(canvasElement);
@@ -585,7 +624,7 @@ export const LongCompanionMobile: Story = {
         );
         const panel = canvas.getByRole("complementary", { name: "Chat activity" });
         const companionButton = canvas.getByRole("button", {
-            name: /Companion Ready/iu,
+            name: /Chat helper Ready/iu,
         });
         const companionSection = companionButton.closest("section");
         if (companionSection === null) {
@@ -598,10 +637,10 @@ export const LongCompanionMobile: Story = {
         await settleLayout();
         await expect(panel.scrollHeight).toBeGreaterThan(panel.clientHeight);
         await expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);
-        const answer = canvas.getByLabelText("Companion answer");
+        const answer = canvas.getByLabelText("Chat helper answer");
         const answerText = answer.firstChild;
         if (!(answerText instanceof Text)) {
-            throw new TypeError("Expected a text-only Companion answer");
+            throw new TypeError("Expected a text-only Chat helper answer");
         }
         const finalLineStart = answerText.data.lastIndexOf("Evidence line 24");
         const finalLineRange = answer.ownerDocument.createRange();
@@ -626,8 +665,8 @@ export const LongCompanionMobile: Story = {
         );
         await expect(finalLineBounds.bottom).toBeLessThanOrEqual(panelBounds.bottom);
         for (const control of [
-            canvas.getByRole("textbox", { name: "Ask companion" }),
-            canvas.getByRole("button", { name: "Ask companion" }),
+            canvas.getByRole("textbox", { name: "Ask chat helper" }),
+            canvas.getByRole("button", { name: "Ask chat helper" }),
             canvas.getByRole("button", { name: "Reset" }),
         ]) {
             control.scrollIntoView({ block: "nearest" });
@@ -696,9 +735,10 @@ export const EmptyMobile390: Story = {
 };
 
 export const StaleLastKnownGood: Story = {
+    name: "Out-of-date connection",
     args: {
         canSend: false,
-        error: "Some chat data could not be refreshed. Last-known rows remain visible.",
+        error: "Some chat data could not be updated. The latest available messages remain visible.",
         view: view({ connection: "stale" }),
     },
     globals: { viewport: { isRotated: false, value: "mobile1" } },
@@ -707,9 +747,9 @@ export const StaleLastKnownGood: Story = {
         const canvas = within(canvasElement);
         const status = canvas.getByRole("alert");
         await expect(status).toHaveTextContent(
-            "Some chat data could not be refreshed. Last-known rows remain visible."
+            "Some chat data could not be updated. The latest available messages remain visible."
         );
-        await expect(status).not.toHaveTextContent(/Showing last-known history/iu);
+        await expect(status).not.toHaveTextContent(/Showing the latest saved history/iu);
         await expectStatusRowGeometry(canvasElement, mobileViewport);
     },
 };
@@ -766,7 +806,7 @@ export const SidePanelsUnavailable: Story = {
             backgroundTasks: [],
             backgroundTasksError: "Background tasks are unavailable. Retry to load them.",
             companion: { status: "idle" },
-            companionError: "Companion state is unavailable. Retry to load it.",
+            companionError: "The chat helper is unavailable. Try loading it again.",
             modelInventoryError:
                 "Configured models could not be refreshed. Current session controls remain available.",
         }),
@@ -778,14 +818,14 @@ export const SidePanelLastKnownData: Story = {
     args: {
         view: view({
             backgroundTasksError:
-                "Background tasks could not be refreshed. Last-known tasks remain visible.",
+                "Background tasks could not be updated. The latest available tasks remain visible.",
             companionError:
-                "Companion state could not be refreshed. The last-known exchange remains visible.",
+                "The chat helper could not be updated. The latest available answer remains visible.",
             taskDetailError:
                 "Task detail could not be refreshed. The summary remains visible.",
         }),
     },
-    name: "Side panels — last-known data",
+    name: "Side panels — latest available data",
 };
 
 export const PendingAttachment: Story = {
@@ -1087,7 +1127,7 @@ export const LongHistory: Story = {
                 parts: [
                     {
                         kind: "text" as const,
-                        text: `Bounded history message ${index + 1}`,
+                        text: `History message ${index + 1}`,
                     },
                 ],
                 role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),

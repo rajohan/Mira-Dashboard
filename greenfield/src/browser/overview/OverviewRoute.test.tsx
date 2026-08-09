@@ -474,7 +474,7 @@ describe("Dashboard operational overview foundation", () => {
             await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" })
         ).toBeTruthy();
         expect(
-            await screen.findByRole("heading", { level: 2, name: "System metrics" })
+            await screen.findByRole("heading", { level: 2, name: "System usage" })
         ).toBeTruthy();
         const cpuHeading = screen.getByRole("heading", { level: 3, name: "CPU" });
         const cpuCard = cpuHeading.closest("section");
@@ -537,10 +537,10 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             await screen.findByRole("heading", {
                 level: 2,
-                name: "Dashboard job queue",
+                name: "Dashboard background jobs",
             })
         ).toBeTruthy();
-        expect(screen.getByText("Claiming active")).toBeTruthy();
+        expect(screen.getByText("Accepting new jobs")).toBeTruthy();
         expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
             "href",
             "/jobs"
@@ -555,7 +555,7 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             await screen.findByRole("heading", {
                 level: 2,
-                name: "Reports overview",
+                name: "Recent reports",
             })
         ).toBeTruthy();
         expect(screen.getByText("Overview heartbeat")).toBeTruthy();
@@ -567,8 +567,8 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             transport.queryCalls.filter(({ path }) => path === "cache.getEntry")
         ).toHaveLength(0);
-        expect(screen.getAllByText("fresh").length).toBeGreaterThan(0);
-        expect(screen.getAllByText("failed").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Up to date").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
 
         await user.click(screen.getByRole("button", { name: "system.host" }));
         expect(
@@ -582,7 +582,7 @@ describe("Dashboard operational overview foundation", () => {
             ).toHaveLength(1)
         );
 
-        await user.click(screen.getByRole("button", { name: "Queue refresh" }));
+        await user.click(screen.getByRole("button", { name: "Refresh now" }));
         await waitFor(() =>
             expect(
                 transport.mutationCalls.filter(
@@ -597,10 +597,10 @@ describe("Dashboard operational overview foundation", () => {
         expect(refreshInput.idempotencyKey).toMatch(/^[0-9a-f]{32}$/u);
         expect(
             await screen.findByText(
-                "Refresh queued. Cache data changes only after the worker commits the provider attempt."
+                "Refresh requested. Saved data updates when the background job finishes."
             )
         ).toBeTruthy();
-        const queuedRunLink = screen.getByRole("link", { name: "Open refresh run" });
+        const queuedRunLink = screen.getByRole("link", { name: "View background job" });
         expect(queuedRunLink.getAttribute("href")).toContain(refreshRunId);
     });
 
@@ -612,10 +612,10 @@ describe("Dashboard operational overview foundation", () => {
 
         expect(
             await screen.findByText(
-                "The latest collection failed. Showing a last-known-good sample no more than 30 seconds old."
+                "The latest check failed. Showing the most recent reading, which is no more than 30 seconds old."
             )
         ).toBeTruthy();
-        expect(screen.getByText("stale")).toBeTruthy();
+        expect(screen.getAllByText("Out of date")).not.toHaveLength(0);
         expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
     });
 
@@ -638,11 +638,11 @@ describe("Dashboard operational overview foundation", () => {
         expect(
             screen.getByRole("heading", {
                 level: 3,
-                name: "Cache snapshot incomplete",
+                name: "Saved data list incomplete",
             })
         ).toBeTruthy();
-        expect(screen.queryByText("No cache attempts yet")).toBeNull();
-        expect(screen.queryByText("Select a cache entry")).toBeNull();
+        expect(screen.queryByText("No saved data yet")).toBeNull();
+        expect(screen.queryByText("Select a data source")).toBeNull();
     });
 
     test("reuses an ambiguous refresh key and presents a terminal replay accurately", async () => {
@@ -655,18 +655,16 @@ describe("Dashboard operational overview foundation", () => {
         await screen.findByText("Showing 2 of 129");
         await user.click(screen.getByRole("button", { name: "system.host" }));
         await screen.findByRole("heading", { level: 3, name: "mira-vps" });
-        await user.click(screen.getByRole("button", { name: "Queue refresh" }));
+        await user.click(screen.getByRole("button", { name: "Refresh now" }));
         expect(
-            await screen.findByText(
-                "The cache request could not be completed. Try again."
-            )
+            await screen.findByText("The request could not be completed. Try again.")
         ).toBeTruthy();
         expect(screen.queryByText(rawFailure.message)).toBeNull();
 
-        await user.click(screen.getByRole("button", { name: "Retry refresh request" }));
+        await user.click(screen.getByRole("button", { name: "Try refresh again" }));
         expect(
             await screen.findByText(
-                "Refresh run failed. Open the run for reviewed details."
+                "The refresh failed. Open the background job for details."
             )
         ).toBeTruthy();
         expect(screen.queryByText(/Refresh queued/u)).toBeNull();
@@ -676,7 +674,7 @@ describe("Dashboard operational overview foundation", () => {
         expect(refreshInputs).toHaveLength(2);
         expect(refreshInputs[1]?.idempotencyKey).toBe(refreshInputs[0]?.idempotencyKey);
         expect(
-            screen.getByRole("link", { name: "Open refresh run" }).getAttribute("href")
+            screen.getByRole("link", { name: "View background job" }).getAttribute("href")
         ).toContain(refreshRunId);
     });
 
@@ -693,18 +691,18 @@ describe("Dashboard operational overview foundation", () => {
         await screen.findByText("Showing 2 of 129");
         await user.click(screen.getByRole("button", { name: "system.host" }));
         await screen.findByRole("heading", { level: 3, name: "mira-vps" });
-        await user.click(screen.getByRole("button", { name: "Queue refresh" }));
+        await user.click(screen.getByRole("button", { name: "Refresh now" }));
         await waitFor(() =>
             expect(
                 transport.queryCalls.filter(({ path }) => path === "cache.getEntry")
             ).toHaveLength(2)
         );
         await waitFor(() =>
-            expect(screen.queryByRole("link", { name: "Open refresh run" })).toBeNull()
+            expect(screen.queryByRole("link", { name: "View background job" })).toBeNull()
         );
         expect(
             screen.queryByText(
-                "Refresh queued. Cache data changes only after the worker commits the provider attempt."
+                "Refresh requested. Saved data updates when the background job finishes."
             )
         ).toBeNull();
     });

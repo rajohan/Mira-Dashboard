@@ -1,6 +1,7 @@
 import { useForm } from "@tanstack/react-form";
 import { Smartphone, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { useState } from "react";
 
 import {
     totpStepUpInputSchema,
@@ -17,7 +18,7 @@ import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
-import { optionalFactorLabelFormSchema } from "./mfaFormSchemas.ts";
+import { MfaEnrollmentLabelModal } from "./MfaEnrollmentLabelModal.tsx";
 import { OneTimeSecretPanel } from "./SecurityUi.tsx";
 
 interface TotpFactorManagementProps {
@@ -46,22 +47,7 @@ export function TotpFactorManagement({
     refreshAfter,
 }: TotpFactorManagementProps) {
     const client = useDashboardTrpcClient();
-    const labelForm = useForm({
-        defaultValues: { label: "" },
-        onSubmit: async ({ formApi, value }) => {
-            const result = await action.run(() =>
-                client.mutation(
-                    "accountSecurity.beginTotpEnrollment",
-                    value.label.length === 0 ? {} : { label: value.label }
-                )
-            );
-            if (result.status === "success") {
-                onEnrollmentChange(result.value.enrollment);
-                formApi.setFieldValue("label", "");
-            }
-        },
-        validators: { onSubmit: optionalFactorLabelFormSchema },
-    });
+    const [labelModalOpen, setLabelModalOpen] = useState(false);
     const confirmationForm = useForm({
         defaultValues: { code: "" },
         onSubmit: async ({ formApi, value }) => {
@@ -84,6 +70,18 @@ export function TotpFactorManagement({
     function dismissEnrollment() {
         confirmationForm.setFieldValue("code", "");
         onEnrollmentChange(undefined);
+    }
+
+    async function beginEnrollment(label: string): Promise<boolean> {
+        const result = await action.run(() =>
+            client.mutation(
+                "accountSecurity.beginTotpEnrollment",
+                label.length === 0 ? {} : { label }
+            )
+        );
+        if (result.status !== "success") return false;
+        onEnrollmentChange(result.value.enrollment);
+        return true;
     }
 
     return (
@@ -114,51 +112,39 @@ export function TotpFactorManagement({
                     </li>
                 ))}
             </ul>
-            <Form className="mt-4" onSubmit={() => void labelForm.handleSubmit()}>
-                <labelForm.Field name="label">
-                    {(field) => (
-                        <FormField
-                            disabled={factorCapacityReached || action.busy}
-                            error={firstFormFieldError(field.state.meta.errors)}
-                            label="Authenticator label"
-                        >
-                            <Input
-                                className="mt-2"
-                                name={field.name}
-                                onBlur={field.handleBlur}
-                                onChange={(event) =>
-                                    field.handleChange(event.currentTarget.value)
-                                }
-                                placeholder="Phone authenticator"
-                                value={field.state.value}
-                            />
-                        </FormField>
-                    )}
-                </labelForm.Field>
-                <labelForm.Subscribe
-                    selector={(state) => [state.canSubmit, state.isSubmitting] as const}
-                >
-                    {([canSubmit, isSubmitting]) => (
-                        <Button
-                            busy={action.busy || isSubmitting}
-                            busyLabel="Starting enrollment…"
-                            className="mt-3"
-                            disabled={factorCapacityReached || !canSubmit}
-                            type="submit"
-                        >
-                            <Icon icon={Smartphone} size="sm" tone="inherit" />
-                            Begin authenticator enrollment
-                        </Button>
-                    )}
-                </labelForm.Subscribe>
-            </Form>
+            <Button
+                className="mt-4"
+                disabled={factorCapacityReached || action.busy}
+                onClick={() => setLabelModalOpen(true)}
+            >
+                <Icon icon={Smartphone} size="sm" tone="inherit" />
+                Add authenticator app
+            </Button>
+            {labelModalOpen && (
+                <MfaEnrollmentLabelModal
+                    busy={action.busy}
+                    busyLabel="Starting setup…"
+                    description="Give this authenticator a name so you can recognize it later. You can leave the name blank."
+                    icon={Smartphone}
+                    inputLabel="Name"
+                    onClose={() => setLabelModalOpen(false)}
+                    onSubmit={beginEnrollment}
+                    placeholder="Example: Phone authenticator"
+                    submitLabel="Continue"
+                    title="Add authenticator app"
+                />
+            )}
             {enrollment !== undefined && (
                 <OneTimeSecretPanel
                     id="totp-enrollment-secret"
                     onDismiss={dismissEnrollment}
-                    title="Authenticator enrollment secret"
+                    title="Finish authenticator app setup"
                 >
                     <div className="font-sans">
+                        <p className="mb-3 text-sm text-amber-50">
+                            Scan this QR code with your authenticator app. If you cannot
+                            scan it, enter the setup key shown below.
+                        </p>
                         <div className="inline-flex rounded-lg bg-white p-2">
                             <QRCodeSVG
                                 marginSize={4}
@@ -167,10 +153,16 @@ export function TotpFactorManagement({
                                 value={enrollment.otpauthUri}
                             />
                         </div>
-                        <p className="mt-3 font-mono text-sm break-all">
+                        <p className="mt-3 text-xs font-medium tracking-wide text-amber-200 uppercase">
+                            Setup key
+                        </p>
+                        <p className="mt-1 font-mono text-sm break-all">
                             {enrollment.secret}
                         </p>
-                        <p className="mt-2 font-mono text-xs break-all">
+                        <p className="mt-3 text-xs font-medium tracking-wide text-amber-200 uppercase">
+                            Setup link
+                        </p>
+                        <p className="mt-1 font-mono text-xs break-all">
                             {enrollment.otpauthUri}
                         </p>
                         <Form
@@ -197,6 +189,7 @@ export function TotpFactorManagement({
                                                     event.currentTarget.value
                                                 )
                                             }
+                                            placeholder="123456"
                                             required
                                             value={field.state.value}
                                         />

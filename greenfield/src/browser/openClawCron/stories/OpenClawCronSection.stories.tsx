@@ -171,7 +171,7 @@ async function expectMobileDetailGeometry(
     ) {
         throw new TypeError("Expected the responsive detail identity and header");
     }
-    const statusGroup = canvas.getByRole("region", { name: "Cron job status" });
+    const statusGroup = canvas.getByRole("region", { name: "Scheduled job status" });
     const identityBounds = identity.getBoundingClientRect();
     const headerBounds = header.getBoundingClientRect();
     const statusBounds = statusGroup.getBoundingClientRect();
@@ -197,7 +197,7 @@ async function expectMobileDetailGeometry(
         await expect(rowBounds.right).toBeLessThanOrEqual(definitionBounds.right);
     }
 
-    const actions = canvas.getByRole("toolbar", { name: "Cron job actions" });
+    const actions = canvas.getByRole("toolbar", { name: "Scheduled job actions" });
     const actionButtons = within(actions).getAllByRole("button");
     const actionBounds = actions.getBoundingClientRect();
     let previousBottom = 0;
@@ -220,8 +220,8 @@ async function expectMobileDetailGeometry(
 
 async function expectResponsiveLayout(canvasElement: HTMLElement) {
     const canvas = within(canvasElement);
-    const section = canvas.getByRole("region", { name: "OpenClaw cron" });
-    const inventoryList = canvas.getByRole("list", { name: "OpenClaw cron jobs" });
+    const section = canvas.getByRole("region", { name: "OpenClaw scheduled jobs" });
+    const inventoryList = canvas.getByRole("list", { name: "OpenClaw scheduled jobs" });
     const inventoryCanvas = within(inventoryList);
     const selectedTarget = inventoryCanvas.getByRole("button", {
         name: responsiveJob.name,
@@ -236,8 +236,8 @@ async function expectResponsiveLayout(canvasElement: HTMLElement) {
         })
     ).toBeVisible();
     for (const label of [
-        "Gateway state",
-        "Dashboard sync",
+        "OpenClaw status",
+        "Dashboard status",
         "Schedule",
         "Last run",
         "Next run",
@@ -349,7 +349,7 @@ export const ActiveInventory: Story = {
 
         await userEvent.click(canvas.getByRole("button", { name: "Run now" }));
         const dialog = within(document.body).getByRole("dialog", {
-            name: "Run OpenClaw cron job",
+            name: "Run OpenClaw scheduled job",
         });
         await userEvent.click(within(dialog).getByRole("button", { name: "Run now" }));
         await expect(args.onRun).toHaveBeenCalledWith(activeJob);
@@ -441,7 +441,7 @@ export const DisableDialogMobile: Story = {
             modal.getByRole("textbox", { name: "Disable reason" }),
             "Mobile maintenance"
         );
-        const save = modal.getByRole("button", { name: "Save disabled state" });
+        const save = modal.getByRole("button", { name: "Disable job" });
         await expect(save).toHaveClass("w-full", "sm:w-auto");
         await userEvent.click(save);
         await expect(args.onSetEnabled).toHaveBeenCalledWith(activeJob, false, {

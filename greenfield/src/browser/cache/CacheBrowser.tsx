@@ -29,7 +29,7 @@ export function CacheBrowser() {
     if (query.isPending && query.data === undefined) {
         inventory = (
             <Card className="min-w-0">
-                <PageState label="Loading cache status…" status="loading" />
+                <PageState label="Loading saved data…" status="loading" />
             </Card>
         );
     } else if (query.data === undefined) {
@@ -40,28 +40,28 @@ export function CacheBrowser() {
                 onRetry={() => void query.refetch()}
                 retryBusy={query.isFetching}
                 status="error"
-                title="Cache status unavailable"
+                title="Saved data unavailable"
             />
         );
     } else if (query.data.entries.length === 0 && query.data.totalCount === 0) {
         inventory = (
             <PageState
-                description="The initially due provider schedule will seed this inventory after its first attempt."
+                description="Data appears after each source completes its first check."
                 headingLevel={3}
                 icon={DatabaseZap}
                 status="empty"
-                title="No cache attempts yet"
+                title="No saved data yet"
             />
         );
     } else if (query.data.entries.length === 0) {
         inventory = (
             <PageState
                 headingLevel={3}
-                message="The server reports cache entries outside this returned snapshot. Retry to reconcile the bounded inventory."
+                message="The server reported more entries than it returned. Try again to load the list."
                 onRetry={() => void query.refetch()}
                 retryBusy={query.isFetching}
                 status="error"
-                title="Cache snapshot incomplete"
+                title="Saved data list incomplete"
             />
         );
     } else {
@@ -81,11 +81,11 @@ export function CacheBrowser() {
             <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <Heading id="cache-browser-heading" level={2}>
-                        Cache
+                        Saved system data
                     </Heading>
                     <Text className="mt-1" tone="muted">
-                        Last-known-good provider projections and their independent refresh
-                        attempt state.
+                        Saved results from background checks and the latest refresh
+                        status.
                     </Text>
                 </div>
                 {query.data !== undefined && (
@@ -93,10 +93,10 @@ export function CacheBrowser() {
                         <Badge>
                             {query.data.truncated
                                 ? `Showing ${query.data.entries.length} of ${query.data.totalCount}`
-                                : `${query.data.totalCount} ${query.data.totalCount === 1 ? "entry" : "entries"}`}
+                                : `${query.data.totalCount} ${query.data.totalCount === 1 ? "source" : "sources"}`}
                         </Badge>
                         <Text size="sm" tone="muted">
-                            Snapshot {formatDashboardDateTime(query.data.generatedAtMs)}
+                            Checked {formatDashboardDateTime(query.data.generatedAtMs)}
                         </Text>
                     </div>
                 )}
@@ -119,11 +119,11 @@ export function CacheBrowser() {
                 {hasSelectableEntries &&
                     (selectedKey === undefined ? (
                         <PageState
-                            description="Choose an entry to load its bounded payload and attempt details."
+                            description="Choose a data source to view its saved result and latest refresh details."
                             headingLevel={3}
                             icon={DatabaseZap}
                             status="empty"
-                            title="Select a cache entry"
+                            title="Select a data source"
                         />
                     ) : (
                         <CacheEntryDetail cacheKey={selectedKey} key={selectedKey} />

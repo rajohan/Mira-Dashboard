@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { chatHistoryResponseMaximumBytes } from "../../../contracts/chatModel.ts";
 import {
     ChatProviderCapacityError,
     ChatProviderUnknownOutcomeError,
@@ -11,6 +12,7 @@ import {
     type PersistentGatewayChatMediaReferenceRegistrar,
     type PersistentGatewayChatProviderTransport,
 } from "./persistentGatewayChatProvider.ts";
+import { persistentGatewayChatHistoryMaximumChars } from "./persistentGatewayProtocol.ts";
 import type {
     PersistentGatewayChatListener,
     PersistentGatewayDeliveredChatEvent,
@@ -106,6 +108,39 @@ function createHarness(responses: Readonly<Record<string, unknown>>): Readonly<{
 }
 
 describe("persistent Gateway chat provider", () => {
+    test("keeps Dashboard's response budget while bounding the Gateway history request", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        expect(chatHistoryResponseMaximumBytes).toBeGreaterThan(
+            persistentGatewayChatHistoryMaximumChars
+        );
+
+        await harness.provider.history({
+            limit: 1,
+            maxChars: chatHistoryResponseMaximumBytes,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(harness.requests).toEqual([
+            {
+                method: "chat.history",
+                parameters: {
+                    limit: 1,
+                    maxChars: persistentGatewayChatHistoryMaximumChars,
+                    offset: 0,
+                    sessionKey,
+                },
+            },
+        ]);
+    });
+
     test("projects history into bounded local media and sanitized diagnostics", async () => {
         const harness = createHarness({
             "chat.history": {
@@ -279,6 +314,55 @@ describe("persistent Gateway chat provider", () => {
                 },
             ],
         });
+    });
+
+    test("omits provider message keys that are not canonical Dashboard idempotency keys", async () => {
+        const canonicalKey = "A".repeat(32);
+        const harness = createHarness({
+            "chat.history": {
+                defaults: {},
+                messages: [
+                    {
+                        __openclaw: {
+                            id: "019fe89d-156f-7ba0-bfad-2dff55fab001",
+                            idempotencyKey: "channel:message:noncanonical",
+                            seq: 1,
+                        },
+                        content: "First message",
+                        role: "user",
+                        timestamp: 1_800_000_000_000,
+                    },
+                    {
+                        __openclaw: {
+                            id: "019fe89d-156f-7ba0-bfad-2dff55fab002",
+                            idempotencyKey: canonicalKey,
+                            seq: 2,
+                        },
+                        content: "Second message",
+                        role: "user",
+                        timestamp: 1_800_000_000_001,
+                    },
+                ],
+                offset: 0,
+                sessionId: "session-generation-1",
+                sessionInfo: {},
+                sessionKey,
+                thinkingLevel: "high",
+                totalMessages: 2,
+                verboseLevel: "off",
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 2,
+            maxChars: 16 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]).not.toHaveProperty("idempotencyKey");
+        expect(history.messages[1]).toMatchObject({ idempotencyKey: canonicalKey });
+        expect(history.sessionId).toBe("session-generation-1");
     });
 
     test("rejects foreign managed-media origins and keeps active image content download-only", async () => {

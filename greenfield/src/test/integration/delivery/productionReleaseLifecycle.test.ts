@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { cp, lstat, mkdtemp, readFile, symlink } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -34,6 +34,7 @@ const releaseId = "d".repeat(40);
 const temporaryDirectories: string[] = [];
 const excludedBuildEntries = new Set([".git", "coverage", "dist", "node_modules"]);
 const gatewayTestEnvironment = Object.freeze({
+    MIRA_DASHBOARD_WORKSPACE_ROOT: sourceProjectRoot,
     OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
     OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:65530",
 });
@@ -90,6 +91,7 @@ function webEnvironment(projectRoot: string, port: number): Record<string, strin
     const encodedKey = Buffer.alloc(32, 7).toString("base64");
     return {
         MIRA_DASHBOARD_LOG_LEVEL: "debug",
+        MIRA_DASHBOARD_OPENCLAW_ROOT: path.join(projectRoot, "openclaw-test"),
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
         MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "10",
@@ -247,6 +249,9 @@ class DirectProcessController implements ProductionServiceController {
         runtime: InstalledProductionRuntime
     ): Promise<void> {
         await this.stop();
+        const openClawRoot = path.join(this.#projectRoot, "openclaw-test");
+        await mkdir(openClawRoot, { mode: 0o700, recursive: true });
+        await chmod(openClawRoot, 0o700);
         await pointProductionProcessesAtRelease(
             this.#lease,
             this.#paths,

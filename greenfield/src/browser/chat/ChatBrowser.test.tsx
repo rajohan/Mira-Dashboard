@@ -284,12 +284,12 @@ async function revealCompanionControls(): Promise<void> {
         name: "Open activity panel",
     });
     if (activityTrigger !== null) fireEvent.click(activityTrigger);
-    const companion = screen.getByRole("button", { name: /Companion/iu });
+    const companion = screen.getByRole("button", { name: /Chat helper/iu });
     if (companion.getAttribute("aria-expanded") === "false") {
         fireEvent.click(companion);
     }
     await waitFor(() =>
-        expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeVisible()
+        expect(screen.getByRole("textbox", { name: "Ask chat helper" })).toBeVisible()
     );
 }
 
@@ -347,7 +347,7 @@ describe("chat browser", () => {
             sessionSnapshot: snapshot("stale"),
         });
         try {
-            expect(screen.getByText(/Showing last-known history/iu)).toBeVisible();
+            expect(screen.getByText(/Showing the latest saved history/iu)).toBeVisible();
             expect(view.onSelectedSessionChange).not.toHaveBeenCalled();
             expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
         } finally {
@@ -484,7 +484,9 @@ describe("chat browser", () => {
             await user.type(composer, "Send exactly once");
             await user.click(screen.getByRole("button", { name: "Send message" }));
             expect(
-                await screen.findByText(/remains under runtime reconciliation/iu)
+                await screen.findByText(
+                    /could not confirm whether the message was sent/iu
+                )
             ).toBeVisible();
             expect(composer).toHaveValue("");
             expect(
@@ -718,7 +720,11 @@ describe("chat browser", () => {
 
             await user.type(composer, "/reset");
             await user.click(send);
-            expect(screen.getByText(/confirm Reset provider transcript/iu)).toBeVisible();
+            expect(
+                screen.getByText(
+                    "Open Chat settings and choose Reset chat history to continue."
+                )
+            ).toBeVisible();
 
             await user.clear(composer);
             await user.type(composer, "/model unavailable/model");
@@ -921,7 +927,9 @@ describe("chat browser", () => {
         try {
             await waitForConnectedComposer();
             await user.click(screen.getByRole("button", { name: "Chat settings" }));
-            await user.click(screen.getByRole("button", { name: "Compact context" }));
+            await user.click(
+                screen.getByRole("button", { name: "Shorten chat history" })
+            );
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -932,19 +940,17 @@ describe("chat browser", () => {
             await user.click(screen.getByRole("button", { name: "Chat settings" }));
             await waitFor(() =>
                 expect(
-                    screen.getByRole("button", { name: "Compact context" })
+                    screen.getByRole("button", { name: "Shorten chat history" })
                 ).toBeEnabled()
             );
 
-            await user.click(
-                screen.getByRole("button", { name: "Reset provider transcript" })
-            );
+            await user.click(screen.getByRole("button", { name: "Reset chat history" }));
             const confirmation = await screen.findByRole("dialog", {
-                name: "Reset chat session?",
+                name: "Reset this chat?",
             });
             await user.click(
                 within(confirmation).getByRole("button", {
-                    name: "Reset provider transcript",
+                    name: "Reset chat history",
                 })
             );
             await waitFor(() =>
@@ -1173,7 +1179,7 @@ describe("chat browser", () => {
         }
     });
 
-    test("hydrates the first authoritative task with one exact detail read", async () => {
+    test("hydrates only an explicitly opened task and lets the selected row close it", async () => {
         const task: OpenClawTaskSummary = {
             id: "task-default-detail",
             progressSummary: "Summary",
@@ -1208,15 +1214,138 @@ describe("chat browser", () => {
             requestedSessionKey: gatewayPrimarySessionKey,
             sessionSnapshot: snapshot(),
         });
+        const user = userEvent.setup();
         try {
+            await screen.findByRole("button", {
+                name: "Default task detail Running",
+            });
+            const taskButton = () =>
+                screen.getByRole("button", {
+                    name: "Default task detail Running",
+                });
+            expect(taskButton()).toHaveAttribute("aria-expanded", "false");
+            expect(
+                view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
+            ).toHaveLength(0);
+
+            await user.click(taskButton());
             const hydratedDetails = await screen.findAllByText("Hydrated exact detail");
             expect(hydratedDetails.length).toBeGreaterThanOrEqual(1);
+            expect(taskButton()).toHaveAttribute("aria-expanded", "true");
             expect(
                 view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
             ).toHaveLength(1);
             expect(
                 view.query.mock.calls.find((call) => call[0] === "openClawTasks.get")?.[1]
             ).toEqual({ taskId: task.id });
+
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Close details for Default task detail",
+                })
+            );
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("region", {
+                        name: "Task detail: Default task detail",
+                    })
+                ).toBeNull()
+            );
+            expect(taskButton()).toHaveFocus();
+            expect(
+                view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
+            ).toHaveLength(1);
+
+            await user.click(taskButton());
+            await screen.findByRole("region", {
+                name: "Task detail: Default task detail",
+            });
+            await user.click(taskButton());
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("region", {
+                        name: "Task detail: Default task detail",
+                    })
+                ).toBeNull()
+            );
+            expect(taskButton()).toHaveAttribute("aria-expanded", "false");
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("loads each unfinished task ledger once and hides the button at the end", async () => {
+        const view = harness({
+            query: (name, input) => {
+                if (name !== "openClawTasks.list") return;
+                const record =
+                    typeof input === "object" && input !== null
+                        ? (input as Readonly<Record<string, unknown>>)
+                        : {};
+                const statuses = Array.isArray(record.statuses) ? record.statuses : [];
+                const active = statuses.includes("running");
+                const cursor =
+                    typeof record.cursor === "string" ? record.cursor : undefined;
+                if (cursor === undefined) {
+                    return Promise.resolve({
+                        nextCursor: "1",
+                        tasks: [
+                            {
+                                id: active ? "task-active-1" : "task-finished-1",
+                                status: active ? "running" : "completed",
+                                title: active ? "Active task" : "Finished task",
+                            },
+                        ],
+                    });
+                }
+                return Promise.resolve(
+                    active
+                        ? { nextCursor: cursor, tasks: [] }
+                        : {
+                              tasks: [
+                                  {
+                                      id: "task-finished-2",
+                                      status: "failed",
+                                      title: "Older finished task",
+                                  },
+                              ],
+                          }
+                );
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        const taskListReads = () =>
+            view.query.mock.calls.filter((call) => call[0] === "openClawTasks.list");
+        try {
+            const loadMore = await screen.findByRole("button", {
+                name: "Load more tasks",
+            });
+            expect(taskListReads()).toHaveLength(2);
+
+            await user.click(loadMore);
+
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("button", { name: "Load more tasks" })
+                ).toBeNull()
+            );
+            expect(await screen.findByText("Older finished task")).toBeVisible();
+            expect(taskListReads()).toHaveLength(4);
+            expect(
+                taskListReads().filter((call) => {
+                    const input = call[1];
+                    return (
+                        typeof input === "object" && input !== null && "cursor" in input
+                    );
+                })
+            ).toHaveLength(2);
+
+            await Promise.resolve();
+            expect(taskListReads()).toHaveLength(4);
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();
@@ -1249,6 +1378,9 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await screen.findAllByText("Background review");
+            await user.click(
+                screen.getByRole("button", { name: "Background review Running" })
+            );
             await user.dblClick(screen.getByRole("button", { name: "Cancel task" }));
             expect(
                 await screen.findByText(/newer task observation is required/iu)
@@ -1258,9 +1390,7 @@ describe("chat browser", () => {
                     (call) => call[0] === "openClawTasks.cancel"
                 )
             ).toHaveLength(1);
-            expect(
-                screen.getByRole("button", { name: "Reconciling task…" })
-            ).toBeDisabled();
+            expect(screen.getByRole("button", { name: "Stopping task…" })).toBeDisabled();
 
             task = {
                 ...task,
@@ -1273,7 +1403,7 @@ describe("chat browser", () => {
             await waitFor(() =>
                 expect(screen.queryByRole("button", { name: "Cancel task" })).toBeNull()
             );
-            expect(screen.getByText("completed")).toBeVisible();
+            expect(screen.getByText("Completed")).toBeVisible();
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();
@@ -1337,6 +1467,11 @@ describe("chat browser", () => {
         const postTask = { ...task, updatedAtMs: observedAtMs + 2 };
         try {
             await screen.findAllByText("Delayed task reconciliation");
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Delayed task reconciliation Running",
+                })
+            );
             await waitFor(() => expect(detailReads).toBe(1));
             void Promise.all([
                 view.queryClient.invalidateQueries({
@@ -1363,9 +1498,7 @@ describe("chat browser", () => {
                 await Promise.all([preActiveRead.promise, preDetailRead.promise]);
                 await Promise.resolve();
             });
-            expect(
-                screen.getByRole("button", { name: "Reconciling task…" })
-            ).toBeDisabled();
+            expect(screen.getByRole("button", { name: "Stopping task…" })).toBeDisabled();
 
             await act(async () => {
                 postActiveRead.resolve({ tasks: [postTask] });
@@ -1413,6 +1546,9 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await screen.findAllByText("Vanishing task");
+            await user.click(
+                screen.getByRole("button", { name: "Vanishing task Running" })
+            );
             await user.click(screen.getByRole("button", { name: "Cancel task" }));
             await waitFor(() => expect(screen.queryByText("Vanishing task")).toBeNull());
             expect(
@@ -1464,6 +1600,9 @@ describe("chat browser", () => {
         const user = userEvent.setup();
         try {
             await screen.findAllByText("Exact reconciliation");
+            await user.click(
+                screen.getByRole("button", { name: "Exact reconciliation Running" })
+            );
             await user.click(screen.getByRole("button", { name: "Cancel task" }));
             await waitFor(() =>
                 expect(screen.queryByText("Exact reconciliation")).toBeNull()
@@ -1511,10 +1650,10 @@ describe("chat browser", () => {
             await screen.findByRole("button", { name: "Stop response 1" });
             await revealCompanionControls();
             await user.type(
-                screen.getByRole("textbox", { name: "Ask companion" }),
+                screen.getByRole("textbox", { name: "Ask chat helper" }),
                 "What changed?"
             );
-            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
             await waitFor(() =>
                 expect(screen.getByRole("button", { name: "Asking…" })).toBeDisabled()
             );
@@ -1545,8 +1684,10 @@ describe("chat browser", () => {
                 await pendingAsk.promise;
             });
             expect(screen.queryByText("Stale answer")).toBeNull();
-            expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeDisabled();
-            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            expect(
+                screen.getByRole("textbox", { name: "Ask chat helper" })
+            ).toBeDisabled();
+            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
             expect(
                 view.mutation.mock.calls.filter((call) => call[0] === "chat.companionAsk")
             ).toHaveLength(1);
@@ -1585,10 +1726,10 @@ describe("chat browser", () => {
             await waitForConnectedComposer();
             await revealCompanionControls();
             await user.type(
-                screen.getByRole("textbox", { name: "Ask companion" }),
+                screen.getByRole("textbox", { name: "Ask chat helper" }),
                 "What changed?"
             );
-            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            await user.click(screen.getByRole("button", { name: "Ask chat helper" }));
             await waitFor(() =>
                 expect(
                     view.mutation.mock.calls.filter(
@@ -1633,10 +1774,14 @@ describe("chat browser", () => {
             await revealCompanionControls();
             await user.dblClick(screen.getByRole("button", { name: "Reset" }));
             expect(
-                await screen.findByText(/reset outcome could not be confirmed/iu)
+                await screen.findByText(
+                    /could not confirm whether the chat helper was reset/iu
+                )
             ).toBeVisible();
             expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
-            expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeDisabled();
+            expect(
+                screen.getByRole("textbox", { name: "Ask chat helper" })
+            ).toBeDisabled();
             expect(
                 view.mutation.mock.calls.filter(
                     (call) => call[0] === "chat.companionReset"
@@ -1651,7 +1796,9 @@ describe("chat browser", () => {
                 expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled()
             );
             expect(
-                screen.queryByText(/reset outcome could not be confirmed/iu)
+                screen.queryByText(
+                    /could not confirm whether the chat helper was reset/iu
+                )
             ).toBeNull();
         } finally {
             reconciliation.resolve({ exchanges: [] });
@@ -1837,11 +1984,13 @@ describe("chat browser", () => {
         try {
             await screen.findByRole("button", { name: "Stop response 1" });
             await revealCompanionControls();
-            const question = screen.getByRole("textbox", { name: "Ask companion" });
+            const question = screen.getByRole("textbox", { name: "Ask chat helper" });
             await user.type(question, "Do not duplicate");
-            await user.dblClick(screen.getByRole("button", { name: "Ask companion" }));
+            await user.dblClick(screen.getByRole("button", { name: "Ask chat helper" }));
             expect(
-                await screen.findByText(/outcome could not be confirmed/iu)
+                await screen.findByText(
+                    /could not confirm whether the chat helper received the question/iu
+                )
             ).toBeVisible();
             expect(question).toBeDisabled();
             expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();

@@ -299,9 +299,7 @@ describe("monitoring browser routes", () => {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Reports" })
         ).toBeTruthy();
-        expect(
-            screen.getByText(/Updates automatically from report events/u)
-        ).toBeTruthy();
+        expect(screen.getByText(/This page updates automatically/u)).toBeTruthy();
         expect(screen.getByRole("link", { name: "Browse incidents" })).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(await screen.findByText("Reports unavailable")).toBeTruthy();
@@ -320,15 +318,21 @@ describe("monitoring browser routes", () => {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Incidents" })
         ).toBeTruthy();
-        expect(
-            screen.getByText(/Updates automatically from incident events/u)
-        ).toBeTruthy();
+        expect(screen.getByText(/This page updates automatically/u)).toBeTruthy();
         expect(screen.getByRole("link", { name: "Browse reports" })).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(await screen.findByText("Incidents unavailable")).toBeTruthy();
 
         await user.click(screen.getByRole("button", { name: "Try again" }));
         expect(await screen.findByText("Primary disk warning")).toBeTruthy();
+        expect(screen.getByLabelText("Problem type")).toHaveAttribute(
+            "placeholder",
+            "Example: filesystem"
+        );
+        expect(screen.getByLabelText("Check")).toHaveAttribute(
+            "placeholder",
+            "Example: ops-check"
+        );
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
     });
 
@@ -369,8 +373,12 @@ describe("monitoring browser routes", () => {
         const user = userEvent.setup();
 
         await screen.findByText("Primary heartbeat");
-        await user.type(screen.getByLabelText("Kind"), "heartbeat");
-        await user.type(screen.getByLabelText("Source"), "openclaw");
+        const kind = screen.getByLabelText("Report type");
+        const source = screen.getByLabelText("Source");
+        expect(kind).toHaveAttribute("placeholder", "Example: heartbeat");
+        expect(source).toHaveAttribute("placeholder", "Example: openclaw");
+        await user.type(kind, "heartbeat");
+        await user.type(source, "openclaw");
         expect(
             transport.calls.filter(({ path }) => path === "reports.list")
         ).toHaveLength(1);
@@ -493,7 +501,7 @@ describe("monitoring browser routes", () => {
         const user = userEvent.setup();
         await user.click(
             screen.getByRole("button", {
-                name: "Primary disk warning; ops-check; generation 1",
+                name: "Primary disk warning; ops-check; occurrence group 1",
             })
         );
         expect(

@@ -233,7 +233,7 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
     } else if (schedules.length === 0) {
         directoryContent = (
             <PageState
-                description="Change the enabled-state filter or reconcile a code-owned schedule."
+                description="Try another status filter."
                 icon={CalendarClock}
                 status="empty"
                 title="No matching schedules"
@@ -270,11 +270,11 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
                         Dashboard schedules
                     </Heading>
                     <Text className="mt-1" tone="muted">
-                        Edit code-owned cadence, explicit disable intent, and
-                        lost-response-safe manual runs.
+                        Change when Dashboard jobs run, pause them with a reason, or start
+                        one now.
                     </Text>
                 </div>
-                <FormField label="Directory filter">
+                <FormField label="Show schedules">
                     <Select
                         className="mt-2 min-w-48"
                         onChange={setEnabled}
@@ -296,7 +296,7 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
             <div className="mt-7">
                 {search.scheduleId === undefined ? (
                     <PageState
-                        description="Select a schedule from any page, or open a validated scheduleId deep link."
+                        description="Choose a schedule from the table to see and edit it."
                         status="empty"
                         title="Select a schedule"
                     />

@@ -27,7 +27,9 @@ import {
     type ApplicationNodeEnvironment,
     configurationChoice,
     configurationError,
+    configurationOpenClawRoot,
     configurationProjectRoot,
+    configurationWorkspaceRoot,
     pickApplicationEnvironment,
     type PickedApplicationEnvironment,
     requiredConfigurationString,
@@ -40,6 +42,7 @@ export interface WebConfiguration {
     readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
     readonly nodeEnvironment: ApplicationNodeEnvironment;
+    readonly openClawRoot: string;
     readonly port: number;
     readonly projectRoot: string;
     readonly publicOrigin: string;
@@ -48,6 +51,7 @@ export interface WebConfiguration {
     readonly totpKeyring: Redacted.Redacted<string>;
     readonly trustedProxyAddresses: readonly string[];
     readonly webAuthnRelyingParty: WebAuthnRelyingPartyConfiguration;
+    readonly workspaceRoot: string;
 }
 
 const canonicalUnsignedIntegerPattern = /^(?:0|[1-9][0-9]*)$/u;
@@ -57,7 +61,9 @@ const optionalEnvironmentValueSchema = v.optional(v.unknown());
 export const webConfigurationEnvironmentSchema = v.object({
     ELEVENLABS_API_KEY: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_OPENCLAW_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_WORKSPACE_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PUBLIC_ORIGIN: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_RECENT_AUTH_MINUTES: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_SESSION_IDLE_MINUTES: optionalEnvironmentValueSchema,
@@ -300,6 +306,7 @@ export function parseWebConfiguration(
             "warn",
         ] as const),
         nodeEnvironment,
+        openClawRoot: configurationOpenClawRoot(input),
         port: canonicalInteger(
             input,
             "PORT",
@@ -321,6 +328,7 @@ export function parseWebConfiguration(
         totpKeyring: totpKeyring(input),
         trustedProxyAddresses: trustedProxyAddresses(input),
         webAuthnRelyingParty: webAuthnConfiguration(input, origin),
+        workspaceRoot: configurationWorkspaceRoot(input),
     } satisfies WebConfiguration);
     return configuration;
 }

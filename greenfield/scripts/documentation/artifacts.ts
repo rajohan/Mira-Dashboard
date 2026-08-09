@@ -4,11 +4,13 @@ import {
     realtimeEventContracts,
 } from "../../src/contracts/contractRegistry.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
+import { dashboardRouteDocumentation } from "../../src/shared/browserRouteRegistry.ts";
 import { bunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
 import { applicationConfigurationRegistry } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
 import { convertContractSchema, type SchemaTypeMode } from "./jsonSchema.ts";
 import {
     type PackageDocumentationInput,
+    renderBrowserRoutes,
     renderConfiguration,
     renderGeneratedIndex,
     renderPackagesAndRuntime,
@@ -102,6 +104,7 @@ export function buildDocumentationArtifacts(
         ["procedures.md", renderProcedures(procedureContracts)],
         ["raw-http.md", renderRawHttp(rawHttpContracts)],
         ["realtime-events.md", renderRealtimeEvents(realtimeEventContracts)],
+        ["routes-and-features.md", renderBrowserRoutes(dashboardRouteDocumentation)],
     ]);
 
     for (const [schemaId, registered] of collectSchemas()) {

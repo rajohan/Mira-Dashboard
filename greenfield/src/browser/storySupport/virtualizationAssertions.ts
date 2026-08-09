@@ -7,6 +7,126 @@ interface VirtualizedTableAssertions {
     readonly rowCount: number;
 }
 
+interface StickyTableHeaderAssertions {
+    readonly canvasElement: HTMLElement;
+    readonly label: string;
+}
+
+async function expectOpaqueBackground(element: HTMLElement): Promise<void> {
+    const backgroundColor = getComputedStyle(element).backgroundColor;
+    await expect(backgroundColor).not.toBe("transparent");
+    await expect(backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+}
+
+async function expectHeaderPaintsAboveBody(
+    canvasElement: HTMLElement,
+    header: HTMLTableSectionElement
+): Promise<void> {
+    const headerCells = [...header.querySelectorAll<HTMLTableCellElement>("th")];
+    const headerBounds = header.getBoundingClientRect();
+    const sampleYPositions = [
+        headerBounds.top + 2,
+        headerBounds.top + headerBounds.height / 2,
+        headerBounds.bottom - 2,
+    ];
+
+    for (const headerCell of headerCells) {
+        await expectOpaqueBackground(headerCell);
+        const cellBounds = headerCell.getBoundingClientRect();
+        const sampleX = cellBounds.left + cellBounds.width / 2;
+
+        for (const sampleY of sampleYPositions) {
+            const hitTarget = canvasElement.ownerDocument.elementFromPoint(
+                sampleX,
+                sampleY
+            );
+            await expect(hitTarget?.closest("thead")).toBe(header);
+        }
+    }
+}
+
+/**
+ * Verifies that a vertically scrolled shared table keeps its opaque header
+ * inside the bordered scroll region and above body rows that pass beneath it.
+ */
+export async function expectStickyTableHeaderContained({
+    canvasElement,
+    label,
+}: StickyTableHeaderAssertions): Promise<void> {
+    const canvas = within(canvasElement);
+    const scrollRegion = canvas.getByRole("region", { name: label });
+    const table = within(scrollRegion).getByRole("table", { name: label });
+    const header = table.querySelector<HTMLTableSectionElement>("thead");
+    const bodyRows = table.querySelectorAll<HTMLTableRowElement>("tbody tr");
+
+    if (header === null || bodyRows.length === 0) {
+        throw new Error("The sticky table fixture is incomplete.");
+    }
+
+    await waitFor(async () => {
+        await expect(getComputedStyle(table).display).toBe("table");
+        await expect(getComputedStyle(header).position).toBe("sticky");
+        await expect(scrollRegion.scrollHeight).toBeGreaterThan(
+            scrollRegion.clientHeight
+        );
+    });
+
+    const initialHeaderTop = header.getBoundingClientRect().top;
+    const overlapOffset = header.getBoundingClientRect().height + 12;
+    scrollRegion.scrollTop = Math.min(
+        overlapOffset,
+        scrollRegion.scrollHeight - scrollRegion.clientHeight
+    );
+    scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+    await waitFor(async () => {
+        const scrollBounds = scrollRegion.getBoundingClientRect();
+        const headerBounds = header.getBoundingClientRect();
+        const scrollContentTop = scrollBounds.top + scrollRegion.clientTop;
+        const scrollContentRight =
+            scrollBounds.left + scrollRegion.clientLeft + scrollRegion.clientWidth;
+        const bodyPassesUnderHeader = [
+            ...table.querySelectorAll<HTMLTableRowElement>("tbody tr[data-index]"),
+        ].some((row) => {
+            const rowBounds = row.getBoundingClientRect();
+            return (
+                rowBounds.top < headerBounds.bottom && rowBounds.bottom > headerBounds.top
+            );
+        });
+
+        await expect(scrollRegion.scrollTop).toBeGreaterThan(0);
+        await expect(Math.abs(headerBounds.top - initialHeaderTop)).toBeLessThanOrEqual(
+            1
+        );
+        await expect(Math.abs(headerBounds.top - scrollContentTop)).toBeLessThanOrEqual(
+            1
+        );
+        await expect(headerBounds.left).toBeGreaterThanOrEqual(
+            scrollBounds.left + scrollRegion.clientLeft - 1
+        );
+        await expect(headerBounds.right).toBeLessThanOrEqual(scrollContentRight + 1);
+        await expect(headerBounds.bottom).toBeLessThan(scrollBounds.bottom);
+        await expect(bodyPassesUnderHeader).toBe(true);
+    });
+
+    await expectOpaqueBackground(header);
+    await expectHeaderPaintsAboveBody(canvasElement, header);
+
+    scrollRegion.scrollTop = scrollRegion.scrollHeight;
+    scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+    await waitFor(async () => {
+        const scrollBounds = scrollRegion.getBoundingClientRect();
+        const headerBounds = header.getBoundingClientRect();
+        await expect(scrollRegion.scrollTop).toBeGreaterThan(overlapOffset);
+        await expect(
+            Math.abs(headerBounds.top - (scrollBounds.top + scrollRegion.clientTop))
+        ).toBeLessThanOrEqual(1);
+    });
+
+    await expectHeaderPaintsAboveBody(canvasElement, header);
+}
+
 function renderedVirtualIndexes(container: ParentNode): number[] {
     return [...container.querySelectorAll<HTMLElement>("[data-index]")].flatMap(
         (element) => {

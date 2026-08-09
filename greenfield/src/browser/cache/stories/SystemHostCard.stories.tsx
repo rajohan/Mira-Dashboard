@@ -71,7 +71,7 @@ export const InvalidPayloadFailsClosed: Story = {
         const canvas = within(canvasElement);
 
         await expect(
-            canvas.getByRole("heading", { name: "Host projection unavailable" })
+            canvas.getByRole("heading", { name: "Host data unavailable" })
         ).toBeVisible();
         await expect(canvas.queryByText("must-not-render")).not.toBeInTheDocument();
     },

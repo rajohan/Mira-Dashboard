@@ -53,7 +53,7 @@ export function OpenClawCronDefinitionDialog({
             setMutationError(
                 isDashboardOperationOutcomeUnknown(error)
                     ? openClawCronUnknownOutcomeMessage
-                    : "The OpenClaw definition was not updated. Refresh and try again."
+                    : "The OpenClaw job was not updated. Refresh and try again."
             );
         } finally {
             setBusy(false);
@@ -62,24 +62,20 @@ export function OpenClawCronDefinitionDialog({
 
     return (
         <Modal
-            description="Only complete reviewed fields are prefilled. Delivery targets are write-only: omit delivery to keep it unchanged, add a replacement value to replace it, or use null to clear it. Enabled state, command/script payloads, session targets, trigger code, and scheduler state are never accepted by this editor."
+            description="Edit the job settings below. Leave delivery out to keep it unchanged, enter a new value to replace it, or use null to remove it. This editor cannot enable the job or change commands, chat targets, trigger code, or scheduling state."
             dismissible={!busy && !reconciliationBusy}
             onClose={onClose}
             open
             size="lg"
             title={<span className="wrap-anywhere">Edit {job.name}</span>}
         >
-            <Form aria-label="Edit OpenClaw cron definition" onSubmit={submit}>
+            <Form aria-label="Edit OpenClaw scheduled job" onSubmit={submit}>
                 <Alert className="mb-4" message={mutationError} />
                 <Alert className="mb-4" message={reconciliationError} />
                 <FormField
-                    description={
-                        parsed.success
-                            ? "Valid changed definition and write-only delivery JSON."
-                            : undefined
-                    }
+                    description={parsed.success ? "The changes are valid." : undefined}
                     error={parsed.success ? undefined : parsed.message}
-                    label="Reviewed definition and delivery JSON"
+                    label="Job settings (JSON)"
                 >
                     <Textarea
                         className="min-h-96 max-w-full min-w-0 font-mono text-sm"
@@ -110,7 +106,7 @@ export function OpenClawCronDefinitionDialog({
                             type="button"
                             variant="secondary"
                         >
-                            Refresh authoritative state
+                            Refresh current status
                         </Button>
                     )}
                     <Button
@@ -125,7 +121,7 @@ export function OpenClawCronDefinitionDialog({
                         }
                         type="submit"
                     >
-                        Save reviewed fields
+                        Save changes
                     </Button>
                 </div>
             </Form>

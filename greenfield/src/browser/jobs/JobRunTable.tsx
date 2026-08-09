@@ -53,7 +53,7 @@ const jobRunColumns = jobRunColumnHelper.columns([
                 {jobRunStateLabel(getValue())}
             </Badge>
         ),
-        header: "State",
+        header: "Status",
         id: "state",
     }),
     jobRunColumnHelper.accessor((row) => row.run.triggerType, {
@@ -74,7 +74,7 @@ const jobRunColumns = jobRunColumnHelper.columns([
                 )}
             </div>
         ),
-        header: "Trigger",
+        header: "Started by",
         id: "triggerType",
     }),
     jobRunColumnHelper.accessor((row) => row.run.resourceClass, {
@@ -88,7 +88,7 @@ const jobRunColumns = jobRunColumnHelper.columns([
                 </Text>
             </div>
         ),
-        header: "Resource",
+        header: "Work size",
         id: "resourceClass",
     }),
     jobRunColumnHelper.accessor((row) => row.run.attemptCount, {
@@ -143,7 +143,7 @@ export function JobRunTable({ onSelect, runs, selectedId }: JobRunTableProps) {
     if (rows.length === 0) {
         return (
             <EmptyState
-                description="Queued, active, and completed durable runs will appear here."
+                description="Waiting, running, and completed jobs will appear here."
                 icon={History}
                 title="No job runs"
             />
@@ -152,7 +152,7 @@ export function JobRunTable({ onSelect, runs, selectedId }: JobRunTableProps) {
 
     const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
         <DataTable
-            label="Durable job runs"
+            label="Job runs"
             rowWindow={rowWindow}
             scrollContainerRef={rowWindow?.scrollContainerRef}
             table={table}

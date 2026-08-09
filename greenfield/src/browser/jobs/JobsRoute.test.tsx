@@ -767,7 +767,7 @@ describe("Dashboard jobs route", () => {
             expect(
                 within(
                     screen.getByRole("list", {
-                        name: "Durable job run events",
+                        name: "Job activity",
                     })
                 ).getAllByRole("article")
             ).toHaveLength(202)
@@ -962,15 +962,21 @@ describe("Dashboard jobs route", () => {
         ).toBeTruthy();
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
         const initialHistoryCallCount = historyCalls().length;
-        const scheduleInput = screen.getByLabelText("Schedule id");
+        const scheduleInput = screen.getByLabelText("Schedule ID");
+        expect(scheduleInput).toHaveAttribute(
+            "placeholder",
+            "Example: system.worker-smoke"
+        );
         const applyFilters = screen.getByRole("button", { name: "Apply" });
 
         await user.type(scheduleInput, "INVALID");
         await user.click(applyFilters);
-        expect(screen.getByText("Use a canonical Dashboard schedule id.")).toBeTruthy();
+        expect(
+            screen.getByText("Enter a schedule ID such as system.worker-smoke.")
+        ).toBeTruthy();
         await waitFor(() => expect(scheduleInput).toHaveFocus());
         expect(scheduleInput).toHaveAccessibleDescription(
-            "Use a canonical Dashboard schedule id."
+            "Enter a schedule ID such as system.worker-smoke."
         );
         expect(historyCalls()).toHaveLength(initialHistoryCallCount);
 
@@ -981,7 +987,7 @@ describe("Dashboard jobs route", () => {
         await user.clear(scheduleInput);
         await waitFor(() =>
             expect(
-                screen.queryByText("Use a canonical Dashboard schedule id.")
+                screen.queryByText("Enter a schedule ID such as system.worker-smoke.")
             ).toBeNull()
         );
         expect(historyCalls()).toHaveLength(initialHistoryCallCount);
@@ -1002,13 +1008,13 @@ describe("Dashboard jobs route", () => {
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
         const initialHistoryCallCount = historyCalls().length;
         expect(initialHistoryCallCount).toBe(1);
-        const scheduleInput = screen.getByLabelText("Schedule id");
+        const scheduleInput = screen.getByLabelText("Schedule ID");
 
-        await user.click(screen.getByLabelText("State"));
+        await user.click(screen.getByLabelText("Status"));
         await user.click(screen.getByRole("option", { name: "running" }));
-        await user.click(screen.getByLabelText("Resource class"));
+        await user.click(screen.getByLabelText("Work size"));
         await user.click(screen.getByRole("option", { name: "network" }));
-        await user.click(screen.getByLabelText("Trigger"));
+        await user.click(screen.getByLabelText("Started by"));
         await user.click(screen.getByRole("option", { name: "manual" }));
         await user.type(scheduleInput, scheduleId);
         expect(historyCalls()).toHaveLength(initialHistoryCallCount);
@@ -1091,7 +1097,7 @@ describe("Dashboard jobs route", () => {
         ).toBeTruthy();
         await user.click(
             await screen.findByRole("button", {
-                name: "Pause claiming for new job runs",
+                name: "Pause new jobs",
             })
         );
         await waitFor(() =>
@@ -1103,7 +1109,7 @@ describe("Dashboard jobs route", () => {
         });
         expect(
             await screen.findByRole("button", {
-                name: "Resume claiming for new job runs",
+                name: "Resume new jobs",
             })
         ).toBeTruthy();
 
@@ -1328,7 +1334,7 @@ describe("Dashboard jobs route", () => {
         await waitFor(() => expect(transport.callsFor("schedules.run")).toHaveLength(1));
 
         const retry = await screen.findByRole("button", {
-            name: "Retry run request",
+            name: "Try starting again",
         });
         expect(retry).toBeEnabled();
         expect(transport.scheduleDetails.get(scheduleId)?.activeRun?.id).toBe(
@@ -1426,13 +1432,18 @@ describe("Dashboard jobs route", () => {
         expect(
             within(source).getByRole("button", { name: "Dashboard jobs" })
         ).toHaveAttribute("aria-pressed", "true");
-        await user.click(within(source).getByRole("button", { name: "OpenClaw cron" }));
+        await user.click(
+            within(source).getByRole("button", { name: "OpenClaw schedules" })
+        );
 
         expect(
-            within(source).getByRole("button", { name: "OpenClaw cron" })
+            within(source).getByRole("button", { name: "OpenClaw schedules" })
         ).toHaveAttribute("aria-pressed", "true");
         expect(
-            await screen.findByRole("heading", { level: 2, name: "OpenClaw cron" })
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "OpenClaw scheduled jobs",
+            })
         ).toBeTruthy();
         await waitFor(() =>
             expect(transport.callsFor("openClawCron.list")).toHaveLength(1)
@@ -1446,7 +1457,7 @@ describe("Dashboard jobs route", () => {
             sortBy: "name",
             sortDir: "asc",
         });
-        expect(screen.getByText("No OpenClaw cron jobs")).toBeTruthy();
+        expect(screen.getByText("No OpenClaw scheduled jobs")).toBeTruthy();
         expect(router.state.location.search).toEqual({ source: "openclaw" });
 
         act(() => router.history.back());

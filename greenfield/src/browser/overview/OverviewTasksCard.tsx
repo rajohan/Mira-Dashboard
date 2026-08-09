@@ -54,7 +54,7 @@ export function OverviewTasksCard({ hasMore, tasks }: OverviewTasksCardProps) {
                             Unfinished tasks
                         </Heading>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Counts cover only the newest {taskOverviewPageSize}
+                            These counts include the newest {taskOverviewPageSize}
                             unfinished Dashboard tasks.
                         </Text>
                     </div>

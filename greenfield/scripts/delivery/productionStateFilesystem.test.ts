@@ -53,10 +53,16 @@ describe("production state filesystem", () => {
         expect(prepared).toEqual({
             backupsDirectory: path.join(root, "production/state/backups"),
             jobOutputDirectory: path.join(root, "production/state/job-output"),
+            logMaintenanceDirectory: path.join(root, "production/state/log-maintenance"),
             logsDirectory: path.join(root, "production/state/logs"),
             productionDirectory: path.join(root, "production"),
             projectRoot: root,
             stateDirectory: path.join(root, "production/state"),
+            terminalBrokerDirectory: path.join(root, "production/state/terminal-broker"),
+            workspaceFileUploadsDirectory: path.join(
+                root,
+                "production/state/workspace-file-uploads"
+            ),
         });
         expect(await permissionMode(parent)).toBe(0o755);
         expect(await permissionMode(root)).toBe(0o755);
@@ -64,7 +70,10 @@ describe("production state filesystem", () => {
         expect(await permissionMode(prepared.stateDirectory)).toBe(0o700);
         expect(await permissionMode(prepared.backupsDirectory)).toBe(0o700);
         expect(await permissionMode(prepared.jobOutputDirectory)).toBe(0o700);
+        expect(await permissionMode(prepared.logMaintenanceDirectory)).toBe(0o700);
         expect(await permissionMode(prepared.logsDirectory)).toBe(0o700);
+        expect(await permissionMode(prepared.terminalBrokerDirectory)).toBe(0o700);
+        expect(await permissionMode(prepared.workspaceFileUploadsDirectory)).toBe(0o700);
     });
 
     test("narrows existing managed directories without broadening permissions", async () => {

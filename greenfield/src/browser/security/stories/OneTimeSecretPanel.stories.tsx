@@ -17,7 +17,7 @@ const meta = {
     },
     render: (properties) => (
         <SecuritySection
-            description="Create narrowly scoped principals and rotate their credentials."
+            description="Create automation accounts and manage their access tokens."
             id="automation-security-heading"
             title="Automation security"
         >

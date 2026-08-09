@@ -71,7 +71,9 @@ export const ActiveWindow: Story = {
         await expect(
             canvas.getByRole("link", { name: "View incidents" })
         ).toHaveAttribute("href", "/incidents");
-        await expect(canvas.getByText(/Older active generations/u)).toBeVisible();
+        await expect(
+            canvas.getByText(/Open Incidents to see older active incidents/u)
+        ).toBeVisible();
     },
 };
 
@@ -79,7 +81,7 @@ export const Empty: Story = {
     args: { hasMore: false, incidents: [] },
     play: async ({ canvasElement }) => {
         await expect(
-            within(canvasElement).getByText("No persisted active incidents.")
+            within(canvasElement).getByText("No active incidents.")
         ).toBeVisible();
     },
 };

@@ -7,7 +7,12 @@ import { Badge } from "../ui/Badge.tsx";
 import { DataTable } from "../ui/DataTable.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
-import { cacheAttemptVariant, cacheFreshnessVariant } from "./cachePresentation.ts";
+import {
+    cacheAttemptLabel,
+    cacheAttemptVariant,
+    cacheFreshnessLabel,
+    cacheFreshnessVariant,
+} from "./cachePresentation.ts";
 
 const minimumVirtualizedRows = 50;
 const cacheStatusTableFeatures = tableFeatures({});
@@ -39,21 +44,25 @@ const cacheStatusColumns = cacheStatusColumnHelper.columns([
                 {getValue()}
             </button>
         ),
-        header: "Entry",
+        header: "Data source",
         id: "key",
     }),
     cacheStatusColumnHelper.accessor((row) => row.entry.freshness, {
         cell: ({ getValue }) => (
-            <Badge variant={cacheFreshnessVariant(getValue())}>{getValue()}</Badge>
+            <Badge variant={cacheFreshnessVariant(getValue())}>
+                {cacheFreshnessLabel(getValue())}
+            </Badge>
         ),
-        header: "Freshness",
+        header: "Status",
         id: "freshness",
     }),
     cacheStatusColumnHelper.accessor((row) => row.entry.lastAttemptStatus, {
         cell: ({ getValue }) => (
-            <Badge variant={cacheAttemptVariant(getValue())}>{getValue()}</Badge>
+            <Badge variant={cacheAttemptVariant(getValue())}>
+                {cacheAttemptLabel(getValue())}
+            </Badge>
         ),
-        header: "Last attempt",
+        header: "Last refresh",
         id: "lastAttemptStatus",
     }),
     cacheStatusColumnHelper.accessor((row) => row.entry.updatedAtMs, {
@@ -101,7 +110,7 @@ export function CacheStatusTable({
     const rows = table.getRowModel().rows;
     const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
         <DataTable
-            label="Cache entries"
+            label="Saved data sources"
             rowWindow={rowWindow}
             scrollContainerRef={rowWindow?.scrollContainerRef}
             table={table}

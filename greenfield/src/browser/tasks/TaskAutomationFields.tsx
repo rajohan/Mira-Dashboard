@@ -54,6 +54,7 @@ export function TaskAutomationFields({ busy, form }: TaskAutomationFieldsProps) 
                                                     event.currentTarget.value
                                                 )
                                             }
+                                            placeholder="Example: morning-report"
                                             required
                                             value={field.state.value}
                                         />
@@ -78,7 +79,7 @@ export function TaskAutomationFields({ busy, form }: TaskAutomationFieldsProps) 
                                                     event.currentTarget.value
                                                 )
                                             }
-                                            placeholder="Every weekday at 08:00"
+                                            placeholder="Example: Every weekday at 08:00"
                                             value={field.state.value}
                                         />
                                     </FormField>
@@ -102,6 +103,7 @@ export function TaskAutomationFields({ busy, form }: TaskAutomationFieldsProps) 
                                                     event.currentTarget.value
                                                 )
                                             }
+                                            placeholder="Example: openai/gpt-5.6"
                                             value={field.state.value}
                                         />
                                     </FormField>
@@ -125,6 +127,7 @@ export function TaskAutomationFields({ busy, form }: TaskAutomationFieldsProps) 
                                                     event.currentTarget.value
                                                 )
                                             }
+                                            placeholder="Example: high"
                                             value={field.state.value}
                                         />
                                     </FormField>
@@ -149,6 +152,7 @@ export function TaskAutomationFields({ busy, form }: TaskAutomationFieldsProps) 
                                                     event.currentTarget.value
                                                 )
                                             }
+                                            placeholder="Example: agent:main:main"
                                             value={field.state.value}
                                         />
                                     </FormField>

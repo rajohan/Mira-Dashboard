@@ -22,7 +22,7 @@ export function SystemMetricsSection() {
     if (query.isPending && query.data === undefined) {
         content = (
             <Card>
-                <PageState label="Loading system metrics…" status="loading" />
+                <PageState label="Loading system usage…" status="loading" />
             </Card>
         );
     } else if (query.data === undefined) {
@@ -33,7 +33,7 @@ export function SystemMetricsSection() {
                 onRetry={() => void query.refetch()}
                 retryBusy={query.isFetching}
                 status="error"
-                title="System metrics unavailable"
+                title="System usage unavailable"
             />
         );
     } else {
@@ -45,10 +45,10 @@ export function SystemMetricsSection() {
             <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <Heading id="system-metrics-heading" level={2}>
-                        System metrics
+                        System usage
                     </Heading>
                     <Text className="mt-1" tone="muted">
-                        Demand-driven host gauges without identity or control authority.
+                        Current CPU, memory, disk, network, and uptime readings.
                     </Text>
                 </div>
                 {query.data !== undefined && (
@@ -58,10 +58,12 @@ export function SystemMetricsSection() {
                                 query.data.freshness === "fresh" ? "success" : "warning"
                             }
                         >
-                            {query.data.freshness}
+                            {query.data.freshness === "fresh"
+                                ? "Up to date"
+                                : "Out of date"}
                         </Badge>
                         <Text size="sm" tone="muted">
-                            Sampled {formatDashboardDateTime(query.data.sampledAtMs)}
+                            Measured {formatDashboardDateTime(query.data.sampledAtMs)}
                         </Text>
                     </div>
                 )}
@@ -76,7 +78,7 @@ export function SystemMetricsSection() {
             {query.data?.freshness === "stale" && query.error === null && (
                 <Alert
                     className="mt-4"
-                    message="The latest collection failed. Showing a last-known-good sample no more than 30 seconds old."
+                    message="The latest check failed. Showing the most recent reading, which is no more than 30 seconds old."
                     variant="info"
                 />
             )}

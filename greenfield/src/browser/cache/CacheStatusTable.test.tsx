@@ -49,8 +49,8 @@ describe("CacheStatusTable", () => {
                 onSelect={(key) => selected.push(key)}
             />
         );
-        expect(screen.getByText("fresh")).toBeTruthy();
-        expect(screen.getByText("failed")).toBeTruthy();
+        expect(screen.getByText("Up to date")).toBeTruthy();
+        expect(screen.getByText("Failed")).toBeTruthy();
         expect(screen.getByText("Available")).toBeTruthy();
 
         await userEvent
@@ -92,9 +92,9 @@ describe("CacheStatusTable", () => {
             "min-h-8",
             "underline"
         );
-        expect(screen.getByRole("region", { name: "Cache entries" })).not.toHaveAttribute(
-            "tabindex"
-        );
+        expect(
+            screen.getByRole("region", { name: "Saved data sources" })
+        ).not.toHaveAttribute("tabindex");
         expect(screen.queryAllByText("Unavailable")).toHaveLength(0);
     });
 
@@ -107,10 +107,12 @@ describe("CacheStatusTable", () => {
                 onSelect={jest.fn()}
             />
         );
-        const table = screen.getByRole("table", { name: "Cache entries" });
+        const table = screen.getByRole("table", { name: "Saved data sources" });
         expect(table.getAttribute("aria-rowcount")).toBe("51");
         expect(table.querySelector("td[height]")).toBeTruthy();
-        expect(screen.getByRole("region", { name: "Cache entries" }).tabIndex).toBe(0);
+        expect(screen.getByRole("region", { name: "Saved data sources" }).tabIndex).toBe(
+            0
+        );
         expect(screen.queryAllByRole("button").length).toBeLessThan(50);
     });
 });

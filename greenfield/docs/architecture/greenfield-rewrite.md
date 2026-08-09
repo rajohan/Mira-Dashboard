@@ -1,8 +1,9 @@
 # Greenfield Rewrite Blueprint
 
-> **Status:** implementation active. Phase 0 evidence is complete and Phase 2 is complete for its
-> stated server scope; the remaining foundation, browser, domain, Gateway/chat, privileged,
-> hardening, and cutover phases are incomplete. Until cutover, the rewrite is staged under
+> **Status:** implementation active. Phases 0 and 1 are complete, Phase 2 is complete for its
+> stated server scope, and Phase 5 now has implemented Files, Logs, and interactive Terminal
+> verticals. The remaining browser, domain, Gateway/chat, privileged, hardening, and cutover gates
+> are incomplete. Until cutover, the rewrite is staged under
 > `greenfield/` beside the current production implementation. The contents of `greenfield/` are a
 > self-contained future repository root: they do not import the old implementation or depend on
 > compatibility wrappers. Cutover promotes those contents to the repository root and removes the

@@ -198,15 +198,15 @@ describe("chat contract adapter", () => {
                 { kind: "text", text: "Provider response" },
                 {
                     kind: "control",
-                    text: expect.stringContaining("without a local Dashboard admission"),
+                    text: expect.stringContaining("started outside the Dashboard"),
                 },
                 {
                     kind: "control",
-                    text: expect.stringContaining("continuity was interrupted"),
+                    text: expect.stringContaining("Activity updates were interrupted"),
                 },
                 {
                     kind: "control",
-                    text: expect.stringContaining("could not be projected"),
+                    text: expect.stringContaining("could not be shown"),
                 },
             ],
             role: "assistant",
@@ -215,7 +215,7 @@ describe("chat contract adapter", () => {
         expect(projection.message).not.toHaveProperty("runId");
         expect(projection.plan).toMatchObject({
             runId: "provider:provider-run-1",
-            title: "Provider-origin plan",
+            title: "OpenClaw plan",
         });
     });
 
@@ -243,7 +243,9 @@ describe("chat contract adapter", () => {
                 parts: [
                     {
                         kind: "control",
-                        text: expect.stringContaining("projection detail was omitted"),
+                        text: expect.stringContaining(
+                            "live response details were not returned"
+                        ),
                         tone: "warning",
                     },
                 ],
@@ -276,7 +278,7 @@ describe("chat contract adapter", () => {
                     {
                         kind: "control",
                         text: expect.stringContaining(
-                            "remains unresolved after the reconciliation deadline"
+                            "still has not confirmed the result"
                         ),
                         tone: "warning",
                     },

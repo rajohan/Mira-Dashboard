@@ -344,7 +344,7 @@ function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntim
                 ...parts,
                 {
                     kind: "control",
-                    text: "Runtime stream was interrupted; reconciling…",
+                    text: "The live response was interrupted. Checking chat history…",
                     tone: "warning",
                 },
             ];
@@ -938,7 +938,7 @@ export function chatRuntimeMessages(
                       parts: [
                           {
                               kind: "control",
-                              text: "Additional provider-origin runs were omitted by the bounded response.",
+                              text: "Some OpenClaw activity was not returned. Refresh chat history to check for updates.",
                               tone: "warning",
                           },
                       ],

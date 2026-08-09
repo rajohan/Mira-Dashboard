@@ -25,6 +25,7 @@ import {
     persistentGatewayAgentEventDataMaximumBytes,
     persistentGatewayAuthenticatedFrameMaximumBytes,
     persistentGatewayBufferedAmountPolicyMaximumBytes,
+    persistentGatewayChatHistoryMaximumChars,
     persistentGatewayChatOutboundFrameMaximumBytes,
     persistentGatewayReadWriteMethods,
     persistentGatewayChatReadMethods,
@@ -209,11 +210,19 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(() =>
             assertPersistentGatewayChatReadParameters("chat.history", {
                 limit: 100,
-                maxChars: 512 * 1024,
+                maxChars: persistentGatewayChatHistoryMaximumChars,
                 offset: 0,
                 sessionKey: "agent:main:main",
             })
         ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayChatReadParameters("chat.history", {
+                limit: 100,
+                maxChars: persistentGatewayChatHistoryMaximumChars + 1,
+                offset: 0,
+                sessionKey: "agent:main:main",
+            })
+        ).toThrow(TypeError);
         expect(() =>
             assertPersistentGatewayChatReadParameters("chat.history", {
                 messageId: "message-1",

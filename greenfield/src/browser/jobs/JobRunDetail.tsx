@@ -333,7 +333,7 @@ export function JobRunDetail({
                 <DetailValue label="Run ID">
                     <code>{run.id}</code>
                 </DetailValue>
-                <DetailValue label="Trigger">
+                <DetailValue label="Started by">
                     <span className="capitalize">{run.triggerType}</span>
                     {run.scheduledJobId === undefined ? null : (
                         <span className="mt-1 block font-mono text-xs">
@@ -341,7 +341,7 @@ export function JobRunDetail({
                         </span>
                     )}
                 </DetailValue>
-                <DetailValue label="Resource">
+                <DetailValue label="Work size">
                     <span className="capitalize">{run.resourceClass}</span> · priority{" "}
                     {run.priority}
                 </DetailValue>
@@ -351,7 +351,7 @@ export function JobRunDetail({
                 <DetailValue label="Queued">
                     <TimestampValue timestampMs={run.queuedAtMs} />
                 </DetailValue>
-                <DetailValue label="Available">
+                <DetailValue label="Ready to start">
                     <TimestampValue timestampMs={run.availableAtMs} />
                 </DetailValue>
                 <DetailValue label="Started">
@@ -361,19 +361,21 @@ export function JobRunDetail({
                     <TimestampValue timestampMs={run.finishedAtMs} />
                 </DetailValue>
                 <DetailValue label="Timeout">{formatDuration(run.timeoutMs)}</DetailValue>
-                <DetailValue label="Cancellation policy">
-                    <span className="capitalize">{run.cancellationPolicy}</span>
+                <DetailValue label="Cancellation">
+                    {run.cancellationPolicy === "cooperative"
+                        ? "Supported"
+                        : "Not supported"}
                 </DetailValue>
-                <DetailValue label="Retry safe">
+                <DetailValue label="Safe to retry">
                     {run.retrySafe ? "Yes" : "No"}
                 </DetailValue>
-                <DetailValue label="State version">{run.stateVersion}</DetailValue>
+                <DetailValue label="Status update">{run.stateVersion}</DetailValue>
             </dl>
 
             {run.resourceKeys.length > 0 && (
                 <section aria-labelledby={`${headingId}-resources`} className="mt-5">
                     <Heading id={`${headingId}-resources`} level={3}>
-                        Resource keys
+                        Reserved resources
                     </Heading>
                     <ul className="mt-2 flex flex-wrap gap-2">
                         {run.resourceKeys.map((resourceKey) => (
@@ -428,7 +430,7 @@ export function JobRunDetail({
             <section aria-labelledby={`${headingId}-events`} className="mt-6">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <Heading id={`${headingId}-events`} level={3}>
-                        Durable events
+                        Job activity
                     </Heading>
                     <Text size="sm" tone="muted">
                         Newest first · {run.eventCount} total
@@ -437,11 +439,11 @@ export function JobRunDetail({
                 {events.length === 0 ? (
                     <output className="mt-3 block">
                         <Text as="span" tone="muted">
-                            No durable events recorded.
+                            No activity has been recorded.
                         </Text>
                     </output>
                 ) : (
-                    <ol aria-label="Durable job run events" className="mt-3 space-y-3">
+                    <ol aria-label="Job activity" className="mt-3 space-y-3">
                         {events.map((event) => (
                             <JobRunEventItem event={event} key={event.sequence} />
                         ))}
@@ -450,8 +452,8 @@ export function JobRunDetail({
                 {additionalEventsAvailable && (
                     <output className="mt-3 block">
                         <Text as="span" size="sm" tone="muted">
-                            Showing {events.length} newest events. Additional durable
-                            events can be loaded through the bounded history cursor.
+                            Showing the {events.length} newest events. Use “Load older
+                            events” to see more.
                         </Text>
                     </output>
                 )}

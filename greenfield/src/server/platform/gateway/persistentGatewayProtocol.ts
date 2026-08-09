@@ -15,6 +15,8 @@ export const persistentGatewayChallengeFrameMaximumBytes = 4 * 1024;
 export const persistentGatewayOutboundFrameMaximumBytes = 1024 * 1024;
 /** Audited ceiling for a chat.send JSON frame containing base64 attachment content. */
 export const persistentGatewayChatOutboundFrameMaximumBytes = 24 * 1024 * 1024;
+/** Installed Gateway ceiling for the `chat.history` `maxChars` request parameter. */
+export const persistentGatewayChatHistoryMaximumChars = 500_000;
 
 export const persistentGatewayWebReadScopes = Object.freeze(["operator.read"] as const);
 export const persistentGatewayTaskNotificationScopes = Object.freeze([
@@ -425,7 +427,12 @@ const gatewayChatHistoryParamsSchema = v.pipe(
     v.strictObject({
         agentId: v.optional(chatAgentIdSchema),
         limit: v.optional(v.pipe(positiveSafeIntegerSchema, v.maxValue(1000))),
-        maxChars: v.optional(v.pipe(positiveSafeIntegerSchema, v.maxValue(1024 * 1024))),
+        maxChars: v.optional(
+            v.pipe(
+                positiveSafeIntegerSchema,
+                v.maxValue(persistentGatewayChatHistoryMaximumChars)
+            )
+        ),
         messageId: v.optional(chatMessageIdSchema),
         offset: v.optional(nonnegativeSafeIntegerSchema),
         sessionId: v.optional(chatRunIdSchema),
