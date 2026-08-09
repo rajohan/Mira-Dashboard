@@ -26,6 +26,7 @@ import { PageState } from "../ui/PageState.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
 import { useDeleteReportMutation } from "./monitoringMutations.ts";
+import { reportKindLabel, reportStatusVariant } from "./monitoringPresentation.ts";
 import {
     reportDetailQueryOptions,
     reportListQueryOptions,
@@ -42,16 +43,6 @@ const reportStatusOptions = Object.freeze([
 ] as const);
 
 type ReportStatusFilter = (typeof reportStatusOptions)[number]["value"];
-
-function reportStatusVariant(status: ReportSummary["status"]) {
-    if (status === "error") return "danger" as const;
-    if (status === "warning") return "warning" as const;
-    return "success" as const;
-}
-
-function reportKindLabel(kind: string): string {
-    return kind.replaceAll(/[-_]+/gu, " ");
-}
 
 function reportDeletionFailureMessage(error: unknown): string {
     switch (classifyDashboardBrowserFailure(error)) {

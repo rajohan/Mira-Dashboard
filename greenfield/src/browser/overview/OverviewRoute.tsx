@@ -1,5 +1,6 @@
 import { CacheBrowser } from "../cache/CacheBrowser.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
+import { OverviewReportsSection } from "./OverviewReportsSection.tsx";
 import { SystemMetricsSection } from "./SystemMetricsSection.tsx";
 
 /** @returns Progressive operational overview composed only from implemented domains. */
@@ -13,6 +14,9 @@ export function OverviewRoute() {
             />
             <div className="mt-8">
                 <SystemMetricsSection />
+            </div>
+            <div className="mt-10">
+                <OverviewReportsSection />
             </div>
             <div className="mt-10">
                 <CacheBrowser />

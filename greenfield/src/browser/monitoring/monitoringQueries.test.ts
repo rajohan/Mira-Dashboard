@@ -11,6 +11,7 @@ import {
 import {
     incidentListQueryOptions,
     reportListQueryOptions,
+    reportOverviewQueryOptions,
     uniqueMonitoringRows,
 } from "./monitoringQueries.ts";
 
@@ -72,6 +73,28 @@ class MonitoringQueryTransport implements DashboardTrpcTransport {
 }
 
 describe("monitoring browser queries", () => {
+    test("isolates the overview to one cancellable newest-report page", async () => {
+        const transport = new MonitoringQueryTransport({
+            "reports.list": [{ reports: [report] }],
+        });
+        const queryClient = createDashboardQueryClient();
+
+        try {
+            const client = createDashboardTrpcClient(transport);
+            const overviewOptions = reportOverviewQueryOptions(client);
+            const listOptions = reportListQueryOptions(client, undefined);
+            await queryClient.fetchQuery(overviewOptions);
+
+            expect(overviewOptions.queryKey).not.toEqual(listOptions.queryKey);
+            expect(transport.calls.map(({ input, path }) => ({ input, path }))).toEqual([
+                { input: { limit: 50 }, path: "reports.list" },
+            ]);
+            expect(transport.calls[0]?.signal).toBeInstanceOf(AbortSignal);
+        } finally {
+            queryClient.clear();
+        }
+    });
+
     test("forwards report filters, continuation cursors, and cancellation signals", async () => {
         const transport = new MonitoringQueryTransport({
             "reports.list": [

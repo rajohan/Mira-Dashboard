@@ -1043,3 +1043,19 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   `/` parity also remains `planned`: the remaining Phase 3 overview composition and later-phase
   weather, quota, Git, Docker, database, backup, and privileged operational cards are not claimed
   by this metrics slice.
+
+### 2026-08-09 — Phase 3 reports overview composition
+
+- The authenticated root overview now reuses the existing keyset-paginated `reports.list` query
+  for one bounded newest-50 summary window. It counts only that disclosed window, renders the
+  already canonical newest summary and status, links to the full reports route, and never requests
+  report Markdown bodies or metadata.
+- The card uses a dedicated first-page query under the reports cache namespace, so previously
+  loaded catalog pages cannot widen root refresh work. It shares the existing durable report
+  realtime invalidation with its 30-second fallback refresh. Initial loading and safe-error states
+  are explicit, while a failed background refresh retains validated summaries and displays only
+  fixed browser failure text.
+- This is progressive root composition only. `/` remains `planned`; jobs still require the Phase 4
+  OpenClaw-cron half, legacy `GET /api/metrics` still lacks its wider observability projections,
+  and later-phase weather, quota, Git, Docker, database, backup, and privileged operational cards
+  are not claimed here.

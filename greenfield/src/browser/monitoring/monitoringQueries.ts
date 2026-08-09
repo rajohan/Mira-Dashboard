@@ -18,6 +18,9 @@ export const monitoringQueryKey = ["monitoring"] as const;
 export const incidentQueryKey = [...monitoringQueryKey, "incidents"] as const;
 export const reportQueryKey = [...monitoringQueryKey, "reports"] as const;
 export const reportListQueryRoot = [...reportQueryKey, "list"] as const;
+export const reportOverviewQueryKey = [...reportQueryKey, "overview"] as const;
+/** Bounded newest-first report window shared by list and overview surfaces. */
+export const reportListPageSize = 50;
 
 /**
  * Removes repeated identities while preserving the first, newest-page occurrence.
@@ -109,6 +112,19 @@ export function incidentDetailQueryOptions(client: DashboardTrpcClient, id: stri
 
 /**
  * @param client Validated browser tRPC client.
+ * @returns One isolated newest-report page for the root overview.
+ */
+export function reportOverviewQueryOptions(client: DashboardTrpcClient) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListReportsResult> =>
+            client.query("reports.list", { limit: reportListPageSize }, { signal }),
+        queryKey: reportOverviewQueryKey,
+        staleTime: 10_000,
+    });
+}
+
+/**
+ * @param client Validated browser tRPC client.
  * @param filters Server-owned report filters.
  * @returns Cursor-paginated report query options.
  */
@@ -124,7 +140,7 @@ export function reportListQueryOptions(
                 {
                     ...(pageParam === undefined ? {} : { cursor: pageParam }),
                     ...(filters === undefined ? {} : { filters }),
-                    limit: 50,
+                    limit: reportListPageSize,
                 },
                 { signal }
             ),
