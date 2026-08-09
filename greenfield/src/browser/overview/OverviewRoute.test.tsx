@@ -10,6 +10,7 @@ import type {
     RefreshCacheEntryInput,
 } from "../../contracts/cache.ts";
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
+import type { SystemMetrics } from "../../contracts/system.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -25,7 +26,7 @@ import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClien
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -50,6 +51,34 @@ const authenticatedStatus: AuthStatus = {
         username: "operator",
     },
 };
+
+const systemMetrics = Object.freeze({
+    cpu: {
+        loadAverage: [2, 1, 0.5],
+        loadPercent: 50,
+        logicalCoreCount: 4,
+    },
+    disk: {
+        freeBytes: 40 * 1024 ** 3,
+        totalBytes: 100 * 1024 ** 3,
+        usedBytes: 60 * 1024 ** 3,
+        usedPercent: 60,
+    },
+    freshness: "fresh",
+    memory: {
+        freeBytes: 2 * 1024 ** 3,
+        totalBytes: 8 * 1024 ** 3,
+        usedBytes: 6 * 1024 ** 3,
+        usedPercent: 75,
+    },
+    network: {
+        downloadBitsPerSecond: 12_300_000,
+        state: "ready",
+        uploadBitsPerSecond: 1_250_000,
+    },
+    sampledAtMs: timestampMs,
+    uptimeSeconds: 183_600,
+} as const satisfies SystemMetrics);
 
 const hostEntry = Object.freeze({
     consecutiveFailures: 1,
@@ -164,6 +193,7 @@ interface OverviewTransportOptions {
     readonly cacheEntryOutputs?: readonly (CacheEntry | Error)[];
     readonly cacheStatusOutputs?: readonly (CacheStatusResult | Error)[];
     readonly refreshOutputs?: readonly (JobRunSummary | Error)[];
+    readonly systemMetricsOutputs?: readonly (SystemMetrics | Error)[];
 }
 
 function transportOutput(
@@ -182,6 +212,7 @@ class OverviewTransport implements DashboardTrpcTransport {
     readonly #cacheEntryOutputs: readonly (CacheEntry | Error)[];
     readonly #cacheStatusOutputs: readonly (CacheStatusResult | Error)[];
     readonly #refreshOutputs: readonly (JobRunSummary | Error)[];
+    readonly #systemMetricsOutputs: readonly (SystemMetrics | Error)[];
     readonly mutationCalls: TransportCall[] = [];
     readonly queryCalls: TransportCall[] = [];
 
@@ -189,6 +220,7 @@ class OverviewTransport implements DashboardTrpcTransport {
         this.#cacheEntryOutputs = options.cacheEntryOutputs ?? [hostEntry];
         this.#cacheStatusOutputs = options.cacheStatusOutputs ?? [cacheStatus];
         this.#refreshOutputs = options.refreshOutputs ?? [queuedRefresh];
+        this.#systemMetricsOutputs = options.systemMetricsOutputs ?? [systemMetrics];
     }
 
     mutation(path: string, input?: unknown): Promise<unknown> {
@@ -218,6 +250,9 @@ class OverviewTransport implements DashboardTrpcTransport {
             }
             case "notifications.list": {
                 return Promise.resolve(emptyNotificationListResult);
+            }
+            case "system.metrics": {
+                return transportOutput(this.#systemMetricsOutputs, callIndex, path);
             }
             default: {
                 return Promise.reject(new TypeError(`Unexpected query: ${path}`));
@@ -261,7 +296,7 @@ function renderOverview(transport: OverviewTransport) {
     return { queryClient, user: userEvent.setup() };
 }
 
-describe("Dashboard overview cache foundation", () => {
+describe("Dashboard operational overview foundation", () => {
     test("loads bounded status before exact payload and queues refresh as a job", async () => {
         const transport = new OverviewTransport();
         const { user } = renderOverview(transport);
@@ -269,6 +304,15 @@ describe("Dashboard overview cache foundation", () => {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" })
         ).toBeTruthy();
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "System metrics" })
+        ).toBeTruthy();
+        const cpuHeading = screen.getByRole("heading", { level: 3, name: "CPU" });
+        const cpuCard = cpuHeading.closest("section");
+        expect(cpuCard).toBeTruthy();
+        expect(within(cpuCard as HTMLElement).getByText("50%")).toBeTruthy();
+        expect(screen.getByText("12.3 Mbit/s")).toBeTruthy();
+        expect(screen.queryByText("mira-vps")).toBeNull();
         expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
         expect(
             transport.queryCalls.filter(({ path }) => path === "cache.getEntry")
@@ -308,6 +352,21 @@ describe("Dashboard overview cache foundation", () => {
         ).toBeTruthy();
         const queuedRunLink = screen.getByRole("link", { name: "Open refresh run" });
         expect(queuedRunLink.getAttribute("href")).toContain(refreshRunId);
+    });
+
+    test("marks a recent last-known-good metric sample without hiding cache data", async () => {
+        const transport = new OverviewTransport({
+            systemMetricsOutputs: [{ ...systemMetrics, freshness: "stale" }],
+        });
+        renderOverview(transport);
+
+        expect(
+            await screen.findByText(
+                "The latest collection failed. Showing a last-known-good sample no more than 30 seconds old."
+            )
+        ).toBeTruthy();
+        expect(screen.getByText("stale")).toBeTruthy();
+        expect(await screen.findByText("Showing 2 of 129")).toBeTruthy();
     });
 
     test("does not present an empty truncated snapshot as a complete inventory", async () => {

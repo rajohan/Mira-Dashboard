@@ -1019,3 +1019,27 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   in this slice. Root-route parity remains `planned`: metrics and the remaining Phase 3 overview
   composition are still open. Parity bookkeeping assigns OpenClaw cron and `cache.getHeartbeat` to
   Phase 4 with their persistent authenticated Gateway dependency.
+
+### 2026-08-09 — Phase 3 system metrics and overview gauges
+
+- Browser sessions now have one `system.metrics` query with no automation capability. Its strict
+  response exposes only CPU load, memory and root-disk capacity, aggregate network throughput,
+  uptime, sample time, and freshness. Hostname, CPU model, interface identity, raw collector
+  failures, control authority, shell execution, and a new realtime topic remain outside the
+  contract.
+- The process runtime owns one demand-driven sampler. Concurrent reads share a single in-flight
+  collection, successful reads retain one last-known-good snapshot, and a failed collection may
+  return that snapshot as explicitly stale for at most 30 seconds before the procedure fails with
+  fixed `SERVICE_UNAVAILABLE` text. Linux network rates warm from two monotonic aggregate counter
+  samples; counter resets and clock regressions return to the disclosed warming state.
+- The root route polls the ordinary TanStack Query every five seconds and renders accessible CPU,
+  memory, disk, uptime, download, and upload cards above the cache browser. Query failures retain
+  validated data, server fallback is visibly marked stale, the first network sample says
+  `Sampling…`, and no chart dependency or duplicate client state owner is introduced.
+- Contract, collector, single-flight, authorization, safe-error, polling, formatting, component,
+  Storybook, and route tests cover the slice. `system.metrics` is implemented and registered, while
+  legacy `GET /api/metrics` parity remains `planned` because its application-observability, HTTP,
+  polling-snapshot, and token projections are not part of this bounded host-gauge procedure. Full
+  `/` parity also remains `planned`: the remaining Phase 3 overview composition and later-phase
+  weather, quota, Git, Docker, database, backup, and privileged operational cards are not claimed
+  by this metrics slice.

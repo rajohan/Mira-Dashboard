@@ -280,6 +280,10 @@
         },
         {
             "kind": "query",
+            "name": "system.metrics"
+        },
+        {
+            "kind": "query",
             "name": "system.runtimeIdentity"
         },
         {

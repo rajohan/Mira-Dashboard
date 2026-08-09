@@ -115,6 +115,7 @@ import {
     securityAuditEventsHaveStableOrder,
     securityAuditPageCursorIsConsistent,
 } from "../../src/contracts/securityAudit.ts";
+import { systemMetricCapacityIsConsistent } from "../../src/contracts/system.ts";
 import {
     canonicalizeTaskStrings,
     freezeTaskStrings,
@@ -164,6 +165,10 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${securityLabelControl
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        systemMetricCapacityIsConsistent,
+        "Live Valibot validation additionally requires capacity bytes and the rounded percentage to describe one consistent state.",
+    ],
     [
         cacheEntryPayloadFitsBudget,
         "Live Valibot validation additionally limits the serialized cache payload to its reviewed UTF-8 byte budget.",

@@ -347,6 +347,7 @@ describe("application Effect runtime", () => {
         expect(Object.isFrozen(runtime)).toBe(true);
         expect(Object.isFrozen(runtime.services)).toBe(true);
         expect(Object.isFrozen(runtime.services.realtimeEvents)).toBe(true);
+        expect(Object.isFrozen(runtime.services.systemMetrics)).toBe(true);
 
         const values = await Array.fromAsync(
             await runtime.services.realtimeEvents.stream(

@@ -1,5 +1,6 @@
 import { CacheBrowser } from "../cache/CacheBrowser.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
+import { SystemMetricsSection } from "./SystemMetricsSection.tsx";
 
 /** @returns Progressive operational overview composed only from implemented domains. */
 export function OverviewRoute() {
@@ -11,6 +12,9 @@ export function OverviewRoute() {
                 title="Mira Dashboard"
             />
             <div className="mt-8">
+                <SystemMetricsSection />
+            </div>
+            <div className="mt-10">
                 <CacheBrowser />
             </div>
         </div>

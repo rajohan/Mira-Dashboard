@@ -27,6 +27,10 @@ import type { AutomationSecurityLifecycleService } from "../../domains/security/
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
 import type { SecurityAuditLifecycleService } from "../../domains/security/securityAuditLifecycle.ts";
+import {
+    SystemMetricsUnavailableError,
+    type SystemMetricsRuntimeService,
+} from "../../domains/system/systemMetricsService.ts";
 import type { TaskService } from "../../domains/tasks/service.ts";
 import { createTestTaskService } from "../../domains/tasks/testSupport/service.ts";
 import {
@@ -196,6 +200,7 @@ interface TestApplicationRuntimeOverrides {
     readonly logger?: StructuredLogger;
     readonly shutdownListener?: ApplicationRuntime["shutdownListener"];
     readonly stream?: RealtimeEventRuntimeService["stream"];
+    readonly systemMetrics?: SystemMetricsRuntimeService;
 }
 
 const inertAuthenticationWorkGate: AuthenticationWorkRuntimeService["passwordWorkGate"] =
@@ -225,6 +230,10 @@ const inertAuthenticationRuntime: AuthenticationWorkRuntimeService = Object.free
     totpWorkGate: inertAuthenticationWorkGate,
     runGatewayVerification: runInertAuthenticationVerification,
     runWebAuthnVerification: runInertAuthenticationVerification,
+});
+
+const inertSystemMetricsRuntime: SystemMetricsRuntimeService = Object.freeze({
+    read: () => Promise.reject(new SystemMetricsUnavailableError()),
 });
 
 /**
@@ -463,6 +472,7 @@ export function createTestApplicationRuntime(
                         )),
                 wake: () => Promise.resolve(),
             }),
+            systemMetrics: overrides.systemMetrics ?? inertSystemMetricsRuntime,
         }),
         shutdownListener:
             overrides.shutdownListener ??
