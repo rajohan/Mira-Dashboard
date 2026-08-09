@@ -41,6 +41,7 @@ import {
 import {
     createDashboardOpenClawCronProvider,
     createDashboardServer,
+    resolveDashboardGatewayScope,
     startDashboardOpenClawCronExpiryReconciliation,
     validateDashboardWebAuthnBrowserOrigin,
 } from "./dashboardServer.ts";
@@ -253,6 +254,23 @@ describe("Dashboard OpenClaw cron composition", () => {
 });
 
 describe("Dashboard security composition", () => {
+    test("isolates durable chat state by canonical Gateway origin", () => {
+        const scope = resolveDashboardGatewayScope(
+            "wss://Gateway.Example.test:443/socket?token=rotated"
+        );
+
+        expect(scope).toMatch(/^[0-9a-f]{64}$/u);
+        expect(scope).toBe(
+            resolveDashboardGatewayScope("wss://gateway.example.test/other-path")
+        );
+        expect(scope).not.toBe(
+            resolveDashboardGatewayScope("wss://other.example.test/socket")
+        );
+        expect(scope).not.toBe(
+            resolveDashboardGatewayScope("ws://gateway.example.test/socket")
+        );
+    });
+
     test("requires the HTTP browser origin in the WebAuthn allowlist", () => {
         const relyingParty = createWebAuthnRelyingPartyConfiguration({
             allowedOrigins: ["https://dashboard.example"],

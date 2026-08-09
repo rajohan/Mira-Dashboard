@@ -1,0 +1,1528 @@
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+
+import { QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
+
+import type { AuthStatus } from "../../contracts/auth.ts";
+import { chatSpeechCapabilitiesPath } from "../../contracts/chatSpeech.ts";
+import {
+    deriveGatewaySessionStats,
+    gatewayPrimarySessionKey,
+    type GatewaySession,
+    type ListGatewaySessionsResult,
+} from "../../contracts/gatewaySessions.ts";
+import type { OpenClawTaskSummary } from "../../contracts/openClawTasks.ts";
+import { createDashboardQueryClient } from "../api/queryClient.ts";
+import type { DashboardRealtimeClient } from "../api/realtimeClient.ts";
+import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
+import type { DashboardTrpcClient } from "../api/trpcClient.ts";
+import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { gatewaySessionQueryKey } from "../sessions/gatewaySessionQueries.ts";
+import { ChatBrowser } from "./ChatBrowser.tsx";
+import {
+    chatCompanionQueryKey,
+    chatRuntimeQueryKey,
+    openClawTaskDetailQueryKey,
+    openClawTaskListSessionQueryKey,
+} from "./chatQueries.ts";
+import { chatRuntimeStoreContext as ChatRuntimeStoreContext } from "./chatRuntimeContextValue.ts";
+import { createChatRuntimeStore } from "./chatRuntimeStore.ts";
+
+const { act, fireEvent, render, screen, waitFor } =
+    await import("@testing-library/react");
+const userEventModule = await import("@testing-library/user-event");
+const userEvent = userEventModule.default;
+const observedAtMs = 1_800_000_000_000;
+const activeRunId = "019fe633-9133-7ba0-8b80-809dd80dfb39";
+const browserFetch = globalThis.fetch;
+
+beforeEach(() => {
+    Reflect.set(globalThis, "fetch", (input: RequestInfo | URL): Promise<Response> => {
+        let target: string;
+        if (typeof input === "string") {
+            target = input;
+        } else if (input instanceof URL) {
+            target = input.pathname;
+        } else {
+            target = new URL(input.url).pathname;
+        }
+        if (target !== chatSpeechCapabilitiesPath) {
+            return Promise.reject(new Error(`Unexpected browser fetch ${target}`));
+        }
+        return Promise.resolve(
+            Response.json({ speechToText: false, textToSpeech: false })
+        );
+    });
+});
+
+afterEach(() => {
+    Reflect.set(globalThis, "fetch", browserFetch);
+});
+
+const primarySession: GatewaySession = {
+    activeRunIds: [],
+    displayName: "Mira main",
+    effectiveFastMode: false,
+    hasActiveRun: false,
+    key: gatewayPrimarySessionKey,
+    kind: "main",
+    model: "openai/gpt-5.6-sol",
+    sessionId: "session-generation-1",
+    thinkingLevel: "high",
+    totalTokensFresh: false,
+    updatedAtMs: observedAtMs,
+};
+
+function snapshot(
+    freshness: "fresh" | "stale" = "fresh",
+    session: GatewaySession = primarySession,
+    providerObservedAtMs = observedAtMs
+): ListGatewaySessionsResult {
+    return {
+        filter: "ALL",
+        projectionTruncated: false,
+        sessions: [session],
+        source:
+            freshness === "fresh"
+                ? {
+                      checkedAtMs: providerObservedAtMs,
+                      connection: "connected",
+                      freshness,
+                      observedAtMs: providerObservedAtMs,
+                  }
+                : {
+                      checkedAtMs: providerObservedAtMs + 1000,
+                      connection: "disconnected",
+                      freshness,
+                      observedAtMs: providerObservedAtMs,
+                  },
+        stats: deriveGatewaySessionStats([session], providerObservedAtMs),
+    };
+}
+
+function queryOutput(name: string, input: unknown): Promise<unknown> {
+    const sessionKey =
+        typeof input === "object" && input !== null && "sessionKey" in input
+            ? String(input.sessionKey)
+            : gatewayPrimarySessionKey;
+    switch (name) {
+        case "chat.listModels": {
+            return Promise.resolve({
+                models: [
+                    {
+                        id: "openai/gpt-5.6-sol",
+                        label: "GPT-5.6 Sol",
+                        provider: "openai",
+                        supportsFastMode: true,
+                        thinkingLevels: ["high"],
+                    },
+                ],
+            });
+        }
+        case "chat.history": {
+            return Promise.resolve({
+                messages: [],
+                providerPagesRead: 1,
+                sessionKey,
+                truncated: false,
+            });
+        }
+        case "chat.runtime": {
+            return Promise.resolve({
+                cursor: "0",
+                events: [],
+                hasMore: false,
+                resetRequired: false,
+                runs: [],
+                sessionKey,
+            });
+        }
+        case "chat.companionState": {
+            return Promise.resolve({ exchanges: [] });
+        }
+        case "openClawTasks.list": {
+            return Promise.resolve({ tasks: [] });
+        }
+        default: {
+            return Promise.reject(new Error(`Unexpected query ${name}`));
+        }
+    }
+}
+
+function activeRuntimePage(sessionKey = gatewayPrimarySessionKey, sequence = 1) {
+    return {
+        cursor: String(sequence),
+        events: [],
+        hasMore: false,
+        resetRequired: true,
+        runs: [
+            {
+                firstSequence: sequence,
+                parts: [],
+                projectionTruncated: false,
+                run: {
+                    admittedAtMs: observedAtMs,
+                    id: activeRunId,
+                    reconciliation: "runtime-authoritative" as const,
+                    sessionKey,
+                    state: "active" as const,
+                    stateVersion: sequence,
+                    updatedAtMs: observedAtMs + sequence,
+                },
+                throughSequence: sequence,
+            },
+        ],
+        sessionKey,
+    };
+}
+
+function harness(
+    options: Readonly<{
+        mirrorSelection?: boolean;
+        mutation?: (
+            name: string,
+            input: unknown,
+            options?: Readonly<{ signal?: AbortSignal }>
+        ) => Promise<unknown>;
+        query?: (
+            name: string,
+            input: unknown,
+            options?: Readonly<{ signal?: AbortSignal }>
+        ) => Promise<unknown> | undefined;
+        requestedSessionKey?: string;
+        sessionSnapshotQuery?: () =>
+            | ListGatewaySessionsResult
+            | Promise<ListGatewaySessionsResult>;
+        sessionSnapshot?: ListGatewaySessionsResult;
+        sessionsFailure?: boolean;
+    }> = {}
+) {
+    const queryClient = createDashboardQueryClient();
+    const runtimeStore = createChatRuntimeStore();
+    if (options.sessionSnapshot !== undefined) {
+        queryClient.setQueryData(gatewaySessionQueryKey, options.sessionSnapshot, {
+            updatedAt: Date.now(),
+        });
+    }
+    const query = jest.fn(
+        (
+            name: string,
+            input: unknown,
+            queryOptions?: Readonly<{ signal?: AbortSignal }>
+        ) => {
+            const override = options.query?.(name, input, queryOptions);
+            if (override !== undefined) return override;
+            if (name !== "gatewaySessions.list") return queryOutput(name, input);
+            if (options.sessionsFailure) return Promise.reject(new Error("offline"));
+            return Promise.resolve(
+                options.sessionSnapshotQuery?.() ?? options.sessionSnapshot ?? snapshot()
+            );
+        }
+    );
+    const mutation = jest.fn(
+        options.mutation ?? (() => Promise.reject(new Error("Unexpected mutation")))
+    );
+    const client = { mutation, query } as unknown as DashboardTrpcClient;
+    const realtimeClient: DashboardRealtimeClient = {
+        subscribe: () => ({ unsubscribe() {} }),
+    };
+    const onSelectedSessionChange = jest.fn();
+    function BrowserSelectionHarness() {
+        const [selection, setSelection] = useState(options.requestedSessionKey);
+        const [handleSelection] = useState(() => (sessionKey: string) => {
+            onSelectedSessionChange(sessionKey);
+            setSelection(sessionKey);
+        });
+        return (
+            <ChatBrowser
+                onSelectedSessionChange={handleSelection}
+                requestedSessionKey={selection}
+            />
+        );
+    }
+    const browser = options.mirrorSelection ? (
+        <BrowserSelectionHarness />
+    ) : (
+        <ChatBrowser
+            onSelectedSessionChange={onSelectedSessionChange}
+            requestedSessionKey={options.requestedSessionKey}
+        />
+    );
+    const rendered = render(
+        <QueryClientProvider client={queryClient}>
+            <DashboardRealtimeProvider client={realtimeClient}>
+                <DashboardTrpcProvider client={client}>
+                    <ChatRuntimeStoreContext value={runtimeStore}>
+                        {browser}
+                    </ChatRuntimeStoreContext>
+                </DashboardTrpcProvider>
+            </DashboardRealtimeProvider>
+        </QueryClientProvider>
+    );
+    return {
+        mutation,
+        onSelectedSessionChange,
+        query,
+        queryClient,
+        rendered,
+        runtimeStore,
+    };
+}
+
+async function waitForConnectedComposer(): Promise<void> {
+    await waitFor(() =>
+        expect(screen.getByTestId("chat-workspace")).toHaveAttribute(
+            "data-connection",
+            "connected"
+        )
+    );
+}
+
+async function revealCompanionControls(): Promise<void> {
+    const activityTrigger = screen.queryByRole("button", {
+        name: "Open activity panel",
+    });
+    if (activityTrigger !== null) fireEvent.click(activityTrigger);
+    const companion = screen.getByRole("button", { name: /Companion/iu });
+    if (companion.getAttribute("aria-expanded") === "false") {
+        fireEvent.click(companion);
+    }
+    await waitFor(() =>
+        expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeVisible()
+    );
+}
+
+describe("chat browser", () => {
+    test("selects a stable valid default without claiming connected before runtime proof", async () => {
+        let resolveRuntime: ((value: unknown) => void) | undefined;
+        let runtimeReady = false;
+        const runtimePage = {
+            cursor: "0",
+            events: [],
+            hasMore: false,
+            resetRequired: false,
+            runs: [],
+            sessionKey: gatewayPrimarySessionKey,
+        };
+        const runtime = new Promise<unknown>((resolve) => {
+            resolveRuntime = resolve;
+        });
+        const view = harness({
+            mirrorSelection: true,
+            query: (name) => {
+                if (name !== "chat.runtime") return;
+                return runtimeReady ? Promise.resolve(runtimePage) : runtime;
+            },
+            requestedSessionKey: "missing-session",
+            sessionSnapshot: snapshot(),
+        });
+        try {
+            expect(screen.getByTestId("chat-workspace")).toHaveAttribute(
+                "data-connection",
+                "reconnecting"
+            );
+            expect(screen.getByRole("textbox", { name: "Message" })).toBeDisabled();
+            await waitFor(() =>
+                expect(view.onSelectedSessionChange).toHaveBeenCalledWith(
+                    gatewayPrimarySessionKey
+                )
+            );
+            await act(async () => {
+                runtimeReady = true;
+                resolveRuntime?.(runtimePage);
+                await runtime;
+            });
+            await waitForConnectedComposer();
+        } finally {
+            view.rendered.unmount();
+            await view.queryClient.cancelQueries();
+            view.queryClient.clear();
+        }
+    });
+
+    test("retains a valid URL session while a last-known inventory is disconnected", async () => {
+        const view = harness({
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot("stale"),
+        });
+        try {
+            expect(screen.getByText(/Showing last-known history/iu)).toBeVisible();
+            expect(view.onSelectedSessionChange).not.toHaveBeenCalled();
+            expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("does not normalize a requested URL from an incomplete stale inventory", async () => {
+        const emptyStaleSnapshot = snapshot("stale");
+        const view = harness({
+            requestedSessionKey: "agent:missing:main",
+            sessionSnapshot: {
+                ...emptyStaleSnapshot,
+                sessions: [],
+                stats: deriveGatewaySessionStats([], observedAtMs),
+            },
+        });
+        try {
+            expect(
+                await screen.findByRole("heading", { name: "No chat sessions" })
+            ).toBeVisible();
+            expect(view.onSelectedSessionChange).not.toHaveBeenCalled();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("keeps a missing URL session unresolved until one complete fresh snapshot normalizes it", async () => {
+        const sessionScopedReadNames = new Set([
+            "chat.companionState",
+            "chat.history",
+            "chat.runtime",
+            "openClawTasks.get",
+            "openClawTasks.list",
+        ]);
+        const pendingSessionReads: Array<
+            Readonly<{
+                input: unknown;
+                name: string;
+                resolve: (value: unknown) => void;
+            }>
+        > = [];
+        const view = harness({
+            query: (name, input) =>
+                sessionScopedReadNames.has(name)
+                    ? new Promise((resolve) => {
+                          pendingSessionReads.push({ input, name, resolve });
+                      })
+                    : undefined,
+            requestedSessionKey: "agent:missing:main",
+            sessionSnapshot: {
+                ...snapshot(),
+                projectionTruncated: true,
+            },
+        });
+        const sessionScopedReads = () =>
+            view.query.mock.calls.filter(([name]) =>
+                sessionScopedReadNames.has(String(name))
+            );
+        try {
+            expect(
+                await screen.findByRole("heading", { name: "No chat sessions" })
+            ).toBeVisible();
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            expect(view.onSelectedSessionChange).not.toHaveBeenCalled();
+            expect(sessionScopedReads()).toHaveLength(0);
+            expect(view.mutation).not.toHaveBeenCalled();
+            expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+
+            await act(async () => {
+                view.queryClient.setQueryData(
+                    gatewaySessionQueryKey,
+                    snapshot("fresh", primarySession, observedAtMs + 1)
+                );
+                await Promise.resolve();
+            });
+            await waitFor(() =>
+                expect(view.onSelectedSessionChange).toHaveBeenCalledTimes(1)
+            );
+            expect(view.onSelectedSessionChange).toHaveBeenCalledWith(
+                gatewayPrimarySessionKey
+            );
+            await waitFor(() =>
+                expect(
+                    sessionScopedReads().some(([name]) => name === "chat.history")
+                ).toBeTrue()
+            );
+            expect(
+                sessionScopedReads().some(([name]) => name === "chat.runtime")
+            ).toBeTrue();
+
+            await act(async () => {
+                view.queryClient.setQueryData(
+                    gatewaySessionQueryKey,
+                    snapshot("fresh", primarySession, observedAtMs + 2)
+                );
+                await Promise.resolve();
+            });
+            expect(view.onSelectedSessionChange).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                for (const pending of pendingSessionReads) {
+                    pending.resolve(await queryOutput(pending.name, pending.input));
+                }
+            });
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("keeps an unknown send reconciling and prevents duplicate dispatch", async () => {
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.send"
+                    ? Promise.reject(
+                          Object.assign(new Error("Unknown send outcome"), {
+                              data: { reason: "operation_outcome_unknown" },
+                          })
+                      )
+                    : Promise.reject(new Error("Unexpected mutation")),
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            const composer = screen.getByRole("textbox", { name: "Message" });
+            await user.type(composer, "Send exactly once");
+            await user.click(screen.getByRole("button", { name: "Send message" }));
+            expect(
+                await screen.findByText(/remains under runtime reconciliation/iu)
+            ).toBeVisible();
+            expect(composer).toHaveValue("");
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.send")
+            ).toHaveLength(1);
+            expect(
+                view.mutation.mock.calls.find((call) => call[0] === "chat.send")?.[1]
+            ).not.toHaveProperty("queueMode");
+            expect(screen.queryByText(/queued/iu)).toBeNull();
+            expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("does not override provider queue mode while a run is active", async () => {
+        const view = harness({
+            mutation: (name, input) =>
+                name === "chat.send"
+                    ? Promise.resolve({
+                          admission: "created",
+                          run: {
+                              id: (input as { clientRunId: string }).clientRunId,
+                          },
+                      })
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(activeRuntimePage())
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await screen.findByRole("button", { name: "Stop response 1" });
+            await user.type(
+                screen.getByRole("textbox", { name: "Message" }),
+                "Follow the configured provider behavior"
+            );
+            await user.click(screen.getByRole("button", { name: "Send message" }));
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter((call) => call[0] === "chat.send")
+                ).toHaveLength(1)
+            );
+            expect(
+                view.mutation.mock.calls.find((call) => call[0] === "chat.send")?.[1]
+            ).not.toHaveProperty("queueMode");
+            expect(screen.queryByText(/queued/iu)).toBeNull();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("does not reopen Stop from a delayed pre-abort runtime read", async () => {
+        const unknownOutcome = Object.assign(new Error("Unknown abort outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        const preActionRead =
+            Promise.withResolvers<ReturnType<typeof activeRuntimePage>>();
+        const postActionRead =
+            Promise.withResolvers<ReturnType<typeof activeRuntimePage>>();
+        let runtimeReads = 0;
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.abort"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) => {
+                if (name !== "chat.runtime") return;
+                runtimeReads += 1;
+                if (runtimeReads === 1) return Promise.resolve(activeRuntimePage());
+                return runtimeReads === 2
+                    ? preActionRead.promise
+                    : postActionRead.promise;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await screen.findByRole("button", { name: "Stop response 1" });
+            void view.queryClient.invalidateQueries({
+                exact: true,
+                queryKey: chatRuntimeQueryKey(gatewayPrimarySessionKey),
+            });
+            await waitFor(() => expect(runtimeReads).toBe(2));
+            await user.click(screen.getByRole("button", { name: "Stop response 1" }));
+            await waitFor(() => expect(runtimeReads).toBe(3));
+
+            await act(async () => {
+                preActionRead.resolve(activeRuntimePage(gatewayPrimarySessionKey, 2));
+                await preActionRead.promise;
+                await Promise.resolve();
+            });
+            expect(screen.queryByRole("button", { name: "Stop response 1" })).toBeNull();
+
+            await act(async () => {
+                postActionRead.resolve(activeRuntimePage(gatewayPrimarySessionKey, 2));
+                await postActionRead.promise;
+            });
+            expect(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            ).toBeEnabled();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
+            ).toHaveLength(1);
+        } finally {
+            preActionRead.resolve(activeRuntimePage(gatewayPrimarySessionKey, 2));
+            postActionRead.resolve(activeRuntimePage(gatewayPrimarySessionKey, 2));
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("restores an untouched draft after a definite send failure", async () => {
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.prepareAttachmentTicket"
+                    ? Promise.reject(new Error("definite"))
+                    : Promise.reject(new Error("Unexpected mutation")),
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            const attachment = new File(["attachment body"], "failure.txt", {
+                type: "text/plain",
+            });
+            const input =
+                view.rendered.container.querySelector<HTMLInputElement>(
+                    'input[type="file"]'
+                );
+            expect(input).not.toBeNull();
+            fireEvent.change(input as HTMLInputElement, {
+                target: { files: [attachment] },
+            });
+            expect(await screen.findByText("failure.txt")).toBeVisible();
+            const composer = screen.getByRole("textbox", { name: "Message" });
+            await user.type(composer, "Restore me");
+            await user.click(screen.getByRole("button", { name: "Send message" }));
+            await waitFor(() => expect(composer).toHaveValue("Restore me"));
+            expect(screen.getByText("failure.txt")).toBeVisible();
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "chat.prepareAttachmentTicket"
+                )
+            ).toHaveLength(1);
+            expect(
+                view.runtimeStore.state.sessions[gatewayPrimarySessionKey]
+                    ?.optimisticSends ?? {}
+            ).toEqual({});
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("renders slash-command guidance as a neutral notice instead of an attachment alert", async () => {
+        const view = harness({
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            await user.type(screen.getByRole("textbox", { name: "Message" }), "/help");
+            await user.click(screen.getByRole("button", { name: "Send message" }));
+            const notice = screen.getByText(/Commands: \/compact/iu);
+            expect(notice.tagName).toBe("OUTPUT");
+            expect(notice).toHaveAttribute("aria-live", "polite");
+            expect(screen.queryByRole("alert")).toBeNull();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("uses an initial page state when no session inventory exists", async () => {
+        const view = harness({ sessionsFailure: true });
+        try {
+            expect(
+                await screen.findByRole("heading", { name: "Chat unavailable" })
+            ).toBeVisible();
+            expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+            expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("uses normalized settings readback until a newer fresh snapshot wins", async () => {
+        let resolveSnapshot: ((value: ListGatewaySessionsResult) => void) | undefined;
+        const refreshedSnapshot = new Promise<ListGatewaySessionsResult>((resolve) => {
+            resolveSnapshot = resolve;
+        });
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.updateSessionSettings"
+                    ? Promise.resolve({
+                          fastMode: false,
+                          model: "openai/gpt-5.6-sol",
+                          sessionId: primarySession.sessionId,
+                          sessionKey: gatewayPrimarySessionKey,
+                          thinkingLevel: "high",
+                      })
+                    : Promise.reject(new Error("Unexpected mutation")),
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+            sessionSnapshotQuery: () => refreshedSnapshot,
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            await user.click(screen.getByRole("button", { name: "Chat settings" }));
+            await user.click(screen.getByRole("button", { name: /Response speed/iu }));
+            await user.click(screen.getByRole("option", { name: "Fast" }));
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.some(
+                        (call) =>
+                            call[0] === "chat.updateSessionSettings" &&
+                            typeof call[1] === "object" &&
+                            call[1] !== null &&
+                            "fastMode" in call[1] &&
+                            call[1].fastMode === true
+                    )
+                ).toBe(true)
+            );
+            await waitFor(() =>
+                expect(
+                    view.query.mock.calls.filter(
+                        (call) => call[0] === "gatewaySessions.list"
+                    )
+                ).toHaveLength(1)
+            );
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", { name: /Response speed/iu })
+                ).toHaveTextContent("Standard")
+            );
+
+            await act(async () => {
+                resolveSnapshot?.(
+                    snapshot(
+                        "fresh",
+                        { ...primarySession, effectiveFastMode: true },
+                        observedAtMs + 1
+                    )
+                );
+                await refreshedSnapshot;
+            });
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", { name: /Response speed/iu })
+                ).toHaveTextContent("Fast")
+            );
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", { name: /Response speed/iu })
+                ).toBeEnabled()
+            );
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("does not settle settings from a delayed pre-action inventory read", async () => {
+        const preActionRead = Promise.withResolvers<ListGatewaySessionsResult>();
+        const postActionRead = Promise.withResolvers<ListGatewaySessionsResult>();
+        let inventoryReads = 0;
+        const unknownOutcome = Object.assign(new Error("Unknown settings outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.updateSessionSettings"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) => {
+                if (name !== "gatewaySessions.list") return;
+                inventoryReads += 1;
+                return inventoryReads === 1
+                    ? preActionRead.promise
+                    : postActionRead.promise;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            void view.queryClient.invalidateQueries({
+                exact: true,
+                queryKey: gatewaySessionQueryKey,
+            });
+            await waitFor(() => expect(inventoryReads).toBe(1));
+            await user.click(screen.getByRole("button", { name: "Chat settings" }));
+            await user.click(screen.getByRole("button", { name: /Response speed/iu }));
+            await user.click(screen.getByRole("option", { name: "Fast" }));
+            await waitFor(() => expect(inventoryReads).toBe(2));
+
+            await act(async () => {
+                preActionRead.resolve(
+                    snapshot(
+                        "fresh",
+                        { ...primarySession, effectiveFastMode: true },
+                        observedAtMs + 100
+                    )
+                );
+                await preActionRead.promise;
+                await Promise.resolve();
+            });
+            expect(
+                screen.getByRole("button", { name: /Response speed/iu })
+            ).toBeDisabled();
+
+            await act(async () => {
+                postActionRead.resolve(
+                    snapshot(
+                        "fresh",
+                        { ...primarySession, effectiveFastMode: true },
+                        observedAtMs + 1
+                    )
+                );
+                await postActionRead.promise;
+            });
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", { name: /Response speed/iu })
+                ).toBeEnabled()
+            );
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "chat.updateSessionSettings"
+                )
+            ).toHaveLength(1);
+        } finally {
+            preActionRead.resolve(snapshot());
+            postActionRead.resolve(snapshot("fresh", primarySession, observedAtMs + 1));
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("hydrates the first authoritative task with one exact detail read", async () => {
+        const task: OpenClawTaskSummary = {
+            id: "task-default-detail",
+            progressSummary: "Summary",
+            status: "running",
+            title: "Default task detail",
+            updatedAtMs: observedAtMs,
+        };
+        const view = harness({
+            query: (name, input) => {
+                if (name === "openClawTasks.list") {
+                    const statuses =
+                        typeof input === "object" &&
+                        input !== null &&
+                        "statuses" in input &&
+                        Array.isArray(input.statuses)
+                            ? input.statuses
+                            : [];
+                    return Promise.resolve({
+                        tasks: statuses.includes("running") ? [task] : [],
+                    });
+                }
+                if (name === "openClawTasks.get") {
+                    return Promise.resolve({
+                        task: {
+                            ...task,
+                            progressSummary: "Hydrated exact detail",
+                        },
+                    });
+                }
+                return;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        try {
+            const hydratedDetails = await screen.findAllByText("Hydrated exact detail");
+            expect(hydratedDetails.length).toBeGreaterThanOrEqual(1);
+            expect(
+                view.query.mock.calls.filter((call) => call[0] === "openClawTasks.get")
+            ).toHaveLength(1);
+            expect(
+                view.query.mock.calls.find((call) => call[0] === "openClawTasks.get")?.[1]
+            ).toEqual({ taskId: task.id });
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("deduplicates unknown task cancellation until a newer terminal task arrives", async () => {
+        let task: OpenClawTaskSummary = {
+            id: "task-1",
+            status: "running" as const,
+            title: "Background review",
+            updatedAtMs: observedAtMs,
+        };
+        const unknownOutcome = Object.assign(new Error("Unknown cancel outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        const view = harness({
+            mutation: (name) =>
+                name === "openClawTasks.cancel"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) =>
+                name === "openClawTasks.list"
+                    ? Promise.resolve({ tasks: [task] })
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await screen.findAllByText("Background review");
+            await user.dblClick(screen.getByRole("button", { name: "Cancel task" }));
+            expect(
+                await screen.findByText(/newer task observation is required/iu)
+            ).toBeVisible();
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "openClawTasks.cancel"
+                )
+            ).toHaveLength(1);
+            expect(
+                screen.getByRole("button", { name: "Reconciling task…" })
+            ).toBeDisabled();
+
+            task = {
+                ...task,
+                status: "completed",
+                updatedAtMs: observedAtMs + 1,
+            };
+            await view.queryClient.invalidateQueries({
+                queryKey: ["openclaw-tasks", "list", gatewayPrimarySessionKey],
+            });
+            await waitFor(() =>
+                expect(screen.queryByRole("button", { name: "Cancel task" })).toBeNull()
+            );
+            expect(screen.getByText("completed")).toBeVisible();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("does not settle task cancellation from delayed pre-action task reads", async () => {
+        const task: OpenClawTaskSummary = {
+            id: "task-delayed-read",
+            status: "running",
+            title: "Delayed task reconciliation",
+            updatedAtMs: observedAtMs,
+        };
+        const preActiveRead = Promise.withResolvers<{ tasks: OpenClawTaskSummary[] }>();
+        const postActiveRead = Promise.withResolvers<{ tasks: OpenClawTaskSummary[] }>();
+        const preDetailRead = Promise.withResolvers<{ task: OpenClawTaskSummary }>();
+        const postDetailRead = Promise.withResolvers<{ task: OpenClawTaskSummary }>();
+        const unknownOutcome = Object.assign(new Error("Unknown cancel outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        let activeReads = 0;
+        let detailReads = 0;
+        const view = harness({
+            mutation: (name) =>
+                name === "openClawTasks.cancel"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name, input) => {
+                if (name === "openClawTasks.list") {
+                    const statuses =
+                        typeof input === "object" &&
+                        input !== null &&
+                        "statuses" in input &&
+                        Array.isArray(input.statuses)
+                            ? input.statuses
+                            : [];
+                    if (!statuses.includes("running")) {
+                        return Promise.resolve({ tasks: [] });
+                    }
+                    activeReads += 1;
+                    if (activeReads === 1) return Promise.resolve({ tasks: [task] });
+                    return activeReads === 2
+                        ? preActiveRead.promise
+                        : postActiveRead.promise;
+                }
+                if (name === "openClawTasks.get") {
+                    detailReads += 1;
+                    if (detailReads === 1) return Promise.resolve({ task });
+                    return detailReads === 2
+                        ? preDetailRead.promise
+                        : postDetailRead.promise;
+                }
+                return;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        const preTask = { ...task, updatedAtMs: observedAtMs + 1 };
+        const postTask = { ...task, updatedAtMs: observedAtMs + 2 };
+        try {
+            await screen.findAllByText("Delayed task reconciliation");
+            await waitFor(() => expect(detailReads).toBe(1));
+            void Promise.all([
+                view.queryClient.invalidateQueries({
+                    queryKey: openClawTaskListSessionQueryKey(gatewayPrimarySessionKey),
+                }),
+                view.queryClient.invalidateQueries({
+                    exact: true,
+                    queryKey: openClawTaskDetailQueryKey(task.id),
+                }),
+            ]);
+            await waitFor(() => {
+                expect(activeReads).toBe(2);
+                expect(detailReads).toBe(2);
+            });
+            await user.click(screen.getByRole("button", { name: "Cancel task" }));
+            await waitFor(() => {
+                expect(activeReads).toBe(3);
+                expect(detailReads).toBe(3);
+            });
+
+            await act(async () => {
+                preActiveRead.resolve({ tasks: [preTask] });
+                preDetailRead.resolve({ task: preTask });
+                await Promise.all([preActiveRead.promise, preDetailRead.promise]);
+                await Promise.resolve();
+            });
+            expect(
+                screen.getByRole("button", { name: "Reconciling task…" })
+            ).toBeDisabled();
+
+            await act(async () => {
+                postActiveRead.resolve({ tasks: [postTask] });
+                postDetailRead.resolve({ task: postTask });
+                await Promise.all([postActiveRead.promise, postDetailRead.promise]);
+            });
+            await waitFor(() =>
+                expect(screen.getByRole("button", { name: "Cancel task" })).toBeEnabled()
+            );
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "openClawTasks.cancel"
+                )
+            ).toHaveLength(1);
+        } finally {
+            preActiveRead.resolve({ tasks: [preTask] });
+            postActiveRead.resolve({ tasks: [postTask] });
+            preDetailRead.resolve({ task: preTask });
+            postDetailRead.resolve({ task: postTask });
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("settles a definitive absent-task cancellation without retaining its lock", async () => {
+        const task: OpenClawTaskSummary = {
+            id: "task-missing",
+            status: "running",
+            title: "Vanishing task",
+            updatedAtMs: observedAtMs,
+        };
+        const view = harness({
+            mutation: (name) =>
+                name === "openClawTasks.cancel"
+                    ? Promise.resolve({ cancelled: false, found: false })
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) =>
+                name === "openClawTasks.list"
+                    ? Promise.resolve({ tasks: [task] })
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await screen.findAllByText("Vanishing task");
+            await user.click(screen.getByRole("button", { name: "Cancel task" }));
+            await waitFor(() => expect(screen.queryByText("Vanishing task")).toBeNull());
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "openClawTasks.cancel"
+                )
+            ).toHaveLength(1);
+            expect(screen.queryByText("Reconciling task…")).toBeNull();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("uses an exact task read when an unknown cancel removes the default list row", async () => {
+        let listReads = 0;
+        const task: OpenClawTaskSummary = {
+            id: "task-exact",
+            status: "running",
+            title: "Exact reconciliation",
+            updatedAtMs: observedAtMs,
+        };
+        const unknownOutcome = Object.assign(new Error("Unknown cancel outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        const view = harness({
+            mutation: (name) =>
+                name === "openClawTasks.cancel"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name, input) => {
+                if (name === "openClawTasks.list") {
+                    listReads += 1;
+                    return Promise.resolve({ tasks: listReads === 1 ? [task] : [] });
+                }
+                if (name === "openClawTasks.get") {
+                    return Promise.reject(
+                        Object.assign(new Error("not found"), {
+                            data: { code: "NOT_FOUND" },
+                        })
+                    );
+                }
+                return queryOutput(name, input);
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await screen.findAllByText("Exact reconciliation");
+            await user.click(screen.getByRole("button", { name: "Cancel task" }));
+            await waitFor(() =>
+                expect(screen.queryByText("Exact reconciliation")).toBeNull()
+            );
+            expect(
+                view.query.mock.calls.some((call) => call[0] === "openClawTasks.get")
+            ).toBe(true);
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "openClawTasks.cancel"
+                )
+            ).toHaveLength(1);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("uses reset as a single-flight escape hatch that supersedes ask", async () => {
+        const pendingAsk = Promise.withResolvers<{
+            answer: string;
+            timestampMs: number;
+        }>();
+        const pendingReset = Promise.withResolvers<{ reset: true }>();
+        let askSignal: AbortSignal | undefined;
+        const view = harness({
+            mutation: (name, _input, options) => {
+                if (name === "chat.companionAsk") {
+                    askSignal = options?.signal;
+                    return pendingAsk.promise;
+                }
+                if (name === "chat.companionReset") return pendingReset.promise;
+                return Promise.reject(new Error("Unexpected mutation"));
+            },
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(activeRuntimePage())
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await screen.findByRole("button", { name: "Stop response 1" });
+            await revealCompanionControls();
+            await user.type(
+                screen.getByRole("textbox", { name: "Ask companion" }),
+                "What changed?"
+            );
+            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            await waitFor(() =>
+                expect(screen.getByRole("button", { name: "Asking…" })).toBeDisabled()
+            );
+            expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();
+            await user.click(screen.getByRole("button", { name: "Reset" }));
+            expect(askSignal?.aborted).toBeTrue();
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "chat.companionReset"
+                )
+            ).toHaveLength(1);
+            expect(
+                await screen.findByRole("button", {
+                    name: "Resetting…",
+                })
+            ).toBeDisabled();
+            await user.click(screen.getByRole("button", { name: "Resetting…" }));
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "chat.companionReset"
+                )
+            ).toHaveLength(1);
+            await act(async () => {
+                pendingAsk.resolve({
+                    answer: "Stale answer",
+                    timestampMs: observedAtMs + 1,
+                });
+                await pendingAsk.promise;
+            });
+            expect(screen.queryByText("Stale answer")).toBeNull();
+            expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeDisabled();
+            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.companionAsk")
+            ).toHaveLength(1);
+            await act(async () => {
+                pendingReset.resolve({ reset: true });
+                await pendingReset.promise;
+            });
+            await waitFor(() =>
+                expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled()
+            );
+        } finally {
+            pendingAsk.resolve({ answer: "Stale answer", timestampMs: observedAtMs });
+            pendingReset.resolve({ reset: true });
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("allows a companion ask while the selected session has no active run", async () => {
+        const view = harness({
+            mutation: (name, input) =>
+                name === "chat.companionAsk"
+                    ? Promise.resolve({
+                          answer: `Answered: ${String(
+                              (input as { question?: unknown }).question
+                          )}`,
+                          timestampMs: observedAtMs + 1,
+                      })
+                    : Promise.reject(new Error("Unexpected mutation")),
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            await revealCompanionControls();
+            await user.type(
+                screen.getByRole("textbox", { name: "Ask companion" }),
+                "What changed?"
+            );
+            await user.click(screen.getByRole("button", { name: "Ask companion" }));
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter(
+                        (call) => call[0] === "chat.companionAsk"
+                    )
+                ).toHaveLength(1)
+            );
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("gates an unknown companion reset until a newer exact state read", async () => {
+        const unknownOutcome = Object.assign(new Error("Unknown reset outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        const reconciliation = Promise.withResolvers<{ exchanges: [] }>();
+        let companionReads = 0;
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.companionReset"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) => {
+                if (name === "chat.runtime") return Promise.resolve(activeRuntimePage());
+                if (name === "chat.companionState") {
+                    companionReads += 1;
+                    return companionReads === 1
+                        ? Promise.resolve({ exchanges: [] })
+                        : reconciliation.promise;
+                }
+                return;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            await revealCompanionControls();
+            await user.dblClick(screen.getByRole("button", { name: "Reset" }));
+            expect(
+                await screen.findByText(/reset outcome could not be confirmed/iu)
+            ).toBeVisible();
+            expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
+            expect(screen.getByRole("textbox", { name: "Ask companion" })).toBeDisabled();
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "chat.companionReset"
+                )
+            ).toHaveLength(1);
+
+            await act(async () => {
+                reconciliation.resolve({ exchanges: [] });
+                await reconciliation.promise;
+            });
+            await waitFor(() =>
+                expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled()
+            );
+            expect(
+                screen.queryByText(/reset outcome could not be confirmed/iu)
+            ).toBeNull();
+        } finally {
+            reconciliation.resolve({ exchanges: [] });
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("does not join a delayed pre-reset companion read from an empty state", async () => {
+        const unknownOutcome = Object.assign(new Error("Unknown reset outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        const preActionRead = Promise.withResolvers<{ exchanges: [] }>();
+        const postActionRead = Promise.withResolvers<{ exchanges: [] }>();
+        let companionReads = 0;
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.companionReset"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) => {
+                if (name === "chat.companionState") {
+                    companionReads += 1;
+                    if (companionReads === 1) return Promise.resolve({ exchanges: [] });
+                    return companionReads === 2
+                        ? preActionRead.promise
+                        : postActionRead.promise;
+                }
+                return;
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            await revealCompanionControls();
+            void view.queryClient.invalidateQueries({
+                exact: true,
+                queryKey: chatCompanionQueryKey(gatewayPrimarySessionKey),
+            });
+            await waitFor(() => expect(companionReads).toBe(2));
+            await user.click(screen.getByRole("button", { name: "Reset" }));
+            await waitFor(() => expect(companionReads).toBe(3));
+
+            await act(async () => {
+                preActionRead.resolve({ exchanges: [] });
+                await preActionRead.promise;
+                await Promise.resolve();
+            });
+            expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
+
+            await act(async () => {
+                postActionRead.resolve({ exchanges: [] });
+                await postActionRead.promise;
+            });
+            await waitFor(() =>
+                expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled()
+            );
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "chat.companionReset"
+                )
+            ).toHaveLength(1);
+        } finally {
+            preActionRead.resolve({ exchanges: [] });
+            postActionRead.resolve({ exchanges: [] });
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("does not publish an expired reset across an auth and session switch", async () => {
+        const otherSession: GatewaySession = {
+            ...primarySession,
+            displayName: "Mira other",
+            key: "agent:other:main",
+            sessionId: "session-generation-2",
+        };
+        const twoSessionSnapshot = snapshot();
+        const sessions = [primarySession, otherSession];
+        const pendingReset = Promise.withResolvers<{ reset: true }>();
+        const view = harness({
+            mirrorSelection: true,
+            mutation: (name) =>
+                name === "chat.companionReset"
+                    ? pendingReset.promise
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name, input) => {
+                if (name !== "chat.companionState") return;
+                const sessionKey =
+                    typeof input === "object" && input !== null && "sessionKey" in input
+                        ? String(input.sessionKey)
+                        : "";
+                return Promise.resolve({
+                    exchanges:
+                        sessionKey === gatewayPrimarySessionKey
+                            ? [
+                                  {
+                                      answer: "Existing A answer",
+                                      question: "Existing A question",
+                                      timestampMs: observedAtMs - 1,
+                                  },
+                              ]
+                            : [],
+                });
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: {
+                ...twoSessionSnapshot,
+                sessions,
+                stats: deriveGatewaySessionStats(sessions, observedAtMs),
+            },
+        });
+        const user = userEvent.setup();
+        try {
+            await revealCompanionControls();
+            expect(await screen.findByText("Existing A answer")).toBeVisible();
+            view.queryClient.setQueryData(authStatusQueryKey, {
+                state: "bootstrap-required",
+            } satisfies AuthStatus);
+            await user.click(screen.getByRole("button", { name: "Reset" }));
+            expect(
+                await screen.findByRole("button", {
+                    name: "Resetting…",
+                })
+            ).toBeDisabled();
+
+            await user.click(screen.getByRole("button", { name: "Agent" }));
+            await user.click(screen.getByRole("option", { name: /other 1 session/iu }));
+            await waitFor(() =>
+                expect(screen.getByRole("button", { name: "Agent" })).toHaveTextContent(
+                    "other"
+                )
+            );
+            expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();
+
+            view.queryClient.setQueryData(authStatusQueryKey, {
+                state: "anonymous",
+            } satisfies AuthStatus);
+            await act(async () => {
+                pendingReset.resolve({ reset: true });
+                await pendingReset.promise;
+                await Promise.resolve();
+            });
+
+            await user.click(screen.getByRole("button", { name: "Agent" }));
+            await user.click(screen.getByRole("option", { name: /main 1 session/iu }));
+            expect(await screen.findByText("Existing A answer")).toBeVisible();
+            expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
+            expect(
+                view.mutation.mock.calls.filter(
+                    (call) => call[0] === "chat.companionReset"
+                )
+            ).toHaveLength(1);
+        } finally {
+            pendingReset.resolve({ reset: true });
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("keeps an unknown companion ask gated pending exact state reconciliation", async () => {
+        const unknownOutcome = Object.assign(new Error("Unknown ask outcome"), {
+            data: { reason: "operation_outcome_unknown" },
+        });
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.companionAsk"
+                    ? Promise.reject(unknownOutcome)
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(activeRuntimePage())
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await screen.findByRole("button", { name: "Stop response 1" });
+            await revealCompanionControls();
+            const question = screen.getByRole("textbox", { name: "Ask companion" });
+            await user.type(question, "Do not duplicate");
+            await user.dblClick(screen.getByRole("button", { name: "Ask companion" }));
+            expect(
+                await screen.findByText(/outcome could not be confirmed/iu)
+            ).toBeVisible();
+            expect(question).toBeDisabled();
+            expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.companionAsk")
+            ).toHaveLength(1);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+});

@@ -5,6 +5,7 @@ import {
     type RouterHistory,
 } from "@tanstack/react-router";
 
+import { parseChatRouteSearch } from "./chat/chatRouteSearch.ts";
 import { parseJobsRouteSearch } from "./jobs/jobRouteSearch.ts";
 import { DashboardShell } from "./layout/DashboardShell.tsx";
 import {
@@ -34,6 +35,11 @@ const tasksRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/tasks",
 }).lazy(() => import("./routes/tasks.lazy.tsx").then((module) => module.Route));
+const chatRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/chat",
+    validateSearch: parseChatRouteSearch,
+}).lazy(() => import("./routes/chat.lazy.tsx").then((module) => module.Route));
 const jobsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/jobs",
@@ -58,6 +64,7 @@ const routeTree = rootRoute.addChildren([
     loginRoute,
     accountSecurityRoute,
     agentsRoute,
+    chatRoute,
     incidentsRoute,
     jobsRoute,
     reportsRoute,

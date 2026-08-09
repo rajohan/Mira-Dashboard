@@ -1,15 +1,18 @@
 import { secondsToMilliseconds } from "date-fns";
 import * as v from "valibot";
 
+import { chatAttachmentLimits } from "../contracts/chatMedia.ts";
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
 import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
+import type { ChatService } from "../server/domains/chat/service.ts";
 import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
 import type { GatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
 import type { JobService } from "../server/domains/jobs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../server/domains/openClawCron/service.ts";
+import type { OpenClawTasksService } from "../server/domains/openClawTasks/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
@@ -19,6 +22,7 @@ import type { TaskService } from "../server/domains/tasks/service.ts";
 import type { ReadinessController } from "../server/platform/readiness/readinessState.ts";
 import type { ApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { readRuntimeIdentity } from "../server/platform/runtime/readRuntimeIdentity.ts";
+import type { ChatRawHttpHandler } from "../server/rawHttp/chatMedia.ts";
 import type { FrontendAssetHandler } from "../server/rawHttp/frontendAssets.ts";
 import {
     type HealthProbeMethod,
@@ -30,6 +34,12 @@ import type { AuthenticateCredential } from "../server/trpc/context.ts";
 import { positiveSafeIntegerSchema } from "../shared/validation.ts";
 import { createTrpcHttpHandler } from "./trpcHttpHandler.ts";
 import { isTrpcRequestPath, serverRequestBodyMaximumBytes } from "./trpcRequestPolicy.ts";
+
+/** Listener ceiling needed for raw chat uploads; each route retains its own tighter policy. */
+export const serverListenerRequestBodyMaximumBytes = Math.max(
+    serverRequestBodyMaximumBytes,
+    chatAttachmentLimits.maximumFileBytes
+);
 
 const serverIdleTimeoutSeconds = 10;
 const serverGracefulShutdownTimeoutDefaultMs = secondsToMilliseconds(5);
@@ -58,16 +68,34 @@ async function primaryErrorAfterCleanup(
 }
 
 async function disposeRuntimeAndFlush(
-    applicationRuntime: ApplicationRuntime
+    applicationRuntime: ApplicationRuntime,
+    disposeBeforeRuntime?: () => Promise<void> | void
 ): Promise<void> {
+    let lifecycleFailure: unknown;
+    let runtimeFailure: unknown;
+    try {
+        await disposeBeforeRuntime?.();
+    } catch (error) {
+        lifecycleFailure = error;
+    }
     try {
         await applicationRuntime.dispose();
     } catch (error) {
-        throw await primaryErrorAfterCleanup(error, () => {
-            applicationRuntime.logger.flush();
-        });
+        runtimeFailure = error;
     }
     applicationRuntime.logger.flush();
+    if (lifecycleFailure !== undefined) {
+        throw lifecycleFailure instanceof Error
+            ? lifecycleFailure
+            : new Error("Dashboard lifecycle disposal failed", {
+                  cause: lifecycleFailure,
+              });
+    }
+    if (runtimeFailure !== undefined) {
+        throw runtimeFailure instanceof Error
+            ? runtimeFailure
+            : new Error("Dashboard runtime disposal failed", { cause: runtimeFailure });
+    }
 }
 
 function responseWithRequestId(response: Response, requestId: string): Response {
@@ -139,6 +167,11 @@ export interface ServerOptions {
     /** Explicit public browser origin when TLS terminates at a trusted proxy. */
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
+    /** Raw attachment/media routes mounted before browser asset fallback. */
+    readonly chatRawHttpHandler?: ChatRawHttpHandler;
+    readonly chatService?: ChatService;
+    /** Process-owned domain adapters disposed after listener drain, before runtime DB. */
+    readonly disposeBeforeRuntime?: () => Promise<void> | void;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     /** Manifest-indexed browser artifacts and controlled SPA navigation. */
@@ -152,6 +185,7 @@ export interface ServerOptions {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    readonly openClawTasksService?: OpenClawTasksService;
     readonly port: number;
     readonly readiness: ReadinessController;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
@@ -192,6 +226,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             automationSecurityLifecycle: options.automationSecurityLifecycle,
             browserOrigin,
             cacheService: options.cacheService,
+            chatService: options.chatService,
             gatewayConnectionService: options.gatewayConnectionService,
             gatewaySessionsService: options.gatewaySessionsService,
             mfaAccountLifecycle: options.mfaAccountLifecycle,
@@ -200,6 +235,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             monitoringCatalogService: options.monitoringCatalogService,
             monitoringService: options.monitoringService,
             openClawCronService: options.openClawCronService,
+            openClawTasksService: options.openClawTasksService,
             securityAuditLifecycle: options.securityAuditLifecycle,
             taskService: options.taskService,
             trustedProxyAddresses: options.trustedProxyAddresses,
@@ -237,13 +273,21 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                                 options.readiness
                             );
                         } else {
-                            const frontendResponse = await options.frontendAssets?.(
+                            const chatResponse = await options.chatRawHttpHandler?.(
                                 request,
                                 requestUrl
                             );
-                            response =
-                                frontendResponse ??
-                                new Response("Not found", { status: 404 });
+                            if (chatResponse === undefined) {
+                                const frontendResponse = await options.frontendAssets?.(
+                                    request,
+                                    requestUrl
+                                );
+                                response =
+                                    frontendResponse ??
+                                    new Response("Not found", { status: 404 });
+                            } else {
+                                response = chatResponse;
+                            }
                         }
                     }
                     if (request.signal.aborted) {
@@ -297,7 +341,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             },
             hostname: options.hostname,
             idleTimeout: serverIdleTimeoutSeconds,
-            maxRequestBodySize: serverRequestBodyMaximumBytes,
+            maxRequestBodySize: serverListenerRequestBodyMaximumBytes,
             port: options.port,
         });
         let serverPort: number;
@@ -336,7 +380,10 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
                         options.readiness.markUnavailable();
                         throw error;
                     }
-                    await disposeRuntimeAndFlush(options.applicationRuntime);
+                    await disposeRuntimeAndFlush(
+                        options.applicationRuntime,
+                        options.disposeBeforeRuntime
+                    );
                 })();
                 return stopPromise;
             },
@@ -344,7 +391,10 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
         });
     } catch (error) {
         throw await primaryErrorAfterCleanup(error, () =>
-            disposeRuntimeAndFlush(options.applicationRuntime)
+            disposeRuntimeAndFlush(
+                options.applicationRuntime,
+                options.disposeBeforeRuntime
+            )
         );
     }
 }

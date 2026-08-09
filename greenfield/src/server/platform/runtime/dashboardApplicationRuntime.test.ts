@@ -63,6 +63,11 @@ function createFakePersistentGatewayTransport(): {
     const transport: PersistentGatewayTransport = {
         request: unavailablePersistentGatewayRequest,
         requestAdmin: unavailablePersistentGatewayRequest,
+        requestChatRead: unavailablePersistentGatewayRequest,
+        requestChatReadMutation: unavailablePersistentGatewayRequest,
+        requestChatWrite: unavailablePersistentGatewayRequest,
+        requestTaskRead: unavailablePersistentGatewayRequest,
+        requestTaskWrite: unavailablePersistentGatewayRequest,
         snapshot: {
             connectionGeneration: 0,
             phase: "stopped",
@@ -103,6 +108,7 @@ function createFakePersistentGatewayTransport(): {
                 if (listener === nextListener) listener = undefined;
             };
         },
+        subscribeChat: () => () => {},
     };
     return { calls, transport };
 }

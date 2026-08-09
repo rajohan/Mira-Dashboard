@@ -326,6 +326,10 @@ describe("Dashboard agents route", () => {
         expect(screen.getByText("agent:main:main")).toBeTruthy();
         expect(screen.getByText("openai/gpt-5.6-sol")).toBeTruthy();
         expect(screen.getAllByText(/not online status or health/u)).toHaveLength(2);
+        expect(
+            screen.getByText(/Updates automatically from agent and Gateway events/u)
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(screen.getByRole("table", { name: "Agent task history" })).toBeTruthy();
         expect(screen.getByRole("link", { name: /Agents/u })).toBeTruthy();
 
@@ -434,7 +438,7 @@ describe("Dashboard agents route", () => {
         expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
     });
 
-    test("renders the final collection refresh failure and clears busy state", async () => {
+    test("reports an automatic refresh failure and retains explicit recovery", async () => {
         const transport = new AgentTransport();
         const queryClient = createDashboardQueryClient();
         queryClient.setQueryDefaults(agentStatusesQueryKey, { retry: false });
@@ -461,15 +465,19 @@ describe("Dashboard agents route", () => {
         const statusRefresh = Promise.withResolvers<unknown>();
 
         await expectAgentShellReady();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         transport.statusQueryResponse = statusRefresh.promise;
-        await user.click(screen.getByRole("button", { name: "Refresh" }));
-        expect(await screen.findByRole("button", { name: "Refreshing…" })).toBeTruthy();
+        let backgroundRefresh: Promise<unknown> | undefined;
+        act(() => {
+            backgroundRefresh = collections.agents.statuses.utils.refetch();
+        });
 
         const consoleError = spyOn(console, "error").mockImplementation(() => {});
         try {
             await act(async () => {
                 statusRefresh.reject(new TypeError("redacted status failure"));
                 await statusRefresh.promise.catch(() => {});
+                await backgroundRefresh?.catch(() => {});
             });
             expect(consoleError).toHaveBeenCalled();
         } finally {
@@ -478,9 +486,10 @@ describe("Dashboard agents route", () => {
         expect(await screen.findByRole("alert")).toBeTruthy();
         expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
         expect(screen.queryByText(/redacted status failure/u)).toBeNull();
-        await waitFor(() =>
-            expect(screen.queryByRole("button", { name: "Refreshing…" })).toBeNull()
-        );
-        expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+        transport.statusQueryResponse = undefined;
+        await user.click(screen.getByRole("button", { name: "Try again" }));
+        await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+        expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
     });
 });

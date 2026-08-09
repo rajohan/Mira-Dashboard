@@ -122,6 +122,92 @@
                       "const": "current"
                     },
                     "entityType": {
+                      "const": "chat-history"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "const": "snapshot-required"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "snapshot-required"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "chat.history"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "const": "current"
+                    },
+                    "entityType": {
+                      "const": "chat-runtime"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "const": "snapshot-required"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "snapshot-required"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "chat.runtime"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "const": "current"
+                    },
+                    "entityType": {
                       "const": "gateway-connection"
                     },
                     "occurredAtMs": {
@@ -582,6 +668,49 @@
                     },
                     "topic": {
                       "const": "monitoring.reports"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "const": "current"
+                    },
+                    "entityType": {
+                      "const": "openclaw-task"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "const": "snapshot-required"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "snapshot-required"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "openclaw.tasks"
                     }
                   },
                   "required": [

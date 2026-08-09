@@ -1,0 +1,28 @@
+{
+  "$id": "urn:mira-dashboard:chat.companionAsk.output",
+  "type": "object",
+  "properties": {
+    "answer": {
+      "type": "string",
+      "maxLength": 1200,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        }
+      ]
+    },
+    "timestampMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    }
+  },
+  "required": [
+    "answer",
+    "timestampMs"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

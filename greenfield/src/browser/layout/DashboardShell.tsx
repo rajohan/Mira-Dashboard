@@ -6,6 +6,7 @@ import {
     Home,
     ListTodo,
     Menu,
+    MessageCircle,
     MessagesSquare,
     Newspaper,
     ShieldCheck,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { cn } from "../lib/classNames.ts";
 import type {
     DashboardAuthenticatedPath,
     DashboardNavigationPath,
@@ -33,6 +35,7 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: Home, label: "Dashboard", to: "/" },
     { icon: Bot, label: "Agents", to: "/agents" },
     { icon: MessagesSquare, label: "Sessions", to: "/sessions" },
+    { icon: MessageCircle, label: "Chat", to: "/chat" },
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
     { icon: CalendarClock, label: "Jobs", to: "/jobs" },
     { icon: Newspaper, label: "Reports", to: "/reports" },
@@ -126,6 +129,7 @@ export function DashboardShell() {
     const currentTitle =
         authenticatedRouteTitles.find((item) => item.to === location.pathname)?.label ??
         "Mira Dashboard";
+    const chatCanvas = location.pathname === "/chat";
     return (
         <div className="bg-primary-900 text-primary-50 flex h-full overflow-hidden">
             <a
@@ -181,10 +185,20 @@ export function DashboardShell() {
                     </div>
                 </header>
                 <main
-                    className="min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6 lg:px-8"
+                    className={cn(
+                        "min-h-0 flex-1",
+                        chatCanvas
+                            ? "overflow-hidden p-2 sm:p-3"
+                            : "overflow-y-auto px-4 py-8 sm:px-6 lg:px-8"
+                    )}
                     id="dashboard-content"
                 >
-                    <div className="mx-auto w-full max-w-7xl">
+                    <div
+                        className={cn(
+                            "w-full",
+                            chatCanvas ? "h-full min-h-0" : "mx-auto max-w-7xl"
+                        )}
+                    >
                         <Outlet />
                     </div>
                 </main>

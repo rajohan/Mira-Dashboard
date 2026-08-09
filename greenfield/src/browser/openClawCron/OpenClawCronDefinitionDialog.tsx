@@ -67,7 +67,7 @@ export function OpenClawCronDefinitionDialog({
             onClose={onClose}
             open
             size="lg"
-            title={`Edit ${job.name}`}
+            title={<span className="wrap-anywhere">Edit {job.name}</span>}
         >
             <Form aria-label="Edit OpenClaw cron definition" onSubmit={submit}>
                 <Alert className="mb-4" message={mutationError} />
@@ -82,7 +82,7 @@ export function OpenClawCronDefinitionDialog({
                     label="Reviewed definition and delivery JSON"
                 >
                     <Textarea
-                        className="min-h-96 font-mono text-sm"
+                        className="min-h-96 max-w-full min-w-0 font-mono text-sm"
                         disabled={busy || reconciliationBlocked || reconciliationBusy}
                         onChange={(event) => {
                             setValue(event.target.value);
@@ -91,8 +91,9 @@ export function OpenClawCronDefinitionDialog({
                         value={value}
                     />
                 </FormField>
-                <div className="mt-5 flex justify-end gap-2">
+                <div className="mt-5 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
                     <Button
+                        className="w-full sm:w-auto"
                         disabled={busy || reconciliationBusy}
                         onClick={onClose}
                         type="button"
@@ -104,6 +105,7 @@ export function OpenClawCronDefinitionDialog({
                         <Button
                             busy={reconciliationBusy}
                             busyLabel="Refreshing…"
+                            className="w-full sm:w-auto"
                             onClick={() => void onReconcile()}
                             type="button"
                             variant="secondary"
@@ -114,6 +116,7 @@ export function OpenClawCronDefinitionDialog({
                     <Button
                         busy={busy}
                         busyLabel="Saving…"
+                        className="w-full sm:w-auto"
                         disabled={
                             busy ||
                             reconciliationBlocked ||

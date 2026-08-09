@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
+import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
 import {
     assertPersistentGatewayAdminParameters,
+    assertPersistentGatewayChatReadParameters,
+    assertPersistentGatewayChatReadMutationParameters,
+    assertPersistentGatewayChatWriteParameters,
     assertPersistentGatewayReadWriteParameters,
+    assertPersistentGatewayTaskReadParameters,
+    assertPersistentGatewayTaskWriteParameters,
     createPersistentGatewayConnectFrame,
     isPersistentGatewayAdminMethod,
     isPersistentGatewayReadWriteMethod,
@@ -11,14 +17,23 @@ import {
     parsePersistentGatewayEvent,
     parsePersistentGatewayEventEnvelope,
     parsePersistentGatewayHello,
+    parsePersistentGatewayPrivateChatEvent,
     parsePersistentGatewayResponse,
+    parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement,
     parsePersistentGatewaySessionsSubscriptionAcknowledgement,
     persistentGatewayAdminMethods,
+    persistentGatewayAgentEventDataMaximumBytes,
     persistentGatewayAuthenticatedFrameMaximumBytes,
     persistentGatewayBufferedAmountPolicyMaximumBytes,
+    persistentGatewayChatOutboundFrameMaximumBytes,
     persistentGatewayReadWriteMethods,
+    persistentGatewayChatReadMethods,
+    persistentGatewayChatReadMutationMethods,
+    persistentGatewayChatWriteMethods,
     persistentGatewaySessionScopedEventsCapability,
     persistentGatewayTaskNotificationMethod,
+    persistentGatewayTaskReadMethods,
+    persistentGatewayTaskWriteMethods,
 } from "./persistentGatewayProtocol.ts";
 
 function hello(input: {
@@ -30,7 +45,7 @@ function hello(input: {
     return {
         auth: { role: "operator", scopes: input.scopes },
         features: {
-            events: input.events ?? ["tick", "sessions.changed", "cron"],
+            events: input.events ?? ["tick", "sessions.changed", "cron", "task"],
             methods: ["sessions.list", "chat.send", "cron.run"],
         },
         policy: {
@@ -69,6 +84,20 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             profile: "task-notification-worker",
             requestId: "connect-3",
         });
+        const chatWrite = createPersistentGatewayConnectFrame({
+            clientVersion: "0.0.0",
+            credential: "redacted-fixture-token",
+            instanceId: "dashboard-process-1",
+            profile: "chat-write",
+            requestId: "connect-4",
+        });
+        const chatReadMutation = createPersistentGatewayConnectFrame({
+            clientVersion: "0.0.0",
+            credential: "redacted-fixture-token",
+            instanceId: "dashboard-process-1",
+            profile: "chat-read-mutation",
+            requestId: "connect-5",
+        });
 
         expect(readWrite).toEqual({
             id: "connect-1",
@@ -102,6 +131,20 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             caps: [persistentGatewaySessionScopedEventsCapability],
             scopes: ["operator.write"],
         });
+        expect(chatWrite.params as Readonly<Record<string, unknown>>).toMatchObject({
+            caps: [persistentGatewaySessionScopedEventsCapability],
+            client: { displayName: "Mira Dashboard bounded chat write" },
+            scopes: ["operator.write"],
+        });
+        expect(
+            chatReadMutation.params as Readonly<Record<string, unknown>>
+        ).toMatchObject({
+            caps: [persistentGatewaySessionScopedEventsCapability],
+            client: {
+                displayName: "Mira Dashboard bounded chat read-scope mutation",
+            },
+            scopes: ["operator.read"],
+        });
         expect(JSON.stringify(readWrite)).not.toContain("nonce");
     });
 
@@ -124,8 +167,25 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             "cron.update",
             "sessions.compact",
             "sessions.delete",
+            "sessions.patch",
             "sessions.reset",
         ]);
+        expect(persistentGatewayChatReadMethods).toEqual([
+            "chat.history",
+            "chat.message.get",
+            "models.list",
+            "sessions.companion.state",
+        ]);
+        expect(persistentGatewayChatReadMutationMethods).toEqual([
+            "sessions.companion.ask",
+        ]);
+        expect(persistentGatewayChatWriteMethods).toEqual([
+            "chat.abort",
+            "chat.send",
+            "sessions.companion.reset",
+        ]);
+        expect(persistentGatewayTaskReadMethods).toEqual(["tasks.get", "tasks.list"]);
+        expect(persistentGatewayTaskWriteMethods).toEqual(["tasks.cancel"]);
         expect(isPersistentGatewayReadWriteMethod("sessions.list")).toBe(true);
         expect(isPersistentGatewayReadWriteMethod("chat.send")).toBe(false);
         expect(isPersistentGatewayReadWriteMethod("config.patch")).toBe(false);
@@ -142,6 +202,181 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         ).toThrow(TypeError);
         expect(() => assertPersistentGatewayAdminParameters("cron.run", null)).toThrow(
             TypeError
+        );
+    });
+
+    test("strictly validates every audited chat request shape", () => {
+        expect(() =>
+            assertPersistentGatewayChatReadParameters("chat.history", {
+                limit: 100,
+                maxChars: 512 * 1024,
+                offset: 0,
+                sessionKey: "agent:main:main",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayChatReadParameters("chat.history", {
+                messageId: "message-1",
+                offset: 0,
+                sessionKey: "agent:main:main",
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayChatReadParameters("chat.message.get", {
+                maxChars: 1024 * 1024,
+                messageId: "message-1",
+                sessionKey: "agent:main:main",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayChatReadParameters("models.list", {
+                includeProviderCapabilities: false,
+                view: "configured",
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayChatReadMutationParameters("sessions.companion.ask", {
+                question: "   ",
+                sessionKey: "agent:main:main",
+            })
+        ).toThrow(TypeError);
+
+        expect(() =>
+            assertPersistentGatewayChatWriteParameters("chat.send", {
+                attachments: [
+                    {
+                        content: "ZmlsZQ==",
+                        fileName: "fixture.txt",
+                        mimeType: "text/plain",
+                        sizeBytes: 4,
+                        type: "file",
+                    },
+                ],
+                idempotencyKey: "abcdefghijklmnop",
+                message: "hello",
+                sessionKey: "agent:main:main",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayChatWriteParameters("chat.send", {
+                attachments: [
+                    {
+                        content: "ZmlsZQ==",
+                        fileName: "fixture.txt",
+                        mimeType: "text/plain",
+                        sizeBytes: 5,
+                        type: "file",
+                    },
+                ],
+                idempotencyKey: "abcdefghijklmnop",
+                message: "hello",
+                sessionKey: "agent:main:main",
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayChatWriteParameters("chat.send", {
+                idempotencyKey: "too-short",
+                message: "hello",
+                sessionKey: "agent:main:main",
+                unreviewed: true,
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayChatWriteParameters("chat.abort", {
+                preserveSideRuns: false,
+                runId: "provider-run-1",
+                sessionKey: "agent:main:main",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayChatWriteParameters("chat.abort", {
+                preserveSideRuns: true,
+                sessionKey: "agent:main:main",
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayAdminParameters("sessions.patch", {
+                expectedSessionId: "session-1",
+                fastMode: "auto",
+                key: "agent:main:main",
+                model: "openai/gpt-5.6-sol",
+                thinkingLevel: "high",
+            })
+        ).not.toThrow();
+
+        expect(() =>
+            assertPersistentGatewayTaskReadParameters("tasks.list", {
+                cursor: "0",
+                limit: 200,
+                status: ["running", "failed"],
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayTaskReadParameters("tasks.list", {
+                cursor: "01",
+                limit: 201,
+                status: [],
+            })
+        ).toThrow(TypeError);
+        expect(() =>
+            assertPersistentGatewayTaskReadParameters("tasks.get", {
+                taskId: "task-1",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayTaskWriteParameters("tasks.cancel", {
+                reason: "operator stop",
+                taskId: "task-1",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayAdminParameters("sessions.patch", {
+                key: "agent:main:main",
+                model: "x".repeat(257),
+            })
+        ).toThrow(TypeError);
+    });
+
+    test("keeps the maximum accepted attachment send inside the exact serialized frame", () => {
+        const loneHighSurrogate = String.fromCodePoint(55_296);
+        const parameters = {
+            attachments: [
+                {
+                    content: Buffer.alloc(
+                        chatAttachmentLimits.maximumAggregateRawBytes,
+                        0x61
+                    ).toString("base64"),
+                    fileName: loneHighSurrogate.repeat(255),
+                    mimeType: `application/${"a".repeat(64)}`,
+                    sizeBytes: chatAttachmentLimits.maximumAggregateRawBytes,
+                    type: "file" as const,
+                },
+            ],
+            fastMode: "auto" as const,
+            idempotencyKey: "a".repeat(128),
+            message: loneHighSurrogate.repeat(256 * 1024),
+            queueMode: "interrupt" as const,
+            sessionKey: loneHighSurrogate.repeat(512),
+            thinking: loneHighSurrogate.repeat(128),
+        };
+
+        expect(() =>
+            assertPersistentGatewayChatWriteParameters("chat.send", parameters)
+        ).not.toThrow();
+        const encodedBytes = Buffer.byteLength(
+            JSON.stringify({
+                id: loneHighSurrogate.repeat(128),
+                method: "chat.send",
+                params: parameters,
+                type: "req",
+            }),
+            "utf8"
+        );
+        expect(encodedBytes).toBeLessThanOrEqual(
+            persistentGatewayChatOutboundFrameMaximumBytes
+        );
+        expect(encodedBytes).toBeGreaterThan(
+            persistentGatewayChatOutboundFrameMaximumBytes - 2 * 1024 * 1024
         );
     });
 
@@ -170,6 +405,12 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                     scopes: ["operator.read"],
                 }),
                 "web-read"
+            )
+        ).toBeDefined();
+        expect(
+            parsePersistentGatewayHello(
+                hello({ events: ["tick"], scopes: ["operator.write"] }),
+                "chat-write"
             )
         ).toBeDefined();
 
@@ -251,6 +492,75 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             seq: 7,
             type: "event",
         });
+        const sessionLifecycleSecret = "Bearer private-session-event-field";
+        const resetLifecycle = parsePersistentGatewayEvent({
+            event: "sessions.changed",
+            payload: {
+                privateField: sessionLifecycleSecret,
+                reason: "reset",
+                sessionId: "provider-session-1",
+                sessionKey: "agent:main:main",
+                ts: 1234,
+                updatedAt: 1200,
+            },
+            type: "event",
+        });
+        expect(resetLifecycle).toEqual({
+            event: "sessions.changed",
+            sessionLifecycle: {
+                occurredAtMs: 1234,
+                reason: "reset",
+                sessionId: "provider-session-1",
+                sessionKey: "agent:main:main",
+                updatedAtMs: 1200,
+            },
+            type: "event",
+        });
+        expect(JSON.stringify(resetLifecycle)).not.toContain(sessionLifecycleSecret);
+        expect(
+            parsePersistentGatewayEvent({
+                event: "sessions.changed",
+                payload: {
+                    compacted: false,
+                    reason: "compact",
+                    sessionKey: "agent:main:main",
+                    ts: 1300,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "sessions.changed",
+            sessionLifecycle: {
+                compacted: false,
+                occurredAtMs: 1300,
+                reason: "compact",
+                sessionKey: "agent:main:main",
+            },
+            type: "event",
+        });
+        expect(
+            parsePersistentGatewayEvent({
+                event: "sessions.changed",
+                payload: { reason: "delete", ts: 1400 },
+                type: "event",
+            })
+        ).toEqual({
+            event: "sessions.changed",
+            sessionLifecycle: { occurredAtMs: 1400, reason: "delete" },
+            type: "event",
+        });
+        expect(
+            parsePersistentGatewayEvent({
+                event: "sessions.changed",
+                payload: {
+                    compacted: "yes",
+                    reason: "compact",
+                    sessionKey: "agent:main:main",
+                    ts: 1500,
+                },
+                type: "event",
+            })
+        ).toEqual({ event: "sessions.changed", type: "event" });
         const secretShapedPayload = "Bearer secret-shaped-cron-payload";
         const cronEvent = parsePersistentGatewayEvent({
             event: "cron",
@@ -311,6 +621,161 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             parsePersistentGatewaySessionsSubscriptionAcknowledgement({
                 subscribed: true,
                 unreviewed: true,
+            })
+        ).toBeUndefined();
+
+        expect(
+            parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement(
+                { key: "agent:main:main", subscribed: true },
+                true
+            )
+        ).toEqual({ key: "agent:main:main", subscribed: true });
+        expect(
+            parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement(
+                { key: "agent:main:main", subscribed: false },
+                true
+            )
+        ).toBeUndefined();
+
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "chat",
+                payload: {
+                    deltaText: "hello",
+                    runId: "provider-run-1",
+                    seq: 1,
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "chat",
+            payload: {
+                deltaText: "hello",
+                runId: "provider-run-1",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                state: "delta",
+            },
+        });
+        const privateBulkValue = "Bearer provider-private-chat-frame";
+        const projectedBulkEvent = parsePersistentGatewayPrivateChatEvent({
+            event: "chat",
+            payload: {
+                deltaText: "bounded delta",
+                message: { content: privateBulkValue },
+                runId: "provider-run-bulk",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                state: "delta",
+                usage: { privateBulkValue },
+            },
+            type: "event",
+        });
+        expect(projectedBulkEvent).toEqual({
+            event: "chat",
+            payload: {
+                deltaText: "bounded delta",
+                runId: "provider-run-bulk",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                state: "delta",
+            },
+        });
+        expect(JSON.stringify(projectedBulkEvent)).not.toContain(privateBulkValue);
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "agent",
+                payload: {
+                    data: {
+                        privateBulkValue: "x".repeat(
+                            persistentGatewayAgentEventDataMaximumBytes
+                        ),
+                        text: "bounded assistant delta",
+                    },
+                    runId: "provider-run-projected",
+                    seq: 1,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    ts: 1000,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "agent",
+            payload: {
+                data: { text: "bounded assistant delta" },
+                runId: "provider-run-projected",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                ts: 1000,
+            },
+        });
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "agent",
+                payload: {
+                    data: {
+                        text: "x".repeat(persistentGatewayAgentEventDataMaximumBytes),
+                    },
+                    runId: "provider-run-oversized",
+                    seq: 1,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    ts: 1000,
+                },
+                type: "event",
+            })
+        ).toBeUndefined();
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "chat",
+                payload: {
+                    deltaText: "x".repeat(64 * 1024 + 1),
+                    runId: "provider-run-oversized-delta",
+                    seq: 1,
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            })
+        ).toBeUndefined();
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "agent",
+                payload: {
+                    data: { delta: "thinking" },
+                    runId: "provider-run-1",
+                    seq: 2,
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                    ts: 1000,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "agent",
+            payload: {
+                data: { delta: "thinking" },
+                runId: "provider-run-1",
+                seq: 2,
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+                ts: 1000,
+            },
+        });
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "chat",
+                payload: {
+                    runId: "provider-run-1",
+                    seq: 0,
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
             })
         ).toBeUndefined();
         expect(

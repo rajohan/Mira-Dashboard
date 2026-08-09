@@ -1,0 +1,53 @@
+{
+  "$id": "urn:mira-dashboard:chat.companionState.output",
+  "type": "object",
+  "properties": {
+    "exchanges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string",
+            "maxLength": 1200,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              }
+            ]
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000]*$"
+              }
+            ]
+          },
+          "timestampMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8640000000000000
+          }
+        },
+        "required": [
+          "answer",
+          "question",
+          "timestampMs"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 24
+    }
+  },
+  "required": [
+    "exchanges"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

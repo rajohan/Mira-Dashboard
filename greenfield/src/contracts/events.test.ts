@@ -16,15 +16,18 @@ import {
     monitoringRealtimeRoutingSchema,
     monitoringRealtimeTopics,
 } from "./monitoringRealtime.ts";
+import { openClawTasksRealtimeTopic } from "./openClawTasksRealtime.ts";
 
 describe("realtime transport contracts", () => {
     test("documents only capabilities required by registered topics", () => {
         expect(realtimeStreamCapabilities).toEqual([
             "agents:read",
             "cache:read",
+            "chat:read",
             "gateway-sessions:read",
             "jobs:read",
             "notifications:read",
+            "openclaw-tasks:read",
             "reports:read",
             "tasks:read",
         ]);
@@ -120,6 +123,30 @@ describe("realtime transport contracts", () => {
                     topic: gatewayRealtimeTopics.sessions,
                 },
                 kind: "change",
+            }).success
+        ).toBeFalse();
+    });
+
+    test("keeps OpenClaw task realtime payload-free", () => {
+        const marker = {
+            event: {
+                entityId: "current",
+                entityType: "openclaw-task",
+                occurredAtMs: 1000,
+                operation: "snapshot-required",
+                payload: { kind: "snapshot-required" },
+                topic: openClawTasksRealtimeTopic,
+            },
+            kind: "change",
+        } as const;
+        expect(v.parse(realtimeStreamDataSchema, marker)).toEqual(marker);
+        expect(
+            v.safeParse(realtimeStreamDataSchema, {
+                ...marker,
+                event: {
+                    ...marker.event,
+                    payload: { kind: "snapshot-required", task: { id: "secret" } },
+                },
             }).success
         ).toBeFalse();
     });

@@ -1,6 +1,5 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
 
 import type {
     AgentDefinition,
@@ -12,7 +11,6 @@ import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
 import { AgentHistoryTable } from "./AgentHistoryTable.tsx";
@@ -60,22 +58,7 @@ export function AgentsRoute() {
     return (
         <div>
             <PageHeader
-                actions={
-                    <Button
-                        busy={
-                            collectionQueries.configuration?.fetchStatus === "fetching" ||
-                            collectionQueries.statuses?.fetchStatus === "fetching" ||
-                            history.isFetching
-                        }
-                        busyLabel="Refreshing…"
-                        onClick={refresh}
-                        variant="secondary"
-                    >
-                        <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                        Refresh
-                    </Button>
-                }
-                description="Reviewed roles, Dashboard-owned tasks, and separate Gateway session availability; availability is not online status or health."
+                description="Reviewed roles, Dashboard-owned tasks, and separate Gateway session availability; availability is not online status or health. Updates automatically from agent and Gateway events, with 10-second status repair polling."
                 eyebrow="Operations"
                 title="Agents"
             />

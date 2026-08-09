@@ -139,7 +139,7 @@ CREATE TABLE `automation_principal_capabilities` (
 	`principal_id` text NOT NULL,
 	CONSTRAINT `automation_principal_capabilities_pk` PRIMARY KEY(`principal_id`, `capability`),
 	CONSTRAINT `fk_automation_principal_capabilities_principal_id_automation_principals_id_fk` FOREIGN KEY (`principal_id`) REFERENCES `automation_principals`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')),
+	CONSTRAINT "automation_principal_capabilities_capability_check" CHECK("capability" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')),
 	CONSTRAINT "automation_principal_capabilities_granted_at_check" CHECK("granted_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
@@ -154,6 +154,116 @@ CREATE TABLE `automation_principals` (
 	CONSTRAINT "automation_principals_id_check" CHECK(length("id") BETWEEN 1 AND 64 AND instr("id", char(0)) = 0 AND "id" = lower("id") AND substr("id", 1, 1) GLOB '[a-z0-9]' AND "id" NOT GLOB '*[^a-z0-9._-]*'),
 	CONSTRAINT "automation_principals_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "label" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
 	CONSTRAINT "automation_principals_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at" AND ("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")))
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `chat_run_events` (
+	`chat_run_id` text NOT NULL,
+	`id` integer PRIMARY KEY AUTOINCREMENT,
+	`kind` text NOT NULL,
+	`occurred_at` integer NOT NULL,
+	`payload_bytes` integer NOT NULL,
+	`payload_json` text NOT NULL,
+	`provider_sequence_end` integer,
+	`provider_sequence_start` integer,
+	`sequence` integer NOT NULL,
+	CONSTRAINT `fk_chat_run_events_chat_run_id_chat_runs_id_fk` FOREIGN KEY (`chat_run_id`) REFERENCES `chat_runs`(`id`) ON UPDATE RESTRICT ON DELETE CASCADE,
+	CONSTRAINT "chat_run_events_kind_check" CHECK("kind" IN ('assistant', 'cancel', 'interrupted', 'item', 'plan', 'provider-noop', 'reconciled', 'status', 'terminal', 'thinking', 'tool', 'user')),
+	CONSTRAINT "chat_run_events_sequence_check" CHECK("sequence" BETWEEN 1 AND 4096),
+	CONSTRAINT "chat_run_events_payload_check" CHECK(length(CAST("payload_json" AS BLOB)) <= 262144 AND CASE WHEN json_valid("payload_json") THEN json_type("payload_json") = 'object' ELSE 0 END AND "payload_bytes" = length(CAST("payload_json" AS BLOB)) AND "payload_bytes" BETWEEN 2 AND 262144),
+	CONSTRAINT "chat_run_events_provider_sequence_check" CHECK(("provider_sequence_start" IS NULL AND "provider_sequence_end" IS NULL) OR ("provider_sequence_start" BETWEEN 1 AND 9007199254740991 AND "provider_sequence_end" BETWEEN "provider_sequence_start" AND 9007199254740991)),
+	CONSTRAINT "chat_run_events_occurred_at_check" CHECK("occurred_at" BETWEEN 0 AND 8640000000000000)
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `chat_runs` (
+	`actor_id` text NOT NULL,
+	`actor_kind` text NOT NULL,
+	`admitted_at` integer NOT NULL,
+	`cancel_requested_at` integer,
+	`dispatch_attempted_at` integer,
+	`event_bytes` integer DEFAULT 0 NOT NULL,
+	`event_count` integer DEFAULT 0 NOT NULL,
+	`failure_code` text,
+	`failure_message` text,
+	`gateway_scope` text NOT NULL,
+	`history_message_id` text,
+	`id` text PRIMARY KEY,
+	`idempotency_key` text NOT NULL,
+	`last_event_sequence` integer DEFAULT 0 NOT NULL,
+	`provider_acknowledged_at` integer,
+	`provider_run_id` text,
+	`reconciled_at` integer,
+	`reconciliation_state` text DEFAULT 'pending' NOT NULL,
+	`request_json` text NOT NULL,
+	`request_sha256` text NOT NULL,
+	`retention_expires_at` integer,
+	`session_key` text NOT NULL,
+	`state` text DEFAULT 'admitted' NOT NULL,
+	`state_version` integer DEFAULT 1 NOT NULL,
+	`terminal_at` integer,
+	`transcript_generation` integer NOT NULL,
+	`updated_at` integer NOT NULL,
+	CONSTRAINT "chat_runs_actor_check" CHECK((("actor_kind" = 'user' AND length("actor_id") = 36 AND instr("actor_id", char(0)) = 0 AND length(replace("actor_id", '-', '')) = 32 AND replace("actor_id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("actor_id", 9, 1) = '-' AND substr("actor_id", 14, 1) = '-' AND substr("actor_id", 15, 1) = '7' AND substr("actor_id", 19, 1) = '-' AND substr("actor_id", 20, 1) GLOB '[89ab]' AND substr("actor_id", 24, 1) = '-') OR ("actor_kind" = 'automation' AND length("actor_id") BETWEEN 1 AND 64 AND instr("actor_id", char(0)) = 0 AND "actor_id" = lower("actor_id") AND substr("actor_id", 1, 1) GLOB '[a-z0-9]' AND "actor_id" NOT GLOB '*[^a-z0-9._-]*'))),
+	CONSTRAINT "chat_runs_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "chat_runs_idempotency_key_check" CHECK(length("idempotency_key") BETWEEN 32 AND 128 AND instr("idempotency_key", char(0)) = 0 AND "idempotency_key" NOT GLOB '*[^A-Za-z0-9_-]*' AND (length("idempotency_key") % 4 = 0 OR (length("idempotency_key") % 4 = 2 AND substr("idempotency_key", -1, 1) GLOB '[AQgw]') OR (length("idempotency_key") % 4 = 3 AND substr("idempotency_key", -1, 1) GLOB '[AEIMQUYcgkosw048]'))),
+	CONSTRAINT "chat_runs_gateway_scope_check" CHECK(length("gateway_scope") BETWEEN 1 AND 64 AND instr("gateway_scope", char(0)) = 0 AND length(trim("gateway_scope", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "gateway_scope" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_runs_session_key_check" CHECK(length("session_key") BETWEEN 1 AND 512 AND instr("session_key", char(0)) = 0 AND length(trim("session_key", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "session_key" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_runs_provider_run_id_check" CHECK("provider_run_id" IS NULL OR length("provider_run_id") BETWEEN 1 AND 256 AND instr("provider_run_id", char(0)) = 0 AND length(trim("provider_run_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "provider_run_id" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_runs_history_message_id_check" CHECK("history_message_id" IS NULL OR length("history_message_id") BETWEEN 1 AND 256 AND instr("history_message_id", char(0)) = 0 AND length(trim("history_message_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "history_message_id" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_runs_request_json_check" CHECK(length(CAST("request_json" AS BLOB)) <= 262144 AND CASE WHEN json_valid("request_json") THEN json_type("request_json") = 'object' ELSE 0 END),
+	CONSTRAINT "chat_runs_request_sha256_check" CHECK(length("request_sha256") = 64 AND instr("request_sha256", char(0)) = 0 AND "request_sha256" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "chat_runs_event_budget_check" CHECK("event_count" BETWEEN 0 AND 4096 AND "last_event_sequence" = "event_count" AND "event_bytes" BETWEEN 0 AND 1048576),
+	CONSTRAINT "chat_runs_state_check" CHECK("state" IN ('active', 'admitted', 'cancel-requested', 'cancelled', 'completed', 'failed', 'interrupted', 'outcome-unknown', 'unresolved')),
+	CONSTRAINT "chat_runs_reconciliation_state_check" CHECK("reconciliation_state" IN ('failed', 'history-authoritative', 'pending', 'runtime-authoritative')),
+	CONSTRAINT "chat_runs_state_version_check" CHECK("state_version" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "chat_runs_failure_check" CHECK(("state" = 'failed' AND "failure_code" IS NOT NULL AND length("failure_code") BETWEEN 1 AND 128 AND instr("failure_code", char(0)) = 0 AND length(trim("failure_code", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "failure_code" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND "failure_message" IS NOT NULL AND length("failure_message") BETWEEN 1 AND 2000 AND instr("failure_message", char(0)) = 0 AND length(trim("failure_message", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0) OR ("state" <> 'failed' AND "failure_code" IS NULL AND "failure_message" IS NULL)),
+	CONSTRAINT "chat_runs_lifecycle_check" CHECK(("state" IN ('cancelled', 'completed', 'failed', 'unresolved') AND "terminal_at" IS NOT NULL AND "retention_expires_at" IS NOT NULL AND "retention_expires_at" > "terminal_at") OR ("state" NOT IN ('cancelled', 'completed', 'failed', 'unresolved') AND "terminal_at" IS NULL AND "retention_expires_at" IS NULL)),
+	CONSTRAINT "chat_runs_cancellation_check" CHECK(("state" IN ('cancel-requested', 'cancelled') AND "cancel_requested_at" IS NOT NULL) OR ("state" IN ('admitted', 'active', 'interrupted') AND "cancel_requested_at" IS NULL) OR ("state" IN ('completed', 'failed', 'outcome-unknown', 'unresolved'))),
+	CONSTRAINT "chat_runs_reconciliation_check" CHECK(("reconciliation_state" = 'history-authoritative' AND "reconciled_at" IS NOT NULL) OR ("reconciliation_state" <> 'history-authoritative' AND "reconciled_at" IS NULL)),
+	CONSTRAINT "chat_runs_transcript_generation_check" CHECK("transcript_generation" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "chat_runs_time_check" CHECK("admitted_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "admitted_at" AND ("dispatch_attempted_at" IS NULL OR ("dispatch_attempted_at" BETWEEN 0 AND 8640000000000000 AND "dispatch_attempted_at" BETWEEN "admitted_at" AND "updated_at")) AND ("provider_acknowledged_at" IS NULL OR ("dispatch_attempted_at" IS NOT NULL AND "provider_acknowledged_at" BETWEEN 0 AND 8640000000000000 AND "provider_acknowledged_at" BETWEEN "dispatch_attempted_at" AND "updated_at")) AND ("cancel_requested_at" IS NULL OR ("cancel_requested_at" BETWEEN 0 AND 8640000000000000 AND "cancel_requested_at" BETWEEN "admitted_at" AND "updated_at")) AND ("terminal_at" IS NULL OR ("terminal_at" BETWEEN 0 AND 8640000000000000 AND "terminal_at" BETWEEN "admitted_at" AND "updated_at")) AND ("reconciled_at" IS NULL OR ("reconciled_at" BETWEEN 0 AND 8640000000000000 AND "reconciled_at" BETWEEN "admitted_at" AND "updated_at")) AND ("retention_expires_at" IS NULL OR "retention_expires_at" BETWEEN 0 AND 8640000000000000))
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `chat_transcript_generations` (
+	`current_generation` integer DEFAULT 1 NOT NULL,
+	`gateway_scope` text NOT NULL,
+	`last_boundary_action` text,
+	`last_boundary_provider_updated_at` integer,
+	`observed_at` integer,
+	`pending_action` text,
+	`pending_control_id` text,
+	`pending_previous_status` text,
+	`provider_session_id` text,
+	`provider_updated_at` integer,
+	`session_key` text NOT NULL,
+	`status` text DEFAULT 'ready' NOT NULL,
+	`updated_at` integer NOT NULL,
+	`version` integer DEFAULT 1 NOT NULL,
+	CONSTRAINT `chat_transcript_generations_pk` PRIMARY KEY(`gateway_scope`, `session_key`),
+	CONSTRAINT "chat_transcript_generations_gateway_scope_check" CHECK(length("gateway_scope") BETWEEN 1 AND 64 AND instr("gateway_scope", char(0)) = 0 AND length(trim("gateway_scope", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "gateway_scope" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_transcript_generations_session_key_check" CHECK(length("session_key") BETWEEN 1 AND 512 AND instr("session_key", char(0)) = 0 AND length(trim("session_key", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "session_key" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_transcript_generations_current_generation_check" CHECK("current_generation" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "chat_transcript_generations_version_check" CHECK("version" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "chat_transcript_generations_status_check" CHECK("status" IN ('absent', 'control-pending', 'ready', 'reconciling')),
+	CONSTRAINT "chat_transcript_generations_pending_check" CHECK(("status" = 'control-pending' AND "pending_action" IN ('compact', 'delete', 'reset') AND "pending_control_id" IS NOT NULL AND length("pending_control_id") BETWEEN 1 AND 128 AND instr("pending_control_id", char(0)) = 0 AND length(trim("pending_control_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "pending_control_id" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*') AND "pending_previous_status" IN ('absent', 'ready')) OR ("status" <> 'control-pending' AND "pending_action" IS NULL AND "pending_control_id" IS NULL AND "pending_previous_status" IS NULL)),
+	CONSTRAINT "chat_transcript_generations_provider_session_check" CHECK("provider_session_id" IS NULL OR length("provider_session_id") BETWEEN 1 AND 256 AND instr("provider_session_id", char(0)) = 0 AND length(trim("provider_session_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "provider_session_id" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "chat_transcript_generations_boundary_action_check" CHECK("last_boundary_action" IS NULL OR "last_boundary_action" IN ('compact', 'delete', 'new', 'reset', 'transport')),
+	CONSTRAINT "chat_transcript_generations_time_check" CHECK("updated_at" BETWEEN 0 AND 8640000000000000 AND ("observed_at" IS NULL OR ("observed_at" BETWEEN 0 AND 8640000000000000 AND "observed_at" <= "updated_at")) AND ("provider_updated_at" IS NULL OR "provider_updated_at" BETWEEN 0 AND 8640000000000000) AND ("last_boundary_provider_updated_at" IS NULL OR "last_boundary_provider_updated_at" BETWEEN 0 AND 8640000000000000)),
+	CONSTRAINT "chat_transcript_generations_absent_check" CHECK("status" <> 'absent' OR "provider_session_id" IS NULL)
+) STRICT, WITHOUT ROWID;
+--> statement-breakpoint
+CREATE TABLE `chat_runtime_snapshots` (
+	`chat_run_id` text PRIMARY KEY,
+	`first_sequence` integer NOT NULL,
+	`schema_version` integer DEFAULT 1 NOT NULL,
+	`snapshot_bytes` integer NOT NULL,
+	`snapshot_json` text NOT NULL,
+	`through_sequence` integer NOT NULL,
+	`updated_at` integer NOT NULL,
+	CONSTRAINT `fk_chat_runtime_snapshots_chat_run_id_chat_runs_id_fk` FOREIGN KEY (`chat_run_id`) REFERENCES `chat_runs`(`id`) ON UPDATE RESTRICT ON DELETE CASCADE,
+	CONSTRAINT "chat_runtime_snapshots_schema_version_check" CHECK("schema_version" = 1),
+	CONSTRAINT "chat_runtime_snapshots_sequence_check" CHECK("first_sequence" BETWEEN 1 AND 4096 AND "through_sequence" BETWEEN "first_sequence" AND 4096),
+	CONSTRAINT "chat_runtime_snapshots_payload_check" CHECK(length(CAST("snapshot_json" AS BLOB)) <= 524288 AND CASE WHEN json_valid("snapshot_json") THEN json_type("snapshot_json") = 'object' ELSE 0 END AND "snapshot_bytes" = length(CAST("snapshot_json" AS BLOB))),
+	CONSTRAINT "chat_runtime_snapshots_updated_at_check" CHECK("updated_at" BETWEEN 0 AND 8640000000000000)
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `cache_entries` (
@@ -413,6 +523,16 @@ CREATE UNIQUE INDEX `automation_credentials_prefix_unique` ON `automation_creden
 CREATE UNIQUE INDEX `automation_credentials_validator_unique` ON `automation_credentials` (`validator_version`,`validator_hash`);--> statement-breakpoint
 CREATE INDEX `automation_principals_created_id_idx` ON `automation_principals` (`created_at`,`id`);--> statement-breakpoint
 CREATE INDEX `automation_principals_active_created_id_idx` ON `automation_principals` (`created_at`,`id`) WHERE "automation_principals"."disabled_at" IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `chat_run_events_run_sequence_unique` ON `chat_run_events` (`chat_run_id`,`sequence`);--> statement-breakpoint
+CREATE INDEX `chat_run_events_run_cursor_idx` ON `chat_run_events` (`chat_run_id`,`id`);--> statement-breakpoint
+CREATE INDEX `chat_run_events_occurred_cursor_idx` ON `chat_run_events` (`occurred_at`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `chat_runs_actor_idempotency_unique` ON `chat_runs` (`actor_kind`,`actor_id`,`idempotency_key`);--> statement-breakpoint
+CREATE UNIQUE INDEX `chat_runs_provider_intent_unique` ON `chat_runs` (`gateway_scope`,`session_key`,`transcript_generation`,`idempotency_key`);--> statement-breakpoint
+CREATE UNIQUE INDEX `chat_runs_provider_identity_unique` ON `chat_runs` (`gateway_scope`,`session_key`,`transcript_generation`,`provider_run_id`) WHERE "chat_runs"."provider_run_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `chat_runs_session_updated_id_idx` ON `chat_runs` (`gateway_scope`,`session_key`,`transcript_generation`,`updated_at`,`id`);--> statement-breakpoint
+CREATE INDEX `chat_runs_active_session_idx` ON `chat_runs` (`gateway_scope`,`session_key`,`transcript_generation`,`admitted_at`,`id`) WHERE "chat_runs"."state" IN ('active', 'admitted', 'cancel-requested', 'interrupted', 'outcome-unknown');--> statement-breakpoint
+CREATE INDEX `chat_runs_active_process_idx` ON `chat_runs` (`gateway_scope`,`transcript_generation`,`admitted_at`,`id`) WHERE "chat_runs"."state" IN ('active', 'admitted', 'cancel-requested', 'interrupted', 'outcome-unknown');--> statement-breakpoint
+CREATE INDEX `chat_runs_retention_idx` ON `chat_runs` (`retention_expires_at`,`id`) WHERE "chat_runs"."retention_expires_at" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `cache_entries_status_expires_key_idx` ON `cache_entries` (`last_attempt_status`,`expires_at`,`key`);--> statement-breakpoint
 CREATE TABLE `task_automation_profiles` (
 	`cron_job_id` text NOT NULL,
@@ -549,6 +669,152 @@ CREATE TABLE `agent_task_runs` (
 CREATE UNIQUE INDEX `agent_task_runs_one_active_agent_idx` ON `agent_task_runs` (`agent_id`) WHERE "agent_task_runs"."completed_at" IS NULL;--> statement-breakpoint
 CREATE INDEX `agent_task_runs_started_id_idx` ON `agent_task_runs` (`started_at`,`id`);--> statement-breakpoint
 CREATE INDEX `agent_task_runs_agent_started_id_idx` ON `agent_task_runs` (`agent_id`,`started_at`,`id`);
+--> statement-breakpoint
+CREATE TRIGGER chat_run_events_reject_replace
+BEFORE INSERT ON chat_run_events
+WHEN EXISTS (
+	SELECT 1
+	FROM chat_run_events
+	WHERE id = NEW.id
+		OR (chat_run_id = NEW.chat_run_id AND sequence = NEW.sequence)
+)
+BEGIN
+	SELECT RAISE(ABORT, 'chat_run_events are append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_run_events_reject_update
+BEFORE UPDATE ON chat_run_events
+BEGIN
+	SELECT RAISE(ABORT, 'chat_run_events are append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_run_events_reject_delete
+BEFORE DELETE ON chat_run_events
+WHEN EXISTS (SELECT 1 FROM chat_runs WHERE id = OLD.chat_run_id)
+BEGIN
+	SELECT RAISE(ABORT, 'chat_run_events are append-only');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runs_reject_replace
+BEFORE INSERT ON chat_runs
+WHEN EXISTS (SELECT 1 FROM chat_runs WHERE id = NEW.id)
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runs admission identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runs_reject_identity_update
+BEFORE UPDATE OF
+	id,
+	actor_id,
+	actor_kind,
+	admitted_at,
+	gateway_scope,
+	session_key,
+	transcript_generation,
+	idempotency_key,
+	request_json,
+	request_sha256
+ON chat_runs
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runs admission identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runs_validate_monotonic_update
+BEFORE UPDATE ON chat_runs
+WHEN NEW.state_version <> OLD.state_version + 1
+	OR NEW.updated_at < OLD.updated_at
+	OR NEW.event_count < OLD.event_count
+	OR NEW.last_event_sequence < OLD.last_event_sequence
+	OR NEW.event_bytes < OLD.event_bytes
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runs version, time, and counters must advance monotonically');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runs_reject_settled_identity_update
+BEFORE UPDATE ON chat_runs
+WHEN (OLD.provider_run_id IS NOT NULL AND NEW.provider_run_id IS NOT OLD.provider_run_id)
+	OR (OLD.history_message_id IS NOT NULL AND NEW.history_message_id IS NOT OLD.history_message_id)
+	OR (OLD.dispatch_attempted_at IS NOT NULL AND NEW.dispatch_attempted_at IS NOT OLD.dispatch_attempted_at)
+	OR (OLD.provider_acknowledged_at IS NOT NULL AND NEW.provider_acknowledged_at IS NOT OLD.provider_acknowledged_at)
+	OR (OLD.cancel_requested_at IS NOT NULL AND NEW.cancel_requested_at IS NOT OLD.cancel_requested_at)
+	OR (OLD.terminal_at IS NOT NULL AND NEW.terminal_at IS NOT OLD.terminal_at)
+	OR (OLD.retention_expires_at IS NOT NULL AND NEW.retention_expires_at IS NOT OLD.retention_expires_at)
+	OR (OLD.reconciled_at IS NOT NULL AND NEW.reconciled_at IS NOT OLD.reconciled_at)
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runs settled identities and timestamps are immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_transcript_generations_reject_replace
+BEFORE INSERT ON chat_transcript_generations
+WHEN EXISTS (
+	SELECT 1
+	FROM chat_transcript_generations
+	WHERE gateway_scope = NEW.gateway_scope AND session_key = NEW.session_key
+)
+BEGIN
+	SELECT RAISE(ABORT, 'chat transcript pointer identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_transcript_generations_reject_identity_update
+BEFORE UPDATE OF gateway_scope, session_key ON chat_transcript_generations
+BEGIN
+	SELECT RAISE(ABORT, 'chat transcript pointer identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_transcript_generations_validate_monotonic_update
+BEFORE UPDATE ON chat_transcript_generations
+WHEN NEW.version <> OLD.version + 1
+	OR NEW.updated_at < OLD.updated_at
+	OR NEW.current_generation < OLD.current_generation
+	OR NEW.current_generation > OLD.current_generation + 1
+BEGIN
+	SELECT RAISE(ABORT, 'chat transcript pointer must advance monotonically');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_transcript_generations_reject_delete
+BEFORE DELETE ON chat_transcript_generations
+BEGIN
+	SELECT RAISE(ABORT, 'chat transcript pointers are durable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runtime_snapshots_reject_replace
+BEFORE INSERT ON chat_runtime_snapshots
+WHEN EXISTS (
+	SELECT 1
+	FROM chat_runtime_snapshots
+	WHERE chat_run_id = NEW.chat_run_id
+)
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runtime_snapshots identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runtime_snapshots_reject_identity_update
+BEFORE UPDATE OF chat_run_id, schema_version ON chat_runtime_snapshots
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runtime_snapshots identity is immutable');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runtime_snapshots_validate_progress_update
+BEFORE UPDATE OF
+	first_sequence,
+	through_sequence,
+	updated_at,
+	snapshot_bytes,
+	snapshot_json
+ON chat_runtime_snapshots
+WHEN NEW.first_sequence < OLD.first_sequence
+	OR NEW.through_sequence <= OLD.through_sequence
+	OR NEW.updated_at < OLD.updated_at
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runtime_snapshots progress must advance monotonically');
+END;
+--> statement-breakpoint
+CREATE TRIGGER chat_runtime_snapshots_reject_delete
+BEFORE DELETE ON chat_runtime_snapshots
+WHEN EXISTS (SELECT 1 FROM chat_runs WHERE id = OLD.chat_run_id)
+BEGIN
+	SELECT RAISE(ABORT, 'chat_runtime_snapshots are parent-owned');
+END;
 --> statement-breakpoint
 CREATE TRIGGER agent_task_runs_reject_replace
 BEFORE INSERT ON agent_task_runs

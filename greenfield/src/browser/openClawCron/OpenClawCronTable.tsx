@@ -1,4 +1,7 @@
+import { useState } from "react";
+
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
+import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -16,86 +19,134 @@ function synchronizationVariant(state: OpenClawCronJob["synchronization"]["state
     return "danger" as const;
 }
 
+function dateTime(timestampMs: number | undefined) {
+    if (timestampMs === undefined) return "—";
+    return (
+        <time dateTime={new Date(timestampMs).toISOString()}>
+            {formatDashboardDateTime(timestampMs)}
+        </time>
+    );
+}
+
+function definitionLabel(label: string) {
+    return (
+        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+            {label}
+        </dt>
+    );
+}
+
+function inventoryCardSurface(selected: boolean, hovered: boolean): string {
+    if (selected) {
+        return "border-accent-400 bg-accent-500/20 ring-accent-300/40 ring-1 ring-inset";
+    }
+    if (hovered) return "border-primary-500 bg-primary-800/55";
+    return "border-primary-700 bg-primary-900/40";
+}
+
 /** @returns Accessible Gateway-owned cron inventory, explicitly separate from Dashboard jobs. */
 export function OpenClawCronTable({
     jobs,
     onSelect,
     selectedId,
 }: OpenClawCronTableProps) {
+    const [hoveredId, setHoveredId] = useState<string>();
+
     return (
-        <div className="border-primary-700 max-w-full overflow-x-auto rounded-lg border">
-            <table aria-label="OpenClaw cron jobs" className="w-full min-w-224">
-                <thead className="bg-primary-900">
-                    <tr>
-                        {[
-                            "OpenClaw job",
-                            "Gateway state",
-                            "Dashboard sync",
-                            "Schedule",
-                            "Next run",
-                        ].map((heading) => (
-                            <th
-                                className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                key={heading}
-                                scope="col"
-                            >
-                                {heading}
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody>
-                    {jobs.map((job) => (
-                        <tr className="border-primary-700 border-b text-sm" key={job.id}>
-                            <td className="p-3">
-                                <button
-                                    aria-current={
-                                        job.id === selectedId ? "true" : undefined
-                                    }
-                                    className="text-primary-100 hover:text-accent-300 text-left font-medium wrap-break-word"
-                                    onClick={() => onSelect(job.id)}
-                                    type="button"
-                                >
+        <ul
+            aria-label="OpenClaw cron jobs"
+            className="grid max-w-full min-w-0 grid-cols-1 gap-3"
+        >
+            {jobs.map((job) => {
+                const selected = job.id === selectedId;
+                const hovered = job.id === hoveredId;
+                return (
+                    <li
+                        className={cn(
+                            "group relative max-w-full min-w-0 rounded-lg border p-3 transition-colors sm:p-4",
+                            inventoryCardSurface(selected, hovered)
+                        )}
+                        key={job.id}
+                    >
+                        <button
+                            aria-current={selected ? "true" : undefined}
+                            aria-label={job.name}
+                            aria-pressed={selected}
+                            className="focus-visible:ring-accent-400 absolute inset-0 z-10 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                            onClick={() => onSelect(job.id)}
+                            onPointerEnter={() => setHoveredId(job.id)}
+                            onPointerLeave={() =>
+                                setHoveredId((current) =>
+                                    current === job.id ? undefined : current
+                                )
+                            }
+                            type="button"
+                        />
+                        <div className="max-w-full min-w-0">
+                            <div className="flex max-w-full min-w-0 items-start justify-between gap-2">
+                                <p className="text-primary-100 group-focus-within:text-accent-300 group-hover:text-accent-300 min-w-0 text-left font-medium wrap-anywhere">
                                     {job.name}
-                                </button>
-                                <Text className="mt-1 font-mono" size="sm" tone="muted">
-                                    {job.id}
-                                </Text>
-                            </td>
-                            <td className="p-3">
-                                <Badge variant={job.enabled ? "success" : "default"}>
-                                    {job.enabled ? "enabled" : "disabled"}
-                                </Badge>
-                            </td>
-                            <td className="p-3">
-                                <Badge
-                                    variant={synchronizationVariant(
-                                        job.synchronization.state
-                                    )}
-                                >
-                                    {job.synchronization.state}
-                                </Badge>
-                            </td>
-                            <td className="p-3 font-mono text-xs wrap-break-word">
-                                {openClawCronScheduleLabel(job)}
-                            </td>
-                            <td className="p-3">
-                                {job.state.nextRunAtMs === undefined ? (
-                                    <Text tone="muted">—</Text>
-                                ) : (
-                                    <time
-                                        dateTime={new Date(
-                                            job.state.nextRunAtMs
-                                        ).toISOString()}
+                                </p>
+                                {selected && <Badge variant="info">Selected</Badge>}
+                            </div>
+                            <Text
+                                className="mt-1 max-w-full font-mono wrap-anywhere"
+                                size="sm"
+                                tone="muted"
+                            >
+                                {job.id}
+                            </Text>
+                        </div>
+
+                        <dl className="mt-4 grid max-w-full min-w-0 grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
+                            <div className="min-w-0">
+                                {definitionLabel("Gateway state")}
+                                <dd className="mt-1">
+                                    <Badge variant={job.enabled ? "success" : "default"}>
+                                        {job.enabled ? "enabled" : "disabled"}
+                                    </Badge>
+                                </dd>
+                            </div>
+                            <div className="min-w-0">
+                                {definitionLabel("Dashboard sync")}
+                                <dd className="mt-1">
+                                    <Badge
+                                        variant={synchronizationVariant(
+                                            job.synchronization.state
+                                        )}
                                     >
-                                        {formatDashboardDateTime(job.state.nextRunAtMs)}
-                                    </time>
-                                )}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
+                                        {job.synchronization.state}
+                                    </Badge>
+                                </dd>
+                            </div>
+                            <div className="min-w-0 sm:col-span-2">
+                                {definitionLabel("Schedule")}
+                                <dd className="text-primary-100 mt-1 max-w-full font-mono text-xs wrap-anywhere">
+                                    {openClawCronScheduleLabel(job)}
+                                </dd>
+                            </div>
+                            <div className="min-w-0">
+                                {definitionLabel("Last run")}
+                                <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                    {dateTime(job.state.lastRunAtMs)}
+                                </dd>
+                            </div>
+                            <div className="min-w-0">
+                                {definitionLabel("Next run")}
+                                <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                    {dateTime(job.state.nextRunAtMs)}
+                                </dd>
+                            </div>
+                            <div className="min-w-0 sm:col-span-2">
+                                {definitionLabel("Last status")}
+                                <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                    {job.state.lastRunStatus ?? "—"}
+                                </dd>
+                            </div>
+                        </dl>
+                    </li>
+                );
+            })}
+        </ul>
     );
 }

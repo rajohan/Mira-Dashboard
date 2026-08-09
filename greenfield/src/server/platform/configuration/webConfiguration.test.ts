@@ -25,6 +25,7 @@ function serializedKeyring(overrides: Readonly<Record<string, unknown>> = {}): s
 
 function validEnvironment(): Record<string, unknown> {
     return {
+        ELEVENLABS_API_KEY: "elevenlabs-api-key-test-value",
         MIRA_DASHBOARD_LOG_LEVEL: "info",
         MIRA_DASHBOARD_PROJECT_ROOT: "/srv/mira-dashboard",
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
@@ -93,6 +94,12 @@ describe("web application configuration", () => {
         expect(Redacted.value(configuration.gatewayToken)).toBe(
             environment.OPENCLAW_GATEWAY_TOKEN as string
         );
+        expect(Redacted.value(configuration.elevenLabsApiKey!)).toBe(
+            environment.ELEVENLABS_API_KEY as string
+        );
+        expect(JSON.stringify(configuration.elevenLabsApiKey)).toBe(
+            '"<redacted:elevenlabs-api-key>"'
+        );
         expect(JSON.stringify(configuration.gatewayToken)).toBe(
             '"<redacted:gateway-token>"'
         );
@@ -108,6 +115,16 @@ describe("web application configuration", () => {
         );
         expect(Object.isFrozen(configuration.totpKeyring)).toBe(true);
         expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
+        expect(Object.isFrozen(configuration.elevenLabsApiKey)).toBe(true);
+    });
+
+    test("keeps optional speech capability absent when its credential is absent", () => {
+        const environment = validEnvironment();
+        delete environment.ELEVENLABS_API_KEY;
+
+        const configuration = parseWebConfiguration(environment);
+
+        expect(configuration).not.toHaveProperty("elevenLabsApiKey");
     });
 
     test("observes only registered keys and ignores unrelated host variables", () => {
@@ -229,6 +246,9 @@ describe("web application configuration", () => {
 
     test("rejects hostile scalar, URL, path, duration, and list values", () => {
         const cases: readonly [string, unknown, string, "inconsistent" | "invalid"][] = [
+            ["ELEVENLABS_API_KEY", "", "ELEVENLABS_API_KEY", "invalid"],
+            ["ELEVENLABS_API_KEY", " secret", "ELEVENLABS_API_KEY", "invalid"],
+            ["ELEVENLABS_API_KEY", "secret\nvalue", "ELEVENLABS_API_KEY", "invalid"],
             ["NODE_ENV", "staging", "NODE_ENV", "invalid"],
             ["PORT", "0", "PORT", "invalid"],
             ["PORT", "01", "PORT", "invalid"],

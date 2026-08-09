@@ -1,0 +1,23 @@
+{
+  "$id": "urn:mira-dashboard:chat.speech.synthesize.input",
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "maxLength": 4000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        }
+      ],
+      "$comment": "Live Valibot validation additionally limits speech synthesis text to 16384 UTF-8 bytes."
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

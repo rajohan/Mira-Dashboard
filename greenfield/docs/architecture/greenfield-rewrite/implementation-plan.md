@@ -72,6 +72,9 @@ Gateway client, chat, production credential cutover, and complete rewrite remain
   the native persistent Gateway client, session operations, chat state machine/journal, adapters,
   attachments, reconciliation, recovery, and the full virtualized frontend. Current-production
   Dashboard Gateway/chat/session/agent/cron code is parity evidence, not protocol authority.
+- replace legacy voice paths with capability-scoped, same-origin raw HTTP for ephemeral
+  transcription and speech generation. The server alone holds the optional provider credential;
+  audio/text are strictly bounded, abortable, no-store, and never persisted or logged.
 - expose a versioned compact automation heartbeat from process-owned state: bounded payload-free
   cache status, sanitized Gateway phase/freshness, identity-free current-session count/truncation,
   and global OpenClaw-cron count/pending-sync state. It must not perform an extra upstream refresh,
@@ -82,7 +85,7 @@ including restart during streaming.
 
 ### Phase 5: privileged and external domains
 
-- implement files/logs/media/STT/TTS, Docker, database, Moltbook, settings, terminal/exec,
+- implement files/logs, Docker, database, Moltbook, settings, terminal/exec,
   GitHub/PR/release/deploy/rollback, backup, and OpenClaw operations through worker adapters.
 - make the privileged log-rotation adapter own separate reviewed policies for managed Docker
   regular-file logs beneath `/opt/docker/data` and allowlisted host text logs beneath `/var/log`.

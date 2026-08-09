@@ -3,8 +3,9 @@
 @config "../../../tailwind.config.ts";
 @source "../**/*.{js,ts,jsx,tsx}";
 
-body.sb-show-main.sb-main-fullscreen:has(#storybook-docs) {
-    overflow: auto;
+body.sb-show-main {
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .storybook-task-board-docs {

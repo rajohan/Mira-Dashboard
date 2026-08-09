@@ -184,6 +184,7 @@ describe("source-boundary policy", () => {
             expect(validateSourceFile(file)?.message).toContain("explicitly classified");
         }
         for (const file of [
+            "src/app/dashboardChatRuntimeMaintenance.test.ts",
             "src/app/dashboardServer.test.ts",
             "src/app/trpcHttpHandler.test.ts",
             "src/app/trpcRequestPolicy.test.ts",

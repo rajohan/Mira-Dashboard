@@ -6,7 +6,7 @@
         },
         {
             "file": "chat.json",
-            "sha256": "a9db688ef4a3aad8b0697ee2986c4f4fe6cfdc1782ced38dd12e6af761a85749"
+            "sha256": "f8ff4bea603dec7ad74f6d875a8a24f5e345008d9ec2bf57c3283cb2e8e528d9"
         },
         {
             "file": "cron.json",
@@ -18,11 +18,11 @@
         },
         {
             "file": "sessions.json",
-            "sha256": "0bd23fffe375d7f261d8f2b7232add4c0e90b7601981383bda39b1dab5cd7cf2"
+            "sha256": "91785d6d4ee208b2dace06c48473341195c5782b8a371317cc63e463e75757a1"
         },
         {
             "file": "tasks.json",
-            "sha256": "a179bd882f1397941743841ba10cdece0616f3123f8c972bfbf5c7668c538f65"
+            "sha256": "0c63c4cd74037301e55fcb46bb757af9b74f3946446167037473122f3d66ed23"
         }
     ],
     "contentPolicy": {
@@ -168,6 +168,12 @@
             "sha256": "ef51e2b35c7d1172dda3e1049caa6de7d0e8d5fde64267e06086689c7a01e652"
         },
         {
+            "bytes": 41357,
+            "path": "dist/managed-image-attachments-DY0M_0qi.js",
+            "role": "managed-outgoing-media",
+            "sha256": "8e533074d301a5d4884158e1d4f12094310ca26075c8bf3237a67612804aced9"
+        },
+        {
             "bytes": 33960,
             "path": "dist/core-descriptors-BbSqaxhR.js",
             "role": "method-descriptors",
@@ -178,6 +184,12 @@
             "path": "dist/method-scopes-_t_OJmWQ.js",
             "role": "method-scopes",
             "sha256": "2661f2c38b368caa72604e4cea1f798da91844699566d7666ddeba3abea66912"
+        },
+        {
+            "bytes": 819,
+            "path": "dist/models-i0bmdcb8.js",
+            "role": "models-handlers",
+            "sha256": "a9576a00b26721fe804149bcbb3c39b82bbbe22742ece5f5aaa3301de3a6ed72"
         },
         {
             "bytes": 113599,
@@ -234,6 +246,12 @@
             "sha256": "9a7057f9fb6e44ef642f9a6413bb716076c5633cbc68f186d3da81cfb8e5dce1"
         },
         {
+            "bytes": 4230,
+            "path": "dist/session-event-payload-DWHrQwmc.js",
+            "role": "session-event-payload",
+            "sha256": "a950b5b9445aa38b79efe77bade1415cdf8a7426b8047474e1b379a18b280828"
+        },
+        {
             "bytes": 5972,
             "path": "dist/lifecycle-NEea4PLq.js",
             "role": "session-lifecycle",
@@ -250,6 +268,12 @@
             "path": "dist/sessions-shared-DiPcjD6h.js",
             "role": "session-operation-event",
             "sha256": "c6f1e0ae60b0172a9a72147efc95e28402a438b559775f8f51881259840c2377"
+        },
+        {
+            "bytes": 42879,
+            "path": "dist/session-reset-service-BkZu1SZZ.js",
+            "role": "session-reset-service",
+            "sha256": "5273448581245f40f0b4abd34112032ce5d7963b933477868e5ea5b3e61843bb"
         },
         {
             "bytes": 76698,

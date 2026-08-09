@@ -25,6 +25,12 @@ import {
     createAutomationPrincipalResultSchema,
     listAutomationPrincipalsResultSchema,
 } from "../../src/contracts/automationSecurity.ts";
+import {
+    chatRuntimeOutputSchema,
+    chatSendInputSchema,
+} from "../../src/contracts/chat.ts";
+import { chatAttachmentTicketPrepareInputSchema } from "../../src/contracts/chatMedia.ts";
+import { chatSpeechSynthesisInputSchema } from "../../src/contracts/chatSpeech.ts";
 import { listIncidentsResultSchema } from "../../src/contracts/incidents.ts";
 import { scheduleCronExpressionSchema } from "../../src/contracts/jobModel.ts";
 import { jobRealtimeChangeSchemas } from "../../src/contracts/jobRealtime.ts";
@@ -34,6 +40,7 @@ import {
 } from "../../src/contracts/monitoring.ts";
 import { listNotificationsResultSchema } from "../../src/contracts/notifications.ts";
 import { openClawCronJobSchema } from "../../src/contracts/openClawCron.ts";
+import { openClawTaskGetOutputSchema } from "../../src/contracts/openClawTasks.ts";
 import { listReportsResultSchema } from "../../src/contracts/reports.ts";
 import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
 import { listSecurityAuditEventsResultSchema } from "../../src/contracts/securityAudit.ts";
@@ -107,6 +114,29 @@ describe("contract JSON Schema conversion", () => {
         ).toThrow('The "transform" action cannot be converted to JSON Schema.');
     });
 
+    test("documents speech synthesis bounds before canonical trimming", () => {
+        const schema = convertContractSchema(
+            chatSpeechSynthesisInputSchema,
+            "chat.speech.synthesize.input",
+            "input"
+        );
+
+        expect(schema).toMatchObject({
+            properties: {
+                text: {
+                    allOf: [{ pattern: String.raw`^[^\u0000]*$` }],
+                    maxLength: 4000,
+                    minLength: 1,
+                    pattern: String.raw`\S`,
+                    type: "string",
+                },
+            },
+        });
+        expect(
+            (schema.properties as { text: { $comment?: string } }).text.$comment
+        ).toContain("16384 UTF-8 bytes");
+    });
+
     test("documents accepted cron aliases before canonical normalization", () => {
         const schema = convertContractSchema(
             scheduleCronExpressionSchema,
@@ -141,6 +171,48 @@ describe("contract JSON Schema conversion", () => {
         );
     });
 
+    test("documents chat budgets, projection invariants, and MIME normalization", () => {
+        const sendDocument = JSON.stringify(
+            convertContractSchema(chatSendInputSchema, "test.chatSend", "input")
+        );
+        expect(sendDocument).toContain("131072 UTF-8 bytes");
+        expect(sendDocument).toContain("nonblank chat text or an attachment ticket");
+
+        const runtimeDocument = JSON.stringify(
+            convertContractSchema(chatRuntimeOutputSchema, "test.chatRuntime", "output")
+        );
+        expect(runtimeDocument).toContain("strict ascending event-sequence order");
+        expect(runtimeDocument).toContain("aggregate UTF-8 response budget");
+
+        const attachmentDocument = JSON.stringify(
+            convertContractSchema(
+                chatAttachmentTicketPrepareInputSchema,
+                "test.chatAttachmentPrepare",
+                "input"
+            )
+        );
+        expect(attachmentDocument).toContain("declared MIME type and filename");
+        expect(attachmentDocument).toContain("aggregate raw-byte budget");
+    });
+
+    test("documents OpenClaw task lifecycle and preserves detail prompt", () => {
+        const document = convertContractSchema(
+            openClawTaskGetOutputSchema,
+            "test.openClawTaskDetail",
+            "output"
+        );
+        expect(JSON.stringify(document)).toContain(
+            "task detail identity aliases and orders available lifecycle timestamps"
+        );
+        expect(document).toMatchObject({
+            properties: {
+                task: {
+                    properties: { prompt: { maxLength: 4000, type: "string" } },
+                },
+            },
+        });
+    });
+
     test("documents automation normalization and runtime-only cross-field checks", () => {
         expect(
             convertContractSchema(
@@ -155,6 +227,8 @@ describe("contract JSON Schema conversion", () => {
                     "agents:write",
                     "cache:read",
                     "cache:write",
+                    "chat:read",
+                    "chat:write",
                     "gateway-sessions:read",
                     "gateway-sessions:write",
                     "jobs:read",
@@ -162,13 +236,15 @@ describe("contract JSON Schema conversion", () => {
                     "monitoring:write",
                     "notifications:read",
                     "notifications:write",
+                    "openclaw-tasks:read",
+                    "openclaw-tasks:write",
                     "reports:read",
                     "reports:write",
                     "tasks:read",
                     "tasks:write",
                 ],
             },
-            maxItems: 15,
+            maxItems: 19,
             type: "array",
             uniqueItems: true,
         });

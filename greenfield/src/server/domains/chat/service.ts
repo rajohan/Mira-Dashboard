@@ -1,0 +1,1952 @@
+import * as v from "valibot";
+
+import {
+    chatAbortInputSchema,
+    chatAbortOutputSchema,
+    chatCompanionAskInputSchema,
+    chatCompanionAskOutputSchema,
+    chatCompanionResetInputSchema,
+    chatCompanionResetOutputSchema,
+    chatCompanionStateInputSchema,
+    chatCompanionStateOutputSchema,
+    chatHistoryInputSchema,
+    chatMessageGetInputSchema,
+    chatModelsListInputSchema,
+    chatModelsListOutputSchema,
+    chatRuntimeInputSchema,
+    chatRuntimeOutputSchema,
+    chatSendInputSchema,
+    chatSendOutputSchema,
+    chatSessionSettingsInputSchema,
+    chatSessionSettingsOutputSchema,
+    type ChatAbortInput,
+    type ChatAbortOutput,
+    type ChatCompanionAskInput,
+    type ChatCompanionAskOutput,
+    type ChatCompanionResetInput,
+    type ChatCompanionResetOutput,
+    type ChatCompanionStateInput,
+    type ChatCompanionStateOutput,
+    type ChatHistoryInput,
+    type ChatHistoryOutput,
+    type ChatMessageGetInput,
+    type ChatMessageGetOutput,
+    type ChatModelsListInput,
+    type ChatModelsListOutput,
+    type ChatRuntimeInput,
+    type ChatRuntimeOutput,
+    type ChatSendInput,
+    type ChatSendOutput,
+    type ChatSessionSettingsInput,
+    type ChatSessionSettingsOutput,
+} from "../../../contracts/chat.ts";
+import {
+    chatAttachmentTicketPrepareInputSchema,
+    chatAttachmentTicketPrepareOutputSchema,
+    type ChatAttachmentTicketPrepareInput,
+    type ChatAttachmentTicketPrepareOutput,
+} from "../../../contracts/chatMedia.ts";
+import {
+    chatExternalRunsPerProcessMaximum,
+    chatExternalRunsPerSessionMaximum,
+    chatExternalRunSchema,
+    chatHistoryProviderPageMaximum,
+    chatHistoryResponseMaximumBytes,
+    chatMessageTextMaximumCodeUnits,
+    chatRuntimeResponseMaximumBytes,
+    mergeChatStreamText,
+    type ChatExternalRun,
+    type ChatMessage,
+} from "../../../contracts/chatModel.ts";
+import { utf8ByteLength } from "../../../shared/encoding.ts";
+import { type ChatCoalescerScheduler, ChatRuntimeEventCoalescer } from "./coalescer.ts";
+import {
+    ChatAdmissionCapacityError,
+    ChatAdmissionConflictError,
+    ChatProviderSequenceConflictError,
+    ChatProviderSequenceGapError,
+    ChatRunNotFoundError,
+    ChatRunTransitionError,
+    ChatTranscriptUnavailableError,
+} from "./errors.ts";
+import { ChatHistoryService, type ChatHistoryObservationPort } from "./history.ts";
+import {
+    ChatAttachmentTicketError,
+    type ChatAttachmentTicketConsumer,
+    type ChatAttachmentTicketPreparer,
+    type ChatAttachmentTicketReservation,
+    type ChatProvider,
+    ChatProviderCapacityError,
+    ChatProviderConflictError,
+    type ChatProviderEvent,
+    type ChatProviderEventGap,
+    type ChatProviderInFlightRun,
+    ChatProviderNotFoundError,
+    ChatProviderUnknownOutcomeError,
+    ChatProviderUnavailableError,
+    type ChatProviderReconciliationReason,
+} from "./provider.ts";
+import {
+    type ChatAdmissionActor,
+    type ChatRepository,
+    type ChatRuntimeEventDraft,
+} from "./repository.ts";
+import {
+    ChatSessionSubscriptionManager,
+    ChatSubscriptionCapacityError,
+} from "./subscriptionManager.ts";
+import type {
+    ChatTranscriptGenerationChange,
+    ChatTranscriptLifecycleCoordinator,
+} from "./transcriptLifecycle.ts";
+
+const reconciliationRetryMilliseconds = 1000;
+const reconciliationRetryMaximumMilliseconds = 60_000;
+const reconciliationLifecycleMilliseconds = 24 * 60 * 60 * 1000;
+export const chatRetentionSweepBatchSize = 100;
+export const chatRetentionSweepMaximumBatches = 4;
+export const chatCompanionAskProcessMaximum = 6;
+export const chatCompanionAskActorWindowMaximum = 4;
+export const chatCompanionAskRateWindowMilliseconds = 60_000;
+export const chatCompanionRateActorMaximum = 64;
+/** Interrupted provider-only projections expire unless history refreshes them. */
+export const chatExternalRunStaleMilliseconds = 15 * 60 * 1000;
+
+interface ChatCompanionAskAdmission {
+    controller: AbortController;
+    generation: number;
+    promise: Promise<ChatCompanionAskOutput>;
+    released: boolean;
+}
+
+export type ChatServiceErrorReason =
+    | "capacity"
+    | "conflict"
+    | "invalid-input"
+    | "not-found"
+    | "provider-unavailable"
+    | "unknown-outcome";
+
+export class ChatServiceError extends Error {
+    public readonly reason: ChatServiceErrorReason;
+
+    public constructor(reason: ChatServiceErrorReason, options?: ErrorOptions) {
+        super(`Chat operation failed: ${reason}`, options);
+        this.name = "ChatServiceError";
+        this.reason = reason;
+    }
+}
+
+export interface ChatRecoveryScheduler {
+    readonly clear: (handle: unknown) => void;
+    readonly schedule: (callback: () => void, delayMs: number) => unknown;
+}
+
+const defaultRecoveryScheduler: ChatRecoveryScheduler = Object.freeze({
+    clear(handle: unknown) {
+        clearTimeout(handle as ReturnType<typeof setTimeout>);
+    },
+    schedule(callback: () => void, delayMs: number) {
+        const handle = setTimeout(callback, delayMs);
+        handle.unref?.();
+        return handle;
+    },
+});
+
+export interface ChatServiceOptions {
+    readonly attachmentConsumer: ChatAttachmentTicketConsumer;
+    readonly attachmentPreparer: ChatAttachmentTicketPreparer;
+    readonly coalescerScheduler?: ChatCoalescerScheduler;
+    readonly nowMs?: () => number;
+    readonly onAsyncFailure?: (error: unknown) => void;
+    readonly provider: ChatProvider;
+    readonly recoveryScheduler?: ChatRecoveryScheduler;
+    readonly repository: ChatRepository;
+    readonly subscriptionIdleMilliseconds?: number;
+    readonly subscriptionMaximum?: number;
+    readonly transcriptLifecycle?: ChatTranscriptLifecycleCoordinator;
+}
+
+export interface ChatService {
+    readonly abort: (
+        input: ChatAbortInput,
+        signal?: AbortSignal
+    ) => Promise<ChatAbortOutput>;
+    readonly companionAsk: (
+        input: ChatCompanionAskInput,
+        actor: ChatAdmissionActor,
+        signal?: AbortSignal
+    ) => Promise<ChatCompanionAskOutput>;
+    readonly companionReset: (
+        input: ChatCompanionResetInput,
+        signal?: AbortSignal
+    ) => Promise<ChatCompanionResetOutput>;
+    readonly companionState: (
+        input: ChatCompanionStateInput,
+        signal?: AbortSignal
+    ) => Promise<ChatCompanionStateOutput>;
+    readonly dispose: () => Promise<void>;
+    readonly getMessage: (
+        input: ChatMessageGetInput,
+        signal?: AbortSignal
+    ) => Promise<ChatMessageGetOutput>;
+    readonly history: (
+        input: ChatHistoryInput,
+        signal?: AbortSignal
+    ) => Promise<ChatHistoryOutput>;
+    readonly listModels: (
+        input: ChatModelsListInput,
+        signal?: AbortSignal
+    ) => Promise<ChatModelsListOutput>;
+    readonly prepareAttachmentTicket: (
+        input: ChatAttachmentTicketPrepareInput,
+        actorId: string,
+        signal?: AbortSignal
+    ) => Promise<ChatAttachmentTicketPrepareOutput>;
+    readonly recover: (signal?: AbortSignal) => Promise<void>;
+    readonly runtime: (
+        input: ChatRuntimeInput,
+        signal?: AbortSignal
+    ) => Promise<ChatRuntimeOutput>;
+    readonly send: (
+        input: ChatSendInput,
+        actor: ChatAdmissionActor,
+        signal?: AbortSignal
+    ) => Promise<ChatSendOutput>;
+    readonly sweepSubscriptions: (atMs?: number) => Promise<number>;
+    readonly sweepRetention: (at?: Date) => Promise<number>;
+    readonly updateSessionSettings: (
+        input: ChatSessionSettingsInput,
+        signal?: AbortSignal
+    ) => Promise<ChatSessionSettingsOutput>;
+}
+
+function providerEventRunId(event: ChatProviderEvent): string {
+    return event.kind === "user-echo"
+        ? (event.providerRunId ?? event.idempotencyKey)
+        : event.providerRunId;
+}
+
+function providerEventDraft(event: ChatProviderEvent): ChatRuntimeEventDraft {
+    switch (event.kind) {
+        case "delta": {
+            return {
+                kind: event.stream,
+                mode: event.mode,
+                occurredAtMs: event.receivedAtMs,
+                providerSequenceEnd: event.providerSequence,
+                providerSequenceStart: event.providerSequence,
+                text: event.text,
+            };
+        }
+        case "tool": {
+            return {
+                callId: event.callId,
+                ...(event.input === undefined ? {} : { input: event.input }),
+                isError: event.isError,
+                kind: "tool",
+                name: event.name,
+                occurredAtMs: event.receivedAtMs,
+                ...(event.output === undefined ? {} : { output: event.output }),
+                phase: event.phase,
+                providerSequence: event.providerSequence,
+            };
+        }
+        case "item": {
+            return {
+                itemId: event.itemId,
+                itemType: event.itemType,
+                kind: "item",
+                occurredAtMs: event.receivedAtMs,
+                providerSequence: event.providerSequence,
+                ...(event.text === undefined ? {} : { text: event.text }),
+            };
+        }
+        case "status": {
+            return {
+                kind: "status",
+                occurredAtMs: event.receivedAtMs,
+                phase: event.phase,
+                providerSequence: event.providerSequence,
+            };
+        }
+        case "plan": {
+            return {
+                kind: "plan",
+                occurredAtMs: event.receivedAtMs,
+                phase: "update",
+                providerSequence: event.providerSequence,
+                steps: [...event.steps],
+            };
+        }
+        case "terminal": {
+            return {
+                ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
+                ...(event.errorMessage === undefined
+                    ? {}
+                    : { errorMessage: event.errorMessage }),
+                kind: "terminal",
+                occurredAtMs: event.receivedAtMs,
+                outcome: event.outcome,
+                providerRunId: event.providerRunId,
+                providerSequence: event.providerSequence,
+                ...(event.stopReason === undefined
+                    ? {}
+                    : { stopReason: event.stopReason }),
+            };
+        }
+        case "noop":
+        case "user-echo": {
+            return {
+                kind: "provider-noop",
+                occurredAtMs: event.receivedAtMs,
+                providerSequence: event.providerSequence,
+                reason: "ignored",
+            };
+        }
+    }
+}
+
+function terminalState(state: string): boolean {
+    return (
+        state === "cancelled" ||
+        state === "completed" ||
+        state === "failed" ||
+        state === "unresolved"
+    );
+}
+
+function messageMatchesRun(
+    message: ChatMessage,
+    localRunId: string,
+    providerRunId: string | undefined,
+    idempotencyKey: string
+): boolean {
+    return (
+        message.role === "assistant" &&
+        (message.localRunId === localRunId ||
+            message.idempotencyKey === idempotencyKey ||
+            (providerRunId !== undefined && message.runId === providerRunId) ||
+            message.runId === idempotencyKey)
+    );
+}
+
+function compareExternalRuns(left: ChatExternalRun, right: ChatExternalRun): number {
+    return (
+        left.updatedAtMs - right.updatedAtMs ||
+        left.sessionKey.localeCompare(right.sessionKey) ||
+        left.providerRunId.localeCompare(right.providerRunId)
+    );
+}
+
+function compactExternalRun(run: ChatExternalRun): ChatExternalRun {
+    if (run.text.length === 0 && run.plan === undefined) return run;
+    return v.parse(chatExternalRunSchema, {
+        continuity: run.continuity,
+        hasUnprojectedActivity: true,
+        projectionTruncated: true,
+        providerRunId: run.providerRunId,
+        sessionKey: run.sessionKey,
+        source: run.source,
+        text: "",
+        updatedAtMs: run.updatedAtMs,
+    });
+}
+
+function runtimeWithExternalRuns(
+    durable: ChatRuntimeOutput,
+    externalRuns: readonly ChatExternalRun[],
+    externalRunsTruncated: boolean
+): ChatRuntimeOutput {
+    return {
+        ...durable,
+        externalRuns: [...externalRuns],
+        externalRunsTruncated,
+    };
+}
+
+function runtimeWithExternalRunsFits(
+    durable: ChatRuntimeOutput,
+    externalRuns: readonly ChatExternalRun[],
+    externalRunsTruncated: boolean
+): boolean {
+    return (
+        utf8ByteLength(
+            JSON.stringify(
+                runtimeWithExternalRuns(durable, externalRuns, externalRunsTruncated)
+            )
+        ) <= chatRuntimeResponseMaximumBytes
+    );
+}
+
+/**
+ * Preserves every bounded external identity and spends remaining bytes newest-first.
+ * @param durable Durable local runtime response.
+ * @param runs Provider-origin runtime projections.
+ * @param externalRunsTruncated Whether provider-origin activity was omitted.
+ * @returns The validated identity-preserving combined runtime response.
+ */
+function budgetExternalRuns(
+    durable: ChatRuntimeOutput,
+    runs: readonly ChatExternalRun[],
+    externalRunsTruncated: boolean
+): ChatRuntimeOutput {
+    let selected = runs
+        .map((run) => compactExternalRun(run))
+        .toSorted(compareExternalRuns);
+    if (!runtimeWithExternalRunsFits(durable, selected, externalRunsTruncated)) {
+        throw new ChatServiceError("capacity", {
+            cause: new RangeError(
+                "External chat run identities exceed the runtime response budget"
+            ),
+        });
+    }
+    for (const full of runs.toSorted(compareExternalRuns).toReversed()) {
+        const index = selected.findIndex(
+            ({ providerRunId }) => providerRunId === full.providerRunId
+        );
+        if (index === -1) continue;
+        const fullCandidate = selected.with(index, full);
+        if (runtimeWithExternalRunsFits(durable, fullCandidate, externalRunsTruncated)) {
+            selected = fullCandidate;
+            continue;
+        }
+
+        let lower = 0;
+        let upper = full.text.length;
+        let best = selected[index]!;
+        while (lower <= upper) {
+            const middle = Math.floor((lower + upper) / 2);
+            const candidateRun = v.parse(chatExternalRunSchema, {
+                continuity: full.continuity,
+                hasUnprojectedActivity: true,
+                projectionTruncated: true,
+                providerRunId: full.providerRunId,
+                sessionKey: full.sessionKey,
+                source: full.source,
+                text: full.text.slice(0, middle),
+                updatedAtMs: full.updatedAtMs,
+            });
+            if (
+                runtimeWithExternalRunsFits(
+                    durable,
+                    selected.with(index, candidateRun),
+                    externalRunsTruncated
+                )
+            ) {
+                best = candidateRun;
+                lower = middle + 1;
+            } else {
+                upper = middle - 1;
+            }
+        }
+        selected = selected.with(index, best);
+        if (full.plan !== undefined) {
+            const withPlan = v.parse(chatExternalRunSchema, {
+                ...best,
+                plan: full.plan,
+            });
+            if (
+                runtimeWithExternalRunsFits(
+                    durable,
+                    selected.with(index, withPlan),
+                    externalRunsTruncated
+                )
+            ) {
+                selected = selected.with(index, withPlan);
+            }
+        }
+    }
+    return v.parse(
+        chatRuntimeOutputSchema,
+        runtimeWithExternalRuns(durable, selected, externalRunsTruncated)
+    );
+}
+
+class ChatServiceImplementation implements ChatService, ChatHistoryObservationPort {
+    readonly #abortAcknowledgedRuns = new Set<string>();
+    readonly #abortOperations = new Map<string, Promise<ChatAbortOutput>>();
+    readonly #attachmentConsumer: ChatAttachmentTicketConsumer;
+    readonly #attachmentPreparer: ChatAttachmentTicketPreparer;
+    readonly #blockedRuns = new Set<string>();
+    readonly #coalescers = new Map<string, ChatRuntimeEventCoalescer>();
+    readonly #coalescerScheduler: ChatCoalescerScheduler | undefined;
+    readonly #companionAsks = new Map<string, ChatCompanionAskAdmission>();
+    readonly #companionGenerations = new Map<string, number>();
+    readonly #companionRateWindows = new Map<string, number[]>();
+    readonly #companionResets = new Map<string, Promise<ChatCompanionResetOutput>>();
+    readonly #externalRuns = new Map<string, Map<string, ChatExternalRun>>();
+    readonly #externalCoalescers = new Map<string, ChatRuntimeEventCoalescer>();
+    readonly #externalTruncatedSessions = new Set<string>();
+    readonly #historyService: ChatHistoryService;
+    readonly #nowMs: () => number;
+    readonly #onAsyncFailure: (error: unknown) => void;
+    readonly #provider: ChatProvider;
+    readonly #pendingReservations = new Map<
+        string,
+        Readonly<{
+            reservation: ChatAttachmentTicketReservation;
+            settlement: "commit" | "hold" | "release";
+        }>
+    >();
+    readonly #reconciliationAttempts = new Map<string, number>();
+    readonly #reconciliationInFlight = new Map<string, Promise<boolean>>();
+    readonly #reconciliationTimers = new Map<string, unknown>();
+    readonly #recoveryScheduler: ChatRecoveryScheduler;
+    readonly #repository: ChatRepository;
+    readonly #subscriptions: ChatSessionSubscriptionManager;
+    readonly #transcriptLifecycle: ChatTranscriptLifecycleCoordinator | undefined;
+    readonly #unsubscribeTranscriptLifecycle: (() => void) | undefined;
+    #companionAskCount = 0;
+    #disposed = false;
+
+    public constructor(options: ChatServiceOptions) {
+        this.#attachmentConsumer = options.attachmentConsumer;
+        this.#attachmentPreparer = options.attachmentPreparer;
+        this.#coalescerScheduler = options.coalescerScheduler;
+        this.#nowMs = options.nowMs ?? Date.now;
+        this.#onAsyncFailure = options.onAsyncFailure ?? (() => {});
+        this.#provider = options.provider;
+        this.#recoveryScheduler = options.recoveryScheduler ?? defaultRecoveryScheduler;
+        this.#repository = options.repository;
+        this.#transcriptLifecycle = options.transcriptLifecycle;
+        this.#historyService = new ChatHistoryService(
+            options.provider,
+            options.repository,
+            this
+        );
+        this.#subscriptions = new ChatSessionSubscriptionManager({
+            ...(options.subscriptionIdleMilliseconds === undefined
+                ? {}
+                : { idleMilliseconds: options.subscriptionIdleMilliseconds }),
+            isPinned: (sessionKey) =>
+                this.#repository.listProviderRunWatermarks(sessionKey).length > 0,
+            ...(options.subscriptionMaximum === undefined
+                ? {}
+                : { maximum: options.subscriptionMaximum }),
+            nowMs: this.#nowMs,
+            onEvent: (event) => this.#handleProviderEvent(event),
+            onGap: (gap) => this.#handleProviderGap(gap),
+            onReconciliationRequired: (sessionKey, reason) =>
+                this.#handleSessionReconciliation(sessionKey, reason),
+            provider: options.provider,
+            watermarks: (sessionKey) =>
+                this.#repository.listProviderRunWatermarks(sessionKey),
+        });
+        this.#unsubscribeTranscriptLifecycle = options.transcriptLifecycle?.subscribe(
+            (change) => this.#handleTranscriptGenerationChange(change)
+        );
+    }
+
+    #reportAsyncFailure(error: unknown): void {
+        try {
+            this.#onAsyncFailure(error);
+        } catch {
+            // Failure reporting has no authority to replace the original failure.
+        }
+    }
+
+    #companionGeneration(sessionKey: string): number {
+        return this.#companionGenerations.get(sessionKey) ?? 1;
+    }
+
+    #invalidateCompanionGeneration(sessionKey: string): void {
+        const next = this.#companionGeneration(sessionKey) + 1;
+        this.#companionGenerations.set(sessionKey, next);
+        const active = this.#companionAsks.get(sessionKey);
+        if (active === undefined) return;
+        active.controller.abort();
+        this.#releaseCompanionAsk(sessionKey, active);
+    }
+
+    async #handleTranscriptGenerationChange(
+        change: ChatTranscriptGenerationChange
+    ): Promise<void> {
+        this.#invalidateCompanionGeneration(change.sessionKey);
+        for (const localRunId of change.retiredRunIds) {
+            this.#blockedRuns.add(localRunId);
+            const timer = this.#reconciliationTimers.get(localRunId);
+            if (timer !== undefined) this.#recoveryScheduler.clear(timer);
+            this.#reconciliationTimers.delete(localRunId);
+            this.#reconciliationAttempts.delete(localRunId);
+            this.#abortAcknowledgedRuns.delete(localRunId);
+            const coalescer = this.#coalescers.get(localRunId);
+            this.#coalescers.delete(localRunId);
+            try {
+                await coalescer?.close();
+            } catch (error) {
+                this.#reportAsyncFailure(error);
+            }
+            await this.#settleReservation(localRunId, "commit");
+        }
+        this.#externalRuns.delete(change.sessionKey);
+        this.#externalTruncatedSessions.delete(change.sessionKey);
+        try {
+            await this.#closeExternalCoalescer(change.sessionKey);
+        } catch (error) {
+            this.#reportAsyncFailure(error);
+        }
+        try {
+            await this.#subscriptions.invalidate(change.sessionKey);
+        } catch (error) {
+            this.#reportAsyncFailure(error);
+        }
+    }
+
+    #externalSession(sessionKey: string): Map<string, ChatExternalRun> {
+        let runs = this.#externalRuns.get(sessionKey);
+        if (runs === undefined) {
+            runs = new Map();
+            this.#externalRuns.set(sessionKey, runs);
+        }
+        return runs;
+    }
+
+    #deleteExternalRun(sessionKey: string, providerRunId: string): boolean {
+        const runs = this.#externalRuns.get(sessionKey);
+        if (runs === undefined || !runs.delete(providerRunId)) return false;
+        if (runs.size === 0) this.#externalRuns.delete(sessionKey);
+        return true;
+    }
+
+    #externalRunCount(): number {
+        let count = 0;
+        for (const runs of this.#externalRuns.values()) count += runs.size;
+        return count;
+    }
+
+    #evictExternalRun(run: ChatExternalRun): void {
+        if (this.#deleteExternalRun(run.sessionKey, run.providerRunId)) {
+            this.#externalTruncatedSessions.add(run.sessionKey);
+        }
+    }
+
+    #storeExternalRun(run: ChatExternalRun): void {
+        this.#externalSession(run.sessionKey).set(run.providerRunId, run);
+        const session = this.#externalRuns.get(run.sessionKey);
+        while (
+            session !== undefined &&
+            session.size > chatExternalRunsPerSessionMaximum
+        ) {
+            const oldest = [...session.values()].toSorted(compareExternalRuns)[0];
+            if (oldest === undefined) break;
+            this.#evictExternalRun(oldest);
+        }
+        while (this.#externalRunCount() > chatExternalRunsPerProcessMaximum) {
+            const oldest = [...this.#externalRuns.values()]
+                .flatMap((runs) => [...runs.values()])
+                .toSorted(compareExternalRuns)[0];
+            if (oldest === undefined) break;
+            this.#evictExternalRun(oldest);
+        }
+    }
+
+    #externalCoalescer(sessionKey: string): ChatRuntimeEventCoalescer {
+        let coalescer = this.#externalCoalescers.get(sessionKey);
+        if (coalescer !== undefined) return coalescer;
+        coalescer = new ChatRuntimeEventCoalescer(
+            async () => {
+                await this.#repository.signalRuntimeChanged();
+            },
+            this.#coalescerScheduler,
+            (error) => this.#reportAsyncFailure(error)
+        );
+        this.#externalCoalescers.set(sessionKey, coalescer);
+        return coalescer;
+    }
+
+    async #flushExternalCoalescer(sessionKey: string): Promise<void> {
+        await this.#externalCoalescers.get(sessionKey)?.flush();
+    }
+
+    async #closeExternalCoalescer(sessionKey: string): Promise<void> {
+        const coalescer = this.#externalCoalescers.get(sessionKey);
+        if (coalescer === undefined) return;
+        this.#externalCoalescers.delete(sessionKey);
+        await coalescer.close();
+    }
+
+    async #pruneStaleExternalRuns(sessionKey: string): Promise<void> {
+        const runs = this.#externalRuns.get(sessionKey);
+        if (runs === undefined) return;
+        const cutoff = this.#nowMs() - chatExternalRunStaleMilliseconds;
+        let changed = false;
+        for (const [providerRunId, run] of runs) {
+            if (run.continuity !== "interrupted" || run.updatedAtMs > cutoff) {
+                continue;
+            }
+            runs.delete(providerRunId);
+            changed = true;
+        }
+        if (!changed) return;
+        await this.#flushExternalCoalescer(sessionKey);
+        if (runs.size === 0) this.#externalRuns.delete(sessionKey);
+        await this.#repository.signalRuntimeChanged();
+        if (!this.#externalRuns.has(sessionKey)) {
+            await this.#closeExternalCoalescer(sessionKey);
+        }
+    }
+
+    async #projectExternalEvent(event: ChatProviderEvent): Promise<void> {
+        const providerRunId = providerEventRunId(event);
+        if (event.kind === "terminal") {
+            await this.#flushExternalCoalescer(event.sessionKey);
+            const projectionChanged = this.#deleteExternalRun(
+                event.sessionKey,
+                providerRunId
+            );
+            // This marker survives a fast provider run that completed before this
+            // process observed any external projection. Tokens never emit it.
+            await this.#repository.signalHistoryChanged();
+            if (projectionChanged) {
+                await this.#repository.signalRuntimeChanged();
+            }
+            if (!this.#externalRuns.has(event.sessionKey)) {
+                await this.#closeExternalCoalescer(event.sessionKey);
+            }
+            return;
+        }
+        const runs = this.#externalRuns.get(event.sessionKey);
+        const previous = runs?.get(providerRunId);
+        let text = previous?.text ?? "";
+        const beganAfterProviderSequenceOne =
+            previous === undefined && event.providerSequence > 1;
+        let hasUnprojectedActivity =
+            previous?.hasUnprojectedActivity ?? beganAfterProviderSequenceOne;
+        let projectionTruncated = previous?.projectionTruncated ?? false;
+        let plan = previous?.plan;
+        if (event.kind === "delta" && event.stream === "assistant") {
+            const previousText = text;
+            text = event.text;
+            if (event.mode === "append") text = previousText + event.text;
+            if (event.mode === "merge") {
+                text = mergeChatStreamText(previousText, event.text);
+            }
+        } else if (event.kind === "plan") {
+            plan = { phase: "update", steps: [...event.steps] };
+        } else if (
+            event.kind === "tool" ||
+            event.kind === "item" ||
+            (event.kind === "delta" && event.stream === "thinking")
+        ) {
+            hasUnprojectedActivity = true;
+        }
+        if (text.length > chatMessageTextMaximumCodeUnits) {
+            text = text.slice(0, chatMessageTextMaximumCodeUnits);
+            hasUnprojectedActivity = true;
+            projectionTruncated = true;
+        }
+        this.#storeExternalRun(
+            v.parse(chatExternalRunSchema, {
+                continuity:
+                    previous?.continuity ??
+                    (beganAfterProviderSequenceOne ? "interrupted" : "complete"),
+                hasUnprojectedActivity,
+                ...(plan === undefined ? {} : { plan }),
+                projectionTruncated,
+                providerRunId,
+                sessionKey: event.sessionKey,
+                source: "provider-runtime",
+                text,
+                updatedAtMs: Math.max(
+                    previous?.updatedAtMs ?? 0,
+                    event.receivedAtMs,
+                    this.#nowMs()
+                ),
+            })
+        );
+        await this.#externalCoalescer(event.sessionKey).push(providerEventDraft(event));
+    }
+
+    async #acknowledgeEventAlias(
+        localRunId: string,
+        providerRunId: string
+    ): Promise<void> {
+        const run = this.#repository.findRun(localRunId);
+        if (run?.providerRunId === undefined) {
+            await this.#repository.acknowledgeDispatch(localRunId, providerRunId);
+        }
+    }
+
+    #coalescer(localRunId: string): ChatRuntimeEventCoalescer {
+        let coalescer = this.#coalescers.get(localRunId);
+        if (coalescer !== undefined) return coalescer;
+        coalescer = new ChatRuntimeEventCoalescer(
+            async (events) => {
+                await this.#repository.appendEvents(localRunId, events);
+            },
+            this.#coalescerScheduler,
+            (error) => {
+                void this.#blockAndReconcile(localRunId, error);
+            }
+        );
+        this.#coalescers.set(localRunId, coalescer);
+        return coalescer;
+    }
+
+    async #handleProviderEvent(event: ChatProviderEvent): Promise<void> {
+        if (this.#disposed) return;
+        const providerRunId = providerEventRunId(event);
+        const run = this.#repository.findByProviderCorrelation(
+            event.sessionKey,
+            providerRunId
+        );
+        if (run === undefined) {
+            if (
+                this.#repository.isRetiredProviderCorrelation(
+                    event.sessionKey,
+                    providerRunId
+                )
+            ) {
+                return;
+            }
+            await this.#projectExternalEvent(event);
+            return;
+        }
+        if (this.#blockedRuns.has(run.id)) return;
+        try {
+            await this.#acknowledgeEventAlias(run.id, providerRunId);
+            const coalescer = this.#coalescer(run.id);
+            await coalescer.push(providerEventDraft(event));
+            if (event.kind === "terminal") {
+                await coalescer.close();
+                this.#coalescers.delete(run.id);
+                this.#blockedRuns.add(run.id);
+                this.#startReconciliation(run.id);
+            }
+        } catch (error) {
+            await this.#blockAndReconcile(run.id, error);
+        }
+    }
+
+    async #appendInterrupted(localRunId: string): Promise<void> {
+        const run = this.#repository.findRun(localRunId);
+        if (
+            run === undefined ||
+            terminalState(run.state) ||
+            run.state === "interrupted"
+        ) {
+            return;
+        }
+        await this.#repository.appendEvents(localRunId, [
+            { kind: "interrupted", occurredAtMs: this.#nowMs() },
+        ]);
+    }
+
+    async #blockAndReconcile(localRunId: string, cause?: unknown): Promise<void> {
+        this.#blockedRuns.add(localRunId);
+        const coalescer = this.#coalescers.get(localRunId);
+        this.#coalescers.delete(localRunId);
+        try {
+            await coalescer?.close();
+        } catch (error) {
+            cause ??= error;
+        }
+        try {
+            await this.#appendInterrupted(localRunId);
+        } catch (error) {
+            cause ??= error;
+        }
+        if (cause !== undefined) this.#reportAsyncFailure(cause);
+        this.#startReconciliation(localRunId);
+    }
+
+    async #handleProviderGap(gap: ChatProviderEventGap): Promise<void> {
+        const run = this.#repository.findByProviderCorrelation(
+            gap.sessionKey,
+            gap.providerRunId
+        );
+        if (run === undefined) {
+            if (
+                this.#repository.isRetiredProviderCorrelation(
+                    gap.sessionKey,
+                    gap.providerRunId
+                )
+            ) {
+                return;
+            }
+            await this.#flushExternalCoalescer(gap.sessionKey);
+            const previous = this.#externalRuns
+                .get(gap.sessionKey)
+                ?.get(gap.providerRunId);
+            this.#storeExternalRun(
+                v.parse(chatExternalRunSchema, {
+                    continuity: "interrupted",
+                    hasUnprojectedActivity: true,
+                    ...(previous?.plan === undefined ? {} : { plan: previous.plan }),
+                    providerRunId: gap.providerRunId,
+                    sessionKey: gap.sessionKey,
+                    source: previous?.source ?? "provider-runtime",
+                    text: previous?.text ?? "",
+                    projectionTruncated: true,
+                    updatedAtMs: Math.max(previous?.updatedAtMs ?? 0, this.#nowMs()),
+                })
+            );
+            await this.#repository.signalRuntimeChanged();
+            return;
+        }
+        await this.#blockAndReconcile(
+            run.id,
+            new ChatProviderSequenceGapError(gap.expectedSequence, gap.receivedSequence)
+        );
+    }
+
+    async #handleSessionReconciliation(
+        sessionKey: string,
+        reason: ChatProviderReconciliationReason
+    ): Promise<void> {
+        const candidates = this.#repository
+            .listRecoveryCandidates()
+            .filter(({ run }) => run.sessionKey === sessionKey);
+        if (reason === "backpressure") {
+            await Promise.all(
+                candidates.map(({ run }) => this.#blockAndReconcile(run.id))
+            );
+        } else {
+            for (const { run } of candidates) this.#startReconciliation(run.id);
+        }
+        const external = this.#externalRuns.get(sessionKey);
+        if (external !== undefined) {
+            await this.#flushExternalCoalescer(sessionKey);
+            for (const [providerRunId, run] of external) {
+                external.set(providerRunId, {
+                    ...run,
+                    continuity: "interrupted",
+                    hasUnprojectedActivity: true,
+                    projectionTruncated: true,
+                    updatedAtMs: Math.max(run.updatedAtMs, this.#nowMs()),
+                });
+            }
+            await this.#repository.signalRuntimeChanged();
+        }
+    }
+
+    async #readReconciliationHistory(
+        sessionKey: string,
+        signal?: AbortSignal
+    ): Promise<
+        Readonly<{
+            inFlightRun?: ChatProviderInFlightRun;
+            messages: readonly ChatMessage[];
+            sessionId?: string;
+        }>
+    > {
+        const messages: ChatMessage[] = [];
+        let inFlightRun: ChatProviderInFlightRun | undefined;
+        let offset = 0;
+        let sessionId: string | undefined;
+        for (
+            let pageIndex = 0;
+            pageIndex < chatHistoryProviderPageMaximum;
+            pageIndex += 1
+        ) {
+            const page = await this.#provider.history(
+                {
+                    limit: 100 - messages.length,
+                    maxChars: chatHistoryResponseMaximumBytes,
+                    offset,
+                    sessionKey,
+                },
+                signal
+            );
+            inFlightRun = page.inFlightRun;
+            if (
+                sessionId !== undefined &&
+                page.sessionId !== undefined &&
+                page.sessionId !== sessionId
+            ) {
+                throw new ChatProviderUnavailableError();
+            }
+            sessionId ??= page.sessionId;
+            messages.push(...page.messages);
+            if (!page.hasMore || messages.length >= 100) break;
+            const nextOffset = page.nextOffset;
+            if (nextOffset === undefined || nextOffset <= offset) {
+                throw new ChatProviderUnavailableError();
+            }
+            offset = nextOffset;
+        }
+        return Object.freeze({
+            ...(inFlightRun === undefined ? {} : { inFlightRun }),
+            messages: Object.freeze(messages),
+            ...(sessionId === undefined ? {} : { sessionId }),
+        });
+    }
+
+    async #reconcileOnce(localRunId: string): Promise<boolean> {
+        const intent = this.#repository.readIntent(localRunId);
+        if (intent === undefined) return true;
+        let history: Readonly<{
+            inFlightRun?: ChatProviderInFlightRun;
+            messages: readonly ChatMessage[];
+            sessionId?: string;
+        }>;
+        try {
+            history = await this.#readReconciliationHistory(intent.run.sessionKey);
+        } catch (error) {
+            this.#reportAsyncFailure(error);
+            return false;
+        }
+        const finalMessage = history.messages.find((message) =>
+            messageMatchesRun(
+                message,
+                localRunId,
+                intent.run.providerRunId,
+                intent.request.idempotencyKey
+            )
+        );
+        if (finalMessage !== undefined) {
+            const providerRunId = finalMessage.runId;
+            if (
+                intent.dispatchAttempted &&
+                intent.run.providerRunId === undefined &&
+                providerRunId !== undefined
+            ) {
+                await this.#repository.acknowledgeDispatch(localRunId, providerRunId);
+            }
+            const current = this.#repository.findRun(localRunId);
+            if (current !== undefined && !terminalState(current.state)) {
+                await this.#repository.appendEvents(localRunId, [
+                    {
+                        kind: "terminal",
+                        occurredAtMs: this.#nowMs(),
+                        outcome: "completed",
+                        ...(providerRunId === undefined ? {} : { providerRunId }),
+                    },
+                ]);
+            }
+            await this.#repository.appendEvents(localRunId, [
+                {
+                    historyMessageId: finalMessage.id,
+                    kind: "reconciled",
+                    occurredAtMs: this.#nowMs(),
+                },
+            ]);
+            await this.#settleReservation(localRunId, "commit");
+            this.#blockedRuns.delete(localRunId);
+            this.#abortAcknowledgedRuns.delete(localRunId);
+            this.#reconciliationAttempts.delete(localRunId);
+            return true;
+        }
+        const inFlight = history.inFlightRun;
+        if (
+            inFlight !== undefined &&
+            (inFlight.runId === intent.request.idempotencyKey ||
+                inFlight.runId === intent.run.providerRunId)
+        ) {
+            if (intent.dispatchAttempted && intent.run.providerRunId === undefined) {
+                await this.#repository.acknowledgeDispatch(localRunId, inFlight.runId);
+            }
+            // No provider sequence exists on this snapshot. It may prove identity,
+            // but never advances or resets the durable provider watermark.
+            return false;
+        }
+        return false;
+    }
+
+    #reconcileSingleFlight(localRunId: string): Promise<boolean> {
+        const current = this.#reconciliationInFlight.get(localRunId);
+        if (current !== undefined) return current;
+        const operation = this.#reconcileOnce(localRunId).catch((error: unknown) => {
+            this.#reportAsyncFailure(error);
+            return false;
+        });
+        this.#reconciliationInFlight.set(localRunId, operation);
+        void operation.finally(() => {
+            if (this.#reconciliationInFlight.get(localRunId) === operation) {
+                this.#reconciliationInFlight.delete(localRunId);
+            }
+        });
+        return operation;
+    }
+
+    async #settleReconciliationDeadline(localRunId: string): Promise<void> {
+        const intent = this.#repository.readIntent(localRunId);
+        if (intent === undefined || terminalState(intent.run.state)) return;
+        const coalescer = this.#coalescers.get(localRunId);
+        this.#coalescers.delete(localRunId);
+        try {
+            await coalescer?.close();
+        } catch (error) {
+            this.#reportAsyncFailure(error);
+        }
+        await this.#repository.settleUnresolved(localRunId);
+        await this.#settleReservation(localRunId, "release");
+        this.#blockedRuns.delete(localRunId);
+        this.#abortAcknowledgedRuns.delete(localRunId);
+        this.#reconciliationAttempts.delete(localRunId);
+        const timer = this.#reconciliationTimers.get(localRunId);
+        if (timer !== undefined) this.#recoveryScheduler.clear(timer);
+        this.#reconciliationTimers.delete(localRunId);
+        await this.#subscriptions.releaseIfUnpinned(intent.run.sessionKey);
+    }
+
+    #startReconciliation(localRunId: string): void {
+        if (
+            this.#disposed ||
+            this.#reconciliationTimers.has(localRunId) ||
+            this.#reconciliationInFlight.has(localRunId)
+        ) {
+            return;
+        }
+        const initialIntent = this.#repository.readIntent(localRunId);
+        if (initialIntent === undefined) return;
+        const initialDeadline =
+            initialIntent.run.admittedAtMs + reconciliationLifecycleMilliseconds;
+        if (this.#nowMs() >= initialDeadline) {
+            void this.#settleReconciliationDeadline(localRunId).catch((error: unknown) =>
+                this.#reportAsyncFailure(error)
+            );
+            return;
+        }
+        void this.#reconcileAndSchedule(localRunId).catch((error: unknown) =>
+            this.#reportAsyncFailure(error)
+        );
+    }
+
+    async #reconcileAndSchedule(localRunId: string): Promise<void> {
+        const complete = await this.#reconcileSingleFlight(localRunId);
+        if (complete || this.#disposed) return;
+        const intent = this.#repository.readIntent(localRunId);
+        if (intent === undefined) return;
+        const remaining =
+            intent.run.admittedAtMs + reconciliationLifecycleMilliseconds - this.#nowMs();
+        if (remaining <= 0) {
+            await this.#settleReconciliationDeadline(localRunId);
+            return;
+        }
+        const attempt = (this.#reconciliationAttempts.get(localRunId) ?? 0) + 1;
+        this.#reconciliationAttempts.set(localRunId, attempt);
+        const delay = Math.min(
+            remaining,
+            reconciliationRetryMaximumMilliseconds,
+            reconciliationRetryMilliseconds * 2 ** Math.min(attempt - 1, 10)
+        );
+        const handle = this.#recoveryScheduler.schedule(() => {
+            this.#reconciliationTimers.delete(localRunId);
+            this.#startReconciliation(localRunId);
+        }, delay);
+        this.#reconciliationTimers.set(localRunId, handle);
+    }
+
+    async #terminalFailure(
+        localRunId: string,
+        code: string,
+        message: string
+    ): Promise<void> {
+        const run = this.#repository.findRun(localRunId);
+        if (run === undefined || terminalState(run.state)) return;
+        await this.#repository.appendEvents(localRunId, [
+            {
+                errorCode: code,
+                errorMessage: message,
+                kind: "terminal",
+                occurredAtMs: this.#nowMs(),
+                outcome: "error",
+            },
+        ]);
+    }
+
+    async #settleReservation(
+        localRunId: string,
+        settlement: "commit" | "release",
+        signal?: AbortSignal
+    ): Promise<void> {
+        const pending = this.#pendingReservations.get(localRunId);
+        if (pending === undefined) return;
+        this.#pendingReservations.set(localRunId, {
+            reservation: pending.reservation,
+            settlement,
+        });
+        try {
+            await (settlement === "commit"
+                ? pending.reservation.commit(signal)
+                : pending.reservation.release(signal));
+            this.#pendingReservations.delete(localRunId);
+        } catch (error) {
+            this.#reportAsyncFailure(error);
+        }
+    }
+
+    public async observeInFlightRun(
+        sessionKey: string,
+        inFlightRun: ChatProviderInFlightRun | undefined
+    ): Promise<void> {
+        if (inFlightRun === undefined) {
+            await this.#flushExternalCoalescer(sessionKey);
+            const runs = this.#externalRuns.get(sessionKey);
+            let changed = false;
+            if (runs !== undefined) {
+                for (const [providerRunId, run] of runs) {
+                    if (run.source === "provider-in-flight") {
+                        runs.delete(providerRunId);
+                        changed = true;
+                    }
+                }
+                if (runs.size === 0) this.#externalRuns.delete(sessionKey);
+            }
+            if (
+                !this.#externalRuns.has(sessionKey) &&
+                this.#externalTruncatedSessions.delete(sessionKey)
+            ) {
+                changed = true;
+            }
+            if (changed) await this.#repository.signalRuntimeChanged();
+            if (!this.#externalRuns.has(sessionKey)) {
+                await this.#closeExternalCoalescer(sessionKey);
+            }
+            return;
+        }
+        await this.#flushExternalCoalescer(sessionKey);
+        const local = this.#repository.findByProviderCorrelation(
+            sessionKey,
+            inFlightRun.runId
+        );
+        if (local !== undefined) return;
+        this.#storeExternalRun(
+            v.parse(chatExternalRunSchema, {
+                continuity: "complete",
+                hasUnprojectedActivity: false,
+                ...(inFlightRun.plan === undefined
+                    ? {}
+                    : { plan: { phase: "update", steps: inFlightRun.plan.steps } }),
+                providerRunId: inFlightRun.runId,
+                sessionKey,
+                source: "provider-in-flight",
+                text: inFlightRun.text,
+                projectionTruncated: false,
+                updatedAtMs: this.#nowMs(),
+            })
+        );
+        await this.#repository.signalRuntimeChanged();
+    }
+
+    public async observeHistoryMessages(
+        sessionKey: string,
+        messages: readonly ChatMessage[]
+    ): Promise<void> {
+        const runs = this.#externalRuns.get(sessionKey);
+        if (runs === undefined) return;
+        const finalIdentities = new Set(
+            messages
+                .filter(({ role }) => role === "assistant")
+                .flatMap(({ idempotencyKey, runId }) => [
+                    ...(idempotencyKey === undefined ? [] : [idempotencyKey]),
+                    ...(runId === undefined ? [] : [runId]),
+                ])
+        );
+        let changed = false;
+        for (const providerRunId of finalIdentities) {
+            changed = this.#deleteExternalRun(sessionKey, providerRunId) || changed;
+        }
+        if (!changed) return;
+        await this.#flushExternalCoalescer(sessionKey);
+        await this.#repository.signalHistoryChanged();
+        await this.#repository.signalRuntimeChanged();
+        if (!this.#externalRuns.has(sessionKey)) {
+            await this.#closeExternalCoalescer(sessionKey);
+        }
+    }
+
+    public async history(
+        rawInput: ChatHistoryInput,
+        signal?: AbortSignal
+    ): Promise<ChatHistoryOutput> {
+        try {
+            const input = v.parse(chatHistoryInputSchema, rawInput);
+            await this.#touchSubscription(input.sessionKey);
+            return await this.#historyService.history(input, signal);
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public async getMessage(
+        rawInput: ChatMessageGetInput,
+        signal?: AbortSignal
+    ): Promise<ChatMessageGetOutput> {
+        try {
+            const input = v.parse(chatMessageGetInputSchema, rawInput);
+            await this.#touchSubscription(input.sessionKey);
+            return await this.#historyService.getMessage(input, signal);
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public async runtime(
+        rawInput: ChatRuntimeInput,
+        _signal?: AbortSignal
+    ): Promise<ChatRuntimeOutput> {
+        try {
+            const input = v.parse(chatRuntimeInputSchema, rawInput);
+            await this.#touchSubscription(input.sessionKey);
+            await this.#pruneStaleExternalRuns(input.sessionKey);
+            const durable = this.#repository.readRuntime(input);
+            const externalRuns = [
+                ...(this.#externalRuns.get(input.sessionKey)?.values() ?? []),
+            ].toSorted(compareExternalRuns);
+            return budgetExternalRuns(
+                durable,
+                externalRuns,
+                this.#externalTruncatedSessions.has(input.sessionKey)
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public async prepareAttachmentTicket(
+        rawInput: ChatAttachmentTicketPrepareInput,
+        actorId: string,
+        signal?: AbortSignal
+    ): Promise<ChatAttachmentTicketPrepareOutput> {
+        try {
+            const input = v.parse(chatAttachmentTicketPrepareInputSchema, rawInput);
+            return v.parse(
+                chatAttachmentTicketPrepareOutputSchema,
+                await this.#attachmentPreparer.prepare(input, actorId, signal)
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public async send(
+        rawInput: ChatSendInput,
+        actor: ChatAdmissionActor,
+        signal?: AbortSignal
+    ): Promise<ChatSendOutput> {
+        const input = v.parse(chatSendInputSchema, rawInput);
+        let admission;
+        try {
+            admission = await this.#repository.admit(input, actor);
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+        if (admission.admission === "replayed") {
+            return v.parse(chatSendOutputSchema, admission);
+        }
+        try {
+            await this.#subscriptions.touch(input.sessionKey);
+        } catch (error) {
+            await this.#terminalFailure(
+                input.clientRunId,
+                "subscription_unavailable",
+                "Chat runtime subscription could not be established before dispatch"
+            );
+            throw this.#serviceFailure(error);
+        }
+        let reservation: ChatAttachmentTicketReservation | undefined;
+        if (input.attachmentTicketId !== undefined) {
+            try {
+                reservation = await this.#attachmentConsumer.reserve(
+                    {
+                        actorId: actor.id,
+                        idempotencyKey: input.idempotencyKey,
+                        sessionKey: input.sessionKey,
+                        ticketId: input.attachmentTicketId,
+                    },
+                    signal
+                );
+            } catch (error) {
+                await this.#terminalFailure(
+                    input.clientRunId,
+                    "attachment_unavailable",
+                    "Chat attachments could not be recovered for dispatch"
+                );
+                throw this.#serviceFailure(error);
+            }
+        }
+        let dispatch;
+        try {
+            dispatch = await this.#repository.beginDispatch(input.clientRunId);
+        } catch (error) {
+            try {
+                await reservation?.release();
+            } catch (releaseError) {
+                this.#reportAsyncFailure(releaseError);
+            }
+            await this.#terminalFailure(
+                input.clientRunId,
+                "dispatch_admission_failed",
+                "Chat dispatch could not be durably admitted"
+            );
+            throw this.#serviceFailure(error);
+        }
+        if (!dispatch.shouldDispatch) {
+            await reservation?.release();
+            return v.parse(chatSendOutputSchema, {
+                admission: "replayed",
+                run: dispatch.run,
+            });
+        }
+        if (reservation !== undefined) {
+            this.#pendingReservations.set(input.clientRunId, {
+                reservation,
+                settlement: "hold",
+            });
+        }
+        let acknowledgement;
+        try {
+            acknowledgement = await this.#provider.send(
+                {
+                    attachments: reservation?.attachments ?? [],
+                    ...(input.settings?.fastMode === undefined
+                        ? {}
+                        : { fastMode: input.settings.fastMode }),
+                    idempotencyKey: input.idempotencyKey,
+                    message: input.message,
+                    ...(input.queueMode === undefined
+                        ? {}
+                        : { queueMode: input.queueMode }),
+                    sessionKey: input.sessionKey,
+                    ...(input.settings?.thinkingLevel === undefined
+                        ? {}
+                        : { thinking: input.settings.thinkingLevel }),
+                },
+                signal
+            );
+        } catch (error) {
+            if (error instanceof ChatProviderUnknownOutcomeError) {
+                try {
+                    await this.#repository.markOutcomeUnknown(input.clientRunId);
+                } finally {
+                    // Dispatch was attempted and cannot safely be retried. Consume the
+                    // one-shot ticket and free raw/base64 bytes before reconciliation.
+                    await this.#settleReservation(input.clientRunId, "commit");
+                    this.#startReconciliation(input.clientRunId);
+                }
+                throw new ChatServiceError("unknown-outcome", { cause: error });
+            }
+            try {
+                await this.#terminalFailure(
+                    input.clientRunId,
+                    "dispatch_failed",
+                    "Chat provider dispatch failed before acknowledgement"
+                );
+            } finally {
+                await this.#settleReservation(input.clientRunId, "release");
+            }
+            throw this.#serviceFailure(error);
+        }
+        let run;
+        try {
+            run = await this.#repository.acknowledgeDispatch(
+                input.clientRunId,
+                acknowledgement.runId
+            );
+        } catch (error) {
+            // The provider ACK proves the attachment was dispatched even if the
+            // local acknowledgement transaction failed.
+            await this.#settleReservation(input.clientRunId, "commit");
+            try {
+                await this.#repository.markOutcomeUnknown(input.clientRunId);
+            } finally {
+                this.#startReconciliation(input.clientRunId);
+            }
+            throw new ChatServiceError("unknown-outcome", { cause: error });
+        }
+        await this.#settleReservation(input.clientRunId, "commit");
+        return v.parse(chatSendOutputSchema, {
+            admission: "created",
+            run,
+        });
+    }
+
+    async #abortOnce(
+        input: ChatAbortInput,
+        signal?: AbortSignal
+    ): Promise<ChatAbortOutput> {
+        await this.#touchSubscription(input.sessionKey);
+        let cancellation;
+        try {
+            cancellation = await this.#repository.requestCancellation(
+                input.runId,
+                input.sessionKey
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+        if (!cancellation.shouldDispatch) {
+            return v.parse(chatAbortOutputSchema, {
+                aborted: cancellation.run.state === "cancelled",
+                run: cancellation.run,
+            });
+        }
+        if (this.#abortAcknowledgedRuns.has(input.runId)) {
+            return v.parse(chatAbortOutputSchema, {
+                aborted: cancellation.run.state === "cancelled",
+                run: cancellation.run,
+            });
+        }
+        const intent = this.#repository.readIntent(input.runId);
+        if (intent === undefined) {
+            throw new ChatServiceError("not-found");
+        }
+        if (!intent.dispatchAttempted) {
+            const terminal = await this.#repository.appendEvents(input.runId, [
+                {
+                    kind: "terminal",
+                    occurredAtMs: this.#nowMs(),
+                    outcome: "aborted",
+                },
+            ]);
+            return v.parse(chatAbortOutputSchema, {
+                aborted: true,
+                run: terminal.run,
+            });
+        }
+        try {
+            const acknowledgement = await this.#provider.abort(
+                {
+                    preserveSideRuns: false,
+                    providerRunId:
+                        intent.run.providerRunId ?? intent.request.idempotencyKey,
+                    sessionKey: input.sessionKey,
+                },
+                signal
+            );
+            this.#abortAcknowledgedRuns.add(input.runId);
+            // Both true and false acknowledgements are only point-in-time control
+            // results. Provider completion/history remains authoritative.
+            this.#startReconciliation(input.runId);
+            return v.parse(chatAbortOutputSchema, {
+                aborted: acknowledgement.aborted,
+                run: this.#repository.findRun(input.runId) ?? cancellation.run,
+            });
+        } catch (error) {
+            if (error instanceof ChatProviderUnknownOutcomeError) {
+                await this.#repository.markOutcomeUnknown(input.runId);
+                this.#abortAcknowledgedRuns.add(input.runId);
+                this.#startReconciliation(input.runId);
+                throw new ChatServiceError("unknown-outcome", {
+                    cause: error,
+                });
+            }
+            // A definitive transport rejection is safe to retry, while history
+            // reconciliation prevents a durable cancel-requested row from stranding.
+            this.#startReconciliation(input.runId);
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public abort(
+        rawInput: ChatAbortInput,
+        signal?: AbortSignal
+    ): Promise<ChatAbortOutput> {
+        let input: ChatAbortInput;
+        try {
+            input = v.parse(chatAbortInputSchema, rawInput);
+        } catch (error) {
+            return Promise.reject(
+                new ChatServiceError("invalid-input", { cause: error })
+            );
+        }
+        const operationKey = JSON.stringify([input.runId, input.sessionKey]);
+        const current = this.#abortOperations.get(operationKey);
+        if (current !== undefined) return current;
+        const operation = this.#abortOnce(input, signal);
+        this.#abortOperations.set(operationKey, operation);
+        const clearOperation = (): void => {
+            if (this.#abortOperations.get(operationKey) === operation) {
+                this.#abortOperations.delete(operationKey);
+            }
+        };
+        void operation.then(clearOperation, clearOperation);
+        return operation;
+    }
+
+    public async listModels(
+        rawInput: ChatModelsListInput,
+        signal?: AbortSignal
+    ): Promise<ChatModelsListOutput> {
+        v.parse(chatModelsListInputSchema, rawInput);
+        try {
+            return v.parse(
+                chatModelsListOutputSchema,
+                await this.#provider.listModels(
+                    { includeProviderCapabilities: true, view: "configured" },
+                    signal
+                )
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public async updateSessionSettings(
+        rawInput: ChatSessionSettingsInput,
+        signal?: AbortSignal
+    ): Promise<ChatSessionSettingsOutput> {
+        const input = v.parse(chatSessionSettingsInputSchema, rawInput);
+        try {
+            return v.parse(
+                chatSessionSettingsOutputSchema,
+                await this.#provider.updateSessionSettings(input, signal)
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public async companionState(
+        rawInput: ChatCompanionStateInput,
+        signal?: AbortSignal
+    ): Promise<ChatCompanionStateOutput> {
+        const input = v.parse(chatCompanionStateInputSchema, rawInput);
+        try {
+            return v.parse(
+                chatCompanionStateOutputSchema,
+                await this.#provider.companionState(input, signal)
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    async #runCompanionAsk(
+        input: ChatCompanionAskInput,
+        generation: number,
+        signal?: AbortSignal
+    ): Promise<ChatCompanionAskOutput> {
+        try {
+            const output = v.parse(
+                chatCompanionAskOutputSchema,
+                await this.#provider.companionAsk(input, signal)
+            );
+            if (this.#companionGeneration(input.sessionKey) !== generation) {
+                throw new ChatServiceError("conflict");
+            }
+            return output;
+        } catch (error) {
+            if (this.#companionGeneration(input.sessionKey) !== generation) {
+                throw new ChatServiceError("conflict", { cause: error });
+            }
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    #companionActorKey(actor: ChatAdmissionActor): string {
+        return `${actor.kind}:${actor.id}`;
+    }
+
+    #admitCompanionRate(actor: ChatAdmissionActor): void {
+        const now = this.#nowMs();
+        const cutoff = now - chatCompanionAskRateWindowMilliseconds;
+        for (const [actorKey, timestamps] of this.#companionRateWindows) {
+            const retained = timestamps.filter((timestamp) => timestamp > cutoff);
+            if (retained.length === 0) {
+                this.#companionRateWindows.delete(actorKey);
+            } else if (retained.length !== timestamps.length) {
+                this.#companionRateWindows.set(actorKey, retained);
+            }
+        }
+        const actorKey = this.#companionActorKey(actor);
+        const timestamps = this.#companionRateWindows.get(actorKey) ?? [];
+        if (
+            timestamps.length >= chatCompanionAskActorWindowMaximum ||
+            (timestamps.length === 0 &&
+                this.#companionRateWindows.size >= chatCompanionRateActorMaximum)
+        ) {
+            throw new ChatServiceError("capacity");
+        }
+        this.#companionRateWindows.set(actorKey, [...timestamps, now]);
+    }
+
+    #releaseCompanionAsk(sessionKey: string, admission: ChatCompanionAskAdmission): void {
+        if (admission.released) return;
+        admission.released = true;
+        this.#companionAskCount -= 1;
+        if (this.#companionAsks.get(sessionKey) === admission) {
+            this.#companionAsks.delete(sessionKey);
+        }
+    }
+
+    public companionAsk(
+        rawInput: ChatCompanionAskInput,
+        actor: ChatAdmissionActor,
+        signal?: AbortSignal
+    ): Promise<ChatCompanionAskOutput> {
+        const input = v.parse(chatCompanionAskInputSchema, rawInput);
+        if (
+            this.#disposed ||
+            this.#companionAsks.has(input.sessionKey) ||
+            this.#companionResets.has(input.sessionKey) ||
+            this.#companionAskCount >= chatCompanionAskProcessMaximum
+        ) {
+            return Promise.reject(new ChatServiceError("capacity"));
+        }
+        try {
+            this.#admitCompanionRate(actor);
+        } catch (error) {
+            return Promise.reject(this.#serviceFailure(error));
+        }
+        this.#companionAskCount += 1;
+        const controller = new AbortController();
+        const generation = this.#companionGeneration(input.sessionKey);
+        const combinedSignal =
+            signal === undefined
+                ? controller.signal
+                : AbortSignal.any([signal, controller.signal]);
+        const operation = this.#runCompanionAsk(input, generation, combinedSignal);
+        const admission: ChatCompanionAskAdmission = {
+            controller,
+            generation,
+            promise: operation,
+            released: false,
+        };
+        this.#companionAsks.set(input.sessionKey, admission);
+        const release = (): undefined => {
+            this.#releaseCompanionAsk(input.sessionKey, admission);
+            return undefined;
+        };
+        void operation.then(release, release);
+        return operation;
+    }
+
+    async #runCompanionReset(
+        input: ChatCompanionResetInput,
+        signal?: AbortSignal
+    ): Promise<ChatCompanionResetOutput> {
+        if (this.#disposed) throw new ChatServiceError("provider-unavailable");
+        try {
+            return v.parse(
+                chatCompanionResetOutputSchema,
+                await this.#provider.companionReset(input, signal)
+            );
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+
+    public companionReset(
+        rawInput: ChatCompanionResetInput,
+        signal?: AbortSignal
+    ): Promise<ChatCompanionResetOutput> {
+        const input = v.parse(chatCompanionResetInputSchema, rawInput);
+        const current = this.#companionResets.get(input.sessionKey);
+        if (current !== undefined) return current;
+        if (this.#disposed) {
+            return Promise.reject(new ChatServiceError("provider-unavailable"));
+        }
+        const operation = this.#runCompanionReset(input, signal);
+        this.#companionResets.set(input.sessionKey, operation);
+        const releaseReset = (): undefined => {
+            if (this.#companionResets.get(input.sessionKey) === operation) {
+                this.#companionResets.delete(input.sessionKey);
+            }
+            return undefined;
+        };
+        void operation.then(() => {
+            this.#invalidateCompanionGeneration(input.sessionKey);
+            return releaseReset();
+        }, releaseReset);
+        return operation;
+    }
+
+    async #recoverTranscriptFences(signal?: AbortSignal): Promise<void> {
+        for (const transcript of this.#repository.listReconcilingTranscripts()) {
+            signal?.throwIfAborted();
+            const candidates = this.#repository.listTranscriptRecoveryCandidates(
+                transcript.sessionKey
+            );
+            let history: Readonly<{
+                inFlightRun?: ChatProviderInFlightRun;
+                messages: readonly ChatMessage[];
+                sessionId?: string;
+            }>;
+            try {
+                history = await this.#readReconciliationHistory(
+                    transcript.sessionKey,
+                    signal
+                );
+            } catch (error) {
+                this.#reportAsyncFailure(error);
+                continue;
+            }
+            const represented =
+                candidates.length > 0 &&
+                candidates.every((candidate) => {
+                    if (!candidate.dispatchAttempted) return false;
+                    const final = history.messages.some((message) =>
+                        messageMatchesRun(
+                            message,
+                            candidate.run.id,
+                            candidate.run.providerRunId,
+                            candidate.request.idempotencyKey
+                        )
+                    );
+                    const inFlight = history.inFlightRun;
+                    return (
+                        final ||
+                        (inFlight !== undefined &&
+                            (inFlight.runId === candidate.run.providerRunId ||
+                                inFlight.runId === candidate.request.idempotencyKey))
+                    );
+                });
+            const observedAtMs = this.#nowMs();
+            let providerUpdatedAtMs = 0;
+            for (const message of history.messages) {
+                providerUpdatedAtMs = Math.max(
+                    providerUpdatedAtMs,
+                    message.createdAtMs ?? 0
+                );
+            }
+            const input = {
+                ...(history.sessionId === undefined
+                    ? {}
+                    : { providerSessionId: history.sessionId }),
+                ...(providerUpdatedAtMs === 0 ? {} : { providerUpdatedAtMs }),
+                represented,
+                sessionKey: transcript.sessionKey,
+                observedAtMs,
+            };
+            await (this.#transcriptLifecycle === undefined
+                ? this.#repository.reconcileTranscript(input)
+                : this.#transcriptLifecycle.reconcile(input));
+        }
+    }
+
+    public async recover(signal?: AbortSignal): Promise<void> {
+        await this.#recoverTranscriptFences(signal);
+        for (const candidate of this.#repository.listRecoveryCandidates()) {
+            await this.#subscriptions.touch(candidate.run.sessionKey);
+            if (!candidate.dispatchAttempted) {
+                await this.#terminalFailure(
+                    candidate.run.id,
+                    "recovery_before_dispatch",
+                    "Chat run could not safely resume before provider dispatch"
+                );
+                continue;
+            }
+            if (
+                this.#nowMs() >=
+                candidate.run.admittedAtMs + reconciliationLifecycleMilliseconds
+            ) {
+                await this.#settleReconciliationDeadline(candidate.run.id);
+                continue;
+            }
+            const complete = await this.#reconcileSingleFlight(candidate.run.id);
+            if (!complete && signal?.aborted !== true) {
+                this.#startReconciliation(candidate.run.id);
+            }
+        }
+    }
+
+    public sweepSubscriptions(atMs?: number): Promise<number> {
+        return this.#subscriptions.sweep(atMs);
+    }
+
+    public async sweepRetention(at?: Date): Promise<number> {
+        let removed = 0;
+        for (let batch = 0; batch < chatRetentionSweepMaximumBatches; batch += 1) {
+            const count = await this.#repository.pruneExpired(
+                at,
+                chatRetentionSweepBatchSize
+            );
+            removed += count;
+            if (count < chatRetentionSweepBatchSize) break;
+        }
+        return removed;
+    }
+
+    public async dispose(): Promise<void> {
+        if (this.#disposed) return;
+        this.#disposed = true;
+        this.#unsubscribeTranscriptLifecycle?.();
+        for (const handle of this.#reconciliationTimers.values()) {
+            this.#recoveryScheduler.clear(handle);
+        }
+        this.#reconciliationTimers.clear();
+        await Promise.all(
+            [...this.#coalescers.values()].map((coalescer) =>
+                coalescer.close().catch((error: unknown) => {
+                    this.#reportAsyncFailure(error);
+                })
+            )
+        );
+        this.#coalescers.clear();
+        await Promise.all(
+            [...this.#externalCoalescers.values()].map((coalescer) =>
+                coalescer.close().catch((error: unknown) => {
+                    this.#reportAsyncFailure(error);
+                })
+            )
+        );
+        this.#externalCoalescers.clear();
+        for (const [localRunId, pending] of this.#pendingReservations) {
+            if (pending.settlement === "hold") continue;
+            await this.#settleReservation(localRunId, pending.settlement);
+        }
+        this.#pendingReservations.clear();
+        this.#companionRateWindows.clear();
+        for (const admission of this.#companionAsks.values()) {
+            admission.controller.abort();
+        }
+        this.#companionAsks.clear();
+        this.#companionAskCount = 0;
+        this.#companionGenerations.clear();
+        this.#externalRuns.clear();
+        this.#externalTruncatedSessions.clear();
+        await this.#subscriptions.dispose();
+    }
+
+    #serviceFailure(error: unknown): ChatServiceError {
+        if (error instanceof ChatServiceError) return error;
+        if (error instanceof v.ValiError) {
+            return new ChatServiceError("invalid-input", { cause: error });
+        }
+        if (error instanceof ChatAttachmentTicketError) {
+            if (error.reason === "capacity") {
+                return new ChatServiceError("capacity", { cause: error });
+            }
+            if (error.reason === "unavailable") {
+                return new ChatServiceError("provider-unavailable", { cause: error });
+            }
+            return new ChatServiceError("invalid-input", { cause: error });
+        }
+        if (
+            error instanceof ChatAdmissionCapacityError ||
+            error instanceof ChatProviderCapacityError ||
+            error instanceof ChatSubscriptionCapacityError
+        ) {
+            return new ChatServiceError("capacity", { cause: error });
+        }
+        if (
+            error instanceof ChatAdmissionConflictError ||
+            error instanceof ChatProviderConflictError ||
+            error instanceof ChatProviderSequenceConflictError ||
+            error instanceof ChatProviderSequenceGapError ||
+            error instanceof ChatRunTransitionError ||
+            error instanceof ChatTranscriptUnavailableError
+        ) {
+            return new ChatServiceError("conflict", { cause: error });
+        }
+        if (
+            error instanceof ChatRunNotFoundError ||
+            error instanceof ChatProviderNotFoundError
+        ) {
+            return new ChatServiceError("not-found", { cause: error });
+        }
+        if (error instanceof ChatProviderUnknownOutcomeError) {
+            return new ChatServiceError("unknown-outcome", { cause: error });
+        }
+        if (error instanceof ChatProviderUnavailableError) {
+            return new ChatServiceError("provider-unavailable", { cause: error });
+        }
+        return new ChatServiceError("provider-unavailable", { cause: error });
+    }
+
+    async #touchSubscription(sessionKey: string): Promise<void> {
+        try {
+            await this.#subscriptions.touch(sessionKey);
+        } catch (error) {
+            throw this.#serviceFailure(error);
+        }
+    }
+}
+
+export function createChatService(options: ChatServiceOptions): ChatService {
+    return new ChatServiceImplementation(options);
+}

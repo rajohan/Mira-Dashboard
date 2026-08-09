@@ -47,6 +47,9 @@ describe("generated contract documentation", () => {
         expect(configurationDocumentation).toContain(
             "| `MIRA_DASHBOARD_TOTP_KEYRING` | `totpKeyring` | `json-secret`; values withheld | Version 1 JSON with one to eight unique AES-256 keys and one active key, at most 4096 code units. | Required; value withheld | `web` | Yes | Presence only |"
         );
+        expect(configurationDocumentation).toContain(
+            "| `ELEVENLABS_API_KEY` | `elevenLabsApiKey` | `opaque-secret`; values withheld | When present, a trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Optional; no default | `web` | Yes | None |"
+        );
         const procedureDocumentation = first.get("procedures.md");
         expect(procedureDocumentation).toContain("`auth.bootstrap`");
         expect(procedureDocumentation).toContain("`auth.changePassword`");
@@ -81,6 +84,15 @@ describe("generated contract documentation", () => {
             "| `openClawCron.run` | mutation | openclaw-cron | Authenticated browser session: jobs:write; MFA enrollment required; recent MFA when enabled |"
         );
         expect(procedureDocumentation).toContain(
+            "| `chat.send` | mutation | chat | Authenticated: chat:write |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `chat.companionAsk` | mutation | chat | Authenticated: chat:write |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `openClawTasks.cancel` | mutation | openClawTasks | Authenticated: openclaw-tasks:write |"
+        );
+        expect(procedureDocumentation).toContain(
             "| None | None | Returns bootstrap, pending MFA"
         );
         expect(procedureDocumentation).toContain("`events.stream`");
@@ -90,16 +102,34 @@ describe("generated contract documentation", () => {
         expect(procedureDocumentation).toContain("`system.runtimeIdentity`");
         const rawHttpDocumentation = first.get("raw-http.md");
         expect(rawHttpDocumentation).toContain(
-            "| GET | `/api/health/live` | Public | 200 | [response]"
+            "| GET | `/api/health/live` | Public | 200 | No body | [schema]"
         );
         expect(rawHttpDocumentation).toContain(
-            "| HEAD | `/api/health/live` | Public | 200 | No body |"
+            "| HEAD | `/api/health/live` | Public | 200 | No body | No body | None |"
         );
         expect(rawHttpDocumentation).toContain(
-            "| GET | `/api/health/ready` | Public | 200, 503 | [response]"
+            "| GET | `/api/health/ready` | Public | 200, 503 | No body | [schema]"
         );
         expect(rawHttpDocumentation).toContain(
-            "| HEAD | `/api/health/ready` | Public | 200, 503 | No body |"
+            "| HEAD | `/api/health/ready` | Public | 200, 503 | No body | No body | None |"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| PUT | `/api/chat/attachments/:ticketId/:attachmentId` | Authenticated: chat:write | 204, 400, 401, 403, 404, 405, 408, 429 | Buffered binary, at most 16777216 bytes"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| GET | `/api/chat/media/:attachmentId?disposition={download,preview}` | Authenticated: chat:read | 200, 206, 400, 401, 403, 404, 405, 415, 416, 429, 502 | No body | Buffered binary, at most 16777216 bytes — `*/*` | Single byte range |"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| HEAD | `/api/chat/media/:attachmentId?disposition={download,preview}` | Authenticated: chat:read | 200, 206, 400, 401, 403, 404, 405, 415, 416, 429, 502 | No body | No body | Single byte range |"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| GET | `/api/chat/speech/capabilities` | Authenticated | 200, 400, 401, 403, 404, 405 | No body | [schema](./schemas/chat.speech.capabilities.output.schema.json) — `application/json` | None |"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| POST | `/api/chat/speech/transcribe` | Authenticated: chat:write | 200, 400, 401, 403, 404, 405, 408, 413, 415, 429, 502, 503, 504 | Buffered binary, at most 8388608 bytes"
+        );
+        expect(rawHttpDocumentation).toContain(
+            "| POST | `/api/chat/speech/synthesize` | Authenticated: chat:write | 200, 400, 401, 403, 404, 405, 408, 413, 415, 429, 502, 503, 504 | [schema](./schemas/chat.speech.synthesize.input.schema.json) — `application/json` | Buffered binary, at most 8388608 bytes — `audio/mpeg` | None |"
         );
         const realtimeDocumentation = first.get("realtime-events.md");
         for (const [topic, snapshot, idSchema] of [
@@ -200,9 +230,12 @@ describe("generated contract documentation", () => {
             });
         }
         for (const [topic, snapshot] of [
+            ["chat.history", "chat.history"],
+            ["chat.runtime", "chat.runtime"],
             ["gateway.connection", "gateway.connection.get"],
             ["gateway.sessions", "gatewaySessions.list"],
             ["openclaw-cron.records", "openClawCron.list"],
+            ["openclaw.tasks", "openClawTasks.list"],
         ] as const) {
             expect(realtimeDocumentation).toContain(
                 `| \`${topic}\` | [payload](./schemas/${topic}.realtime.payload.schema.json) | \`${snapshot}\` | 7 days |`

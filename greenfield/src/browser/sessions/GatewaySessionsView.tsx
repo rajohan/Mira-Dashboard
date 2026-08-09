@@ -1,4 +1,4 @@
-import { Radio, RefreshCw, Unplug } from "lucide-react";
+import { Radio, Unplug } from "lucide-react";
 import { useRef, useState } from "react";
 
 import type {
@@ -18,7 +18,6 @@ import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
     gatewaySessionConfirmationCopy,
@@ -42,8 +41,6 @@ export interface GatewaySessionsViewProps {
         session: GatewaySession
     ) => Promise<GatewaySessionActionResult>;
     readonly onReconcileUnknown?: () => Promise<boolean>;
-    readonly onRefresh?: () => void;
-    readonly refreshBusy?: boolean;
     readonly snapshot: ListGatewaySessionsResult;
 }
 
@@ -80,8 +77,6 @@ export function GatewaySessionsView({
     backgroundUnavailable = false,
     onAction,
     onReconcileUnknown,
-    onRefresh,
-    refreshBusy = false,
     snapshot,
 }: GatewaySessionsViewProps) {
     const [filter, setFilter] = useState<GatewaySessionFilter>("ALL");
@@ -107,10 +102,10 @@ export function GatewaySessionsView({
     let reconciliationError: string | undefined;
     if (reconciliationState === "refreshing") {
         reconciliationError =
-            "The action outcome could not be confirmed. Refreshing the current projection before another action is allowed.";
+            "The action outcome could not be confirmed. Reconciling the current projection before another action is allowed.";
     } else if (reconciliationState === "failed") {
         reconciliationError =
-            "The action outcome could not be confirmed, and the current projection could not be refreshed. Retry refresh before another action.";
+            "The action outcome could not be confirmed, and reconciliation failed. Retry reconciliation before another action.";
     }
 
     function restoreActionFocus(action: PendingGatewaySessionAction) {
@@ -125,7 +120,7 @@ export function GatewaySessionsView({
     function closeConfirmation() {
         const action = pendingAction;
         setPendingAction(undefined);
-        setReconciliationState(undefined);
+        if (!unknownOutcomeBlocked) setReconciliationState(undefined);
         if (action !== undefined) restoreActionFocus(action);
     }
 
@@ -148,7 +143,7 @@ export function GatewaySessionsView({
         setReconciliationState(undefined);
         setPendingAction(undefined);
         setStatusMessage(
-            "Current projection refreshed. Review the session before choosing another action."
+            "Current projection reconciled. Review the session before choosing another action."
         );
         if (action !== undefined) restoreActionFocus(action);
     }
@@ -201,23 +196,20 @@ export function GatewaySessionsView({
                             </time>
                             . Statistics describe these same bounded rows.
                         </Text>
+                        <Text className="mt-1" size="sm" tone="muted">
+                            Updates automatically every 10 seconds and after Gateway
+                            session events.
+                        </Text>
                     </div>
-                    {onRefresh !== undefined && (
+                    {unknownOutcomeBlocked && pendingAction === undefined && (
                         <Button
-                            busy={refreshBusy || reconciliationState === "refreshing"}
-                            busyLabel="Refreshing…"
-                            onClick={() => {
-                                if (unknownOutcomeBlocked) {
-                                    void reconcileUnknownOutcome(undefined);
-                                    return;
-                                }
-                                onRefresh?.();
-                            }}
+                            busy={reconciliationState === "refreshing"}
+                            busyLabel="Reconciling…"
+                            onClick={() => void reconcileUnknownOutcome(undefined)}
                             size="sm"
                             variant="secondary"
                         >
-                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                            Refresh
+                            Retry reconciliation
                         </Button>
                     )}
                 </div>
@@ -306,6 +298,10 @@ export function GatewaySessionsView({
                     variant="error"
                 />
             )}
+            <Alert
+                focusOnError={false}
+                message={pendingAction === undefined ? reconciliationError : undefined}
+            />
             <Alert focusOnError={false} message={actionError} />
             <div aria-atomic="true" aria-live="polite">
                 <Alert
@@ -409,7 +405,7 @@ export function GatewaySessionsView({
                 }
                 open={pendingAction !== undefined}
                 retryBusy={reconciliationState === "refreshing"}
-                retryLabel="Retry refresh"
+                retryLabel="Retry reconciliation"
                 title={confirmation?.title ?? "Confirm session action"}
             />
         </div>

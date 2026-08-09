@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { Redacted } from "effect";
+
 import { rejectionError } from "../../scripts/testSupport/rejection.ts";
 import { testTotpSecretCipher } from "../server/domains/security/testSupport/authentication.ts";
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
@@ -56,6 +58,7 @@ const serializedKeyring = JSON.stringify({
 
 const processOptions = Object.freeze({
     configurationSource: {
+        ELEVENLABS_API_KEY: "elevenlabs-api-key-test-value",
         MIRA_DASHBOARD_LOG_LEVEL: "debug",
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
@@ -125,6 +128,9 @@ function processFixture(totpFailure?: Error) {
             expect(options.applicationRuntime).toBe(observedRuntime);
             expect(options.readiness.isReady()).toBe(false);
             expect(options.browserOrigin).toBe("https://dashboard.example.com");
+            expect(Redacted.value(options.elevenLabsApiKey!)).toBe(
+                "elevenlabs-api-key-test-value"
+            );
             expect(options.frontendAssets).toBeFunction();
             expect(options.port).toBe(3100);
             events.push("server-create");

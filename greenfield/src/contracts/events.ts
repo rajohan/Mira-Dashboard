@@ -15,6 +15,14 @@ import {
     cacheRealtimeTopicDefinition,
 } from "./cacheRealtime.ts";
 import {
+    chatHistoryRealtimeChangeSchema,
+    chatHistoryRealtimeTopic,
+    chatHistoryRealtimeTopicDefinition,
+    chatRealtimeChangeSchema,
+    chatRealtimeTopic,
+    chatRealtimeTopicDefinition,
+} from "./chatRealtime.ts";
+import {
     gatewayRealtimeChangeSchemas,
     gatewayRealtimeTopicDefinitions,
     gatewayRealtimeTopics,
@@ -29,6 +37,11 @@ import {
     monitoringRealtimeTopicDefinitions,
     monitoringRealtimeTopics,
 } from "./monitoringRealtime.ts";
+import {
+    openClawTasksRealtimeChangeSchema,
+    openClawTasksRealtimeTopic,
+    openClawTasksRealtimeTopicDefinition,
+} from "./openClawTasksRealtime.ts";
 import { realtimeSubscriptionMaximumTopics } from "./realtime.ts";
 import type { ProcedureContract } from "./registry.ts";
 import type { ApplicationCapability } from "./security.ts";
@@ -42,9 +55,12 @@ import {
 export const realtimeTopicDefinitions = Object.freeze([
     agentRealtimeTopicDefinition,
     cacheRealtimeTopicDefinition,
+    chatHistoryRealtimeTopicDefinition,
+    chatRealtimeTopicDefinition,
     ...gatewayRealtimeTopicDefinitions,
     ...jobRealtimeTopicDefinitions,
     ...monitoringRealtimeTopicDefinitions,
+    openClawTasksRealtimeTopicDefinition,
     taskRealtimeTopicDefinition,
 ] as const);
 
@@ -61,9 +77,11 @@ export function findRealtimeTopicDefinition(topic: string) {
 export const realtimeStreamCapabilities = Object.freeze([
     "agents:read",
     "cache:read",
+    "chat:read",
     "gateway-sessions:read",
     "jobs:read",
     "notifications:read",
+    "openclaw-tasks:read",
     "reports:read",
     "tasks:read",
 ] as const satisfies readonly ApplicationCapability[]);
@@ -72,6 +90,8 @@ export const realtimeStreamCapabilities = Object.freeze([
 export const realtimeStreamTopics = Object.freeze([
     agentRealtimeTopic,
     cacheRealtimeTopic,
+    chatHistoryRealtimeTopic,
+    chatRealtimeTopic,
     gatewayRealtimeTopics.connection,
     gatewayRealtimeTopics.cron,
     gatewayRealtimeTopics.sessions,
@@ -80,6 +100,7 @@ export const realtimeStreamTopics = Object.freeze([
     monitoringRealtimeTopics.incidents,
     monitoringRealtimeTopics.notifications,
     monitoringRealtimeTopics.reports,
+    openClawTasksRealtimeTopic,
     taskRealtimeTopic,
 ] as const);
 
@@ -116,9 +137,12 @@ export const realtimeStreamDataSchema = v.variant("kind", [
         event: v.union([
             agentRealtimeChangeSchema,
             cacheRealtimeChangeSchema,
+            chatHistoryRealtimeChangeSchema,
+            chatRealtimeChangeSchema,
             ...gatewayRealtimeChangeSchemas,
             ...jobRealtimeChangeSchemas,
             ...monitoringRealtimeChangeSchemas,
+            openClawTasksRealtimeChangeSchema,
             taskRealtimeChangeSchema,
         ]),
         kind: v.literal("change"),

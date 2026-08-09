@@ -1,12 +1,14 @@
 import type { RequestAuthentication } from "../../contracts/security.ts";
 import type { AgentService } from "../domains/agents/service.ts";
 import type { CacheService } from "../domains/cache/service.ts";
+import type { ChatService } from "../domains/chat/service.ts";
 import type { GatewayConnectionService } from "../domains/gatewayConnection/service.ts";
 import type { GatewaySessionsService } from "../domains/gatewaySessions/service.ts";
 import type { JobService } from "../domains/jobs/service.ts";
 import type { MonitoringCatalogService } from "../domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../domains/openClawCron/service.ts";
+import type { OpenClawTasksService } from "../domains/openClawTasks/service.ts";
 import type { AuthenticationLifecycleService } from "../domains/security/authenticationLifecycle.ts";
 import {
     type AuthenticationLease,
@@ -39,6 +41,7 @@ export interface RequestContextOptions {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticateCredential: AuthenticateCredential;
     readonly cacheService: CacheService["Service"];
+    readonly chatService?: ChatService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
@@ -47,6 +50,7 @@ export interface RequestContextOptions {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    readonly openClawTasksService?: OpenClawTasksService;
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly request: Request;
     readonly requestId: string;
@@ -64,6 +68,7 @@ export interface RequestContext {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly authenticationLease?: AuthenticationLease;
     readonly cacheService: CacheService["Service"];
+    readonly chatService?: ChatService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
@@ -72,6 +77,7 @@ export interface RequestContext {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    readonly openClawTasksService?: OpenClawTasksService;
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly requestId: string;
     readonly responseHeaders: Headers;
@@ -100,6 +106,9 @@ export async function createRequestContext(
         authenticationLifecycle: options.authenticationLifecycle,
         automationSecurityLifecycle: options.automationSecurityLifecycle,
         cacheService: options.cacheService,
+        ...(options.chatService === undefined
+            ? {}
+            : { chatService: options.chatService }),
         gatewayConnectionService: options.gatewayConnectionService,
         gatewaySessionsService: options.gatewaySessionsService,
         mfaAccountLifecycle: options.mfaAccountLifecycle,
@@ -108,6 +117,9 @@ export async function createRequestContext(
         monitoringCatalogService: options.monitoringCatalogService,
         monitoringService: options.monitoringService,
         openClawCronService: options.openClawCronService,
+        ...(options.openClawTasksService === undefined
+            ? {}
+            : { openClawTasksService: options.openClawTasksService }),
         ...(resolution.lease && { authenticationLease: resolution.lease }),
         pendingLoginCredential: options.pendingLoginCredential,
         requestId: options.requestId,

@@ -163,9 +163,9 @@ describe("OpenClawCronSection", () => {
         expect(
             screen.getByText(/separate from Dashboard schedules, durable queues/u)
         ).toBeInTheDocument();
-        expect(screen.getByRole("table", { name: "OpenClaw cron jobs" })).toBeVisible();
+        expect(screen.getByRole("list", { name: "OpenClaw cron jobs" })).toBeVisible();
         expect(
-            screen.getByRole("table", { name: "OpenClaw runs for Nightly report" })
+            screen.getByRole("list", { name: "OpenClaw runs for Nightly report" })
         ).toBeVisible();
         expect(
             screen.getByText(
@@ -174,6 +174,147 @@ describe("OpenClawCronSection", () => {
         ).toBeVisible();
         expect(screen.getByText("model-preview (bounded)")).toBeVisible();
         expect(screen.getByText("provider-preview (bounded)")).toBeVisible();
+        expect(
+            screen.getByText(
+                "Updates automatically every 10 seconds and after Gateway events."
+            )
+        ).toBeVisible();
+        expect(
+            screen.queryByRole("button", { name: "Refresh OpenClaw" })
+        ).not.toBeInTheDocument();
+    });
+
+    test("uses mobile-first cards and desktop grids without horizontal scrolling or field loss", async () => {
+        const actions = callbacks();
+        const longJobId = `cron-${"i".repeat(251)}`;
+        const longName = `Responsive ${"n".repeat(245)}`;
+        const longModel = "m".repeat(256);
+        const longProvider = "p".repeat(128);
+        const longSummary = "s".repeat(1000);
+        const responsiveJob = {
+            ...job,
+            id: longJobId,
+            name: longName,
+        } satisfies OpenClawCronJob;
+        const responsiveRuns = {
+            ...runs,
+            runs: [
+                {
+                    ...runs.runs[0],
+                    jobId: longJobId,
+                    model: longModel,
+                    modelTruncated: false,
+                    provider: longProvider,
+                    providerTruncated: false,
+                    summary: longSummary,
+                },
+            ],
+        } satisfies ListOpenClawCronRunsResult;
+
+        render(
+            <OpenClawCronSectionView
+                {...actions}
+                runs={responsiveRuns}
+                state={{ result: resultWithJobs([responsiveJob]), status: "ready" }}
+            />
+        );
+
+        const section = screen.getByRole("region", { name: "OpenClaw cron" });
+        const inventory = within(section).getByRole("list", {
+            name: "OpenClaw cron jobs",
+        });
+        const history = within(section).getByRole("list", {
+            name: `OpenClaw runs for ${longName}`,
+        });
+        expect(inventory).toHaveClass("grid-cols-1", "min-w-0", "max-w-full");
+        expect(history).toHaveClass("grid-cols-1", "min-w-0", "max-w-full");
+        expect(history.querySelector("dl")).toHaveClass(
+            "sm:grid-cols-2",
+            "lg:grid-cols-3"
+        );
+        expect(
+            [...section.querySelectorAll<HTMLElement>("*")].some((element) =>
+                /(?:^|\s)overflow-x-(?:auto|scroll)(?:\s|$)/u.test(element.className)
+            )
+        ).toBe(false);
+        expect(section.querySelector(".min-w-224, .min-w-240")).toBeNull();
+
+        for (const label of [
+            "Gateway state",
+            "Dashboard sync",
+            "Schedule",
+            "Last run",
+            "Next run",
+            "Last status",
+        ]) {
+            expect(within(inventory).getByText(label)).toBeVisible();
+        }
+        for (const label of [
+            "Completed",
+            "Status",
+            "Delivery",
+            "Duration",
+            "Model",
+            "Provider",
+            "Summary",
+        ]) {
+            expect(within(history).getByText(label)).toBeVisible();
+        }
+        expect(within(inventory).getByText(longJobId)).toHaveClass("wrap-anywhere");
+        const detailHeading = within(section).getByRole("heading", {
+            level: 3,
+            name: longName,
+        });
+        const identity = detailHeading.parentElement;
+        const detailHeader = identity?.parentElement;
+        expect(identity).toHaveClass("w-full", "min-w-0", "sm:flex-1");
+        expect(detailHeader).toHaveClass(
+            "min-w-0",
+            "flex-col",
+            "sm:flex-row",
+            "sm:justify-between"
+        );
+        const statusGroup = within(section).getByRole("region", {
+            name: "Cron job status",
+        });
+        expect(statusGroup).toHaveClass(
+            "w-full",
+            "min-w-0",
+            "flex-wrap",
+            "sm:w-auto",
+            "sm:shrink-0"
+        );
+        for (const badge of statusGroup.children) {
+            expect(badge).toHaveClass("shrink-0", "whitespace-nowrap");
+        }
+        const definition = detailHeader?.parentElement?.querySelector("dl");
+        expect(definition).toHaveClass("grid-cols-1", "sm:grid-cols-2", "lg:grid-cols-3");
+        const actionGroup = within(section).getByRole("toolbar", {
+            name: "Cron job actions",
+        });
+        expect(actionGroup).toHaveClass("flex-col", "sm:flex-row", "sm:flex-wrap");
+        for (const action of within(actionGroup).getAllByRole("button")) {
+            expect(action).toHaveClass("w-full", "sm:w-auto");
+        }
+        expect(within(history).getByText(longModel)).toHaveClass("wrap-anywhere");
+        expect(within(history).getByText(longProvider)).toHaveClass("wrap-anywhere");
+        expect(within(history).getByText(longSummary)).toHaveClass("wrap-anywhere");
+
+        await userEvent.click(within(section).getByRole("button", { name: "Run now" }));
+        const dialog = screen.getByRole("dialog", { name: "Run OpenClaw cron job" });
+        const description = within(dialog).getByText(
+            `Request an immediate Gateway run for ${longName}? This is not a Dashboard job run.`
+        );
+        expect(description).toHaveClass("wrap-anywhere");
+        const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+        expect(cancel.parentElement).toHaveClass(
+            "flex-col",
+            "sm:flex-row",
+            "sm:flex-wrap"
+        );
+        for (const button of within(cancel.parentElement!).getAllByRole("button")) {
+            expect(button).toHaveClass("w-full", "sm:w-auto");
+        }
     });
 
     test("marks omitted agent and delivery metadata as an incomplete definition", () => {
@@ -217,10 +358,10 @@ describe("OpenClawCronSection", () => {
             />
         );
 
-        const rows = within(
-            screen.getByRole("table", { name: "OpenClaw cron jobs" })
-        ).getAllByRole("row");
-        expect(rows.slice(1).map((row) => row.textContent)).toEqual([
+        const cards = within(
+            screen.getByRole("list", { name: "OpenClaw cron jobs" })
+        ).getAllByRole("listitem");
+        expect(cards.map((card) => card.textContent)).toEqual([
             expect.stringContaining("Beta"),
             expect.stringContaining("Zulu"),
             expect.stringContaining("Alpha"),
@@ -384,11 +525,18 @@ describe("OpenClawCronSection", () => {
         expect(screen.queryByText(/private/u)).not.toBeInTheDocument();
 
         onReconcile.mockImplementation(() => Promise.resolve(true));
-        await userEvent.click(
-            within(dialog).getByRole("button", {
-                name: "Refresh authoritative state",
-            })
+        const refresh = within(dialog).getByRole("button", {
+            name: "Refresh authoritative state",
+        });
+        expect(refresh.parentElement).toHaveClass(
+            "flex-col",
+            "sm:flex-row",
+            "sm:flex-wrap"
         );
+        for (const button of within(refresh.parentElement!).getAllByRole("button")) {
+            expect(button).toHaveClass("w-full", "sm:w-auto");
+        }
+        await userEvent.click(refresh);
         await waitFor(() =>
             expect(
                 screen.queryByRole("dialog", { name: "Run OpenClaw cron job" })
@@ -483,6 +631,12 @@ describe("OpenClawCronSection", () => {
         );
         await userEvent.click(screen.getByRole("button", { name: "Disable" }));
         const dialog = screen.getByRole("dialog", { name: "Disable Nightly report" });
+        expect(
+            within(dialog).getByRole("radio", { name: /Indefinitely/u })
+        ).toBeChecked();
+        expect(
+            within(dialog).queryByRole("group", { name: "Disabled until" })
+        ).not.toBeInTheDocument();
         await userEvent.type(
             within(dialog).getByRole("textbox", { name: "Disable reason" }),
             "Gateway maintenance"
@@ -495,6 +649,106 @@ describe("OpenClawCronSection", () => {
                 reason: "Gateway maintenance",
             })
         );
+    });
+
+    test("submits the shared picker as an exact browser-local future expiry", async () => {
+        const actions = callbacks();
+        render(
+            <OpenClawCronSectionView
+                {...actions}
+                state={{ result: result(), status: "ready" }}
+            />
+        );
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Disable" }));
+        const dialog = screen.getByRole("dialog", { name: "Disable Nightly report" });
+        await user.click(within(dialog).getByRole("radio", { name: /Until a date/u }));
+        const expiry = within(dialog).getByRole("group", {
+            name: "Disabled until",
+        });
+        const selectedDateLabel = within(expiry)
+            .getByRole("button", { name: /Choose Disabled until date, selected/u })
+            .getAttribute("aria-label");
+        const selectedDate =
+            /selected (?<day>\d{2})\.(?<month>\d{2})\.(?<year>\d{4})/u.exec(
+                selectedDateLabel ?? ""
+            )?.groups;
+        if (selectedDate === undefined) throw new Error("Missing local picker date");
+        const hour = Number(
+            within(expiry).getByRole("button", {
+                name: "Time (24-hour), hour",
+            }).textContent
+        );
+        const minute = Number(
+            within(expiry).getByRole("button", {
+                name: "Time (24-hour), minute",
+            }).textContent
+        );
+        const expiresAtMs = new Date(
+            Number(selectedDate.year),
+            Number(selectedDate.month) - 1,
+            Number(selectedDate.day),
+            hour,
+            minute
+        ).getTime();
+        expect(expiresAtMs).toBeGreaterThan(Date.now());
+
+        await user.type(
+            within(dialog).getByRole("textbox", { name: "Disable reason" }),
+            "Temporary Gateway maintenance"
+        );
+        await user.click(
+            within(dialog).getByRole("button", { name: "Save disabled state" })
+        );
+        await waitFor(() =>
+            expect(actions.onSetEnabled).toHaveBeenCalledWith(job, false, {
+                expiresAtMs,
+                reason: "Temporary Gateway maintenance",
+            })
+        );
+    });
+
+    test("rejects a past shared-picker expiry and focuses its accessible error", async () => {
+        const actions = callbacks();
+        const expiredJob = {
+            ...job,
+            synchronization: {
+                desiredEnabled: false,
+                disableIntent: {
+                    expiresAtMs: Date.now() - 60_000,
+                    reason: "Expired maintenance window",
+                    recordedAtMs: Date.now() - 120_000,
+                    revision: "expired-intent",
+                },
+                state: "conflict",
+            },
+        } satisfies OpenClawCronJob;
+        render(
+            <OpenClawCronSectionView
+                {...actions}
+                state={{ result: resultWithJobs([expiredJob]), status: "ready" }}
+            />
+        );
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Disable" }));
+        const dialog = screen.getByRole("dialog", { name: "Disable Nightly report" });
+        const picker = within(dialog).getByRole("group", { name: "Disabled until" });
+        const dateTrigger = within(picker).getByRole("button", {
+            name: /Choose Disabled until date/u,
+        });
+        await user.click(
+            within(dialog).getByRole("button", { name: "Save disabled state" })
+        );
+
+        const expiryError = within(dialog).getByText("Choose a future date and time.");
+        expect(picker.getAttribute("aria-describedby")?.split(" ")).toContain(
+            expiryError.id
+        );
+        expect(picker).toHaveAttribute("data-invalid");
+        expect(actions.onSetEnabled).not.toHaveBeenCalled();
+        await waitFor(() => expect(dateTrigger).toHaveFocus());
     });
 
     test("gates another disable dispatch after an indeterminate outcome", async () => {

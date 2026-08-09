@@ -49,6 +49,14 @@ function collectSchemas(): Map<string, RegisteredSchema> {
         registerSchema(schemas, contract.outputSchemaId, contract.output, "output");
     }
     for (const contract of rawHttpContracts) {
+        if (contract.requestBody.kind === "schema") {
+            registerSchema(
+                schemas,
+                contract.requestBody.schemaId,
+                contract.requestBody.schema,
+                "input"
+            );
+        }
         if (contract.response.kind === "schema") {
             registerSchema(
                 schemas,

@@ -42,6 +42,10 @@ import {
     type GatewaySessionProviderSnapshot,
     type GatewaySessionsProvider,
 } from "./provider.ts";
+import {
+    type GatewaySessionTranscriptLifecyclePort,
+    unavailableGatewaySessionTranscriptLifecycle,
+} from "./transcriptLifecycle.ts";
 
 interface LastKnownGoodProjection {
     readonly observedAtMs: number;
@@ -104,6 +108,7 @@ export interface GatewaySessionsServiceDependencies {
     readonly controlAudit?: GatewaySessionControlAuditPort;
     readonly nowMs?: () => number;
     readonly provider: GatewaySessionsProvider;
+    readonly transcriptLifecycle?: GatewaySessionTranscriptLifecyclePort;
 }
 
 const clockSchema = timestampMillisecondsSchema("Gateway session clock is invalid");
@@ -235,6 +240,8 @@ export function createGatewaySessionsService(
 ): GatewaySessionsService & GatewaySessionsHeartbeatReader {
     const controlAudit =
         dependencies.controlAudit ?? unavailableGatewaySessionControlAudit;
+    const transcriptLifecycle =
+        dependencies.transcriptLifecycle ?? unavailableGatewaySessionTranscriptLifecycle;
     const nowMs = dependencies.nowMs ?? Date.now;
     let lastKnownGood: LastKnownGoodProjection | undefined;
     let nextRefreshGeneration = 0;
@@ -294,6 +301,20 @@ export function createGatewaySessionsService(
         }
         const projection = parseProviderSnapshot(providerSnapshot, observedAtMs);
         if (refreshMutationEpoch !== mutationEpoch) {
+            markProjectionStale(observedAtMs);
+            throw new GatewaySessionsRefreshInvalidatedError();
+        }
+        try {
+            await transcriptLifecycle.observeSnapshot({
+                observedAtMs: projection.observedAtMs,
+                projectionTruncated: projection.projectionTruncated,
+                sessions: projection.sessions.map(({ key, sessionId, updatedAtMs }) => ({
+                    key,
+                    ...(sessionId === undefined ? {} : { sessionId }),
+                    ...(updatedAtMs === undefined ? {} : { updatedAtMs }),
+                })),
+            });
+        } catch {
             markProjectionStale(observedAtMs);
             throw new GatewaySessionsRefreshInvalidatedError();
         }
@@ -364,6 +385,18 @@ export function createGatewaySessionsService(
             await controlAudit.settle(attempt, "failed");
             throw new GatewaySessionControlForbiddenError();
         }
+        const controlId = context.requestId;
+        try {
+            await transcriptLifecycle.beginControl({
+                action,
+                controlId,
+                key: input.key,
+                occurredAtMs: parseClock(nowMs),
+            });
+        } catch {
+            await controlAudit.settle(attempt, "failed");
+            throw new GatewaySessionControlUnavailableError();
+        }
         let outcome: GatewaySessionActionResult["outcome"] = "changed";
         try {
             const request = {
@@ -405,11 +438,36 @@ export function createGatewaySessionsService(
                 // before this ambiguity, retain identities, and force reconciliation.
                 mutationEpoch += 1;
                 markProjectionStale();
+            } else {
+                try {
+                    await transcriptLifecycle.failControl({
+                        action,
+                        controlId,
+                        key: input.key,
+                        occurredAtMs: parseClock(nowMs),
+                    });
+                } catch {
+                    // A failed local settlement remains fail-closed behind the
+                    // already-durable pending transcript boundary.
+                }
             }
             await controlAudit.settle(attempt, unknownOutcome ? "partial" : "failed");
             if (unknownOutcome) throwControlFailure(error);
             if (signal?.aborted) throw error;
             throwControlFailure(error);
+        }
+        if (action === "compact" && outcome === "unchanged") {
+            try {
+                await transcriptLifecycle.settleUnchangedControl({
+                    action,
+                    controlId,
+                    key: input.key,
+                    occurredAtMs: parseClock(nowMs),
+                });
+            } catch {
+                await controlAudit.settle(attempt, "partial");
+                throw new GatewaySessionControlUnavailableError();
+            }
         }
         if (action !== "compact" || outcome === "changed") {
             // Establish the mutation barrier before any terminal audit or refresh

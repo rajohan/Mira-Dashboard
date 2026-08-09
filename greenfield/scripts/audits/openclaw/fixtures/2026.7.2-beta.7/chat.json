@@ -11,12 +11,205 @@
         "chat.toolTitles"
     ],
     "schemaVersion": 1,
+    "adapter": {
+        "lanes": {
+            "abort": "one-shot-write",
+            "companionAsk": "one-shot-read-mutation",
+            "companionReset": "one-shot-write",
+            "companionState": "persistent-read",
+            "history": "persistent-read",
+            "messageGet": "persistent-read",
+            "modelsList": "persistent-read",
+            "send": "one-shot-write",
+            "settings": "one-shot-admin",
+            "subscription": "private-session-scoped"
+        },
+        "media": {
+            "attachmentId": "uuidv4",
+            "bearerServerSide": true,
+            "ownerRequired": true,
+            "rangeRequests": true,
+            "routePrefix": "/api/chat/media/outgoing",
+            "transcriptAssociationRequired": true,
+            "variant": "full"
+        },
+        "methods": {
+            "abort": {
+                "method": "chat.abort",
+                "requestParams": ["preserveSideRuns", "runId", "sessionKey"],
+                "resultFields": ["aborted", "ok", "runIds"]
+            },
+            "companionAsk": {
+                "connectionRequired": true,
+                "method": "sessions.companion.ask",
+                "requestParams": ["question", "sessionKey"],
+                "resultFields": ["answer", "ts"]
+            },
+            "companionReset": {
+                "method": "sessions.companion.reset",
+                "requestParams": ["sessionKey"],
+                "resetCancelsActiveAsk": true,
+                "resultFields": ["ok"]
+            },
+            "companionState": {
+                "connectionIndependent": true,
+                "exchangeFields": ["answer", "question", "ts"],
+                "method": "sessions.companion.state",
+                "requestParams": ["sessionKey"],
+                "resultFields": ["exchanges"]
+            },
+            "history": {
+                "defaultLimit": 200,
+                "inFlightRun": {
+                    "boundedAgainstPageMessages": true,
+                    "exactValueStableAcrossPages": false,
+                    "multipleActiveRunsPossible": true,
+                    "recomputedPerRequest": true,
+                    "selection": "newest-visible-run",
+                    "tieBreak": "runId-descending"
+                },
+                "maximumLimit": 1000,
+                "messageIdentityPath": "__openclaw.id",
+                "messageOrder": "chronological",
+                "method": "chat.history",
+                "pagination": {
+                    "hasMoreRequiresNextOffset": true,
+                    "nextOffsetOnlyWhenHasMore": true,
+                    "offsetDirection": "older-from-recent-tail"
+                },
+                "possibleResponseFields": [
+                    "completeSnapshot",
+                    "defaults",
+                    "fastMode",
+                    "hasMore",
+                    "inFlightRun",
+                    "messages",
+                    "nextOffset",
+                    "offset",
+                    "sessionId",
+                    "sessionInfo",
+                    "sessionKey",
+                    "thinkingLevel",
+                    "toolOverrides",
+                    "totalMessages",
+                    "verboseLevel"
+                ],
+                "requestParams": [
+                    "agentId",
+                    "limit",
+                    "maxChars",
+                    "messageId",
+                    "offset",
+                    "sessionId",
+                    "sessionKey"
+                ],
+                "sessionIdentity": {
+                    "requestedKeyEchoed": true,
+                    "sessionIdOptional": true
+                }
+            },
+            "messageGet": {
+                "messageIdentityPath": "__openclaw.id",
+                "method": "chat.message.get",
+                "requestParams": ["agentId", "maxChars", "messageId", "sessionKey"],
+                "successFields": ["message", "ok"],
+                "unavailableFields": ["ok", "unavailableReason"],
+                "unavailableReasons": ["not_found", "not_visible", "oversized"]
+            },
+            "modelsList": {
+                "method": "models.list",
+                "requestParams": ["includeProviderCapabilities", "view"],
+                "rowFields": ["id", "name", "provider", "reasoning"]
+            },
+            "send": {
+                "acknowledgedStatuses": ["in_flight", "ok", "started"],
+                "attachmentFields": [
+                    "content",
+                    "fileName",
+                    "mimeType",
+                    "sizeBytes",
+                    "type"
+                ],
+                "idempotencyKeyIsRunId": true,
+                "method": "chat.send"
+            },
+            "settings": {
+                "generationAcknowledgement": {
+                    "requestField": "expectedSessionId",
+                    "requiredOnFencedMutation": true,
+                    "responseField": "entry.sessionId"
+                },
+                "method": "sessions.patch",
+                "requestParams": [
+                    "expectedSessionId",
+                    "fastMode",
+                    "key",
+                    "model",
+                    "thinkingLevel"
+                ],
+                "requiredScope": "operator.admin"
+            }
+        },
+        "subscription": {
+            "eventNames": ["agent", "chat"],
+            "methods": ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+            "requiresSessionMessageSubscription": true,
+            "slowDeltaPolicy": "drop-event",
+            "slowTerminalPolicy": "close-socket",
+            "states": ["aborted", "delta", "error", "final", "status"]
+        }
+    },
     "domain": "chat",
     "methodAccess": [
         {
             "controlPlaneWrite": false,
+            "name": "chat.abort",
+            "scope": "operator.write"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "chat.history",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "chat.message.get",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
             "name": "chat.send",
             "scope": "operator.write"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "models.list",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "sessions.companion.ask",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": true,
+            "name": "sessions.companion.reset",
+            "scope": "operator.write"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "sessions.companion.state",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "sessions.messages.subscribe",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "sessions.messages.unsubscribe",
+            "scope": "operator.read"
         }
     ],
     "streamingPolicy": {

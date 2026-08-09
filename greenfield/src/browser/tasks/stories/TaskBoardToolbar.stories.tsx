@@ -66,7 +66,6 @@ const meta = {
         onAssigneeChange: fn(),
         onAutomationChange: fn(),
         onCreate: fn(),
-        onRefresh: fn(),
         onSearchChange: fn(),
         search: "",
     },

@@ -117,34 +117,46 @@ export function OpenClawCronDetail({
         ["Updated", dateTime(job.updatedAtMs)],
     ];
     return (
-        <div className="space-y-5">
-            <Card aria-labelledby={headingId}>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                        <Heading id={headingId} level={3} size="section">
+        <div className="max-w-full min-w-0 space-y-5">
+            <Card aria-labelledby={headingId} className="max-w-full min-w-0">
+                <header className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="w-full max-w-full min-w-0 sm:flex-1">
+                        <Heading
+                            className="max-w-full wrap-anywhere"
+                            id={headingId}
+                            level={3}
+                            size="section"
+                        >
                             {job.name}
                         </Heading>
                         <Text
-                            className="mt-1 font-mono wrap-break-word"
+                            className="mt-1 max-w-full font-mono wrap-anywhere"
                             size="sm"
                             tone="muted"
                         >
                             {job.id}
                         </Text>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                        <Badge variant={job.enabled ? "success" : "default"}>
+                    <section
+                        aria-label="Cron job status"
+                        className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end"
+                    >
+                        <Badge
+                            className="max-w-full shrink-0 whitespace-nowrap"
+                            variant={job.enabled ? "success" : "default"}
+                        >
                             Gateway {job.enabled ? "enabled" : "disabled"}
                         </Badge>
                         <Badge
+                            className="max-w-full shrink-0 whitespace-nowrap"
                             variant={synchronizationBadgeVariant(
                                 job.synchronization.state
                             )}
                         >
                             {job.synchronization.state}
                         </Badge>
-                    </div>
-                </div>
+                    </section>
+                </header>
                 <Alert className="mt-4" message={actionError} focusOnError={false} />
                 {job.synchronization.state !== "confirmed" && (
                     <Alert
@@ -171,13 +183,13 @@ export function OpenClawCronDetail({
                         variant="info"
                     />
                 )}
-                <dl className="mt-5 grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
                     {definitionRows.map(([label, value]) => (
-                        <div key={label}>
+                        <div className="min-w-0" key={label}>
                             <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
                                 {label}
                             </dt>
-                            <dd className="text-primary-100 mt-1 text-sm wrap-break-word">
+                            <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
                                 {value}
                             </dd>
                         </div>
@@ -188,7 +200,7 @@ export function OpenClawCronDetail({
                         <Text size="sm" tone="muted">
                             Disable intent
                         </Text>
-                        <Text className="mt-1">
+                        <Text className="mt-1 max-w-full wrap-anywhere">
                             {job.synchronization.disableIntent.reason}
                         </Text>
                         {job.synchronization.disableIntent.expiresAtMs !== undefined && (
@@ -199,12 +211,22 @@ export function OpenClawCronDetail({
                         )}
                     </div>
                 )}
-                <div className="mt-6 flex flex-wrap gap-2">
-                    <Button disabled={actionBusy} onClick={onRun} variant="secondary">
+                <div
+                    aria-label="Cron job actions"
+                    className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap"
+                    role="toolbar"
+                >
+                    <Button
+                        className="w-full sm:w-auto"
+                        disabled={actionBusy}
+                        onClick={onRun}
+                        variant="secondary"
+                    >
                         <Icon icon={Play} size="sm" tone="inherit" />
                         Run now
                     </Button>
                     <Button
+                        className="w-full sm:w-auto"
                         disabled={actionBusy || !definitionControlsAvailable}
                         onClick={onSetEnabled}
                         variant="secondary"
@@ -213,6 +235,7 @@ export function OpenClawCronDetail({
                         {job.enabled ? "Disable" : "Enable"}
                     </Button>
                     <Button
+                        className="w-full sm:w-auto"
                         disabled={actionBusy || !definitionControlsAvailable}
                         onClick={onEdit}
                         variant="secondary"
@@ -221,6 +244,7 @@ export function OpenClawCronDetail({
                         Edit reviewed fields
                     </Button>
                     <Button
+                        className="w-full sm:w-auto"
                         disabled={actionBusy || !definitionControlsAvailable}
                         onClick={onDelete}
                         variant="danger"
@@ -231,7 +255,7 @@ export function OpenClawCronDetail({
                 </div>
             </Card>
 
-            <Card aria-labelledby={historyHeadingId}>
+            <Card aria-labelledby={historyHeadingId} className="max-w-full min-w-0">
                 <Heading id={historyHeadingId} level={3}>
                     OpenClaw run history
                 </Heading>
@@ -276,69 +300,83 @@ export function OpenClawCronDetail({
                     </Text>
                 )}
                 {runs !== undefined && runs.runs.length > 0 && (
-                    <div className="border-primary-700 mt-5 overflow-x-auto rounded-lg border">
-                        <table
-                            aria-label={`OpenClaw runs for ${job.name}`}
-                            className="w-full min-w-240"
-                        >
-                            <thead className="bg-primary-900">
-                                <tr>
-                                    {[
-                                        "Completed",
-                                        "Status",
-                                        "Delivery",
-                                        "Duration",
-                                        "Model",
-                                        "Provider",
-                                        "Summary",
-                                    ].map((heading) => (
-                                        <th
-                                            className="text-primary-300 border-primary-700 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
-                                            key={heading}
-                                            scope="col"
-                                        >
-                                            {heading}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {runs.runs.map((run, index) => (
-                                    <tr
-                                        className="border-primary-700 border-b text-sm"
-                                        key={run.runId ?? `${run.completedAtMs}-${index}`}
-                                    >
-                                        <td className="p-3">
+                    <ol
+                        aria-label={`OpenClaw runs for ${job.name}`}
+                        className="mt-5 grid max-w-full min-w-0 grid-cols-1 gap-3"
+                    >
+                        {runs.runs.map((run, index) => (
+                            <li
+                                className="border-primary-700 bg-primary-900/40 max-w-full min-w-0 rounded-lg border p-3 sm:p-4"
+                                key={run.runId ?? `${run.completedAtMs}-${index}`}
+                            >
+                                <dl className="grid max-w-full min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                                    <div className="min-w-0">
+                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                            Completed
+                                        </dt>
+                                        <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
                                             {dateTime(run.completedAtMs)}
-                                        </td>
-                                        <td className="p-3">
+                                        </dd>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                            Status
+                                        </dt>
+                                        <dd className="mt-1">
                                             <Badge variant={runBadgeVariant(run.status)}>
                                                 {run.status}
                                             </Badge>
-                                        </td>
-                                        <td className="p-3">{run.deliveryStatus}</td>
-                                        <td className="p-3">
+                                        </dd>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                            Delivery
+                                        </dt>
+                                        <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                                            {run.deliveryStatus}
+                                        </dd>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                            Duration
+                                        </dt>
+                                        <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
                                             {run.durationMs === undefined
                                                 ? "—"
                                                 : `${run.durationMs} ms`}
-                                        </td>
-                                        <td className="p-3">
+                                        </dd>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                            Model
+                                        </dt>
+                                        <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
                                             {run.model ?? "—"}
                                             {run.modelTruncated && " (bounded)"}
-                                        </td>
-                                        <td className="p-3">
+                                        </dd>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                            Provider
+                                        </dt>
+                                        <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere">
                                             {run.provider ?? "—"}
                                             {run.providerTruncated && " (bounded)"}
-                                        </td>
-                                        <td className="max-w-md p-3 wrap-break-word">
+                                        </dd>
+                                    </div>
+                                    <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                                        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
+                                            Summary
+                                        </dt>
+                                        <dd className="text-primary-100 mt-1 max-w-full text-sm wrap-anywhere whitespace-pre-wrap">
                                             {run.summary ?? run.errorReason ?? "—"}
                                             {run.summaryTruncated && " (bounded preview)"}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                        </dd>
+                                    </div>
+                                </dl>
+                            </li>
+                        ))}
+                    </ol>
                 )}
                 {runs?.hasMore && onLoadMoreRuns !== undefined && (
                     <Button

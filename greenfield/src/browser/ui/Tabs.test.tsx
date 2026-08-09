@@ -45,6 +45,10 @@ describe("Tabs", () => {
             screen.getByRole("tablist", { name: "Worker details" })
         ).toHaveAccessibleDescription("Choose one worker detail view.");
         expect(overview).toHaveAttribute("aria-selected", "true");
+        expect(overview).toHaveClass(
+            "not-data-selected:not-data-disabled:data-hover:bg-primary-800",
+            "hover:not-data-selected:not-data-disabled:bg-primary-800"
+        );
         expect(screen.getByRole("tabpanel")).toHaveTextContent("Current worker state");
 
         await user.tab();
@@ -59,12 +63,17 @@ describe("Tabs", () => {
         expect(screen.getByRole("tab", { name: "Unavailable" })).toBeDisabled();
     });
 
-    test("contains horizontal overflow and supports a responsive vertical layout", () => {
+    test("wraps horizontal tabs without page overflow and supports a responsive vertical layout", () => {
         const { unmount } = render(<ControlledTabs />);
         expect(screen.getByRole("tablist", { name: "Worker details" })).toHaveClass(
             "min-w-0",
             "max-w-full",
-            "overflow-x-auto"
+            "flex-wrap"
+        );
+        expect(screen.getByRole("tab", { name: "Overview" })).toHaveClass(
+            "basis-28",
+            "grow",
+            "min-w-0"
         );
         unmount();
 

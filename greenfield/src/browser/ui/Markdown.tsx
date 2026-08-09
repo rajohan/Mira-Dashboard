@@ -10,7 +10,8 @@ interface MarkdownProps extends Omit<ComponentProps<typeof ReactMarkdown>, "chil
 }
 
 /**
- * Renders operator-authored Markdown without enabling raw HTML.
+ * Renders Markdown without enabling raw HTML. Resource-bearing elements remain
+ * caller-controlled through ReactMarkdown component overrides.
  * @returns Sanitizer-independent Markdown presentation using safe React nodes.
  */
 export function Markdown({ className, source, ...properties }: MarkdownProps) {

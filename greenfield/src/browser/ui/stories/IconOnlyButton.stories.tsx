@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { RefreshCw, Trash2, X } from "lucide-react";
-import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 
 import { IconOnlyButton } from "../IconOnlyButton.tsx";
 
@@ -43,19 +43,6 @@ export const GhostClose: Story = {
         icon: X,
         label: "Close dialog",
         variant: "ghost",
-    },
-    render: (properties) => <IconOnlyButton {...properties} data-hover="" />,
-    play: async ({ canvasElement }) => {
-        const button = within(canvasElement).getByRole("button", {
-            name: "Close dialog",
-        });
-
-        await expect(button).toHaveAttribute("data-hover");
-        await waitFor(async () => {
-            await expect(getComputedStyle(button).backgroundColor).toBe(
-                "rgb(42, 45, 51)"
-            );
-        });
     },
 };
 

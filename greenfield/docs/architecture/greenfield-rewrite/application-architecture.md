@@ -213,7 +213,7 @@ Every application operation controlled by this repository becomes a tRPC procedu
 - settings, authentication, MFA, WebAuthn, and session administration;
 - Docker inventory, updater policy, and actions;
 - database, cache, quota, backup, and log-rotation operations;
-- Moltbook, STT, TTS, files, logs, terminal helpers, and exec jobs; and
+- Moltbook, files, logs, terminal helpers, and exec jobs; and
 - TypeScript automation calls from OpenClaw scripts.
 
 The browser uses `@trpc/tanstack-react-query`, a singleton `QueryClient`, and a singleton
@@ -407,11 +407,17 @@ The explicit raw-route registry owns requests whose semantics are HTTP rather th
 - built frontend assets and SPA navigation fallback;
 - range-aware file/media download and `Content-Disposition` responses;
 - upload streams where buffering into a tRPC JSON body would be harmful;
+- ephemeral Chat speech boundaries: a caller-scoped capability probe, bounded recorded-audio
+  transcription, and bounded MPEG speech generation;
 - third-party webhook, OAuth callback, or redirect protocols if introduced;
 - pull-request preview proxying where HTTP headers and streaming must remain transparent.
 
 These routes use the same authentication, capability, provenance, audit, rate-limit, error,
 and response-header policy as tRPC. They are not a parallel REST application API.
+Here, the shared audit policy means request correlation plus one sanitized terminal HTTP outcome;
+a raw route appends a durable domain-operation audit row only when it changes durable privileged
+state. Ephemeral Chat attachment transfer, media reads, transcription, and speech synthesis never
+persist body-derived audit metadata or content.
 
 ### Contract definition
 
@@ -578,16 +584,87 @@ an explicit local runtime state machine for active work:
 - `chat_run_events` stores ordered, validated runtime events with a unique run/sequence key;
   and
 - `chat_runtime_snapshots` stores the latest compact projection needed for fast restart
-  recovery.
+  recovery; and
+- `chat_transcript_generations` is the durable per-Gateway-scope/session pointer that fences
+  every run, event, snapshot, provider correlation, recovery candidate, and browser cursor to one
+  transcript lifetime.
+
+SQLite triggers preserve immutable admission identity, require exact one-step state-version and
+nondecreasing journal progress, protect settled provider identities, and reject snapshot
+replacement or regressing projection watermarks. Parent-run retention remains the only path that
+may cascade-delete its journal and snapshot.
 
 Gateway token and thinking deltas are coalesced into ordered 150 ms batches before a SQLite
 transaction and SSE emission. The interval matches the audited OpenClaw source throttle and is the
 smallest candidate that meets the measured write-rate, visual-delay, and crash-window policy for
-one, four, and eight concurrent runs. Tool/item boundaries, terminal deltas, cancellation, and
-completion flush immediately; the design never performs one durable commit per token. A final
-Gateway history fetch reconciles the runtime projection without duplicating messages. On restart,
-Dashboard restores the snapshot and remaining journal, reconnects to Gateway, and reconciles
-again.
+one, four, and eight concurrent runs. The same window coalesces payload-free runtime invalidation
+for provider-origin runs that have no local journal. Tool/item/plan/gap/terminal boundaries flush
+immediately; the design never performs one durable commit per token. A final Gateway history fetch
+reconciles the runtime projection without duplicating messages. On restart, Dashboard restores the
+snapshot and remaining journal, reconnects with durable per-run watermarks, and reconciles again.
+
+Compact, reset, and transcript delete first persist a `control-pending` generation barrier before
+the provider call. A definitive failure or source-confirmed unchanged compact reopens that same
+generation. A changed or unknown outcome remains blocked until an exact sanitized lifecycle event
+or a complete snapshot observed strictly after the control fence proves the new boundary; the
+same timestamp and stale last-known-good data cannot resolve it. Exact reset/compact/delete/new
+events advance once, terminalize prior active runs as unresolved, and make every late provider
+event from that retired generation non-projectable.
+
+Process start, reconnect, connection replacement, and sequence gaps are transport boundaries, not
+proof that the provider transcript changed. Sessions with active work become `reconciling`; one
+bounded canonical history/in-flight read preserves the generation only when it represents every
+dispatched candidate, otherwise it advances conservatively. Sessions without active work may
+advance immediately. The browser sends its last transcript generation with the runtime cursor and
+atomically replaces runtime, optimistic, and provider-origin rows when the server generation
+changes, so a cursor from an earlier transcript can never merge into the new one.
+
+History and runtime responses are independently byte- and page-bounded. Active run identities are
+never dropped to make room for projection detail; compacted snapshots and provider-origin runs carry
+explicit truncation/continuity markers and hydrate final content from authoritative history.
+The reducer degrades projection detail, while preserving the current event when possible, after
+256 KiB accumulated text, 512 ordered parts, or a 512 KiB encoded snapshot; the append-only journal
+continues through terminal reconciliation. Provider-origin projections retire only when canonical
+history contains their exact run or idempotency identity. A gap marks unmatched rows interrupted,
+and only those interrupted rows expire after 15 minutes.
+Unknown externally dispatched outcomes consume their one-shot attachment spool immediately after
+dispatch; durable request identity and metadata drive reconciliation without retaining raw or base64
+bytes or permitting blind redispatch. They then become success, failure, or explicit `unresolved` at
+the 24-hour deadline. Run retention, history terminal changes, and task changes publish separate
+payload-free snapshot markers so an idle browser cannot retain a deleted or newly final projection
+indefinitely.
+
+Attachment metadata is admitted through tRPC, while file bytes use bounded same-origin raw upload
+slots and a transcript-authorized media proxy. Ten files may use at most 16 MiB aggregate raw bytes,
+leaving a proved margin for base64, worst-case message escaping, metadata, and the private 24 MiB
+Gateway chat frame. The serialized send contract is independently capped at 128 KiB UTF-8, each
+durable event payload at 256 KiB, and a run journal at 1 MiB; the dedicated 2 MiB tRPC body profile
+is only a transport envelope. Companion compute is session-scoped but requester-delivered, with server-owned
+per-session/process concurrency, per-actor rolling rate admission, reset supersession, and safe busy
+errors. OpenClaw background tasks remain a separate bounded provider projection invalidated through
+`openclaw.tasks`; neither companion exchanges nor task payloads become durable chat events.
+
+Chat voice is another raw protocol edge, not a second REST domain. An optional
+`ELEVENLABS_API_KEY` remains redacted in the web process and is never sent to the browser, SQLite,
+or logs. The authenticated capability probe reports each control only when the provider is
+configured and the caller owns `chat:write`; transcription and speech generation both consume
+provider compute and require that write capability. Transcription accepts one exact Opus WebM,
+Opus Ogg, or AAC MP4 body up to 8 MiB. The server sniffs the container and codec, rejects video,
+reconciles Ogg granules and WebM timestamps with cumulative intrinsic Opus packet duration, derives
+ordinary/fragmented ISO-BMFF AAC-LC duration from the access-unit inventory and encoded sample
+rate, and caps recordings at 120 seconds before dispatch. Ordinary `stsz`/`stts` and fragmented
+`trun`/`tfhd`/`trex` metadata must describe the same bounded access units and media-byte total;
+`mvhd`, `mdhd`, `tfdt`, or declared per-sample duration cannot reduce the intrinsic duration.
+Safari MP4 must carry a matching AAC-LC `esds` descriptor; a declared MIME never grants format
+authority. Synthesis accepts at most
+4000 characters and 16 KiB UTF-8 and buffers at most 8 MiB of `audio/mpeg`. Both provider calls have
+deadlines, caller cancellation, fixed concurrency admission, redirect denial, sanitized failures,
+and `private, no-store`/`nosniff` responses. Paid work is additionally process-rate-limited per
+authenticated principal over a rolling minute: at most six transcription requests and 240 seconds
+of admitted audio, plus twelve synthesis requests and 16,000 admitted Unicode code points. The
+admission registry is identity-bounded and fails closed on clock defects. Raw audio, generated audio,
+transcripts, and synthesis text are request-local only and have no persistence, cache, or
+content-logging port.
 
 This state machine must retain all current behavior: token streaming, thinking and tool row
 ordering, tool failure scoping, final-message reconciliation, cancel/retry, concurrent sends,

@@ -8,7 +8,7 @@ export function GatewaySessionsRoute() {
     return (
         <div>
             <PageHeader
-                description="Current OpenClaw main, subagent, hook, and cron sessions with bounded statistics and recently authenticated controls."
+                description="Current OpenClaw main, subagent, hook, and cron sessions with bounded statistics and recently authenticated controls. Updates automatically every 10 seconds and after Gateway session events."
                 eyebrow="OpenClaw"
                 title="Sessions"
             />

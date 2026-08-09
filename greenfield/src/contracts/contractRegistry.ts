@@ -5,6 +5,13 @@ import { authProcedureContracts } from "./auth.ts";
 import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
 import { cacheProcedureContracts } from "./cache.ts";
 import { cacheRealtimeEventContract } from "./cacheRealtime.ts";
+import { chatProcedureContracts } from "./chat.ts";
+import { chatRawHttpContracts } from "./chatMedia.ts";
+import {
+    chatHistoryRealtimeEventContract,
+    chatRealtimeEventContract,
+} from "./chatRealtime.ts";
+import { chatSpeechRawHttpContracts } from "./chatSpeech.ts";
 import { eventsStreamContract } from "./events.ts";
 import { gatewayConnectionProcedureContracts } from "./gatewayConnection.ts";
 import { gatewayRealtimeEventContracts } from "./gatewayRealtime.ts";
@@ -16,6 +23,8 @@ import { monitoringProcedureContracts } from "./monitoringIngestion.ts";
 import { monitoringRealtimeEventContracts } from "./monitoringRealtime.ts";
 import { notificationProcedureContracts } from "./notifications.ts";
 import { openClawCronProcedureContracts } from "./openClawCron.ts";
+import { openClawTaskProcedureContracts } from "./openClawTasks.ts";
+import { openClawTasksRealtimeEventContract } from "./openClawTasksRealtime.ts";
 import {
     assertProcedureContractErrors,
     type ProcedureContract,
@@ -36,6 +45,7 @@ const registeredProcedureContracts = [
     ...authProcedureContracts,
     ...automationSecurityProcedureContracts,
     ...cacheProcedureContracts,
+    ...chatProcedureContracts,
     eventsStreamContract,
     ...gatewayConnectionProcedureContracts,
     ...gatewaySessionProcedureContracts,
@@ -43,6 +53,7 @@ const registeredProcedureContracts = [
     ...jobProcedureContracts,
     ...monitoringProcedureContracts,
     ...notificationProcedureContracts,
+    ...openClawTaskProcedureContracts,
     ...openClawCronProcedureContracts,
     ...reportProcedureContracts,
     ...scheduleProcedureContracts,
@@ -86,14 +97,21 @@ export const procedureContracts = Object.freeze(
 );
 
 /** Implemented raw HTTP metadata used by runtime wiring and docs. */
-export const rawHttpContracts: readonly RawHttpContract[] = [...systemRawHttpContracts];
+export const rawHttpContracts: readonly RawHttpContract[] = [
+    ...chatRawHttpContracts,
+    ...chatSpeechRawHttpContracts,
+    ...systemRawHttpContracts,
+];
 
 /** Implemented realtime topics used by runtime wiring and docs. */
 export const realtimeEventContracts: readonly RealtimeEventContract[] = Object.freeze([
     agentRealtimeEventContract,
     cacheRealtimeEventContract,
+    chatHistoryRealtimeEventContract,
+    chatRealtimeEventContract,
     ...gatewayRealtimeEventContracts,
     ...jobRealtimeEventContracts,
     ...monitoringRealtimeEventContracts,
+    openClawTasksRealtimeEventContract,
     taskRealtimeEventContract,
 ]);

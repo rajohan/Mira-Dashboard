@@ -32,6 +32,7 @@ import {
     createGatewaySessionsService,
     type GatewaySessionsServiceDependencies,
 } from "./service.ts";
+import type { GatewaySessionTranscriptLifecyclePort } from "./transcriptLifecycle.ts";
 
 const observedAtMs = 1_800_000_000_000;
 const controlContext: GatewaySessionControlRequestContext = Object.freeze({
@@ -73,11 +74,23 @@ class TestGatewaySessionControlAudit implements GatewaySessionControlAuditPort {
     }
 }
 
+const noOpGatewaySessionTranscriptLifecycle = Object.freeze({
+    beginControl: () => Promise.resolve(),
+    failControl: () => Promise.resolve(),
+    observeSnapshot: () => Promise.resolve(),
+    settleUnchangedControl: () => Promise.resolve(),
+}) satisfies GatewaySessionTranscriptLifecyclePort;
+
 function createTestGatewaySessionsService(
     dependencies: Omit<GatewaySessionsServiceDependencies, "controlAudit">,
-    controlAudit: GatewaySessionControlAuditPort = new TestGatewaySessionControlAudit()
+    controlAudit: GatewaySessionControlAuditPort = new TestGatewaySessionControlAudit(),
+    transcriptLifecycle: GatewaySessionTranscriptLifecyclePort = noOpGatewaySessionTranscriptLifecycle
 ) {
-    return createGatewaySessionsService({ ...dependencies, controlAudit });
+    return createGatewaySessionsService({
+        ...dependencies,
+        controlAudit,
+        transcriptLifecycle,
+    });
 }
 
 function session(
@@ -562,6 +575,105 @@ describe("Gateway sessions service", () => {
         expect(reset.action).toBe("reset");
         expect(deleted.action).toBe("delete");
         expect(deleted.refresh.status).toBe("available");
+    });
+
+    test("persists the transcript fence before provider dispatch and observes the refresh", async () => {
+        const order: string[] = [];
+        const provider: GatewaySessionsProvider = {
+            compactSession: () => Promise.resolve("compacted"),
+            deleteSessionTranscript: () => Promise.resolve(),
+            listCurrentSessions: () => {
+                order.push("provider:list");
+                return Promise.resolve(unsortedProjection());
+            },
+            resetSession: () => {
+                order.push("provider:reset");
+                return Promise.resolve();
+            },
+        };
+        const lifecycle: GatewaySessionTranscriptLifecyclePort = {
+            beginControl: ({ action, controlId }) => {
+                order.push(`lifecycle:begin:${action}:${controlId}`);
+                return Promise.resolve();
+            },
+            failControl: () => Promise.resolve(),
+            observeSnapshot: ({ observedAtMs: snapshotObservedAtMs }) => {
+                order.push(`lifecycle:snapshot:${snapshotObservedAtMs}`);
+                return Promise.resolve();
+            },
+            settleUnchangedControl: () => Promise.resolve(),
+        };
+        const service = createTestGatewaySessionsService(
+            { nowMs: () => observedAtMs, provider },
+            new TestGatewaySessionControlAudit(),
+            lifecycle
+        );
+
+        await service.reset({ key: "agent:coder:main" }, controlContext);
+
+        expect(order).toEqual([
+            `lifecycle:begin:reset:${controlContext.requestId}`,
+            "provider:reset",
+            "provider:list",
+            `lifecycle:snapshot:${observedAtMs}`,
+        ]);
+    });
+
+    test("reopens only definitive failures and unchanged compact controls", async () => {
+        async function exercise(
+            failure: Error | undefined,
+            compactOutcome: "compacted" | "unchanged" = "compacted"
+        ): Promise<string[]> {
+            const events: string[] = [];
+            const provider: GatewaySessionsProvider = {
+                compactSession: () =>
+                    failure === undefined
+                        ? Promise.resolve(compactOutcome)
+                        : Promise.reject(failure),
+                deleteSessionTranscript: () => Promise.resolve(),
+                listCurrentSessions: () => Promise.resolve(unsortedProjection()),
+                resetSession: () =>
+                    failure === undefined ? Promise.resolve() : Promise.reject(failure),
+            };
+            const lifecycle: GatewaySessionTranscriptLifecyclePort = {
+                beginControl: ({ action }) => {
+                    events.push(`begin:${action}`);
+                    return Promise.resolve();
+                },
+                failControl: ({ action }) => {
+                    events.push(`fail:${action}`);
+                    return Promise.resolve();
+                },
+                observeSnapshot: () => Promise.resolve(),
+                settleUnchangedControl: ({ action }) => {
+                    events.push(`unchanged:${action}`);
+                    return Promise.resolve();
+                },
+            };
+            const service = createTestGatewaySessionsService(
+                { nowMs: () => observedAtMs, provider },
+                new TestGatewaySessionControlAudit(),
+                lifecycle
+            );
+            await (compactOutcome === "unchanged"
+                ? service.compact({ key: "agent:coder:main" }, controlContext)
+                : captureFailure(() =>
+                      service.reset({ key: "agent:coder:main" }, controlContext)
+                  ));
+            return events;
+        }
+
+        expect(await exercise(new Error("definitive"))).toEqual([
+            "begin:reset",
+            "fail:reset",
+        ]);
+        expect(await exercise(new GatewaySessionProviderUnknownOutcomeError())).toEqual([
+            "begin:reset",
+        ]);
+        expect(await exercise(undefined, "unchanged")).toEqual([
+            "begin:compact",
+            "unchanged:compact",
+        ]);
     });
 
     test("keeps confirmed deletion successful when its refresh fails", async () => {

@@ -52,26 +52,27 @@ export function Modal({
             />
             <div
                 aria-label={dismissible ? undefined : "Dialog content"}
-                className="fixed inset-0 w-screen overflow-y-auto p-4"
+                className="fixed inset-0 w-screen overflow-x-hidden overflow-y-auto p-4"
                 role={dismissible ? undefined : "region"}
                 tabIndex={dismissible ? undefined : 0}
             >
                 <div className="flex min-h-full items-center justify-center">
                     <DialogPanel
                         className={cn(
-                            "border-primary-700 bg-primary-800 w-full rounded-xl border shadow-2xl shadow-black/50 transition duration-200",
+                            "border-primary-700 bg-primary-800 w-full min-w-0 rounded-xl border shadow-2xl shadow-black/50 transition duration-200",
                             "data-closed:translate-y-2 data-closed:scale-95 data-closed:opacity-0",
                             sizeClasses[size]
                         )}
+                        data-testid="modal-panel"
                         transition
                     >
-                        <div className="border-primary-700 flex items-start justify-between gap-4 border-b px-5 py-4">
-                            <div>
-                                <DialogTitle className="text-primary-50 text-lg font-semibold">
+                        <div className="border-primary-700 flex min-w-0 items-start justify-between gap-4 border-b px-5 py-4">
+                            <div className="min-w-0 flex-1">
+                                <DialogTitle className="text-primary-50 line-clamp-3 text-lg font-semibold wrap-anywhere">
                                     {title}
                                 </DialogTitle>
                                 {description !== undefined && (
-                                    <Description className="text-primary-400 mt-1 text-sm leading-6">
+                                    <Description className="text-primary-400 mt-1 text-sm leading-6 wrap-anywhere">
                                         {description}
                                     </Description>
                                 )}
@@ -87,7 +88,7 @@ export function Modal({
                                 />
                             )}
                         </div>
-                        <div className="p-5">{children}</div>
+                        <div className="min-w-0 p-5">{children}</div>
                     </DialogPanel>
                 </div>
             </div>

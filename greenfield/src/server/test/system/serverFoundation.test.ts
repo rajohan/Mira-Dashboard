@@ -7,8 +7,10 @@ import {
     authenticationRequestBodyMaximumBytes,
     type ApplicationServer,
     createServer,
+    serverListenerRequestBodyMaximumBytes,
     serverRequestBodyMaximumBytes,
 } from "../../../app/server.ts";
+import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
 import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
 import {
     createReadinessController,
@@ -182,7 +184,7 @@ describe("system foundation", () => {
         expect(response.headers.get("x-request-id")).toMatch(requestIdPattern);
     });
 
-    test("keeps the Bun pre-dispatch request-body ceiling", async () => {
+    test("keeps the tRPC route ceiling below the raw-upload listener ceiling", async () => {
         const { server } = await startServer();
         const response = await fetch(
             new URL("/trpc/system.runtimeIdentity", server.url),
@@ -194,6 +196,47 @@ describe("system foundation", () => {
         );
 
         expect(response.status).toBe(413);
+        expect(response.headers.get("x-request-id")).toMatch(requestIdPattern);
+        expect(serverListenerRequestBodyMaximumBytes).toBe(
+            chatAttachmentLimits.maximumFileBytes
+        );
+    });
+
+    test("mounts an exact-cap chat upload before the browser fallback", async () => {
+        let observedBytes: number | undefined;
+        const frontendPaths: string[] = [];
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime(),
+            chatRawHttpHandler: async (request, requestUrl) => {
+                if (requestUrl.pathname !== "/api/chat/attachments/fixture") {
+                    return;
+                }
+                observedBytes = Number(request.headers.get("content-length"));
+                await request.body?.cancel("fixture raw handler owns the upload");
+                return new Response(null, { status: 204 });
+            },
+            frontendAssets: (_request, requestUrl) => {
+                frontendPaths.push(requestUrl.pathname);
+                return Promise.resolve(new Response("browser-fallback"));
+            },
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+        const response = await fetch(
+            new URL("/api/chat/attachments/fixture", server.url),
+            {
+                body: new Uint8Array(chatAttachmentLimits.maximumFileBytes),
+                method: "PUT",
+            }
+        );
+
+        expect(response.status).toBe(204);
+        expect(response.headers.get("x-request-id")).toMatch(requestIdPattern);
+        expect(observedBytes).toBe(chatAttachmentLimits.maximumFileBytes);
+        expect(frontendPaths).toEqual([]);
     });
 
     test("emits one correlated response-created event for every response class", async () => {

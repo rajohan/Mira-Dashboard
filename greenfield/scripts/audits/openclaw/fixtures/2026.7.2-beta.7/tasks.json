@@ -1,4 +1,69 @@
 {
+    "adapter": {
+        "cancel": {
+            "method": "tasks.cancel",
+            "notFoundIsRpcSuccess": true,
+            "requestParams": ["reason", "taskId"],
+            "resultFields": ["cancelled", "found", "reason", "task"],
+            "taskOptional": true
+        },
+        "event": {
+            "deletedFields": ["action", "taskId"],
+            "delivery": "best-effort-drop-if-slow",
+            "restoredFields": ["action"],
+            "summariesOmitPrompt": true,
+            "upsertedFields": ["action", "task"]
+        },
+        "get": {
+            "method": "tasks.get",
+            "notFound": "invalid-request-rpc-error",
+            "promptIncluded": true,
+            "requestParams": ["taskId"],
+            "resultFields": ["task"]
+        },
+        "list": {
+            "cursor": "decimal-offset",
+            "cursorIncrement": "returned-row-count",
+            "method": "tasks.list",
+            "nextCursorOnlyWhenHasMore": true,
+            "promptIncluded": false,
+            "requestParams": ["agentId", "cursor", "limit", "sessionKey", "status"],
+            "resultFields": ["nextCursor", "tasks"],
+            "statusAcceptsScalarOrArray": true
+        },
+        "summary": {
+            "endedAtOptionalForEveryStatus": true,
+            "fields": [
+                "agentId",
+                "childSessionKey",
+                "createdAt",
+                "endedAt",
+                "error",
+                "flowId",
+                "id",
+                "kind",
+                "lastToolName",
+                "ownerKey",
+                "parentTaskId",
+                "progressSummary",
+                "prompt",
+                "runId",
+                "runtime",
+                "sessionKey",
+                "sourceId",
+                "startedAt",
+                "status",
+                "taskId",
+                "terminalSummary",
+                "title",
+                "toolUseCount",
+                "updatedAt"
+            ],
+            "promptOptional": true,
+            "timestampFields": ["createdAt", "endedAt", "startedAt", "updatedAt"],
+            "timestampRepresentations": ["integer", "string"]
+        }
+    },
     "authority": {
         "cancelTarget": "task-id",
         "ledgerScope": "global-with-optional-filters",

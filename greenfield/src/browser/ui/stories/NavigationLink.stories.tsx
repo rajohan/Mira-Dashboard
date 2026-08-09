@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { createRootRoute, createRoute, Outlet } from "@tanstack/react-router";
-import { expect, fn, within } from "storybook/test";
+import type { ComponentProps } from "react";
+import { expect, fn, userEvent, within } from "storybook/test";
 
 import { NavigationLink } from "../NavigationLink.tsx";
 
@@ -13,6 +14,18 @@ const agentsRoute = createRoute({
 });
 rootRoute.addChildren([agentsRoute]);
 
+function RenderNavigationLink(properties: ComponentProps<typeof NavigationLink>) {
+    return (
+        <NavigationLink
+            {...properties}
+            onClick={(event) => {
+                event.preventDefault();
+                properties.onClick?.(event);
+            }}
+        />
+    );
+}
+
 const meta = {
     args: {
         active: true,
@@ -21,6 +34,7 @@ const meta = {
         to: "/agents",
     },
     component: NavigationLink,
+    render: RenderNavigationLink,
     title: "UI/NavigationLink",
 } satisfies Meta<typeof NavigationLink>;
 
@@ -37,12 +51,14 @@ export const ActiveTanStackRoute: Story = {
             },
         },
     },
-    play: async ({ canvasElement }) => {
+    play: async ({ args, canvasElement }) => {
         const canvas = within(canvasElement);
         const link = canvas.getByRole("link", { name: "Agents" });
 
         await expect(link).toHaveAttribute("aria-current", "page");
         await expect(link).toHaveAttribute("href", "/agents");
+        await userEvent.click(link);
+        await expect(args.onClick).toHaveBeenCalledOnce();
     },
 };
 

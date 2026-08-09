@@ -37,7 +37,7 @@ function session(
 }
 
 const sessions = Object.freeze([
-    session(gatewayPrimarySessionKey, "main", "Primary main", timestampMs - 5_000, {
+    session(gatewayPrimarySessionKey, "main", "Primary main", timestampMs - 5000, {
         hasActiveRun: true,
         totalTokens: 48_320,
     }),
@@ -72,15 +72,16 @@ const freshSnapshot: ListGatewaySessionsResult = {
 };
 
 const onAction = fn(
-    async (
+    (
         action: GatewaySessionAction,
         selectedSession: GatewaySession
-    ): Promise<GatewaySessionActionResult> => ({
-        action,
-        key: selectedSession.key,
-        outcome: "changed",
-        refresh: { snapshot: freshSnapshot, status: "available" },
-    })
+    ): Promise<GatewaySessionActionResult> =>
+        Promise.resolve({
+            action,
+            key: selectedSession.key,
+            outcome: "changed",
+            refresh: { snapshot: freshSnapshot, status: "available" },
+        })
 );
 
 const meta = {
@@ -103,6 +104,14 @@ export const FreshCurrentProjection: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(canvas.getByText("Connected")).toBeVisible();
+        await expect(
+            canvas.getByText(
+                "Updates automatically every 10 seconds and after Gateway session events."
+            )
+        ).toBeVisible();
+        await expect(
+            canvas.queryByRole("button", { name: "Refresh" })
+        ).not.toBeInTheDocument();
         await expect(
             canvas.getByRole("table", { name: "Current OpenClaw sessions" })
         ).toBeVisible();

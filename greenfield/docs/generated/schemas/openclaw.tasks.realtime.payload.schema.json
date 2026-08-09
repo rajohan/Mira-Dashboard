@@ -1,0 +1,14 @@
+{
+  "$id": "urn:mira-dashboard:openclaw.tasks.realtime.payload",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "const": "snapshot-required"
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

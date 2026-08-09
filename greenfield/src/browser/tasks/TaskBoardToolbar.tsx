@@ -1,4 +1,4 @@
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import { taskAssignees, type TaskAssigneeId } from "../../contracts/taskModel.ts";
 import type { ListTasksInput } from "../../contracts/tasks.ts";
@@ -29,12 +29,11 @@ interface TaskBoardToolbarProps {
     readonly onAssigneeChange: (value: TaskAssigneeFilter) => void;
     readonly onAutomationChange: (value: TaskAutomationFilter) => void;
     readonly onCreate: () => void;
-    readonly onRefresh: () => void;
     readonly onSearchChange: (value: string) => void;
     readonly search: string;
 }
 
-/** @returns Task search, filters, refresh, and creation controls. */
+/** @returns Task search, filters, and creation controls. */
 export function TaskBoardToolbar({
     assignee,
     automation,
@@ -42,7 +41,6 @@ export function TaskBoardToolbar({
     onAssigneeChange,
     onAutomationChange,
     onCreate,
-    onRefresh,
     onSearchChange,
     search,
 }: TaskBoardToolbarProps) {
@@ -72,10 +70,6 @@ export function TaskBoardToolbar({
                 />
             </div>
             <div className="flex shrink-0 gap-2">
-                <Button disabled={busy} onClick={onRefresh} variant="secondary">
-                    <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                    Refresh
-                </Button>
                 <Button disabled={busy} onClick={onCreate}>
                     <Icon icon={Plus} size="sm" tone="inherit" />
                     New task

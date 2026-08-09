@@ -59,10 +59,16 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             if (evt.stream === "thinking") return "thinking";
             if (toolPhase === "start") flushBufferedChatDeltaIfNeeded();
             if (phase === "start" && (isControlUiVisible || hasSessionMessageSubscribers)) {}
-            const emitChatTerminal = () => {
+            const emitChatTerminal = (sessionKey, payload, opts) => {
                 flushBufferedChatDeltaIfNeeded(sessionKey, opts?.agentId);
                 chatRunState.clearRun(clientRunId);
+                const terminal = {
+                    state: jobState === "done" ? "final" : "aborted"
+                };
+                const failed = { state: "error" };
+                sendChatPayload(sessionKey, payload, opts);
             };
+            const sendAgentPayload = () => {};
             if (evt.stream === "plan" && evt.data?.phase === "update") {
                 chatRunState.getOrCreate(clientRunId).planSnapshot = {};
             }
@@ -73,8 +79,31 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             broadcastToConnIds("session.tool", payload, sessionSubscribers, {
                 dropIfSlow: true
             });
+            const flushPayload = {
+                state: "delta"
+            };
+            sendChatPayload(sessionKey, flushPayload, {
+                dropIfSlow: true
+            });
+            run.deltaLastBroadcastLen = text.length;
         `,
         "chat-abort-fixture.js": `
+            function resolveInFlightRunSnapshot(params) {
+                let best;
+                for (const [runId, entry] of params.chatAbortControllers) {
+                    if (entry.kind === "agent") continue;
+                    const newer = best === undefined || entry.startedAtMs > best.startedAtMs;
+                    const tie = best !== undefined && entry.startedAtMs === best.startedAtMs && runId > best.runId;
+                    if (newer || tie) best = { runId, startedAtMs: entry.startedAtMs };
+                }
+                const run = params.chatRunState.runs.get(best.runId);
+            }
+            function boundInFlightRunSnapshotForChatHistory(params) {
+                const messagesBytes = jsonUtf8Bytes(params.messages);
+                if (messagesBytes + jsonUtf8Bytes(params.snapshot) <= params.maxBytes) return params.snapshot;
+                if (messagesBytes + jsonUtf8Bytes(withoutText) <= params.maxBytes) return withoutText;
+                if (messagesBytes + jsonUtf8Bytes(withoutPlan) <= params.maxBytes) return withoutPlan;
+            }
             const plan = run?.planSnapshot;
             const withoutText = params.snapshot.plan ? { plan: params.snapshot.plan } : {};
             const droppedPlan = { plan: { steps: [] } };
@@ -105,6 +134,59 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 status: "started"
             };
             respond(true, ackPayload, void 0, { runId: clientRunId });
+            const max = Math.min(1e3, typeof limit === "number" ? limit : 200);
+            function readChatHistoryMessageId(message) {
+                const metadata = message.__openclaw;
+                return typeof metadata?.id === "string" ? metadata.id : void 0;
+            }
+            const nextOffset = hasMore ? candidateNextOffset : void 0;
+            sessionInfo.activeRunIds = activeRunState.runIds;
+            const boundedInFlightRun = boundInFlightRunSnapshotForChatHistory({
+                snapshot: resolveInFlightRunSnapshot({}),
+                messages: bounded.messages
+            });
+            respond(true, {
+                sessionKey,
+                sessionId,
+                messages: bounded.messages,
+                ...hasMore ? { nextOffset } : {},
+                ...hasMore !== void 0 ? { hasMore } : {},
+                ...boundedInFlightRun ? { inFlightRun: boundedInFlightRun } : {}
+            });
+            unavailableReason: "not_found";
+            unavailableReason: "not_visible";
+            unavailableReason: "oversized";
+            assertValidParams(params, validateChatAbortParams, "chat.abort", respond);
+            const abortAck = { aborted: runIds.length > 0, runIds };
+        `,
+        "managed-image-attachments-fixture.js": `
+            const OUTGOING_IMAGE_ROUTE_PREFIX = "/api/chat/media/outgoing";
+            const MANAGED_OUTGOING_ATTACHMENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f-]+$/i;
+            function buildOutgoingVariantUrl(sessionKey, attachmentId, variant) {
+                return \`\${OUTGOING_IMAGE_ROUTE_PREFIX}/\${encodeURIComponent(sessionKey)}/\${attachmentId}/\${variant}\`;
+            }
+            async function recordMatchesTranscriptMessage(record) { return true; }
+            async function handleManagedOutgoingMediaHttpRequest(req, res, opts) {
+                if (req.method !== "GET" && req.method !== "HEAD") return true;
+                MANAGED_OUTGOING_ATTACHMENT_ID_RE.test(attachmentId);
+                authorizeGatewayHttpRequestOrReply({ req, res });
+                authorizeOperatorScopesForMethod("chat.history", scopes);
+                resolveOpenAiCompatibleHttpSenderIsOwner(req, requestAuth);
+                if (record.sessionKey !== sessionKey) return true;
+                await recordMatchesTranscriptMessage(record);
+                await openLocalFileSafely({ filePath });
+                resolveByteResponse({
+                    rangeHeader: req.headers.range
+                });
+            }
+            //#endregion
+        `,
+        "models-fixture.js": `
+            function buildModelsListResult() {}
+            const modelsHandlers = { "models.list": async ({ params, respond }) => {
+                if (!assertValidParams(params, validateModelsListParams, "models.list", respond)) return;
+                respond(true, await buildModelsListResult({ context, params }));
+            } };
         `,
         "system-fixture.js": `
             async function collectSystemInfo(context) {
@@ -135,7 +217,11 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             };
         `,
         "core-descriptors-fixture.js": `
+            { name: "chat.abort", scope: "operator.write" },
+            { name: "chat.history", scope: "operator.read" },
+            { name: "chat.message.get", scope: "operator.read" },
             { name: "chat.send", scope: "operator.write" },
+            { name: "models.list", scope: "operator.read" },
             { name: "system.info", scope: "operator.read" },
             { name: "tasks.list", scope: "operator.read" },
             { name: "tasks.get", scope: "operator.read" },
@@ -143,6 +229,9 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             { name: "sessions.companion.ask", scope: "operator.read" },
             { name: "sessions.companion.state", scope: "operator.read" },
             { name: "sessions.companion.reset", scope: "operator.write", controlPlaneWrite: true },
+            { name: "sessions.messages.subscribe", scope: "operator.read" },
+            { name: "sessions.messages.unsubscribe", scope: "operator.read" },
+            { name: "sessions.patch", scope: "dynamic" },
             { name: "sessions.compact", scope: "operator.admin" },
             { name: "sessions.delete", scope: "dynamic" },
             { name: "sessions.list", scope: "operator.read" },
@@ -156,6 +245,28 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             { name: "cron.update", scope: "operator.admin" },
         `,
         "method-scopes-fixture.js": `
+            /**
+            * sessions.patch fields a write-scoped operator may mutate: user-level chat
+            * organization only. Any other field (model, sendPolicy, tool inheritance,
+            * exec routing, ...) keeps requiring operator.admin — fail closed on unknowns.
+            */
+            const SESSIONS_PATCH_WRITE_SCOPE_FIELDS = new Set([
+                "key",
+                "agentId",
+                "label",
+                "category",
+                "boardFace",
+                "icon",
+                "pinned",
+                "archived",
+                "unread"
+            ]);
+            function resolveSessionsPatchRequiredScopes(params) {
+                return Object.keys(params).every((key) =>
+                    SESSIONS_PATCH_WRITE_SCOPE_FIELDS.has(key))
+                    ? [WRITE_SCOPE] : [ADMIN_SCOPE];
+            }
+            function resolveSessionsCreateRequiredScopes(params) {}
             // Internal controls (emitLifecycleHooks, expected* CAS guards) stay admin-only
             const SESSIONS_DELETE_WRITE_SCOPE_FIELDS = new Set([
                 "key", "agentId", "deleteTranscript", "archivedOnly"
@@ -191,18 +302,171 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                 Type.Literal("completed"), Type.Literal("failed"),
                 Type.Literal("cancelled"), Type.Literal("timed_out")
             ];
-            const SessionsCompanionAskParamsSchema = {
-                maxLength: 400, maxLength: 1200, maxItems: 24, maximum: 500
-            };
+            const TimestampSchema = Type.Union([Type.String(), Type.Integer({ minimum: 0 })]);
+            const TaskSummarySchema = closedObject({
+\tid: NonEmptyString,
+\tkind: Type.Optional(Type.String()),
+\truntime: Type.Optional(Type.String()),
+\tstatus: TaskLedgerStatusSchema,
+\ttitle: Type.Optional(Type.String()),
+\tagentId: Type.Optional(Type.String()),
+\tsessionKey: Type.Optional(Type.String()),
+\tchildSessionKey: Type.Optional(Type.String()),
+\townerKey: Type.Optional(Type.String()),
+\trunId: Type.Optional(Type.String()),
+\ttaskId: Type.Optional(Type.String()),
+\tflowId: Type.Optional(Type.String()),
+\tparentTaskId: Type.Optional(Type.String()),
+\tsourceId: Type.Optional(Type.String()),
+\tcreatedAt: Type.Optional(TimestampSchema),
+\tupdatedAt: Type.Optional(TimestampSchema),
+\tstartedAt: Type.Optional(TimestampSchema),
+\tendedAt: Type.Optional(TimestampSchema),
+\ttoolUseCount: Type.Optional(Type.Integer({ minimum: 0 })),
+\tlastToolName: Type.Optional(Type.String()),
+\tprogressSummary: Type.Optional(Type.String()),
+\tterminalSummary: Type.Optional(Type.String()),
+\terror: Type.Optional(Type.String()),
+\tprompt: Type.Optional(Type.String())
+            });
+            /** Task list filters with bounded pagination. */
+            const TasksListParamsSchema = closedObject({
+\tstatus: Type.Optional(Type.Union([TaskLedgerStatusSchema, Type.Array(TaskLedgerStatusSchema)])),
+\tagentId: Type.Optional(NonEmptyString),
+\tsessionKey: Type.Optional(NonEmptyString),
+\tlimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+\tcursor: Type.Optional(Type.String())
+            });
+            /** Task list page response. */
+            const TasksListResultSchema = closedObject({
+\ttasks: Type.Array(TaskSummarySchema),
+\tnextCursor: Type.Optional(Type.String())
+            });
+            /** Lookup request for one task id. */
+            const TasksGetParamsSchema = closedObject({ taskId: NonEmptyString });
+            const TasksGetResultSchema = closedObject({ task: TaskSummarySchema });
+            const TasksCancelParamsSchema = closedObject({
+\ttaskId: NonEmptyString,
+\treason: Type.Optional(Type.String())
+            });
+            /** Cancel result, including the task snapshot when it was found. */
+            const TasksCancelResultSchema = closedObject({
+\tfound: Type.Boolean(),
+\tcancelled: Type.Boolean(),
+\treason: Type.Optional(Type.String()),
+\ttask: Type.Optional(TaskSummarySchema)
+            });
+            /** Approval request raised by a plugin before a sensitive tool action proceeds. */
+
+            const SessionCompanionExchangeSchema = closedObject({
+\tquestion: Type.String({ minLength: 1, maxLength: 400 }),
+\tanswer: Type.String({ minLength: 1, maxLength: 1200 }),
+\tts: Type.Integer({ minimum: 0 })
+            });
+            /** Asks the read-only companion about one session and its workspace. */
+            const SessionsCompanionAskParamsSchema = closedObject({
+\tsessionKey: NonEmptyString,
+\tquestion: Type.String({ minLength: 1, maxLength: 400 })
+            });
+            /** Companion answer returned only to the requesting operator. */
+            const SessionsCompanionAskResultSchema = closedObject({
+\tanswer: Type.String({ minLength: 1, maxLength: 1200 }),
+\tts: Type.Integer({ minimum: 0 })
+            });
+            /** Selects the in-memory companion thread for one session. */
+            const SessionsCompanionStateParamsSchema = closedObject({ sessionKey: NonEmptyString });
+            const SessionsCompanionStateResultSchema = closedObject({ exchanges: Type.Array(SessionCompanionExchangeSchema, { maxItems: 24 }) });
+            const SessionsCompanionResetParamsSchema = closedObject({ sessionKey: NonEmptyString });
+            const SessionsCompanionResetResultSchema = closedObject({ ok: Type.Literal(true) });
             // Companion answer returned only to the requesting operator.
             // Returned by tasks.get; omitted from list/event summaries.
 
+            const ChatHistoryParamsSchema = closedObject({
+\tsessionKey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\tlimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 1e3 })),
+\toffset: Type.Optional(Type.Integer({ minimum: 0 })),
+\tmessageId: Type.Optional(NonEmptyString),
+\tsessionId: Type.Optional(NonEmptyString),
+\tmaxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 5e5 }))
+            });
+            /** Lightweight chat metadata request; optional agent scope keeps selector state explicit. */
+            const ChatMetadataParamsSchema = closedObject({});
+            /** Fetches one stored chat message without forcing history callers to request huge payloads. */
+            const ChatMessageGetParamsSchema = closedObject({
+\tsessionKey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\tmessageId: NonEmptyString,
+\tmaxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 2e6 }))
+            });
+            closedObject({
+\tok: Type.Boolean(),
+\tmessage: Type.Optional(Type.Unknown()),
+\tunavailableReason: Type.Optional(Type.Union([
+                    Type.Literal("not_found"),
+                    Type.Literal("oversized"),
+                    Type.Literal("not_visible")
+                ]))
+            });
+            /** Permissive attachment envelope shared by chat and session entrypoints. */
+            const ChatAttachmentSchema = Type.Object({
+\ttype: Type.Optional(Type.String()),
+\tmimeType: Type.Optional(Type.String()),
+\tfileName: Type.Optional(Type.String()),
+\tcontent: Type.Optional(Type.Unknown()),
+\tsizeBytes: Type.Optional(Type.Number())
+            }, { additionalProperties: true });
+            /** Attachment list shared by chat.send and session creation's initial turn. */
+            const ChatAttachmentsSchema = Type.Array(ChatAttachmentSchema);
             const ChatSendParamsSchema = closedObject({
 \tsessionKey: ChatSendSessionKeyString,
 \tmessage: Type.String(),
+\tthinking: Type.Optional(Type.String()),
+\tfastMode: Type.Optional(Type.Union([Type.Boolean(), Type.Literal("auto")])),
+\tqueueMode: Type.Optional(Type.String({ enum: ["steer", "followup", "collect", "interrupt"] })),
+\tattachments: Type.Optional(ChatAttachmentsSchema),
 \tidempotencyKey: NonEmptyString
             });
             /** Cancels the active or named run for a chat session. */
+
+            const ChatAbortParamsSchema = closedObject({
+\tsessionKey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\trunId: Type.Optional(NonEmptyString),
+\tpreserveSideRuns: Type.Optional(Type.Boolean())
+            });
+            /** Inserts an operator-visible synthetic message into an existing chat transcript. */
+            const ChatInjectParamsSchema = closedObject({});
+
+            const ChatEventBaseSchema = {
+\trunId: NonEmptyString,
+\tsessionKey: NonEmptyString,
+\tseq: Type.Integer({ minimum: 0 })
+            };
+            const ChatStatusEventSchema = closedObject({
+                ...ChatEventBaseSchema, state: Type.Literal("status")
+            });
+            const ChatDeltaEventSchema = closedObject({
+                ...ChatEventBaseSchema, state: Type.Literal("delta")
+            });
+            const ChatFinalEventSchema = closedObject({
+                ...ChatEventBaseSchema, state: Type.Literal("final")
+            });
+            const ChatAbortedEventSchema = closedObject({
+                ...ChatEventBaseSchema, state: Type.Literal("aborted")
+            });
+            const ChatErrorEventSchema = closedObject({
+                ...ChatEventBaseSchema, state: Type.Literal("error")
+            });
+            const ChatEventSchema = Type.Union([
+                ChatStatusEventSchema,
+                ChatDeltaEventSchema,
+                ChatFinalEventSchema,
+                ChatAbortedEventSchema,
+                ChatErrorEventSchema
+            ]);
+            //#endregion
+            //#region packages/gateway-protocol/src/schema/sessions-create.ts
 
             /** Empty request payload for Gateway host system information. */
             const SystemInfoParamsSchema = closedObject({});
@@ -275,6 +539,32 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
 \tarchived: Type.Optional(Type.Boolean())
             });
             /** Searches one agent's indexed session transcripts */
+
+            /** Subscribes a client to live message updates for one session. */
+            const SessionsMessagesSubscribeParamsSchema = closedObject({
+\tkey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\tincludeApprovals: Type.Optional(Type.Literal(true))
+            });
+            /** Removes a live message subscription for one session. */
+            const SessionsMessagesUnsubscribeParamsSchema = closedObject({
+\tkey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString)
+            });
+            /** Aborts the active or named run for a session. */
+            const SessionsAbortParamsSchema = closedObject({});
+            /** Mutable per-session preferences and routing metadata. */
+            const SessionsPatchParamsSchema = closedObject({
+\tkey: NonEmptyString,
+\texpectedSessionId: Type.Optional(NonEmptyString),
+\tthinkingLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+\tfastMode: Type.Optional(Type.Union([
+                    Type.Boolean(), Type.Literal("auto"), Type.Null()
+                ])),
+\tmodel: Type.Optional(Type.Union([NonEmptyString, Type.Null()]))
+            });
+            /** Updates or clears one plugin namespace value on a session record. */
+            const SessionsPluginPatchParamsSchema = closedObject({});
 
             const SessionsResetParamsSchema = closedObject({
 \tkey: NonEmptyString,
@@ -541,11 +831,50 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                     cache_write_tokens: Type.Optional(Type.Number())
                 }))
             });
+            /** Model option shown in selectors and model catalog results. */
+            const ModelChoiceSchema = closedObject({
+\tid: NonEmptyString,
+\tname: NonEmptyString,
+\tprovider: NonEmptyString,
+\treasoning: Type.Optional(Type.Boolean())
+            });
+            /** Semantic owner of an agent roster entry. */
+            const AgentKindSchema = Type.Union([]);
+            /** Model catalog request with optional visibility scope. */
+            const ModelsListParamsSchema = closedObject({
+\tincludeProviderCapabilities: Type.Optional(Type.Boolean()),
+\tview: Type.Optional(Type.Union([Type.Literal("configured")]))
+            });
+            /** Reads model-provider credential health for one configured agent. */
+            const ModelsAuthStatusParamsSchema = closedObject({});
             //#region packages/gateway-protocol/src/schema/environments.ts
         `,
         "server-runtime-subscriptions-fixture.js": `
             const SESSION_COMPANION_IDLE_TTL_MS = 120 * 6e4;
             const SESSION_COMPANION_SWEEP_INTERVAL_MS = 10 * 6e4;
+            function createSessionCompanion() {
+                const threads = /* @__PURE__ */ new Map();
+                const reset = (sessionKey) => {
+                    const key = sessionKey.trim();
+                    askRuntime.cancel(key);
+                    threads.delete(key);
+                };
+                return {
+                    state(sessionKey) {
+                        const key = sessionKey.trim();
+                        const thread = threads.get(key);
+                        return thread;
+                    }
+                };
+            }
+            const upserted = {
+                action: "upserted",
+                task: mapTaskSummary(event.task)
+            };
+            const deleted = {
+                action: "deleted",
+                taskId: event.taskId
+            };
             payload = { action: "restored" };
             params.broadcast("task", payload, { dropIfSlow: true });
             function createSessionObserverAudience(params) {
@@ -559,6 +888,15 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             "sessions.companion.ask";
             "sessions.companion.state";
             "sessions.companion.reset";
+            if (!client?.connId) throw new Error();
+            respond(true, await context.sessionCompanion.ask({
+                sessionKey,
+                question,
+                connId: client.connId
+            }));
+            respond(true, context.sessionCompanion.state(sessionKey));
+            context.sessionCompanion.reset(sessionKey);
+            respond(true, { ok: true });
             SESSION_COMPANION_BUSY;
             const details = { retryable: true };
         `,
@@ -584,9 +922,22 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
         `,
         "session-change-event-fixture.js": `
             function emitSessionsChanged(context, payload) {
-                context.broadcastToConnIds("sessions.changed", payload, connIds, {
+                context.broadcastToConnIds("sessions.changed", {
+                    ...payload,
+                    ts: Date.now(),
+                    ...buildGatewaySessionEventFields({ sessionRow })
+                }, connIds, {
                     dropIfSlow: true
                 });
+            }
+        `,
+        "session-event-payload-fixture.js": `
+            function buildGatewaySessionEventFields(params) {
+                const sessionRow = params.sessionRow;
+                return {
+                    updatedAt: sessionRow.updatedAt ?? void 0,
+                    sessionId: sessionRow.sessionId
+                };
             }
         `,
         "sessions-shared-fixture.js": `
@@ -639,6 +990,15 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             }
             function filterAndSortSessionEntries(params) {}
         `,
+        "session-reset-service-fixture.js": `
+            async function performGatewaySessionReset() {
+                const nextSessionId = currentEntry?.sessionId ?? randomUUID();
+                return {
+                    sessionId: nextSessionId,
+                    lifecycleRevision: randomUUID()
+                };
+            }
+        `,
         "session-utils-row-fixture.js": `
             function buildGatewaySessionRow(params) {
                 const thinkingProjection = resolveGatewaySessionThinkingProjectionInternal({});
@@ -680,6 +1040,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
         "sessions-fixture.js": `
             const sessionCompactHandlers = {
                 "sessions.compact": async () => {
+                    const event = { reason: "compact", compacted: true };
                     respond(true, {
                         ok: result.ok,
                         key: target.canonicalKey,
@@ -691,6 +1052,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             };
             const sessionDeleteHandlers = {
                 "sessions.delete": async () => {
+                    const event = { reason: "delete" };
                     const mainKey = resolveMainSessionKey(cfg);
                     const isSelectedNonDefaultGlobal = target.canonicalKey === "global" &&
                         requestedAgentId !== resolveDefaultAgentId(cfg);
@@ -720,6 +1082,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                     respond(true, { subscribed: false });
                 },
                 "sessions.reset": async () => {
+                    const reason = p.reason === "new" ? "new" : "reset";
                     if ("incognitoDeleted" in result) {
                         respond(true, { ok: true, key: result.key, deleted: true });
                     }
@@ -736,8 +1099,35 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                     ...activeRunState.runIds.length > 0 ? {
                         activeRunIds: activeRunState.runIds
                     } : {}
-                })
+                }),
+                "sessions.patch": async () => {
+                    const expectedSessionChanged = p.expectedSessionId !== void 0 && currentLifecycleEntry?.sessionId !== p.expectedSessionId;
+                    respond(true, {
+                        entry: applied.entry,
+                        resolved: {
+                            model: resolvedDisplayModel.model,
+                            thinkingLevel: thinkingProjection.effectiveThinkingLevel
+                        }
+                    });
+                },
+                "sessions.pluginPatch": async () => {},
+                "sessions.messages.subscribe": ({ client, context, respond }) => {
+                    context.subscribeSessionMessageEvents(connId, subscriptionKey);
+                    respond(true, {
+                        subscribed: true,
+                        key: canonicalKey
+                    });
+                },
+                "sessions.messages.unsubscribe": ({ client, context, respond }) => {
+                    context.unsubscribeSessionMessageEvents(connId, subscriptionKey);
+                    respond(true, {
+                        subscribed: false,
+                        key: canonicalKey
+                    });
+                }
             };
+            //#endregion
+            //#region src/gateway/server-methods/session-typing-state.ts
         `,
         "cron-fixture.js": `
             function cronJobReadView(job) {
@@ -887,10 +1277,27 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             const DEFAULT_TASKS_LIST_LIMIT = 100;
             const MAX_TASKS_LIST_LIMIT = 500;
             const LEDGER_STATUS_TO_TASK_STATUSES = { failed: ["failed", "lost"] };
-            function parseCursor() {}
-            "tasks.list"; "tasks.get"; "tasks.cancel";
-            mapTaskSummary(task, { includePrompt: true });
-            respond(true, {});
+            function parseCursor(cursor) {
+                if (!/^\\d+$/.test(cursor.trim())) return null;
+            }
+            const handlers = {
+                "tasks.list": () => {
+                    const nextOffset = cursor + page.tasks.length;
+                    respond(true, {
+                        tasks: page.tasks.map((task) => mapTaskSummary(task)),
+                        ...page.hasMore ? { nextCursor: String(nextOffset) } : {}
+                    });
+                },
+                "tasks.get": () => {
+                    respond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, \`task not found: \${taskId}\`));
+                    respond(true, { task: mapTaskSummary(task, { includePrompt: true }) });
+                },
+                "tasks.cancel": () => respond(true, {
+                    found: result.found,
+                    cancelled: result.cancelled,
+                    ...result.task ? { task: mapTaskSummary(result.task) } : {}
+                })
+            };
         `,
         "task-registry-fixture.js": `
             "Task is already terminal.";
@@ -967,13 +1374,17 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             const coreGatewayHandlers = {};
             methods: ["agent", "agent.wait"];
             methods: ["agent.identity.get", "agents.list"];
-            methods: ["chat.abort", "chat.history", "chat.send"];
+            methods: ["chat.abort", "chat.history", "chat.message.get", "chat.send"];
+            methods: ["models.list"];
             methods: ["system.info"];
             methods: [
                 "session.typing",
                 "sessions.compact",
                 "sessions.delete",
                 "sessions.list",
+                "sessions.messages.subscribe",
+                "sessions.messages.unsubscribe",
+                "sessions.patch",
                 "sessions.reset",
                 "sessions.send",
                 "sessions.subscribe",
@@ -1132,18 +1543,105 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(43);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(47);
+        expect(reviewed.audit.sessions.adapter.event.lifecycleProjection).toEqual({
+            compactIsDestructiveOnlyWhenTrue: true,
+            fields: ["compacted", "reason", "sessionId", "sessionKey", "ts", "updatedAt"],
+            lossRequiresReconciliation: true,
+            reasons: ["compact", "delete", "new", "reset"],
+            resetPreservesSessionId: true,
+            resetRotatesLifecycleRevision: true,
+        });
         expect(reviewed.audit.chat.methodAccess).toEqual([
+            {
+                controlPlaneWrite: false,
+                name: "chat.abort",
+                scope: "operator.write",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "chat.history",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "chat.message.get",
+                scope: "operator.read",
+            },
             {
                 controlPlaneWrite: false,
                 name: "chat.send",
                 scope: "operator.write",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "models.list",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.companion.ask",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: true,
+                name: "sessions.companion.reset",
+                scope: "operator.write",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.companion.state",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.messages.subscribe",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.messages.unsubscribe",
+                scope: "operator.read",
             },
         ]);
         expect(reviewed.audit.chat.taskNotificationSend).toEqual({
             acknowledgedStatuses: ["in_flight", "ok", "started"],
             idempotencyKeyIsRunId: true,
             requiredParams: ["idempotencyKey", "message", "sessionKey"],
+        });
+        expect(reviewed.audit.chat.adapter.methods.history.pagination).toEqual({
+            hasMoreRequiresNextOffset: true,
+            nextOffsetOnlyWhenHasMore: true,
+            offsetDirection: "older-from-recent-tail",
+        });
+        expect(reviewed.audit.chat.adapter.methods.history.inFlightRun).toEqual({
+            boundedAgainstPageMessages: true,
+            exactValueStableAcrossPages: false,
+            multipleActiveRunsPossible: true,
+            recomputedPerRequest: true,
+            selection: "newest-visible-run",
+            tieBreak: "runId-descending",
+        });
+        expect(
+            reviewed.audit.chat.adapter.methods.settings.generationAcknowledgement
+        ).toEqual({
+            requestField: "expectedSessionId",
+            requiredOnFencedMutation: true,
+            responseField: "entry.sessionId",
+        });
+        expect(
+            reviewed.audit.chat.adapter.methods.companionReset.resetCancelsActiveAsk
+        ).toBeTrue();
+        expect(reviewed.audit.chat.adapter.methods.messageGet.requestParams).toEqual([
+            "agentId",
+            "maxChars",
+            "messageId",
+            "sessionKey",
+        ]);
+        expect(reviewed.audit.tasks.adapter.summary).toMatchObject({
+            endedAtOptionalForEveryStatus: true,
+            promptOptional: true,
+            timestampRepresentations: ["integer", "string"],
         });
         expect(reviewed.audit.sessions.adapter.list.requestParams).toEqual([
             "archived",
@@ -1495,6 +1993,7 @@ describe("explicit OpenClaw source audit", () => {
             expect(audit.chat.methods).toEqual([
                 "chat.abort",
                 "chat.history",
+                "chat.message.get",
                 "chat.send",
             ]);
             expect(audit.agents.methods).toEqual([
@@ -1538,6 +2037,21 @@ describe("explicit OpenClaw source audit", () => {
                     },
                 ],
                 delivery: "path-dependent-drop-or-close",
+                lifecycleProjection: {
+                    compactIsDestructiveOnlyWhenTrue: true,
+                    fields: [
+                        "compacted",
+                        "reason",
+                        "sessionId",
+                        "sessionKey",
+                        "ts",
+                        "updatedAt",
+                    ],
+                    lossRequiresReconciliation: true,
+                    reasons: ["compact", "delete", "new", "reset"],
+                    resetPreservesSessionId: true,
+                    resetRotatesLifecycleRevision: true,
+                },
                 name: "sessions.changed",
                 sequence: "omitted",
                 targeted: true,
@@ -1550,7 +2064,7 @@ describe("explicit OpenClaw source audit", () => {
                 "offset",
                 "total",
             ]);
-            expect(audit.sourceArtifacts).toHaveLength(43);
+            expect(audit.sourceArtifacts).toHaveLength(47);
         });
     });
 

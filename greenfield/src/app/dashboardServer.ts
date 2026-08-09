@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
@@ -7,6 +8,10 @@ import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
 import { createCacheService } from "../server/domains/cache/service.ts";
+import { createChatRepository } from "../server/domains/chat/repository.ts";
+import { createChatService, type ChatService } from "../server/domains/chat/service.ts";
+import { chatSessionSubscriptionIdleMilliseconds } from "../server/domains/chat/subscriptionManager.ts";
+import { createChatTranscriptLifecycleCoordinator } from "../server/domains/chat/transcriptLifecycle.ts";
 import {
     createGatewayConnectionService,
     unavailableGatewayConnectionStateProvider,
@@ -37,6 +42,11 @@ import {
 } from "../server/domains/openClawCron/provider.ts";
 import { createOpenClawCronService } from "../server/domains/openClawCron/service.ts";
 import { createSqliteOpenClawCronIntentStore } from "../server/domains/openClawCron/sqliteIntentStore.ts";
+import { createOpenClawTasksRealtimePublisher } from "../server/domains/openClawTasks/realtime.ts";
+import {
+    createOpenClawTasksService,
+    type OpenClawTasksService,
+} from "../server/domains/openClawTasks/service.ts";
 import { createAuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createAuthenticationLifecycleRepository } from "../server/domains/security/authenticationLifecycleRepository.ts";
 import {
@@ -65,6 +75,9 @@ import { createSecurityAuditLifecycleService } from "../server/domains/security/
 import { createSecurityAuditLifecycleRepository } from "../server/domains/security/securityAuditLifecycleRepository.ts";
 import { createTaskRepository } from "../server/domains/tasks/repository.ts";
 import { createTaskService } from "../server/domains/tasks/service.ts";
+import { createElevenLabsSpeechProvider } from "../server/platform/chat/elevenLabsSpeechProvider.ts";
+import { createInMemoryChatAttachmentStore } from "../server/platform/chat/inMemoryChatAttachmentStore.ts";
+import { createInMemoryChatMediaReferences } from "../server/platform/chat/inMemoryChatMediaReferences.ts";
 import {
     type WebConfiguration,
     parseWebConfiguration,
@@ -73,7 +86,14 @@ import {
     type DashboardProjectLayout,
     resolveDashboardProjectLayout,
 } from "../server/platform/filesystem/projectLayout.ts";
+import {
+    createChatTranscriptLifecycleSupervisor,
+    type ChatTranscriptLifecycleSupervisor,
+} from "../server/platform/gateway/chatTranscriptLifecycleSupervisor.ts";
 import { createGatewayCredentialVerifier } from "../server/platform/gateway/gatewayCredentialVerifier.ts";
+import { createOpenClawTasksSubscriptionSupervisor } from "../server/platform/gateway/openClawTasksSubscriptionSupervisor.ts";
+import { createPersistentGatewayChatProvider } from "../server/platform/gateway/persistentGatewayChatProvider.ts";
+import { createPersistentGatewayOpenClawTasksProvider } from "../server/platform/gateway/persistentGatewayOpenClawTasksProvider.ts";
 import { createPersistentGatewaySessionsProvider } from "../server/platform/gateway/persistentGatewaySessionsProvider.ts";
 import { createPersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import {
@@ -102,10 +122,21 @@ import {
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
 import {
+    chatMessageAuthorizesMediaReference,
+    createChatRawHttpHandler,
+    createOpenClawOutgoingMediaFetcher,
+    type ChatRawHttpHandler,
+} from "../server/rawHttp/chatMedia.ts";
+import { createChatSpeechRawHttpHandler } from "../server/rawHttp/chatSpeech.ts";
+import {
     createFrontendAssetHandler,
     type FrontendAssetHandler,
 } from "../server/rawHttp/frontendAssets.ts";
 import { parseBrowserOrigin } from "../server/rawHttp/requestSecurity.ts";
+import {
+    startDashboardChatRuntimeMaintenance,
+    type DashboardChatRuntimeMaintenance,
+} from "./dashboardChatRuntimeMaintenance.ts";
 import { environmentSource } from "./environmentSource.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
 
@@ -119,6 +150,9 @@ export interface DashboardServerOptions extends Omit<
     | "automationSecurityLifecycle"
     | "browserOrigin"
     | "cacheService"
+    | "chatRawHttpHandler"
+    | "chatService"
+    | "disposeBeforeRuntime"
     | "gatewayConnectionService"
     | "gatewaySessionsService"
     | "hostname"
@@ -128,6 +162,7 @@ export interface DashboardServerOptions extends Omit<
     | "monitoringCatalogService"
     | "monitoringService"
     | "openClawCronService"
+    | "openClawTasksService"
     | "securityAuditLifecycle"
     | "taskService"
 > {
@@ -135,8 +170,12 @@ export interface DashboardServerOptions extends Omit<
     readonly authenticationLeaseDurationMs?: number;
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
+    /** Optional server-only speech credential; absence keeps both voice controls hidden. */
+    readonly elevenLabsApiKey?: Redacted.Redacted<string>;
     /** Direct-loopback endpoint shared by bootstrap verification and persistent Gateway traffic. */
     readonly gatewayUrl: string;
+    /** Server-only Gateway credential used by the outgoing-media proxy. */
+    readonly gatewayToken?: Redacted.Redacted<string>;
     readonly gatewayVerificationTimeoutMs?: number;
     /** Shared composition clock for deterministic lifecycle and request-auth behavior. */
     readonly now?: () => Date;
@@ -169,6 +208,17 @@ export function validateDashboardWebAuthnBrowserOrigin(
         );
     }
     return canonicalOrigin;
+}
+
+/**
+ * Derives a stable non-secret scope isolating chat rows by canonical Gateway origin.
+ * @param gatewayUrl Configured Gateway URL.
+ * @returns Lowercase SHA-256 fingerprint of the canonical URL origin.
+ */
+export function resolveDashboardGatewayScope(gatewayUrl: string): string {
+    const origin = new URL(gatewayUrl).origin;
+    if (origin === "null") throw new TypeError("Gateway URL has no canonical origin");
+    return createHash("sha256").update(origin).digest("hex");
 }
 
 const unavailableOpenClawCronProvider: OpenClawCronProvider = Object.freeze({
@@ -276,6 +326,53 @@ export async function createDashboardServer(
     options: DashboardServerOptions
 ): Promise<ApplicationServer> {
     let serverOwnsRuntimeCleanup = false;
+    let compositionDisposed = false;
+    let chatAttachmentStore:
+        | ReturnType<typeof createInMemoryChatAttachmentStore>
+        | undefined;
+    let chatMediaReferences:
+        | ReturnType<typeof createInMemoryChatMediaReferences>
+        | undefined;
+    let chatService: ChatService | undefined;
+    let chatMaintenance: DashboardChatRuntimeMaintenance | undefined;
+    let chatTranscriptLifecycleSupervisor: ChatTranscriptLifecycleSupervisor | undefined;
+    let openClawTasksService: OpenClawTasksService | undefined;
+    let openClawTasksSupervisor:
+        | ReturnType<typeof createOpenClawTasksSubscriptionSupervisor>
+        | undefined;
+    const disposeComposition = async (): Promise<void> => {
+        if (compositionDisposed) return;
+        compositionDisposed = true;
+        let failure: unknown;
+        try {
+            await chatMaintenance?.stop();
+        } catch (error) {
+            failure = error;
+        }
+        try {
+            await chatTranscriptLifecycleSupervisor?.stop();
+        } catch (error) {
+            failure ??= error;
+        }
+        try {
+            await openClawTasksSupervisor?.stop();
+        } catch (error) {
+            failure ??= error;
+        }
+        try {
+            await chatService?.dispose();
+        } catch (error) {
+            failure ??= error;
+        }
+        chatAttachmentStore?.dispose();
+        chatMediaReferences?.dispose();
+        if (failure instanceof Error) throw failure;
+        if (failure !== undefined) {
+            throw new Error("Dashboard composition disposal failed", {
+                cause: failure,
+            });
+        }
+    };
     try {
         const browserOrigin = validateDashboardWebAuthnBrowserOrigin(
             options.browserOrigin,
@@ -435,6 +532,22 @@ export async function createDashboardServer(
                     Promise.reject(new GatewaySessionProviderUnavailableError()),
             }
         );
+        const persistentGatewayTransport =
+            options.applicationRuntime.persistentGatewayTransport;
+        const chatRepository =
+            persistentGatewayTransport === undefined
+                ? undefined
+                : createChatRepository(
+                      database,
+                      databaseRuntime,
+                      resolveDashboardGatewayScope(options.gatewayUrl),
+                      domainNow === undefined ? Date.now : () => domainNow().getTime(),
+                      wakeEventPump
+                  );
+        const chatTranscriptLifecycle =
+            chatRepository === undefined
+                ? undefined
+                : createChatTranscriptLifecycleCoordinator(chatRepository);
         const gatewaySessionsService = createGatewaySessionsService({
             controlAudit: createGatewaySessionControlAudit({
                 ...(domainNow === undefined ? {} : { now: domainNow }),
@@ -466,11 +579,12 @@ export async function createDashboardServer(
             }),
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             provider:
-                options.applicationRuntime.persistentGatewayTransport === undefined
+                persistentGatewayTransport === undefined
                     ? unavailableGatewaySessionsProvider
-                    : createPersistentGatewaySessionsProvider(
-                          options.applicationRuntime.persistentGatewayTransport
-                      ),
+                    : createPersistentGatewaySessionsProvider(persistentGatewayTransport),
+            ...(chatTranscriptLifecycle === undefined
+                ? {}
+                : { transcriptLifecycle: chatTranscriptLifecycle }),
         });
         const agentService = createAgentService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
@@ -478,6 +592,127 @@ export async function createDashboardServer(
             repository: createAgentRepository(database, databaseRuntime),
             wakeEventPump,
         });
+        let chatRawHttpHandler: ChatRawHttpHandler | undefined;
+        if (persistentGatewayTransport !== undefined) {
+            if (chatRepository === undefined || chatTranscriptLifecycle === undefined) {
+                throw new Error("Chat transcript lifecycle composition is unavailable");
+            }
+            chatAttachmentStore = createInMemoryChatAttachmentStore();
+            chatMediaReferences = createInMemoryChatMediaReferences(
+                domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }
+            );
+            chatService = createChatService({
+                attachmentConsumer: chatAttachmentStore,
+                attachmentPreparer: chatAttachmentStore,
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                onAsyncFailure: () =>
+                    options.applicationRuntime.logger.warn({
+                        component: "chat-runtime",
+                        event: "chat.runtime.async_failure",
+                        failure: new Error("Chat background reconciliation failed"),
+                        outcome: "server-error",
+                    }),
+                provider: createPersistentGatewayChatProvider(
+                    persistentGatewayTransport,
+                    chatMediaReferences
+                ),
+                repository: chatRepository,
+                transcriptLifecycle: chatTranscriptLifecycle,
+            });
+            chatTranscriptLifecycleSupervisor = createChatTranscriptLifecycleSupervisor({
+                lifecycle: chatTranscriptLifecycle,
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                onFailure: () =>
+                    options.applicationRuntime.logger.warn({
+                        component: "chat-transcript-lifecycle",
+                        event: "chat.transcript.lifecycle_failed",
+                        failure: new Error(
+                            "Chat transcript lifecycle reconciliation failed"
+                        ),
+                        outcome: "server-error",
+                    }),
+                transport: persistentGatewayTransport,
+            });
+            await chatTranscriptLifecycleSupervisor.ready;
+            chatMaintenance = await startDashboardChatRuntimeMaintenance({
+                intervalMs: chatSessionSubscriptionIdleMilliseconds,
+                onFailure: () =>
+                    options.applicationRuntime.logger.warn({
+                        component: "chat-runtime",
+                        event: "chat.runtime.maintenance_failed",
+                        failure: new Error("Chat maintenance sweep failed"),
+                        outcome: "server-error",
+                    }),
+                service: chatService,
+            });
+
+            const activeChatService = chatService;
+            openClawTasksService = createOpenClawTasksService(
+                createPersistentGatewayOpenClawTasksProvider(persistentGatewayTransport),
+                createOpenClawTasksRealtimePublisher(
+                    database,
+                    databaseRuntime,
+                    domainNow === undefined ? Date.now : () => domainNow().getTime(),
+                    wakeEventPump
+                )
+            );
+            openClawTasksSupervisor = createOpenClawTasksSubscriptionSupervisor({
+                onFailure: () =>
+                    options.applicationRuntime.logger.error({
+                        component: "openclaw-tasks-realtime",
+                        event: "openclaw_tasks.subscription.failed",
+                        failure: new Error(
+                            "OpenClaw task invalidation subscription failed"
+                        ),
+                        outcome: "server-error",
+                    }),
+                service: openClawTasksService,
+            });
+            openClawTasksSupervisor.start();
+
+            if (options.gatewayToken !== undefined) {
+                const mediaHandler = createChatRawHttpHandler({
+                    attachmentStore: chatAttachmentStore,
+                    authenticateCredential: (credential) =>
+                        authenticator.authenticate(credential),
+                    authorizeMedia: async (reference, signal) => {
+                        const result = await activeChatService.getMessage(
+                            {
+                                messageId: reference.messageId,
+                                sessionKey: reference.sessionKey,
+                            },
+                            signal
+                        );
+                        return chatMessageAuthorizesMediaReference(result, reference);
+                    },
+                    browserOrigin,
+                    mediaFetcher: createOpenClawOutgoingMediaFetcher({
+                        gatewayUrl: options.gatewayUrl,
+                        token: options.gatewayToken,
+                    }),
+                    mediaReferences: chatMediaReferences,
+                });
+                const speechHandler = createChatSpeechRawHttpHandler({
+                    authenticateCredential: (credential) =>
+                        authenticator.authenticate(credential),
+                    browserOrigin,
+                    ...(options.elevenLabsApiKey === undefined
+                        ? {}
+                        : {
+                              provider: createElevenLabsSpeechProvider({
+                                  apiKey: options.elevenLabsApiKey,
+                              }),
+                          }),
+                });
+                chatRawHttpHandler = async (request, requestUrl) =>
+                    (await speechHandler(request, requestUrl)) ??
+                    mediaHandler(request, requestUrl);
+            }
+        }
         const openClawCronIntentStore = createSqliteOpenClawCronIntentStore(
             database,
             databaseRuntime
@@ -574,6 +809,9 @@ export async function createDashboardServer(
             automationSecurityLifecycle,
             browserOrigin,
             cacheService,
+            ...(chatRawHttpHandler === undefined ? {} : { chatRawHttpHandler }),
+            ...(chatService === undefined ? {} : { chatService }),
+            disposeBeforeRuntime: disposeComposition,
             gatewayConnectionService,
             gatewaySessionsService,
             frontendAssets: options.frontendAssets,
@@ -585,6 +823,7 @@ export async function createDashboardServer(
             monitoringCatalogService,
             monitoringService,
             openClawCronService,
+            ...(openClawTasksService === undefined ? {} : { openClawTasksService }),
             port: options.port,
             readiness: options.readiness,
             securityAuditLifecycle,
@@ -599,6 +838,11 @@ export async function createDashboardServer(
         );
     } catch (error) {
         if (!serverOwnsRuntimeCleanup) {
+            try {
+                await disposeComposition();
+            } catch {
+                // Preserve the initiating composition failure.
+            }
             try {
                 await options.applicationRuntime.dispose();
             } catch {
@@ -751,8 +995,12 @@ export async function runDashboardWebProcess(
         server = await dependencies.createServer({
             applicationRuntime,
             browserOrigin: configuration.publicOrigin,
+            ...(configuration.elevenLabsApiKey === undefined
+                ? {}
+                : { elevenLabsApiKey: configuration.elevenLabsApiKey }),
             frontendAssets,
             gatewayUrl: configuration.gatewayUrl,
+            gatewayToken: configuration.gatewayToken,
             port: configuration.port,
             readiness,
             recentAuthenticationWindowMs: configuration.recentAuthenticationWindowMs,

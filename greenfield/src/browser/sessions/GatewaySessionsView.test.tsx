@@ -96,6 +96,12 @@ describe("Gateway sessions view", () => {
         );
 
         expect(screen.getByText("Connected")).toBeTruthy();
+        expect(
+            screen.getByText(
+                "Updates automatically every 10 seconds and after Gateway session events."
+            )
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(screen.getAllByText("5", { selector: "dd" })).toHaveLength(2);
         expect(screen.getByText("2", { selector: "dd" })).toBeTruthy();
         const observation = screen.getByText(formatDashboardDateTime(timestampMs));
