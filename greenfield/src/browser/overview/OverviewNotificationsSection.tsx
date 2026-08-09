@@ -8,7 +8,12 @@ import { Card } from "../ui/Card.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { OverviewNotificationsCard } from "./OverviewNotificationsCard.tsx";
 
-/** @returns Realtime-refreshed authoritative notification summary for the overview. */
+/**
+ * Reads the shared authoritative newest-notification window without creating a
+ * second realtime owner. The authenticated shell owns invalidation of the same
+ * cache key.
+ * @returns Notification summary section for the overview.
+ */
 export function OverviewNotificationsSection() {
     const client = useDashboardTrpcClient();
     const query = useQuery(notificationLatestQueryOptions(client));

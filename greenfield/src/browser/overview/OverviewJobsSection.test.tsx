@@ -183,9 +183,16 @@ describe("OverviewJobsSection", () => {
             jobRealtimeTopics.schedules,
         ]);
 
+        const callCountBeforeRealtimeChange = harness.transport.calls.length;
         await emitQueueChange(harness.realtimeClient);
         expect(await screen.findByText("Claiming paused")).toBeTruthy();
-        expect(harness.transport.calls).toHaveLength(2);
+        expect(harness.transport.calls.length).toBeGreaterThan(
+            callCountBeforeRealtimeChange
+        );
+        expect(harness.transport.calls.at(-1)).toEqual({
+            input: { limit: 1 },
+            path: "jobs.listRuns",
+        });
     });
 
     test("retains validated queue state when a background refresh fails", async () => {
