@@ -3,6 +3,7 @@ import { Effect } from "effect";
 
 import {
     agentConfigurationSchema,
+    agentStatusProjectionSchema,
     agentStatusSchema,
 } from "../../../contracts/agentModel.ts";
 import {
@@ -51,12 +52,16 @@ export const agentRoutes = {
         }),
     getStatus: readProcedure
         .input(getAgentStatusInputSchema)
-        .output(agentStatusSchema)
-        .query(({ ctx, input }) => runAgentEffect(ctx.agentService.getStatus(input))),
+        .output(agentStatusProjectionSchema)
+        .query(({ ctx, input, signal }) =>
+            runAgentEffect(ctx.agentService.getStatus(input, signal))
+        ),
     listStatuses: readProcedure
         .input(emptyAgentInputSchema)
         .output(listAgentStatusesResultSchema)
-        .query(({ ctx }) => runAgentEffect(ctx.agentService.listStatuses())),
+        .query(({ ctx, signal }) =>
+            runAgentEffect(ctx.agentService.listStatuses(signal))
+        ),
     listTaskHistory: readProcedure
         .input(listAgentTaskHistoryInputSchema)
         .output(listAgentTaskHistoryResultSchema)

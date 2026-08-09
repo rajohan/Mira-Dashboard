@@ -256,6 +256,37 @@ describe("Dashboard task route", () => {
         expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe("Draft task");
     });
 
+    test("links an automated task to its exact OpenClaw cron selection", async () => {
+        const transport = new TaskTransport();
+        transport.tasks = [
+            {
+                ...initialTask,
+                automation: {
+                    cronJobId: "nightly-report",
+                    kind: "openclaw-cron",
+                    recurring: true,
+                    scheduleSummary: "Nightly report",
+                },
+            },
+        ];
+        renderTaskRoute(transport);
+        const user = userEvent.setup();
+
+        await screen.findByRole("heading", { level: 1, name: "Tasks" });
+        await user.click(
+            screen.getByRole("button", { name: "Open task: Build task domain" })
+        );
+        const link = await screen.findByRole<HTMLAnchorElement>("link", {
+            name: "Open OpenClaw cron job nightly-report",
+        });
+        const destination = new URL(link.href);
+        expect(destination.pathname).toBe("/jobs");
+        expect(Object.fromEntries(destination.searchParams)).toEqual({
+            cronJobId: "nightly-report",
+            source: "openclaw",
+        });
+    });
+
     test("renders the legacy-shaped board and creates a contract-valid task", async () => {
         const transport = new TaskTransport();
         const queryClient = renderTaskRoute(transport);

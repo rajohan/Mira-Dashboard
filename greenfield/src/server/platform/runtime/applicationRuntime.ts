@@ -32,6 +32,11 @@ import {
     createSystemMetricsRuntimeService,
     type SystemMetricsRuntimeService,
 } from "../../domains/system/systemMetricsService.ts";
+import {
+    insertPersistentGatewayRealtimeEvent,
+    persistentGatewayRealtimeLifecycleLayer,
+} from "../gateway/persistentGatewayRealtimeBridge.ts";
+import { type PersistentGatewayTransport } from "../gateway/persistentGatewayTransport.ts";
 import { createEffectLoggerLayer } from "../observability/effectLogger.ts";
 import type { StructuredLogger } from "../observability/structuredLogger.ts";
 import { RealtimeEventPump, type RealtimeEventDelivery } from "../realtime/eventPump.ts";
@@ -115,6 +120,8 @@ export interface DashboardDatabaseRuntimeService extends ImmediateDatabaseWriteA
 /** Process runtime coordinating ordered application and retained database scopes. */
 export interface DashboardApplicationRuntime extends ApplicationRuntime {
     readonly database: DashboardDatabaseRuntimeService;
+    /** Present in the production web runtime; omitted only by focused test runtimes. */
+    readonly persistentGatewayTransport?: PersistentGatewayTransport;
 }
 
 /** Scoped layers owned by one composition root for the full process lifetime. */
@@ -130,6 +137,7 @@ export interface DashboardApplicationRuntimeOptions extends Omit<
     "realtimeEventPumpLayer"
 > {
     readonly database: DatabaseRuntimeLayerOptions;
+    readonly persistentGatewayTransport?: PersistentGatewayTransport;
 }
 
 function authenticationAbortReason(signal: AbortSignal): unknown {
@@ -459,9 +467,35 @@ export function createDashboardApplicationRuntime(
         Effect.map((database) => database.orm)
     );
     const databaseBackedRealtimeLayer = databaseBackedRealtimeEventPumpLayer(databaseOrm);
+    const realtimeAndGatewayLayer =
+        options.persistentGatewayTransport === undefined
+            ? databaseBackedRealtimeLayer
+            : persistentGatewayRealtimeLifecycleLayer({
+                  appendEvent: (event) =>
+                      databaseRuntime.runPromise(
+                          DatabaseRuntimeService.pipe(
+                              Effect.flatMap((database) =>
+                                  database.runImmediateWrite((markTransactionStarted) =>
+                                      insertPersistentGatewayRealtimeEvent(
+                                          database.orm,
+                                          markTransactionStarted,
+                                          event
+                                      )
+                                  )
+                              )
+                          )
+                      ),
+                  onFailure: ({ cause }) =>
+                      options.logger.error({
+                          component: "gateway-realtime-bridge",
+                          event: "gateway.realtime.bridge_failed",
+                          failure: cause,
+                      }),
+                  transport: options.persistentGatewayTransport,
+              }).pipe(Layer.provideMerge(databaseBackedRealtimeLayer));
     const runtime = ManagedRuntime.make(
         Layer.mergeAll(
-            databaseBackedRealtimeLayer,
+            realtimeAndGatewayLayer,
             authenticationWorkLayer(options.authenticationWork),
             createEffectLoggerLayer(options.logger)
         )
@@ -490,6 +524,11 @@ export function createDashboardApplicationRuntime(
     return Object.freeze({
         ...applicationRuntime,
         database,
+        ...(options.persistentGatewayTransport === undefined
+            ? {}
+            : {
+                  persistentGatewayTransport: options.persistentGatewayTransport,
+              }),
         dispose() {
             disposePromise ??= (async () => {
                 try {

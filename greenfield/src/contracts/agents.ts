@@ -2,10 +2,11 @@ import * as v from "valibot";
 
 import { hasUniqueArrayItems } from "../shared/validation.ts";
 import {
-    type AgentStatus,
+    type AgentStatusProjection,
     type AgentTaskRun,
     agentConfigurationSchema,
     agentIdSchema,
+    agentStatusProjectionSchema,
     agentStatusSchema,
     agentTimestampSchema,
     agentTaskRunIdSchema,
@@ -111,7 +112,7 @@ export const listAgentTaskHistoryResultSchema = v.pipe(
  * @param statuses Agent statuses to inspect.
  * @returns Whether IDs are unique and strictly sorted.
  */
-export function canonicalAgentStatuses(statuses: AgentStatus[]): boolean {
+export function canonicalAgentStatuses(statuses: AgentStatusProjection[]): boolean {
     return (
         hasUniqueArrayItems(statuses.map(({ agentId }) => agentId)) &&
         statuses.every((status, index) => {
@@ -124,7 +125,7 @@ export function canonicalAgentStatuses(statuses: AgentStatus[]): boolean {
 /** Complete operational projection for every configured agent. */
 export const listAgentStatusesResultSchema = v.strictObject({
     statuses: v.pipe(
-        v.array(agentStatusSchema, "Agent statuses are invalid"),
+        v.array(agentStatusProjectionSchema, "Agent statuses are invalid"),
         v.minLength(1, "Agent statuses cannot be empty"),
         v.maxLength(dashboardAgentMaximum, "Agent statuses are outside their budget"),
         v.check(canonicalAgentStatuses, "Agent statuses are not canonical")
@@ -182,9 +183,10 @@ export const agentProcedureContracts = [
         inputSchemaId: "agents.getStatus.input",
         kind: "query",
         name: "agents.getStatus",
-        output: agentStatusSchema,
+        output: agentStatusProjectionSchema,
         outputSchemaId: "agents.getStatus.output",
-        summary: "Returns the current task projection for one configured agent.",
+        summary:
+            "Returns Dashboard task state and separate Gateway session availability for one configured agent.",
         transport: agentQueryTransport,
     },
     {
@@ -197,7 +199,8 @@ export const agentProcedureContracts = [
         name: "agents.listStatuses",
         output: listAgentStatusesResultSchema,
         outputSchemaId: "agents.listStatuses.output",
-        summary: "Returns current task projections for all configured agents.",
+        summary:
+            "Returns Dashboard task state and separate Gateway session availability for all configured agents.",
         transport: agentQueryTransport,
     },
     {

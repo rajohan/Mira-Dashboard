@@ -2,10 +2,14 @@ import { describe, expect, test } from "bun:test";
 
 import { TRPCError } from "@trpc/server";
 
+import { gatewayRealtimeTopics } from "../../../contracts/gatewayRealtime.ts";
 import { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
-import { createTestAutomationAuthentication } from "../../test/support/requestContext.ts";
+import {
+    createTestAutomationAuthentication,
+    createTestSessionAuthentication,
+} from "../../test/support/requestContext.ts";
 import { authorizeRealtimeTopics, realtimeDeliveryToStreamOutput } from "./transport.ts";
 
 const reportsAuthentication = createTestAutomationAuthentication(["reports:read"]);
@@ -13,6 +17,14 @@ if (reportsAuthentication.kind !== "authenticated") {
     throw new Error("Test automation identity is not authenticated");
 }
 const reportsPrincipal: AuthenticatedPrincipal = reportsAuthentication.principal;
+const gatewayAutomation = createTestAutomationAuthentication(["gateway-sessions:read"]);
+const gatewaySession = createTestSessionAuthentication(["gateway-sessions:read"]);
+if (
+    gatewayAutomation.kind !== "authenticated" ||
+    gatewaySession.kind !== "authenticated"
+) {
+    throw new Error("Gateway test identities are not authenticated");
+}
 
 const reportDelivery: RealtimeEventDelivery = {
     event: {
@@ -46,6 +58,20 @@ describe("realtime tRPC transport", () => {
         }
         expect(failure).toBeInstanceOf(TRPCError);
         expect((failure as TRPCError).code).toBe("FORBIDDEN");
+    });
+
+    test("keeps Gateway topics session-only even with the exact capability", () => {
+        expect(
+            authorizeRealtimeTopics(gatewaySession.principal, [
+                gatewayRealtimeTopics.connection,
+                gatewayRealtimeTopics.sessions,
+            ])
+        ).toEqual([gatewayRealtimeTopics.connection, gatewayRealtimeTopics.sessions]);
+        expect(() =>
+            authorizeRealtimeTopics(gatewayAutomation.principal, [
+                gatewayRealtimeTopics.sessions,
+            ])
+        ).toThrow(TRPCError);
     });
 
     test("parses durable plain JSON into the topic-specific client contract", () => {

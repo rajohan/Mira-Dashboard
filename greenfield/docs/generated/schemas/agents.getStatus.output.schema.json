@@ -1,77 +1,111 @@
 {
   "$id": "urn:mira-dashboard:agents.getStatus.output",
-  "oneOf": [
-    {
-      "type": "object",
-      "properties": {
-        "agentId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64,
-          "pattern": "^[a-z0-9][a-z0-9._-]*$"
-        },
-        "lastActivityAtMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 8640000000000000
-        },
-        "state": {
-          "const": "idle"
-        }
-      },
-      "required": [
-        "agentId",
-        "state"
-      ],
-      "additionalProperties": false
+  "type": "object",
+  "properties": {
+    "agentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
     },
-    {
-      "type": "object",
-      "properties": {
-        "agentId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64,
-          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    "currentTask": {
+      "type": "string",
+      "maxLength": 512,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
         },
-        "currentTask": {
-          "type": "string",
-          "maxLength": 512,
-          "minLength": 1,
-          "pattern": "\\S",
-          "allOf": [
-            {
-              "pattern": "^[^\\u0000]*$"
-            },
-            {
-              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
-            }
-          ]
-        },
-        "lastActivityAtMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 8640000000000000
-        },
-        "startedAtMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 8640000000000000
-        },
-        "state": {
-          "const": "working"
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
         }
-      },
-      "required": [
-        "agentId",
-        "currentTask",
-        "lastActivityAtMs",
-        "startedAtMs",
-        "state"
+      ]
+    },
+    "freshness": {
+      "enum": [
+        "fresh",
+        "stale",
+        "unavailable"
       ],
-      "additionalProperties": false,
-      "$comment": "Live Valibot validation additionally requires working-status activity not to precede task start."
+      "type": "string"
+    },
+    "gatewayAvailability": {
+      "enum": [
+        "active",
+        "idle",
+        "disconnected",
+        "stale",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "hasActiveRun": {
+      "type": "boolean"
+    },
+    "lastActivityAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "lastSeenAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "observedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "providerModel": {
+      "type": "string",
+      "maxLength": 241,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+        }
+      ]
+    },
+    "sessionKey": {
+      "type": "string",
+      "maxLength": 512,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+        }
+      ]
+    },
+    "startedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "state": {
+      "enum": [
+        "idle",
+        "working"
+      ],
+      "type": "string"
     }
+  },
+  "required": [
+    "agentId",
+    "freshness",
+    "gatewayAvailability",
+    "state"
   ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally keeps Dashboard task state and Gateway session availability separate and requires the fields implied by each state.",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

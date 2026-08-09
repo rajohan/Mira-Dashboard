@@ -3,10 +3,27 @@ import { Effect } from "effect";
 import type { AuthenticatedPrincipal } from "../../../../contracts/security.ts";
 import { testImmediateDatabaseWriteAdmission } from "../../../test/support/databaseWriteAdmission.ts";
 import type { openFreshMigratedDatabase } from "../../../test/support/freshDatabase.ts";
+import {
+    GatewaySessionProviderUnavailableError,
+    type GatewaySessionsProvider,
+} from "../../gatewaySessions/provider.ts";
+import {
+    createGatewaySessionsService,
+    type GatewaySessionsService,
+} from "../../gatewaySessions/service.ts";
 import { createAgentRepository } from "../repository.ts";
 import { createAgentService } from "../service.ts";
 
 export type TestAgentDatabase = Awaited<ReturnType<typeof openFreshMigratedDatabase>>;
+
+const unavailableGatewaySessionsProvider: GatewaySessionsProvider = Object.freeze({
+    compactSession: () => Promise.reject(new GatewaySessionProviderUnavailableError()),
+    deleteSessionTranscript: () =>
+        Promise.reject(new GatewaySessionProviderUnavailableError()),
+    listCurrentSessions: () =>
+        Promise.reject(new GatewaySessionProviderUnavailableError()),
+    resetSession: () => Promise.reject(new GatewaySessionProviderUnavailableError()),
+});
 
 /**
  * Creates a stable UUIDv7 used by deterministic agent-domain tests.
@@ -46,12 +63,18 @@ export function agentServiceFor(
     database: TestAgentDatabase,
     overrides: {
         readonly generateId?: () => string;
+        readonly gatewaySessionsService?: GatewaySessionsService;
         readonly nowMs?: () => number;
         readonly wakeEventPump?: () => Promise<void> | void;
     } = {}
 ) {
     return createAgentService({
         generateId: overrides.generateId ?? agentTestIdGenerator(),
+        gatewaySessionsService:
+            overrides.gatewaySessionsService ??
+            createGatewaySessionsService({
+                provider: unavailableGatewaySessionsProvider,
+            }),
         nowMs: overrides.nowMs ?? (() => 10_000),
         repository: createAgentRepository(
             database.orm,

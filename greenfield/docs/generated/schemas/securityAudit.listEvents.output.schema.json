@@ -137,6 +137,8 @@
                     "agents:write",
                     "cache:read",
                     "cache:write",
+                    "gateway-sessions:read",
+                    "gateway-sessions:write",
                     "jobs:read",
                     "jobs:write",
                     "monitoring:write",
@@ -149,7 +151,7 @@
                   ],
                   "type": "string"
                 },
-                "maxItems": 13,
+                "maxItems": 15,
                 "uniqueItems": true
               },
               "method": {
@@ -196,6 +198,8 @@
                     "agents:write",
                     "cache:read",
                     "cache:write",
+                    "gateway-sessions:read",
+                    "gateway-sessions:write",
                     "jobs:read",
                     "jobs:write",
                     "monitoring:write",
@@ -208,7 +212,7 @@
                   ],
                   "type": "string"
                 },
-                "maxItems": 13,
+                "maxItems": 15,
                 "uniqueItems": true
               },
               "replacementCredentialId": {
@@ -230,6 +234,15 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "settlement": {
+                "enum": [
+                  "attempted",
+                  "succeeded",
+                  "failed",
+                  "partial"
+                ],
+                "type": "string"
               }
             },
             "required": [],

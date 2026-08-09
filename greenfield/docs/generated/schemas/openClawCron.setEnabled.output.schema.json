@@ -1,0 +1,901 @@
+{
+  "$id": "urn:mira-dashboard:openClawCron.setEnabled.output",
+  "type": "object",
+  "properties": {
+    "freshness": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "fresh"
+            },
+            "observedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind",
+            "observedAtMs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "last-known-good"
+            },
+            "observedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "staleSinceMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind",
+            "observedAtMs",
+            "staleSinceMs"
+          ],
+          "additionalProperties": false,
+          "$comment": "Live Valibot validation additionally requires staleness to begin at or after the last observation."
+        }
+      ]
+    },
+    "job": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        },
+        "agentIdTruncated": {
+          "type": "boolean"
+        },
+        "configRevision": {
+          "type": "string",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dashboardOpenLinkedTask": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "status": {
+              "enum": [
+                "todo",
+                "in-progress",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires compact task text to have canonical outer whitespace."
+            }
+          },
+          "required": [
+            "id",
+            "status",
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            }
+          ]
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "accountId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "bestEffort": {
+              "type": "boolean"
+            },
+            "channel": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "\\S",
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                }
+              ]
+            },
+            "completionDestinationConfigured": {
+              "type": "boolean"
+            },
+            "failureDestination": {
+              "type": "object",
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "channel": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "mode": {
+                  "enum": [
+                    "announce",
+                    "webhook"
+                  ],
+                  "type": "string"
+                },
+                "targetConfigured": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "targetConfigured"
+              ],
+              "additionalProperties": false
+            },
+            "metadataTruncated": {
+              "type": "boolean"
+            },
+            "mode": {
+              "enum": [
+                "announce",
+                "none",
+                "webhook"
+              ],
+              "type": "string"
+            },
+            "targetConfigured": {
+              "type": "boolean"
+            },
+            "threadId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              ]
+            }
+          },
+          "required": [
+            "completionDestinationConfigured",
+            "metadataTruncated",
+            "mode",
+            "targetConfigured"
+          ],
+          "additionalProperties": false
+        },
+        "deliveryMode": {
+          "enum": [
+            "announce",
+            "none",
+            "webhook",
+            "unspecified"
+          ],
+          "type": "string"
+        },
+        "descriptionTruncated": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+            }
+          ]
+        },
+        "nameTruncated": {
+          "type": "boolean"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "system-event"
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 16384
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "text",
+                "truncated"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "agent-turn"
+                },
+                "lightContext": {
+                  "type": "boolean"
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 16384
+                },
+                "model": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "thinking": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "timeoutSeconds": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "message",
+                "truncated"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "argumentCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "contentRedacted": {
+                  "const": true
+                },
+                "kind": {
+                  "const": "command"
+                }
+              },
+              "required": [
+                "argumentCount",
+                "contentRedacted",
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "contentRedacted": {
+                  "const": true
+                },
+                "kind": {
+                  "const": "script"
+                }
+              },
+              "required": [
+                "contentRedacted",
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "heartbeat"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "schedule": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "kind": {
+                  "const": "at"
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "at",
+                "kind",
+                "truncated"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "anchorMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "everyMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "kind": {
+                  "const": "every"
+                },
+                "truncated": {
+                  "const": false
+                }
+              },
+              "required": [
+                "everyMs",
+                "kind",
+                "truncated"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "expr": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "kind": {
+                  "const": "cron"
+                },
+                "staggerMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "tz": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "allOf": [
+                    {
+                      "pattern": "^[^\\u0000]*$"
+                    },
+                    {
+                      "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                    }
+                  ]
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "expr",
+                "kind",
+                "truncated"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "commandRedacted": {
+                  "const": true
+                },
+                "kind": {
+                  "const": "on-exit"
+                },
+                "workingDirectoryConfigured": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "commandRedacted",
+                "kind",
+                "workingDirectoryConfigured"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "argumentCount": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "batchMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "commandRedacted": {
+                  "const": true
+                },
+                "kind": {
+                  "const": "stream"
+                },
+                "matchConfigured": {
+                  "type": "boolean"
+                },
+                "maxBatchBytes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "mode": {
+                  "enum": [
+                    "line",
+                    "match"
+                  ],
+                  "type": "string"
+                },
+                "workingDirectoryConfigured": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "argumentCount",
+                "commandRedacted",
+                "kind",
+                "matchConfigured",
+                "workingDirectoryConfigured"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "sessionTarget": {
+          "enum": [
+            "current",
+            "isolated",
+            "main",
+            "named-session"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "const": "openclaw"
+        },
+        "state": {
+          "type": "object",
+          "properties": {
+            "consecutiveErrors": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "lastDeliveryStatus": {
+              "enum": [
+                "delivered",
+                "not-delivered",
+                "not-requested",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            "lastDurationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "lastErrorReason": {
+              "enum": [
+                "auth",
+                "auth_permanent",
+                "billing",
+                "context_overflow",
+                "empty_response",
+                "format",
+                "model_not_found",
+                "no_error_details",
+                "overloaded",
+                "rate_limit",
+                "server_error",
+                "session_expired",
+                "timeout",
+                "unclassified",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            "lastRunAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "lastRunStatus": {
+              "enum": [
+                "error",
+                "ok",
+                "skipped",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            "nextRunAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "runningAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "streamStatus": {
+              "enum": [
+                "disabled",
+                "error",
+                "restarting",
+                "running",
+                "starting",
+                "stopped"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "synchronization": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "desiredEnabled": {
+                  "type": "boolean"
+                },
+                "disableIntent": {
+                  "type": "object",
+                  "properties": {
+                    "expiresAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "recordedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "revision": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reason",
+                    "recordedAtMs",
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                },
+                "state": {
+                  "const": "confirmed"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "desiredEnabled": {
+                  "type": "boolean"
+                },
+                "disableIntent": {
+                  "type": "object",
+                  "properties": {
+                    "expiresAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    },
+                    "recordedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "revision": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "allOf": [
+                        {
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        {
+                          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reason",
+                    "recordedAtMs",
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                },
+                "state": {
+                  "enum": [
+                    "conflict",
+                    "pending"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "desiredEnabled",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "wakeMode": {
+          "enum": [
+            "next-heartbeat",
+            "now"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentIdTruncated",
+        "createdAtMs",
+        "deliveryMode",
+        "descriptionTruncated",
+        "enabled",
+        "id",
+        "name",
+        "nameTruncated",
+        "payload",
+        "schedule",
+        "sessionTarget",
+        "source",
+        "state",
+        "synchronization",
+        "updatedAtMs",
+        "wakeMode"
+      ],
+      "additionalProperties": false,
+      "$comment": "Live Valibot validation additionally requires delivery metadata and desired enabled-state synchronization to agree with the projected job."
+    }
+  },
+  "required": [
+    "freshness",
+    "job"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -7,6 +7,17 @@ import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
 import { createCacheService } from "../server/domains/cache/service.ts";
+import {
+    createGatewayConnectionService,
+    unavailableGatewayConnectionStateProvider,
+} from "../server/domains/gatewayConnection/service.ts";
+import { createGatewaySessionControlAudit } from "../server/domains/gatewaySessions/controlAudit.ts";
+import { createSqliteGatewaySessionControlAuditStore } from "../server/domains/gatewaySessions/controlAuditStore.ts";
+import {
+    GatewaySessionProviderUnavailableError,
+    type GatewaySessionsProvider,
+} from "../server/domains/gatewaySessions/provider.ts";
+import { createGatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
 import { createJobRepository } from "../server/domains/jobs/repository.ts";
 import {
     createJobService,
@@ -15,6 +26,17 @@ import {
 import { createMonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import { createMonitoringRepository } from "../server/domains/monitoring/repository.ts";
 import { createMonitoringService } from "../server/domains/monitoring/service.ts";
+import {
+    createOpenClawCronExpiryReconciler,
+    type OpenClawCronExpiryReconciler,
+} from "../server/domains/openClawCron/expiryReconciler.ts";
+import { createSqliteOpenClawCronOperationAuditWriter } from "../server/domains/openClawCron/operationAudit.ts";
+import {
+    OpenClawCronProviderError,
+    type OpenClawCronProvider,
+} from "../server/domains/openClawCron/provider.ts";
+import { createOpenClawCronService } from "../server/domains/openClawCron/service.ts";
+import { createSqliteOpenClawCronIntentStore } from "../server/domains/openClawCron/sqliteIntentStore.ts";
 import { createAuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createAuthenticationLifecycleRepository } from "../server/domains/security/authenticationLifecycleRepository.ts";
 import {
@@ -52,6 +74,12 @@ import {
     resolveDashboardProjectLayout,
 } from "../server/platform/filesystem/projectLayout.ts";
 import { createGatewayCredentialVerifier } from "../server/platform/gateway/gatewayCredentialVerifier.ts";
+import { createPersistentGatewaySessionsProvider } from "../server/platform/gateway/persistentGatewaySessionsProvider.ts";
+import { createPersistentGatewayTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
+import {
+    createPersistentOpenClawCronProvider,
+    type PersistentOpenClawCronTransport,
+} from "../server/platform/gateway/persistentOpenClawCronProvider.ts";
 import {
     createProjectFileLogDestination,
     type ProjectFileLogDestination,
@@ -91,12 +119,15 @@ export interface DashboardServerOptions extends Omit<
     | "automationSecurityLifecycle"
     | "browserOrigin"
     | "cacheService"
+    | "gatewayConnectionService"
+    | "gatewaySessionsService"
     | "hostname"
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
     | "jobService"
     | "monitoringCatalogService"
     | "monitoringService"
+    | "openClawCronService"
     | "securityAuditLifecycle"
     | "taskService"
 > {
@@ -104,7 +135,7 @@ export interface DashboardServerOptions extends Omit<
     readonly authenticationLeaseDurationMs?: number;
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
-    /** Explicit native WebSocket endpoint used only for one-shot bootstrap verification. */
+    /** Direct-loopback endpoint shared by bootstrap verification and persistent Gateway traffic. */
     readonly gatewayUrl: string;
     readonly gatewayVerificationTimeoutMs?: number;
     /** Shared composition clock for deterministic lifecycle and request-auth behavior. */
@@ -138,6 +169,102 @@ export function validateDashboardWebAuthnBrowserOrigin(
         );
     }
     return canonicalOrigin;
+}
+
+const unavailableOpenClawCronProvider: OpenClawCronProvider = Object.freeze({
+    currentProcessInstanceId: (): undefined => {},
+    get: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
+    list: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
+    listRuns: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
+    remove: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
+    run: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
+    update: () => Promise.reject(new OpenClawCronProviderError("unavailable")),
+});
+
+/**
+ * Selects the real Gateway cron adapter whenever the runtime owns a transport.
+ * The fail-closed provider remains only for explicitly transport-free test runtimes.
+ * @param transport Optional process-owned Gateway transport.
+ * @returns The production adapter or a narrow unavailable fallback.
+ */
+export function createDashboardOpenClawCronProvider(
+    transport?: PersistentOpenClawCronTransport
+): OpenClawCronProvider {
+    return transport === undefined
+        ? unavailableOpenClawCronProvider
+        : createPersistentOpenClawCronProvider(transport);
+}
+
+/**
+ * Starts expiry reconciliation and makes it part of the server shutdown boundary.
+ * @param server Started HTTP server that owns the application runtime.
+ * @param reconciler Process-owned cron disable-intent reconciler.
+ * @returns The same public server surface with ordered, idempotent cleanup.
+ */
+export async function startDashboardOpenClawCronExpiryReconciliation(
+    server: ApplicationServer,
+    reconciler: OpenClawCronExpiryReconciler
+): Promise<ApplicationServer> {
+    try {
+        reconciler.start();
+    } catch (error) {
+        try {
+            await server.stop(true);
+        } catch {
+            // Preserve the initiating lifecycle failure.
+        }
+        throw error;
+    }
+
+    let forceRequested = false;
+    let serverStopForced = false;
+    let serverStopPromise: Promise<void> | undefined;
+    let stopPromise: Promise<void> | undefined;
+
+    function stopServer(force: boolean): Promise<void> {
+        if (serverStopPromise === undefined) {
+            serverStopForced = force;
+            serverStopPromise = server.stop(force);
+        } else if (force && !serverStopForced) {
+            serverStopForced = true;
+            void server.stop(true).catch(() => {});
+        }
+        return serverStopPromise;
+    }
+
+    return Object.freeze({
+        port: server.port,
+        stop(force = false) {
+            if (force) forceRequested = true;
+            if (stopPromise !== undefined) {
+                if (force) {
+                    void reconciler.stop(true).catch(() => {});
+                    void stopServer(true).catch(() => {});
+                }
+                return stopPromise;
+            }
+            stopPromise = (async () => {
+                let reconciliationFailure: unknown;
+                try {
+                    await reconciler.stop(forceRequested);
+                } catch (error) {
+                    reconciliationFailure = error;
+                }
+                try {
+                    await stopServer(forceRequested);
+                } catch (error) {
+                    if (reconciliationFailure === undefined) throw error;
+                }
+                if (reconciliationFailure !== undefined) {
+                    throw new Error("OpenClaw cron expiry reconciler shutdown failed", {
+                        cause: reconciliationFailure,
+                    });
+                }
+            })();
+            return stopPromise;
+        },
+        url: server.url,
+    });
 }
 
 /**
@@ -273,14 +400,10 @@ export async function createDashboardServer(
                 throw error;
             }
         };
-        const agentService = createAgentService({
-            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
-            repository: createAgentRepository(database, databaseRuntime),
-            wakeEventPump,
-        });
+        const taskRepository = createTaskRepository(database, databaseRuntime);
         const taskService = createTaskService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
-            repository: createTaskRepository(database, databaseRuntime),
+            repository: taskRepository,
             wakeEventPump,
         });
         const jobRepository = createJobRepository(database, databaseRuntime);
@@ -294,11 +417,139 @@ export async function createDashboardServer(
             repository: jobRepository,
             wakeEventPump,
         });
+        const gatewayConnectionService = createGatewayConnectionService({
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            provider:
+                options.applicationRuntime.persistentGatewayTransport ??
+                unavailableGatewayConnectionStateProvider,
+        });
+        const unavailableGatewaySessionsProvider: GatewaySessionsProvider = Object.freeze(
+            {
+                compactSession: () =>
+                    Promise.reject(new GatewaySessionProviderUnavailableError()),
+                deleteSessionTranscript: () =>
+                    Promise.reject(new GatewaySessionProviderUnavailableError()),
+                listCurrentSessions: () =>
+                    Promise.reject(new GatewaySessionProviderUnavailableError()),
+                resetSession: () =>
+                    Promise.reject(new GatewaySessionProviderUnavailableError()),
+            }
+        );
+        const gatewaySessionsService = createGatewaySessionsService({
+            controlAudit: createGatewaySessionControlAudit({
+                ...(domainNow === undefined ? {} : { now: domainNow }),
+                onSettlementFailure: ({
+                    action,
+                    cause,
+                    outcome,
+                    requestId,
+                    targetFingerprint,
+                }) =>
+                    options.applicationRuntime.logger.error({
+                        component: "gateway-session-audit",
+                        event: "gateway.session.audit_settlement_failed",
+                        failure: cause,
+                        fields: {
+                            action,
+                            auditOutcome:
+                                outcome === "succeeded" ? "succeeded" : "failed",
+                            kind: "gateway-session-audit-settlement",
+                            targetFingerprint,
+                        },
+                        outcome: "server-error",
+                        requestId,
+                    }),
+                store: createSqliteGatewaySessionControlAuditStore(
+                    database,
+                    databaseRuntime
+                ),
+            }),
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            provider:
+                options.applicationRuntime.persistentGatewayTransport === undefined
+                    ? unavailableGatewaySessionsProvider
+                    : createPersistentGatewaySessionsProvider(
+                          options.applicationRuntime.persistentGatewayTransport
+                      ),
+        });
+        const agentService = createAgentService({
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            gatewaySessionsService,
+            repository: createAgentRepository(database, databaseRuntime),
+            wakeEventPump,
+        });
+        const openClawCronIntentStore = createSqliteOpenClawCronIntentStore(
+            database,
+            databaseRuntime
+        );
+        const openClawCronService = createOpenClawCronService({
+            ...(domainNow === undefined ? {} : { clock: () => domainNow().getTime() }),
+            auditWriter: createSqliteOpenClawCronOperationAuditWriter({
+                ...(domainNow === undefined ? {} : { clock: domainNow }),
+                database,
+                writeAdmission: databaseRuntime,
+            }),
+            intentStore: openClawCronIntentStore,
+            linkedTaskReader: {
+                listOpenLinkedTasks: (cronJobIds) =>
+                    taskRepository
+                        .listOpenTasksByCronJobIds(cronJobIds)
+                        .flatMap(({ cronJobId, task }) =>
+                            task.status === "done"
+                                ? []
+                                : [
+                                      {
+                                          cronJobId,
+                                          task: {
+                                              id: task.id,
+                                              status: task.status,
+                                              title: task.title,
+                                          },
+                                      },
+                                  ]
+                        ),
+            },
+            onAuditSettlementFailure: ({ operation, settlement, targetFingerprint }) => {
+                options.applicationRuntime.logger.warn({
+                    component: "openclaw-cron-audit",
+                    event: "openclaw_cron.audit_settlement.failed",
+                    failure: new Error("OpenClaw cron audit settlement append failed"),
+                    fields: {
+                        kind: "openclaw-cron-audit-settlement",
+                        operation,
+                        settlement,
+                        targetFingerprint,
+                    },
+                    outcome: "server-error",
+                });
+            },
+            provider: createDashboardOpenClawCronProvider(
+                options.applicationRuntime.persistentGatewayTransport
+            ),
+        });
         const cacheService = createCacheService({
             cacheRepository: createCacheRepository(database, databaseRuntime),
             jobRepository,
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            readGatewayConnection: gatewayConnectionService.get,
+            readGatewaySessionsProjection: gatewaySessionsService.readHeartbeatProjection,
+            readOpenClawCronProjection: openClawCronService.readHeartbeatProjection,
             wakeEventPump,
+        });
+        const openClawCronExpiryReconciler = createOpenClawCronExpiryReconciler({
+            ...(domainNow === undefined ? {} : { clock: () => domainNow().getTime() }),
+            intentStore: openClawCronIntentStore,
+            onFailure: (failure) => {
+                options.applicationRuntime.logger.warn({
+                    component: "openclaw-cron-expiry",
+                    event: "openclaw_cron.expiry_reconciliation.failed",
+                    failure: new Error(
+                        `OpenClaw cron expiry reconciliation failed: ${failure.reason}`
+                    ),
+                    outcome: "server-error",
+                });
+            },
+            service: openClawCronService,
         });
         const monitoringRepository = createMonitoringRepository(
             database,
@@ -323,6 +574,8 @@ export async function createDashboardServer(
             automationSecurityLifecycle,
             browserOrigin,
             cacheService,
+            gatewayConnectionService,
+            gatewaySessionsService,
             frontendAssets: options.frontendAssets,
             gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
             hostname: "127.0.0.1",
@@ -331,6 +584,7 @@ export async function createDashboardServer(
             jobService,
             monitoringCatalogService,
             monitoringService,
+            openClawCronService,
             port: options.port,
             readiness: options.readiness,
             securityAuditLifecycle,
@@ -338,7 +592,11 @@ export async function createDashboardServer(
             trustedProxyAddresses: options.trustedProxyAddresses,
         };
         serverOwnsRuntimeCleanup = true;
-        return await createServer(serverOptions);
+        const server = await createServer(serverOptions);
+        return await startDashboardOpenClawCronExpiryReconciliation(
+            server,
+            openClawCronExpiryReconciler
+        );
     } catch (error) {
         if (!serverOwnsRuntimeCleanup) {
             try {
@@ -396,7 +654,7 @@ const defaultWebProcessDependencies = Object.freeze({
     createFrontendAssets: (release) => createFrontendAssetHandler(release),
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
-    createRuntime: (_configuration, layout, release, logger) =>
+    createRuntime: (configuration, layout, release, logger) =>
         createDashboardApplicationRuntime({
             database: {
                 migrationsDirectory: path.join(release.releaseRoot, "migrations"),
@@ -405,6 +663,11 @@ const defaultWebProcessDependencies = Object.freeze({
                 stateDirectory: layout.production.state.root,
             },
             logger,
+            persistentGatewayTransport: createPersistentGatewayTransport({
+                clientVersion: release.manifest.source.commitSha,
+                token: configuration.gatewayToken,
+                url: configuration.gatewayUrl,
+            }),
         }),
     createServer: createDashboardServer,
     createTerminationController: createProcessTerminationController,

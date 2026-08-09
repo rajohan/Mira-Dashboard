@@ -16,7 +16,9 @@ build it as a **Bun-native modular monolith**:
 - The browser receives live updates over one multiplexed tRPC SSE subscription. It does not
   open a separate application WebSocket.
 - The Phase 2 bootstrap verifier uses Bun's native `WebSocket` client for one current-protocol
-  OpenClaw Gateway handshake. The persistent Gateway connection remains a Phase 4 target.
+  OpenClaw Gateway handshake. Phase 4A adds one process-owned persistent native connection in
+  each web or worker process that needs reviewed Gateway operations; the browser still receives
+  application updates only through the authenticated Dashboard SSE stream.
 - Valibot owns transport, persistence, generated JSON Schema, tests, and documentation schemas.
   Effect Schema is limited to server-internal typed/tagged errors and does not replace Valibot at
   those boundaries.
@@ -223,6 +225,22 @@ Automation scripts import the same `AppRouter` client type. They authenticate wi
 high-entropy bearer credentials whose validators are hashed at rest. There is no second REST
 contract for automation merely because the caller is non-browser TypeScript.
 
+### Compact automation heartbeat
+
+`cache.getHeartbeat` is a versioned greenfield query under the existing `cache:read` automation
+scope. It embeds the same at-most-128-row, payload-free cache status used by `cache.getStatus`, then
+adds only the process-owned Gateway phase/freshness and identity-free summaries of the latest
+validated current-session and global OpenClaw-cron projections. Session keys, display names, cron
+names, payloads, credentials, endpoints, and raw errors never cross this boundary.
+
+The heartbeat does not issue a Gateway RPC. Before a bounded projection has been observed it says
+`unavailable`; after a failed refresh or Gateway disconnect it retains the count as explicitly
+`last-known-good`. Session truncation remains visible. Cron pending synchronization is `unknown`
+when the cached global page cannot prove absence and `present` when any unsettled desired state is
+known. This modern schema does not reproduce legacy schema-v3 task rows, Dashboard-job rows, or
+payload-bearing cache envelopes, so the reviewed legacy endpoint remains planned until those
+remaining consumers are deliberately migrated or removed.
+
 ### Browser-managed automation security
 
 The `automationSecurity` namespace owns the complete operator-managed principal and credential
@@ -294,11 +312,69 @@ The 4 KiB and 25 MiB application checks run after Bun's native WebSocket has all
 wire frame. Literal-loopback composition, the installed Gateway's own limits, and bounded
 concurrency constrain that residual allocation exposure; these are not pre-allocation frame caps.
 
-This is **not** the Phase 4 persistent Gateway client. Before implementing persistent connections,
-sessions, chat, Gateway events, or cron integration, inspect the then-installed OpenClaw source and
-protocol again. Current-production Gateway/chat/session/agent/cron code supplies parity evidence,
-not protocol authority. The consolidated controls and executable evidence are in the
+This one-shot verifier is **not** reused as the persistent Gateway client. Phase 4A re-audits the
+installed OpenClaw source and protocol, then composes a separate process-owned transport for the
+reviewed session, cron, agent-availability, realtime, and task-notification surfaces. Every later
+chat or OpenClaw adapter must extend that source audit before depending on additional semantics.
+Current-production Gateway/chat/session/agent/cron code supplies parity evidence, not protocol
+authority. The bootstrap controls and executable evidence remain in the
 [Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md).
+
+### Persistent Gateway lifecycle
+
+Each web or worker process that needs Gateway access owns one direct-loopback transport for its
+entire managed runtime. The process-only token is `Redacted`; it appears only in the protocol-v4
+connect frame and never in the URL, browser, SQLite, cache, or logs. The web process's long-lived
+inventory/event lane negotiates exactly `operator.read`, while the worker notification lane
+negotiates exactly `operator.write`. Admin-only session and cron controls use fresh single-use
+sockets that negotiate exactly `operator.admin`; the browser still sees only narrow Dashboard
+procedures and capabilities. Every persistent and one-shot profile declares the source-audited
+`session-scoped-events` client capability to suppress global agent/chat broadcasts that are not
+needed by Phase 4A.
+
+The transport has typed method allowlists, correlation IDs, explicit deadlines and cancellation,
+a bounded pending-request map, outbound frame and socket-buffer ceilings, strict text-frame/order
+validation, event-sequence gap detection, heartbeat watchdogs, jittered reconnect, terminal-auth
+failure handling, and bounded graceful shutdown. Native connection, session, and cron changes are
+coalesced into durable snapshot-required outbox rows before waking the existing realtime pump.
+Connect, disconnect, reconnect, and event gaps invalidate all affected snapshots; disconnect
+preserves validated last-known-good projections with explicit staleness.
+
+The installed Gateway has no changes-only subscription. `sessions.subscribe({})` also targets
+session message, tool, and operation events. Backpressure is path-dependent: session-change and
+transcript-fallback markers are sequence-less and may be dropped for a slow client, while the
+transcript-snapshot `sessions.changed` path and transcript-message path are not drop-if-slow and
+close the socket after the reviewed upstream buffer ceiling is exceeded. Dashboard therefore
+validates every authenticated event only as a bounded generic envelope, consumes sequence/activity
+metadata, and forwards payload-free metadata only for `sessions.changed` and `cron`; all other
+payloads are dropped before listeners, persistence, browser transport, or logging. The residual
+native wire/parse exposure is bounded by the installed 25 MiB authenticated frame ceiling and
+50 MiB upstream socket-buffer policy. Immediate disconnect invalidation, reconnect snapshots, and
+10-second foreground polls of the bounded sessions, agent-status, and cron projections preserve
+correctness after either a dropped marker or a backpressure close.
+
+Gateway sessions are capped, normalized, and sorted server-side. Compact, reset, and transcript
+delete run on the admin lane; delete carries the observed provider generation and a local mutation
+barrier prevents an older in-flight refresh from resurrecting the row. Once a control crosses the
+native send boundary, timeout, abort, disconnect, malformed success response, or lost ACK is an
+explicit unknown outcome: the audit records a failed row with `settlement: "partial"`, the cached
+projection becomes stale without inventing a delete, and the browser requires refresh before
+retry. Successful reads accept wider finite non-secret upstream metadata; a long display label is
+bounded with an explicit truncation marker, while over-budget optional metadata is omitted with
+canonical field markers instead of invalidating the whole snapshot or appearing complete. After
+explicit hook, cron, and subagent classification, only remaining `agent:main:*` identities qualify
+for the legacy main family; other `agent:*` identities remain subagent projections. Gateway session discovery
+may enrich only the reviewed Dashboard agent IDs through a separate availability projection and
+cannot create identities, alter `working|idle` task state, or grant authority.
+
+OpenClaw cron inventory and run history are bounded. Reviewed `at`, `every`, and `cron` schedules
+and safe agent/system payload fields preserve source-audited nullable patch semantics. Privileged
+command/script bodies remain redacted, and delivery destinations are write-only; an omitted field
+therefore means retain the provider value rather than round-tripping an incomplete projection.
+Controls use process/configuration fencing plus authoritative readback, while append-only local
+disable intents expose non-atomic external/local outcomes for reconciliation and expiry. The
+worker's task-notification sender is a separate purpose-specific `chat.send` port with durable
+idempotency; it is not the Phase 4 chat runtime.
 
 ### Current-protocol Control UI projections
 
@@ -615,8 +691,9 @@ suppress the next session's transport request.
 - Feature modules own their query option factories, mutation option factories, collection
   adapter, components, and tests.
 - Shared UI contains presentation primitives, not domain-specific orchestration.
-- The reviewed Dashboard agent directory is code-owned configuration. Gateway discovery may
-  enrich future live availability, but cannot add identities or grant agent capabilities.
+- The reviewed Dashboard agent directory is code-owned configuration. Gateway session discovery
+  may enrich a separate live availability projection, but cannot add identities or grant agent
+  capabilities.
 - Agent current-task writes require an `agents:write` automation principal and retain durable
   actor attribution. Browser sessions consume the read projection and history; they cannot
   impersonate the task-tracking caller.
@@ -642,7 +719,7 @@ the following behavior is covered by automated tests and a manual parity checkli
 | `/agents`     | Agent state, metadata, current task, history, status transitions, and live updates.                                                                                                                 |
 | `/sessions`   | Gateway session listing, filtering, metadata, actions, refresh, and live state.                                                                                                                     |
 | `/chat`       | All streaming, thinking/tool display, cancel/retry/steer/concurrent send, history, attachment, settings, session, unread/follow/scroll, compaction, and restart/reconnect behavior described above. |
-| `/logs`       | Safe root selection, file listing, tail/follow, bounded streaming, search/display controls, rotation state, and non-blocking errors.                                                                |
+| `/logs`       | Safe root selection, file listing, tail/follow, bounded streaming, search/display controls, rotation state for reviewed Docker and `/var/log` text-log policies, and non-blocking errors.           |
 | `/jobs`       | Dashboard schedules, OpenClaw cron jobs, enable/disable intent and expiry, run history, manual run/cancel, worker state, output, and aggregate counts.                                              |
 | `/reports`    | Daily briefs, summaries, heartbeats, custom reports, filters, pagination/detail linking, Markdown display, cached refresh behavior, and incident links.                                             |
 | Notifications | Read/unread behavior, source links, filtering, badges, and exactly-once notification per active incident generation.                                                                                |

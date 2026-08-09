@@ -176,6 +176,10 @@
         },
         {
             "kind": "query",
+            "name": "cache.getHeartbeat"
+        },
+        {
+            "kind": "query",
             "name": "cache.getStatus"
         },
         {
@@ -185,6 +189,26 @@
         {
             "kind": "subscription",
             "name": "events.stream"
+        },
+        {
+            "kind": "query",
+            "name": "gateway.connection.get"
+        },
+        {
+            "kind": "mutation",
+            "name": "gatewaySessions.compact"
+        },
+        {
+            "kind": "mutation",
+            "name": "gatewaySessions.delete"
+        },
+        {
+            "kind": "query",
+            "name": "gatewaySessions.list"
+        },
+        {
+            "kind": "mutation",
+            "name": "gatewaySessions.reset"
         },
         {
             "kind": "query",
@@ -237,6 +261,34 @@
         {
             "kind": "mutation",
             "name": "notifications.upsert"
+        },
+        {
+            "kind": "mutation",
+            "name": "openClawCron.delete"
+        },
+        {
+            "kind": "query",
+            "name": "openClawCron.get"
+        },
+        {
+            "kind": "query",
+            "name": "openClawCron.list"
+        },
+        {
+            "kind": "query",
+            "name": "openClawCron.listRuns"
+        },
+        {
+            "kind": "mutation",
+            "name": "openClawCron.run"
+        },
+        {
+            "kind": "mutation",
+            "name": "openClawCron.setEnabled"
+        },
+        {
+            "kind": "mutation",
+            "name": "openClawCron.update"
         },
         {
             "kind": "mutation",

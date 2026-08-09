@@ -26,12 +26,24 @@ export const contractAuthenticationErrorReasons = [
 export type ContractAuthenticationErrorReason =
     (typeof contractAuthenticationErrorReasons)[number];
 
+/** Stable client-action reasons for externally dispatched operation uncertainty. */
+export const contractOperationErrorReasons = ["operation_outcome_unknown"] as const;
+
+export type ContractOperationErrorReason = (typeof contractOperationErrorReasons)[number];
+
+/** Stable allowlisted client-action reason exposed by one expected procedure error. */
+export type ContractErrorReason =
+    | ContractAuthenticationErrorReason
+    | ContractOperationErrorReason;
+
 /** Authentication requirement shown in generated contract documentation. */
 export type ContractAccess =
     | { kind: "public" }
     | { kind: "pending-login" }
     | {
+          capabilities?: readonly string[];
           kind: "recent-auth";
+          principalKinds?: readonly ("automation" | "session")[];
           whenMfaDisabled: "deny" | "password" | "session";
           whenMfaEnabled: "mfa";
       }
@@ -62,7 +74,7 @@ export interface ProcedureTransportContract {
 export interface ProcedureContract {
     access: ContractAccess;
     domain: string;
-    errorReasons?: readonly ContractAuthenticationErrorReason[];
+    errorReasons?: readonly ContractErrorReason[];
     errors: readonly ContractErrorCode[];
     input: ContractSchema;
     inputSchemaId: string;
@@ -80,13 +92,17 @@ export interface ProcedureContract {
  * @param contracts Procedure names and their declared expected error codes.
  */
 export function assertProcedureContractErrors(
-    contracts: readonly Pick<ProcedureContract, "errors" | "name">[]
+    contracts: readonly Pick<ProcedureContract, "errorReasons" | "errors" | "name">[]
 ): void {
     const names = contracts.map(({ name }) => name);
     if (new Set(names).size !== names.length) {
         throw new TypeError("Procedure contract names must be unique");
     }
     const registered = new Set<string>(contractErrorCodes);
+    const registeredReasons = new Set<string>([
+        ...contractAuthenticationErrorReasons,
+        ...contractOperationErrorReasons,
+    ]);
     for (const contract of contracts) {
         const errors = [...contract.errors];
         if (
@@ -96,6 +112,16 @@ export function assertProcedureContractErrors(
         ) {
             throw new TypeError(
                 `Procedure contract errors are invalid for ${contract.name}`
+            );
+        }
+        const reasons = [...(contract.errorReasons ?? [])];
+        if (
+            reasons.some((reason) => !registeredReasons.has(reason)) ||
+            new Set(reasons).size !== reasons.length ||
+            reasons.join("\n") !== reasons.toSorted().join("\n")
+        ) {
+            throw new TypeError(
+                `Procedure contract error reasons are invalid for ${contract.name}`
             );
         }
     }

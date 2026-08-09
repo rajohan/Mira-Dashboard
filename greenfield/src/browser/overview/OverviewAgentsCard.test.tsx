@@ -8,7 +8,10 @@ import {
     RouterProvider,
 } from "@tanstack/react-router";
 
-import type { AgentDefinition, AgentStatus } from "../../contracts/agentModel.ts";
+import type {
+    AgentDefinition,
+    AgentStatusProjection,
+} from "../../contracts/agentModel.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import {
     OverviewAgentsCard,
@@ -36,16 +39,28 @@ const statuses = Object.freeze([
     {
         agentId: "main",
         currentTask: "Complete the Phase 3 overview",
+        freshness: "fresh",
+        gatewayAvailability: "active",
+        hasActiveRun: true,
         lastActivityAtMs: timestampMs,
+        lastSeenAtMs: timestampMs,
+        observedAtMs: timestampMs,
+        sessionKey: "agent:main:main",
         startedAtMs: timestampMs - 60_000,
         state: "working",
     },
     {
         agentId: "researcher",
+        freshness: "fresh",
+        gatewayAvailability: "idle",
+        hasActiveRun: false,
         lastActivityAtMs: timestampMs - 120_000,
+        lastSeenAtMs: timestampMs - 120_000,
+        observedAtMs: timestampMs,
+        sessionKey: "agent:researcher:main",
         state: "idle",
     },
-] as const satisfies readonly AgentStatus[]);
+] as const satisfies readonly AgentStatusProjection[]);
 
 function renderCard(properties: OverviewAgentsCardProps) {
     const rootRoute = createRootRoute();
@@ -75,7 +90,7 @@ function metric(label: string): HTMLElement {
 }
 
 describe("OverviewAgentsCard", () => {
-    test("renders complete Dashboard-owned current tasks and explicit Gateway scope", async () => {
+    test("renders separate Dashboard task and Gateway session projections", async () => {
         renderCard({ agents, statuses });
 
         expect(
@@ -85,12 +100,14 @@ describe("OverviewAgentsCard", () => {
         expect(within(metric("Working")).getByText("1")).toBeTruthy();
         expect(within(metric("Idle")).getByText("1")).toBeTruthy();
         expect(within(metric("Missing projection")).getByText("0")).toBeTruthy();
+        expect(within(metric("Active")).getByText("1")).toBeTruthy();
+        expect(within(metric("Idle sessions")).getByText("1")).toBeTruthy();
         expect(screen.getByText("Complete the Phase 3 overview")).toBeTruthy();
         expect(
             screen.getByText(`Started ${formatDashboardDateTime(timestampMs - 60_000)}`)
         ).toHaveAttribute("dateTime", new Date(timestampMs - 60_000).toISOString());
         expect(
-            screen.getByText(/Gateway presence and sessions are not included/u)
+            screen.getByText(/Availability is not online status or health/u)
         ).toBeTruthy();
         expect(screen.getByRole("link", { name: "View agents" })).toHaveAttribute(
             "href",
@@ -103,14 +120,20 @@ describe("OverviewAgentsCard", () => {
             agents,
             statuses: statuses.map((status) => ({
                 agentId: status.agentId,
+                freshness: status.freshness,
+                gatewayAvailability: status.gatewayAvailability,
+                hasActiveRun: status.hasActiveRun,
                 lastActivityAtMs: status.lastActivityAtMs,
+                lastSeenAtMs: status.lastSeenAtMs,
+                observedAtMs: status.observedAtMs,
+                sessionKey: status.sessionKey,
                 state: "idle" as const,
             })),
         });
 
         expect(await screen.findByText("All configured agents are idle.")).toBeTruthy();
         expect(within(metric("Idle")).getByText("2")).toBeTruthy();
-        expect(screen.queryByText(/online/u)).toBeNull();
+        expect(screen.getByText(/not online status or health/u)).toBeTruthy();
     });
 
     test("discloses a cross-projection mismatch without inventing availability", async () => {
@@ -124,6 +147,6 @@ describe("OverviewAgentsCard", () => {
         expect(within(metric("Idle")).getByText("1")).toBeTruthy();
         expect(within(metric("Missing projection")).getByText("1")).toBeTruthy();
         expect(screen.queryByText(/unavailable/u)).toBeNull();
-        expect(screen.queryByText(/online/u)).toBeNull();
+        expect(screen.getByText(/not online status or health/u)).toBeTruthy();
     });
 });

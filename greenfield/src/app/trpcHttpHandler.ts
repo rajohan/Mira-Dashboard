@@ -2,9 +2,12 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
+import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
+import type { GatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
 import type { JobService } from "../server/domains/jobs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
+import type { OpenClawCronService } from "../server/domains/openClawCron/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
@@ -40,11 +43,14 @@ export interface TrpcHttpHandlerOptions {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
+    readonly gatewayConnectionService: GatewayConnectionService;
+    readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
+    readonly openClawCronService: OpenClawCronService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly taskService: TaskService["Service"];
     readonly trustedProxyAddresses?: readonly string[];
@@ -220,11 +226,14 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     automationSecurityLifecycle: options.automationSecurityLifecycle,
                     authenticateCredential: options.authenticateCredential,
                     cacheService: options.cacheService,
+                    gatewayConnectionService: options.gatewayConnectionService,
+                    gatewaySessionsService: options.gatewaySessionsService,
                     mfaAccountLifecycle: options.mfaAccountLifecycle,
                     mfaLoginLifecycle: options.mfaLoginLifecycle,
                     jobService: options.jobService,
                     monitoringCatalogService: options.monitoringCatalogService,
                     monitoringService: options.monitoringService,
+                    openClawCronService: options.openClawCronService,
                     pendingLoginCredential: credentials.pendingLogin,
                     request: req,
                     requestId,

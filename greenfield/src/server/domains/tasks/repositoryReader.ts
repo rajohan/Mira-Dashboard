@@ -7,6 +7,7 @@ import {
     exists,
     inArray,
     lt,
+    ne,
     notExists,
     or,
     sql,
@@ -33,6 +34,7 @@ import {
 } from "./repositoryRecords.ts";
 import type {
     TaskAggregateRecord,
+    TaskOpenCronLinkRecord,
     TaskPersistenceDatabase,
     TaskRecord,
     TaskRepositoryReader,
@@ -208,6 +210,44 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
             .limit(input.limit + 1)
             .all()
             .map((row) => parseTaskProgressRecord(row));
+    }
+
+    public listOpenTasksByCronJobIds(
+        cronJobIds: readonly string[]
+    ): TaskOpenCronLinkRecord[] {
+        if (cronJobIds.length === 0) return [];
+        assertPageLimit(cronJobIds.length, taskPageMaximum);
+        const rows = this.database
+            .select({
+                assignee: tasks.assignee,
+                bodyMarkdown: tasks.bodyMarkdown,
+                createdAt: tasks.createdAt,
+                cronJobId: taskAutomationProfiles.cronJobId,
+                id: tasks.id,
+                priority: tasks.priority,
+                status: tasks.status,
+                title: tasks.title,
+                updatedAt: tasks.updatedAt,
+                version: tasks.version,
+            })
+            .from(taskAutomationProfiles)
+            .innerJoin(tasks, eq(taskAutomationProfiles.taskId, tasks.id))
+            .where(
+                and(
+                    inArray(taskAutomationProfiles.cronJobId, [...cronJobIds]),
+                    ne(tasks.status, "done")
+                )
+            )
+            .orderBy(asc(taskAutomationProfiles.cronJobId))
+            .limit(cronJobIds.length + 1)
+            .all();
+        if (rows.length > cronJobIds.length) {
+            throw new Error("Task cron relationship count is outside its budget");
+        }
+        return rows.map(({ cronJobId, ...task }) => ({
+            cronJobId,
+            task: parseTaskRecord(task),
+        }));
     }
 
     public listTasks(input: ListTasksInput): TaskAggregateRecord[] {

@@ -75,6 +75,12 @@ describe("generated contract documentation", () => {
             "| `agents.updateMetadata` | mutation | agents | Authenticated automation principal: agents:write |"
         );
         expect(procedureDocumentation).toContain(
+            "| `gatewaySessions.compact` | mutation | gateway-sessions | Authenticated browser session: gateway-sessions:write; MFA enrollment required; recent MFA when enabled |"
+        );
+        expect(procedureDocumentation).toContain(
+            "| `openClawCron.run` | mutation | openclaw-cron | Authenticated browser session: jobs:write; MFA enrollment required; recent MFA when enabled |"
+        );
+        expect(procedureDocumentation).toContain(
             "| None | None | Returns bootstrap, pending MFA"
         );
         expect(procedureDocumentation).toContain("`events.stream`");
@@ -193,7 +199,28 @@ describe("generated contract documentation", () => {
                 type: "object",
             });
         }
-        expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(8);
+        for (const [topic, snapshot] of [
+            ["gateway.connection", "gateway.connection.get"],
+            ["gateway.sessions", "gatewaySessions.list"],
+            ["openclaw-cron.records", "openClawCron.list"],
+        ] as const) {
+            expect(realtimeDocumentation).toContain(
+                `| \`${topic}\` | [payload](./schemas/${topic}.realtime.payload.schema.json) | \`${snapshot}\` | 7 days |`
+            );
+            const payloadSchema = JSON.parse(
+                first.get(`schemas/${topic}.realtime.payload.schema.json`) ?? "null"
+            ) as unknown;
+            expect(payloadSchema).toMatchObject({
+                $id: `urn:mira-dashboard:${topic}.realtime.payload`,
+                additionalProperties: false,
+                properties: { kind: { const: "snapshot-required" } },
+                required: ["kind"],
+                type: "object",
+            });
+        }
+        expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(
+            realtimeStreamTopics.length
+        );
         expect(first.get("schemas/schedules.update.input.schema.json")).toContain(
             "Five-field minute cron; live validation accepts JAN-DEC month and SUN-SAT weekday aliases, normalizes aliases and ASCII whitespace, and requires a future occurrence."
         );

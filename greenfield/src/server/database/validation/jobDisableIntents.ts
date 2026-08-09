@@ -9,7 +9,12 @@ import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
 
 const createdActorKindSchema = v.picklist(["automation", "user"]);
 const endedActorKindSchema = v.picklist(["automation", "system", "user"]);
-const endedReasonSchema = v.picklist(["expired", "re-enabled", "replaced"]);
+const endedReasonSchema = v.picklist([
+    "expired",
+    "re-enabled",
+    "replaced",
+    "target-deleted",
+]);
 const externalJobIdSchema = boundedNonBlankTextSchema(256, "External job id is invalid");
 
 interface StoredDisableIntent {
@@ -19,7 +24,12 @@ interface StoredDisableIntent {
     readonly endedAt?: Date | null;
     readonly endedById?: string | null;
     readonly endedByKind?: "automation" | "system" | "user" | null;
-    readonly endedReason?: "expired" | "re-enabled" | "replaced" | null;
+    readonly endedReason?:
+        | "expired"
+        | "re-enabled"
+        | "replaced"
+        | "target-deleted"
+        | null;
     readonly expiresAt?: Date | null;
     readonly externalJobId?: string | null;
     readonly externalProvider?: "openclaw" | null;

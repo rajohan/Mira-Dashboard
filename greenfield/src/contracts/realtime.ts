@@ -25,6 +25,7 @@ export interface RealtimeTopicDefinition {
         | "updated"
     )[];
     readonly payload: v.GenericSchema;
+    readonly principalKinds?: readonly ("automation" | "session")[];
     readonly topic: string;
 }
 

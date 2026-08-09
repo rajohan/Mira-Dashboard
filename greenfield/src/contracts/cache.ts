@@ -10,6 +10,11 @@ import {
     positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
 import {
+    gatewayConnectionFreshnessSchema,
+    gatewayConnectionPhaseSchema,
+} from "./gatewayConnection.ts";
+import { gatewaySessionProjectionMaximum } from "./gatewaySessions.ts";
+import {
     jobIdempotencyKeySchema,
     jobRunIdSchema,
     jobRunSummarySchema,
@@ -349,6 +354,207 @@ export const cacheStatusResultSchema = v.pipe(
     v.check(cacheStatusResultIsConsistent, "Cache status result is inconsistent")
 );
 
+/** First compact greenfield heartbeat schema; legacy schema-v3 rows are not mirrored. */
+export const cacheHeartbeatSchemaVersion = 1 as const;
+
+interface CacheHeartbeatConnectionState {
+    readonly checkedAtMs: number;
+    readonly freshness: "fresh" | "stale" | "unavailable";
+    readonly phase: "connected" | "connecting" | "degraded" | "stopped" | "stopping";
+}
+
+/**
+ * @param connection Compact connection state to validate.
+ * @returns Whether the compact connection phase and freshness agree.
+ */
+export function cacheHeartbeatConnectionIsConsistent(
+    connection: CacheHeartbeatConnectionState & Record<string, unknown>
+): boolean {
+    return (connection.freshness === "fresh") === (connection.phase === "connected");
+}
+
+function cacheHeartbeatLastKnownGoodTimesAreConsistent(projection: {
+    readonly observedAtMs: number;
+    readonly staleSinceMs: number;
+}): boolean {
+    return projection.staleSinceMs >= projection.observedAtMs;
+}
+
+const cacheHeartbeatConnectionSchema = v.pipe(
+    v.strictObject({
+        checkedAtMs: cacheTimestampSchema,
+        freshness: gatewayConnectionFreshnessSchema,
+        phase: gatewayConnectionPhaseSchema,
+    }),
+    v.check(
+        cacheHeartbeatConnectionIsConsistent,
+        "Heartbeat Gateway connection state is inconsistent"
+    )
+);
+
+const cacheHeartbeatSessionCountSchema = v.pipe(
+    nonnegativeSafeIntegerSchema("Heartbeat Gateway session count is invalid"),
+    v.maxValue(
+        gatewaySessionProjectionMaximum,
+        "Heartbeat Gateway session count is outside its budget"
+    )
+);
+const cacheHeartbeatSessionsUnavailableSchema = v.strictObject({
+    state: v.literal("unavailable"),
+});
+const cacheHeartbeatSessionsFreshSchema = v.strictObject({
+    count: cacheHeartbeatSessionCountSchema,
+    observedAtMs: cacheTimestampSchema,
+    state: v.literal("fresh"),
+    truncated: v.boolean("Heartbeat Gateway session truncation is invalid"),
+});
+interface CacheHeartbeatSessionsLastKnownGood {
+    readonly count: number;
+    readonly observedAtMs: number;
+    readonly staleSinceMs: number;
+    readonly state: "last-known-good";
+    readonly truncated: boolean;
+}
+
+/**
+ * @param projection Last-known-good session summary to validate.
+ * @returns Whether session-projection staleness follows its observation.
+ */
+export function cacheHeartbeatSessionsLastKnownGoodIsConsistent(
+    projection: CacheHeartbeatSessionsLastKnownGood & Record<string, unknown>
+): boolean {
+    return cacheHeartbeatLastKnownGoodTimesAreConsistent(projection);
+}
+
+const cacheHeartbeatSessionsLastKnownGoodSchema = v.pipe(
+    v.strictObject({
+        count: cacheHeartbeatSessionCountSchema,
+        observedAtMs: cacheTimestampSchema,
+        staleSinceMs: cacheTimestampSchema,
+        state: v.literal("last-known-good"),
+        truncated: v.boolean("Heartbeat Gateway session truncation is invalid"),
+    }),
+    v.check(
+        cacheHeartbeatSessionsLastKnownGoodIsConsistent,
+        "Heartbeat Gateway session freshness is inconsistent"
+    )
+);
+
+/** Identity-free state of the latest bounded current-session projection. */
+export const cacheHeartbeatSessionsSchema = v.variant("state", [
+    cacheHeartbeatSessionsUnavailableSchema,
+    cacheHeartbeatSessionsFreshSchema,
+    cacheHeartbeatSessionsLastKnownGoodSchema,
+]);
+
+export const cacheHeartbeatPendingSyncStates = ["none", "present", "unknown"] as const;
+export const cacheHeartbeatPendingSyncSchema = v.picklist(
+    cacheHeartbeatPendingSyncStates,
+    "Heartbeat OpenClaw cron pending-sync state is invalid"
+);
+
+const cacheHeartbeatCronProjectionEntries = {
+    count: nonnegativeSafeIntegerSchema("Heartbeat OpenClaw cron count is invalid"),
+    observedAtMs: cacheTimestampSchema,
+    pendingSync: cacheHeartbeatPendingSyncSchema,
+};
+const cacheHeartbeatCronUnavailableSchema = v.strictObject({
+    pendingSync: v.picklist(
+        ["present", "unknown"],
+        "Unavailable heartbeat OpenClaw cron pending-sync state is invalid"
+    ),
+    state: v.literal("unavailable"),
+});
+const cacheHeartbeatCronFreshSchema = v.strictObject({
+    ...cacheHeartbeatCronProjectionEntries,
+    state: v.literal("fresh"),
+});
+interface CacheHeartbeatCronLastKnownGood {
+    readonly count: number;
+    readonly observedAtMs: number;
+    readonly pendingSync: "none" | "present" | "unknown";
+    readonly staleSinceMs: number;
+    readonly state: "last-known-good";
+}
+
+/**
+ * @param projection Last-known-good cron summary to validate.
+ * @returns Whether cron-projection staleness follows its observation.
+ */
+export function cacheHeartbeatCronLastKnownGoodIsConsistent(
+    projection: CacheHeartbeatCronLastKnownGood & Record<string, unknown>
+): boolean {
+    return cacheHeartbeatLastKnownGoodTimesAreConsistent(projection);
+}
+
+const cacheHeartbeatCronLastKnownGoodSchema = v.pipe(
+    v.strictObject({
+        ...cacheHeartbeatCronProjectionEntries,
+        staleSinceMs: cacheTimestampSchema,
+        state: v.literal("last-known-good"),
+    }),
+    v.check(
+        cacheHeartbeatCronLastKnownGoodIsConsistent,
+        "Heartbeat OpenClaw cron freshness is inconsistent"
+    )
+);
+
+/** Identity- and payload-free state of the latest global OpenClaw cron projection. */
+export const cacheHeartbeatOpenClawCronSchema = v.variant("state", [
+    cacheHeartbeatCronUnavailableSchema,
+    cacheHeartbeatCronFreshSchema,
+    cacheHeartbeatCronLastKnownGoodSchema,
+]);
+
+const cacheHeartbeatResultObjectSchema = v.strictObject({
+    cache: cacheStatusResultSchema,
+    gateway: v.strictObject({
+        connection: cacheHeartbeatConnectionSchema,
+        sessions: cacheHeartbeatSessionsSchema,
+    }),
+    generatedAtMs: cacheTimestampSchema,
+    openClawCron: cacheHeartbeatOpenClawCronSchema,
+    schemaVersion: v.literal(cacheHeartbeatSchemaVersion),
+});
+
+export type CacheHeartbeatResult = v.InferOutput<typeof cacheHeartbeatResultObjectSchema>;
+
+/** @returns Whether all nested observations precede the clamped response clock. */
+export function cacheHeartbeatResultIsConsistent(result: CacheHeartbeatResult): boolean {
+    const timestamps = [
+        result.cache.generatedAtMs,
+        result.gateway.connection.checkedAtMs,
+        ...(result.gateway.sessions.state === "unavailable"
+            ? []
+            : [
+                  result.gateway.sessions.observedAtMs,
+                  ...(result.gateway.sessions.state === "last-known-good"
+                      ? [result.gateway.sessions.staleSinceMs]
+                      : []),
+              ]),
+        ...(result.openClawCron.state === "unavailable"
+            ? []
+            : [
+                  result.openClawCron.observedAtMs,
+                  ...(result.openClawCron.state === "last-known-good"
+                      ? [result.openClawCron.staleSinceMs]
+                      : []),
+              ]),
+    ];
+    return (
+        timestamps.every((timestamp) => timestamp <= result.generatedAtMs) &&
+        (result.gateway.connection.freshness === "fresh" ||
+            (result.gateway.sessions.state !== "fresh" &&
+                result.openClawCron.state !== "fresh"))
+    );
+}
+
+/** Compact cache, Gateway, current-session, and OpenClaw-cron heartbeat projection. */
+export const cacheHeartbeatResultSchema = v.pipe(
+    cacheHeartbeatResultObjectSchema,
+    v.check(cacheHeartbeatResultIsConsistent, "Cache heartbeat result is inconsistent")
+);
+
 const cacheReadAccess = {
     capabilities: ["cache:read"],
     capabilityPolicy: "all",
@@ -370,7 +576,7 @@ const cacheMutationTransport = {
     requestBody: "default",
 } as const;
 
-/** Cache projection lookup, bounded status, and durable refresh contracts. */
+/** Cache projection lookup, bounded status/heartbeat, and durable refresh contracts. */
 export const cacheProcedureContracts = [
     {
         access: cacheReadAccess,
@@ -383,6 +589,20 @@ export const cacheProcedureContracts = [
         output: cacheEntrySchema,
         outputSchemaId: "cache.getEntry.output",
         summary: "Loads one cache projection with last-known-good data and freshness.",
+        transport: cacheQueryTransport,
+    },
+    {
+        access: cacheReadAccess,
+        domain: "cache",
+        errors: ["FORBIDDEN", "UNAUTHORIZED"],
+        input: emptyInputSchema,
+        inputSchemaId: "cache.getHeartbeat.input",
+        kind: "query",
+        name: "cache.getHeartbeat",
+        output: cacheHeartbeatResultSchema,
+        outputSchemaId: "cache.getHeartbeat.output",
+        summary:
+            "Returns compact cache status plus sanitized process-owned Gateway projections.",
         transport: cacheQueryTransport,
     },
     {

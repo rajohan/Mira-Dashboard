@@ -12,6 +12,13 @@
     ],
     "schemaVersion": 1,
     "domain": "chat",
+    "methodAccess": [
+        {
+            "controlPlaneWrite": false,
+            "name": "chat.send",
+            "scope": "operator.write"
+        }
+    ],
     "streamingPolicy": {
         "coalescedAgentStreams": ["assistant", "thinking"],
         "deltaThrottleMs": 150,
@@ -86,5 +93,10 @@
             ],
             "id": "completed-tool-run"
         }
-    ]
+    ],
+    "taskNotificationSend": {
+        "acknowledgedStatuses": ["in_flight", "ok", "started"],
+        "idempotencyKeyIsRunId": true,
+        "requiredParams": ["idempotencyKey", "message", "sessionKey"]
+    }
 }

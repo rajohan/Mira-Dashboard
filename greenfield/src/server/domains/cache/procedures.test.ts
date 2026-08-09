@@ -52,6 +52,7 @@ describe("cache procedures", () => {
     test("enforces exact read and write capabilities", async () => {
         const anonymous = appRouter.createCaller(await createTestRequestContext()).cache;
         await expectTrpcCode(() => anonymous.getStatus({}), "UNAUTHORIZED");
+        await expectTrpcCode(() => anonymous.getHeartbeat({}), "UNAUTHORIZED");
 
         const readOnly = appRouter.createCaller(
             await createTestRequestContext(
@@ -80,6 +81,29 @@ describe("cache procedures", () => {
 
     test("serves bounded status and durable refresh results", async () => {
         const cacheService = createTestCacheService({
+            getHeartbeat: () =>
+                Effect.succeed({
+                    cache: {
+                        entries: [],
+                        generatedAtMs: 1000,
+                        totalCount: 0,
+                        truncated: false,
+                    },
+                    gateway: {
+                        connection: {
+                            checkedAtMs: 1000,
+                            freshness: "unavailable",
+                            phase: "stopped",
+                        },
+                        sessions: { state: "unavailable" },
+                    },
+                    generatedAtMs: 1000,
+                    openClawCron: {
+                        pendingSync: "unknown",
+                        state: "unavailable",
+                    },
+                    schemaVersion: 1,
+                }),
             getStatus: () =>
                 Effect.succeed({
                     entries: [],
@@ -102,6 +126,25 @@ describe("cache procedures", () => {
             generatedAtMs: 1000,
             totalCount: 0,
             truncated: false,
+        });
+        expect(await caller.getHeartbeat({})).toEqual({
+            cache: {
+                entries: [],
+                generatedAtMs: 1000,
+                totalCount: 0,
+                truncated: false,
+            },
+            gateway: {
+                connection: {
+                    checkedAtMs: 1000,
+                    freshness: "unavailable",
+                    phase: "stopped",
+                },
+                sessions: { state: "unavailable" },
+            },
+            generatedAtMs: 1000,
+            openClawCron: { pendingSync: "unknown", state: "unavailable" },
+            schemaVersion: 1,
         });
         expect(
             await caller.refreshEntry({

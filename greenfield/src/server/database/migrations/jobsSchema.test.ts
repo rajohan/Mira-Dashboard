@@ -803,6 +803,48 @@ describe("jobs baseline schema", () => {
         }
     });
 
+    test("closes an external disable intent when its target is deleted", async () => {
+        const database = await openFreshMigratedDatabase();
+        const intentId = uuid(15);
+
+        try {
+            database.sqlite.run(
+                `INSERT INTO job_disable_intents (
+                    created_at, created_by_id, created_by_kind, ended_at, ended_by_id,
+                    ended_by_kind, ended_reason, expires_at, external_job_id,
+                    external_provider, id, reason, scheduled_job_id, target_kind
+                ) VALUES (1000, ?, 'user', NULL, NULL, NULL, NULL, NULL, 'cron-cleanup',
+                          'openclaw', ?, 'Operator maintenance', NULL, 'openclaw-cron')`,
+                [userId, intentId]
+            );
+            database.sqlite.run(
+                `UPDATE job_disable_intents
+                 SET ended_at = 2000, ended_by_id = ?, ended_by_kind = 'user',
+                     ended_reason = 'target-deleted'
+                 WHERE id = ?`,
+                [userId, intentId]
+            );
+
+            expect(
+                database.sqlite
+                    .query<{ ended_at: number; ended_reason: string }, [string]>(
+                        `SELECT ended_at, ended_reason
+                         FROM job_disable_intents
+                         WHERE id = ?`
+                    )
+                    .get(intentId)
+            ).toEqual({ ended_at: 2000, ended_reason: "target-deleted" });
+            expect(() =>
+                database.sqlite.run(
+                    "UPDATE job_disable_intents SET reason = 'Changed' WHERE id = ?",
+                    [intentId]
+                )
+            ).toThrow("closed job_disable_intents are immutable");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("enforces immutable run snapshots and legal retry and cancellation lifecycles", async () => {
         const database = await openFreshMigratedDatabase();
         const workerId = uuid(20);

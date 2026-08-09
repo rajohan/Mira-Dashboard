@@ -209,7 +209,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "sessions",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/sessions",
                 "phase": "phase-4"
             }

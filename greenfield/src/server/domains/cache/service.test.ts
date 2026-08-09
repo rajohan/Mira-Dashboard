@@ -123,6 +123,133 @@ describe("cache service", () => {
         ).rejects.toBeInstanceOf(CacheNotFoundError);
     });
 
+    test("composes compact cached Gateway projections without upstream row reads", async () => {
+        const calls: string[] = [];
+        const service = createCacheService({
+            cacheRepository: readOnlyCacheRepository(record),
+            jobRepository: Object.freeze({}) as never,
+            nowMs: () => 5000,
+            readGatewayConnection: () => {
+                calls.push("connection");
+                return {
+                    checkedAtMs: 5000,
+                    freshness: "fresh",
+                    phase: "connected",
+                };
+            },
+            readGatewaySessionsProjection: () => {
+                calls.push("sessions");
+                return {
+                    count: 3,
+                    observedAtMs: 4500,
+                    state: "fresh",
+                    truncated: true,
+                };
+            },
+            readOpenClawCronProjection: () => {
+                calls.push("cron");
+                return {
+                    count: 7,
+                    observedAtMs: 4600,
+                    pendingSync: "present",
+                    state: "fresh",
+                };
+            },
+        });
+
+        const heartbeat = await Effect.runPromise(service.getHeartbeat());
+        expect(calls).toEqual(["connection", "sessions", "cron"]);
+        expect(heartbeat).toMatchObject({
+            cache: {
+                entries: [{ freshness: "stale", key: "system.host" }],
+                generatedAtMs: 5000,
+                totalCount: 129,
+                truncated: true,
+            },
+            gateway: {
+                connection: {
+                    checkedAtMs: 5000,
+                    freshness: "fresh",
+                    phase: "connected",
+                },
+                sessions: {
+                    count: 3,
+                    observedAtMs: 4500,
+                    state: "fresh",
+                    truncated: true,
+                },
+            },
+            generatedAtMs: 5000,
+            openClawCron: {
+                count: 7,
+                observedAtMs: 4600,
+                pendingSync: "present",
+                state: "fresh",
+            },
+            schemaVersion: 1,
+        });
+        expect(JSON.stringify(heartbeat)).not.toContain("session-key");
+    });
+
+    test("demotes cached projections with connection loss and contains reader failures", async () => {
+        const disconnected = createCacheService({
+            cacheRepository: readOnlyCacheRepository(record),
+            jobRepository: Object.freeze({}) as never,
+            nowMs: () => 6000,
+            readGatewayConnection: () => ({
+                checkedAtMs: 6000,
+                freshness: "stale",
+                phase: "degraded",
+            }),
+            readGatewaySessionsProjection: () => ({
+                count: 2,
+                observedAtMs: 4000,
+                state: "fresh",
+                truncated: false,
+            }),
+            readOpenClawCronProjection: () => ({
+                count: 4,
+                observedAtMs: 4500,
+                pendingSync: "none",
+                state: "fresh",
+            }),
+        });
+        expect(await Effect.runPromise(disconnected.getHeartbeat())).toMatchObject({
+            gateway: {
+                sessions: {
+                    staleSinceMs: 6000,
+                    state: "last-known-good",
+                },
+            },
+            openClawCron: {
+                staleSinceMs: 6000,
+                state: "last-known-good",
+            },
+        });
+
+        const unavailable = createCacheService({
+            cacheRepository: readOnlyCacheRepository(record),
+            jobRepository: Object.freeze({}) as never,
+            nowMs: () => 7000,
+            readGatewayConnection: () => {
+                throw new Error("private endpoint and token detail");
+            },
+            readGatewaySessionsProjection: () => {
+                throw new Error("private session identity");
+            },
+            readOpenClawCronProjection: () => {
+                throw new Error("private cron payload");
+            },
+        });
+        expect(await Effect.runPromise(unavailable.getHeartbeat())).toMatchObject({
+            gateway: {
+                connection: { freshness: "unavailable", phase: "stopped" },
+                sessions: { state: "unavailable" },
+            },
+            openClawCron: { pendingSync: "unknown", state: "unavailable" },
+        });
+    });
+
     test("replays before mutable provider and schedule lookups with caller isolation", async () => {
         const database = await openFreshMigratedDatabase();
         const jobRepository = createJobRepository(

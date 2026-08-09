@@ -5,6 +5,7 @@ import * as v from "valibot";
 import {
     type AgentConfiguration,
     type AgentStatus,
+    type AgentStatusProjection,
     type AgentTaskRun,
     agentStatusSchema,
     agentTaskRunSchema,
@@ -30,9 +31,11 @@ import {
     positiveSafeIntegerSchema,
 } from "../../../shared/validation.ts";
 import { isDatabaseRuntimeWriteUnavailableError } from "../../database/runtime/databaseErrors.ts";
+import type { GatewaySessionsService } from "../gatewaySessions/service.ts";
 import { defaultRealtimeRetentionMilliseconds } from "../realtime/retention.ts";
 import { dashboardAgentConfiguration, findDashboardAgent } from "./directory.ts";
 import { AgentNotFoundError, type AgentOperationError } from "./errors.ts";
+import { readAgentGatewayAvailability } from "./gatewayAvailability.ts";
 import type {
     AgentRepository,
     AgentRepositoryUnitOfWork,
@@ -52,9 +55,12 @@ class AgentUnexpectedOperationError extends Data.TaggedError(
 interface AgentServiceShape {
     readonly getConfiguration: () => Effect.Effect<AgentConfiguration>;
     readonly getStatus: (
-        input: GetAgentStatusInput
-    ) => Effect.Effect<AgentStatus, AgentNotFoundError>;
-    readonly listStatuses: () => Effect.Effect<ListAgentStatusesResult>;
+        input: GetAgentStatusInput,
+        signal?: AbortSignal
+    ) => Effect.Effect<AgentStatusProjection, AgentNotFoundError>;
+    readonly listStatuses: (
+        signal?: AbortSignal
+    ) => Effect.Effect<ListAgentStatusesResult>;
     readonly listTaskHistory: (
         input: ListAgentTaskHistoryInput
     ) => Effect.Effect<ListAgentTaskHistoryResult, AgentNotFoundError>;
@@ -71,6 +77,7 @@ export class AgentService extends Context.Service<AgentService, AgentServiceShap
 
 export interface AgentServiceDependencies {
     readonly generateId?: () => string;
+    readonly gatewaySessionsService: GatewaySessionsService;
     readonly nowMs?: () => number;
     readonly realtimeRetentionMs?: number;
     readonly repository: AgentRepository;
@@ -129,7 +136,7 @@ function statusFromRecord(agentId: string, record?: AgentTaskRunRecord): AgentSt
     });
 }
 
-function listStatuses(repository: AgentRepository): ListAgentStatusesResult {
+function listTaskStatuses(repository: AgentRepository): AgentStatus[] {
     return repository.withReadTransaction((reader) => {
         const agentIds = dashboardAgentConfiguration.agents
             .map(({ id }) => id)
@@ -139,14 +146,12 @@ function listStatuses(repository: AgentRepository): ListAgentStatusesResult {
             throw new Error("Agent active-run count is outside its budget");
         }
         const activeByAgent = new Map(activeRuns.map((run) => [run.agentId, run]));
-        return v.parse(listAgentStatusesResultSchema, {
-            statuses: agentIds.map((agentId) =>
-                statusFromRecord(
-                    agentId,
-                    activeByAgent.get(agentId) ?? reader.findLatestRun(agentId)
-                )
-            ),
-        });
+        return agentIds.map((agentId) =>
+            statusFromRecord(
+                agentId,
+                activeByAgent.get(agentId) ?? reader.findLatestRun(agentId)
+            )
+        );
     });
 }
 
@@ -329,7 +334,7 @@ function mutationEffect<T>(
 
 /**
  * Creates the agent application service over validated admitted persistence.
- * @param dependencies Repository plus replaceable clock, IDs, and realtime wakeup.
+ * @param dependencies Repository, Gateway sessions, clock, IDs, and realtime wakeup.
  * @returns Effect service with typed expected agent-domain failures.
  */
 export function createAgentService(
@@ -345,7 +350,7 @@ export function createAgentService(
 
     return AgentService.of({
         getConfiguration: () => Effect.succeed(dashboardAgentConfiguration),
-        getStatus: (input) =>
+        getStatus: (input, signal) =>
             readEffect(() => {
                 requireConfiguredAgent(input.id);
                 return dependencies.repository.withReadTransaction((reader) =>
@@ -354,8 +359,35 @@ export function createAgentService(
                         reader.findActiveRun(input.id) ?? reader.findLatestRun(input.id)
                     )
                 );
-            }),
-        listStatuses: () => Effect.sync(() => listStatuses(dependencies.repository)),
+            }).pipe(
+                Effect.flatMap((status) =>
+                    Effect.promise(async () => {
+                        const [projection] = await readAgentGatewayAvailability(
+                            [status],
+                            dependencies.gatewaySessionsService,
+                            signal
+                        );
+                        if (projection === undefined) {
+                            throw new Error("Agent status projection is missing");
+                        }
+                        return projection;
+                    })
+                )
+            ),
+        listStatuses: (signal) =>
+            Effect.sync(() => listTaskStatuses(dependencies.repository)).pipe(
+                Effect.flatMap((statuses) =>
+                    Effect.promise(async () =>
+                        v.parse(listAgentStatusesResultSchema, {
+                            statuses: await readAgentGatewayAvailability(
+                                statuses,
+                                dependencies.gatewaySessionsService,
+                                signal
+                            ),
+                        })
+                    )
+                )
+            ),
         listTaskHistory: (input) =>
             readEffect(() => listTaskHistory(dependencies.repository, input)),
         updateMetadata: (principal, input) =>
@@ -386,7 +418,7 @@ export function createAgentService(
 
 /**
  * Provides the agent service as an Effect layer.
- * @param dependencies Repository plus replaceable clock, IDs, and realtime wakeup.
+ * @param dependencies Repository, Gateway sessions, clock, IDs, and realtime wakeup.
  * @returns Layer containing one agent service.
  */
 export function agentServiceLayer(

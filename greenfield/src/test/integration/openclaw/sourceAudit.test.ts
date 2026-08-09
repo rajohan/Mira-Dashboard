@@ -66,19 +66,106 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             if (evt.stream === "plan" && evt.data?.phase === "update") {
                 chatRunState.getOrCreate(clientRunId).planSnapshot = {};
             }
+            const sessionSubscribers = excludeConnIds(
+                sessionEventSubscribers.getAll(),
+                runToolRecipients
+            );
+            broadcastToConnIds("session.tool", payload, sessionSubscribers, {
+                dropIfSlow: true
+            });
         `,
         "chat-abort-fixture.js": `
             const plan = run?.planSnapshot;
             const withoutText = params.snapshot.plan ? { plan: params.snapshot.plan } : {};
             const droppedPlan = { plan: { steps: [] } };
         `,
+        "chat-fixture.js": `
+            function loadChatSendSessionContext(params) {
+                const { p } = params.request;
+                const clientRunId = p.idempotencyKey;
+                return { clientRunId };
+            }
+            /** Load and validate the session/model facts shared by later admission and dispatch phases. */
+            async function runChatSendPreAdmission(params) {
+                const { clientRunId, pendingChatSendKey } = params.session;
+                const cached = context.dedupe.get(\`chat:\${clientRunId}\`);
+                if (cached) return cached;
+                if (context.dedupe.get(pendingChatSendKey)) {
+                    return { runId: clientRunId, status: "in_flight" };
+                }
+                if (durableClaim.kind === "accepted") {
+                    return { runId: clientRunId, status: "ok" };
+                }
+                return true;
+            }
+            //#endregion
+            //#region src/gateway/server-methods/chat-send-admission.ts
+            const ackPayload = {
+                runId: clientRunId,
+                status: "started"
+            };
+            respond(true, ackPayload, void 0, { runId: clientRunId });
+        `,
+        "system-fixture.js": `
+            async function collectSystemInfo(context) {
+                return {
+                    machineName: await getMachineDisplayName(),
+                    hostname: os.hostname(),
+                    platform: os.platform(),
+                    release: os.release(),
+                    arch: os.arch(),
+                    osLabel: resolveRuntimeOsLabel(),
+                    port: resolveGatewayPort(context.getRuntimeConfig()),
+                    nodeVersion: process.version,
+                    pid: process.pid,
+                    processInstanceId: getGatewayProcessInstanceId(),
+                    uptimeMs: Math.round(process.uptime() * 1e3),
+                    cpuCount: os.cpus().length,
+                    memoryTotalBytes: os.totalmem(),
+                    memoryFreeBytes: os.freemem(),
+                };
+            }
+            /** Gateway handlers for identity, host information, heartbeat toggles, and presence events. */
+            const systemHandlers = {
+                "system.info": async ({ params, respond, context }) => {
+                    if (!assertValidParams(params, validateSystemInfoParams, "system.info", respond)) return;
+                    respond(true, await collectSystemInfo(context), void 0);
+                },
+                "system-event": () => {},
+            };
+        `,
         "core-descriptors-fixture.js": `
+            { name: "chat.send", scope: "operator.write" },
+            { name: "system.info", scope: "operator.read" },
             { name: "tasks.list", scope: "operator.read" },
             { name: "tasks.get", scope: "operator.read" },
             { name: "tasks.cancel", scope: "operator.write" },
             { name: "sessions.companion.ask", scope: "operator.read" },
             { name: "sessions.companion.state", scope: "operator.read" },
             { name: "sessions.companion.reset", scope: "operator.write", controlPlaneWrite: true },
+            { name: "sessions.compact", scope: "operator.admin" },
+            { name: "sessions.delete", scope: "dynamic" },
+            { name: "sessions.list", scope: "operator.read" },
+            { name: "sessions.reset", scope: "operator.admin" },
+            { name: "sessions.subscribe", scope: "operator.read" },
+            { name: "cron.get", scope: "operator.read" },
+            { name: "cron.list", scope: "operator.read" },
+            { name: "cron.remove", scope: "operator.admin" },
+            { name: "cron.run", scope: "operator.admin" },
+            { name: "cron.runs", scope: "operator.read" },
+            { name: "cron.update", scope: "operator.admin" },
+        `,
+        "method-scopes-fixture.js": `
+            // Internal controls (emitLifecycleHooks, expected* CAS guards) stay admin-only
+            const SESSIONS_DELETE_WRITE_SCOPE_FIELDS = new Set([
+                "key", "agentId", "deleteTranscript", "archivedOnly"
+            ]);
+            function resolveSessionsDeleteRequiredScopes(params) {
+                if (params.archivedOnly !== true) return [ADMIN_SCOPE];
+                return Object.keys(params).every((key) =>
+                    SESSIONS_DELETE_WRITE_SCOPE_FIELDS.has(key))
+                    ? [WRITE_SCOPE] : [ADMIN_SCOPE];
+            }
         `,
         "openclaw-tools-fixture.js": `
             const PLAN_STEP_STATUSES = [
@@ -92,6 +179,13 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             const tool = { name: "update_plan", status: "updated" };
         `,
         "src-fixture.js": `
+            const ConnectParamsSchema = closedObject({
+                minProtocol: Type.Integer({ minimum: 1 }),
+                maxProtocol: Type.Integer({ minimum: 1 }),
+                client: closedObject({ mode: GatewayClientModeSchema }),
+                caps: Type.Optional(Type.Array(NonEmptyString, { default: [] }))
+            });
+            const HelloOkSchema = closedObject({});
             const TaskLedgerStatusSchema = [
                 Type.Literal("queued"), Type.Literal("running"),
                 Type.Literal("completed"), Type.Literal("failed"),
@@ -102,12 +196,364 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             };
             // Companion answer returned only to the requesting operator.
             // Returned by tasks.get; omitted from list/event summaries.
+
+            const ChatSendParamsSchema = closedObject({
+\tsessionKey: ChatSendSessionKeyString,
+\tmessage: Type.String(),
+\tidempotencyKey: NonEmptyString
+            });
+            /** Cancels the active or named run for a chat session. */
+
+            /** Empty request payload for Gateway host system information. */
+            const SystemInfoParamsSchema = closedObject({});
+            const UtilityModelStatusSchema = Type.Union([]);
+            const SystemInfoResultSchema = closedObject({
+\tmachineName: Type.String(),
+\thostname: Type.String(),
+\tplatform: Type.String(),
+\trelease: Type.String(),
+\tarch: Type.String(),
+\tosLabel: Type.String(),
+\tlanAddress: Type.Optional(Type.String()),
+\tport: Type.Optional(Type.Integer()),
+\tnodeVersion: Type.String(),
+\tpid: Type.Integer(),
+\tprocessInstanceId: Type.Optional(Type.String({ minLength: 1 })),
+\tuptimeMs: Type.Integer(),
+\tcpuCount: Type.Integer(),
+\tcpuModel: Type.Optional(Type.String()),
+\tloadAverage: Type.Optional(Type.Tuple([])),
+\tmemoryTotalBytes: Type.Integer(),
+\tmemoryFreeBytes: Type.Integer(),
+\tdiskTotalBytes: Type.Optional(Type.Integer()),
+\tdiskAvailableBytes: Type.Optional(Type.Integer()),
+\tdiskPath: Type.Optional(Type.String()),
+\tdefaultAgentUtilityModel: Type.Optional(UtilityModelStatusSchema)
+            });
+            //#endregion
+            //#region packages/gateway-protocol/src/schema/task-suggestions.ts
+
+            const SessionRowSchema = Type.Object({
+\tkey: Type.String(),
+\tsessionId: Type.Optional(Type.String()),
+\tkind: Type.String(),
+\tlabel: Type.Optional(Type.String()),
+\tdisplayName: Type.Optional(Type.String()),
+\tchannel: Type.Optional(Type.String()),
+\tupdatedAt: Type.Optional(Type.Number()),
+\tstatus: Type.Optional(Type.String()),
+\tspawnedBy: Type.Optional(Type.String()),
+\tparentSessionKey: Type.Optional(Type.String()),
+\tcreatedVia: Type.Optional(Type.String()),
+\tcreatedAt: Type.Optional(Type.Number()),
+\ttotalTokens: Type.Optional(Type.Number()),
+\ttotalTokensFresh: Type.Optional(Type.Boolean()),
+\tcontextTokens: Type.Optional(Type.Number()),
+\tmodel: Type.Optional(Type.String()),
+\tmodelProvider: Type.Optional(Type.String())
+            }, { additionalProperties: true });
+            //#endregion
+            //#region packages/gateway-protocol/src/schema/sessions-catalog.ts
+
+            const SessionsListParamsSchema = closedObject({
+\tlimit: Type.Optional(Type.Integer()),
+\toffset: Type.Optional(Type.Integer()),
+\tactiveMinutes: Type.Optional(Type.Integer()),
+\trequireLastInteraction: Type.Optional(Type.Boolean()),
+\tsortBy: Type.Optional(Type.String()),
+\tincludeGlobal: Type.Optional(Type.Boolean()),
+\tincludeUnknown: Type.Optional(Type.Boolean()),
+\tconfiguredAgentsOnly: Type.Optional(Type.Boolean()),
+\tincludeDerivedTitles: Type.Optional(Type.Boolean()),
+\tincludeLastMessage: Type.Optional(Type.Boolean()),
+\tlabel: Type.Optional(Type.String()),
+\tboardFace: Type.Optional(Type.String()),
+\tcreatorId: Type.Optional(Type.String()),
+\tspawnedBy: Type.Optional(Type.String()),
+\tagentId: Type.Optional(Type.String()),
+\tsearch: Type.Optional(Type.String()),
+\tarchived: Type.Optional(Type.Boolean())
+            });
+            /** Searches one agent's indexed session transcripts */
+
+            const SessionsResetParamsSchema = closedObject({
+\tkey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\treason: Type.Optional(Type.String())
+            });
+            /** Deletes a session record and optionally its transcript. */
+            const SessionsDeleteParamsSchema = closedObject({
+\tkey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\tdeleteTranscript: Type.Optional(Type.Boolean()),
+\texpectedSessionId: Type.Optional(NonEmptyString),
+\texpectedLifecycleRevision: Type.Optional(NonEmptyString),
+\texpectedSessionUpdatedAt: Type.Optional(Type.Number()),
+\temitLifecycleHooks: Type.Optional(Type.Boolean()),
+\tarchivedOnly: Type.Optional(Type.Boolean())
+            });
+            /** Lists the gateway-owned custom session group catalog */
+
+            const SessionsCompactParamsSchema = closedObject({
+\tkey: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\tmaxLines: Type.Optional(Type.Integer())
+            });
+            /** Lists compaction checkpoints for one session. */
+
+            const CronCommonOptionalFields = {
+\tagentId: Type.Optional(NonEmptyString),
+\tsessionKey: Type.Optional(NonEmptyString),
+\tdescription: Type.Optional(Type.String()),
+\tenabled: Type.Optional(Type.Boolean()),
+\tdeleteAfterRun: Type.Optional(Type.Boolean())
+            };
+            function cronIdOrJobIdParams(extraFields) {
+                return Type.Union([
+                    closedObject({ id: NonEmptyString, ...extraFields }),
+                    closedObject({ jobId: NonEmptyString, ...extraFields })
+                ]);
+            }
+            const CronRunLogJobIdSchema = Type.String();
+
+            const CronScheduleSchema = Type.Union([
+                closedObject({
+                    kind: Type.Literal("at"), at: NonEmptyString
+                }),
+                closedObject({
+                    kind: Type.Literal("every"), everyMs: Type.Integer(),
+                    anchorMs: Type.Optional(Type.Integer())
+                }),
+                closedObject({
+                    kind: Type.Literal("cron"), expr: NonEmptyString,
+                    tz: Type.Optional(Type.String()), staggerMs: Type.Optional(Type.Integer())
+                }),
+                closedObject({
+                    kind: Type.Literal("on-exit"), command: NonEmptyString,
+                    cwd: Type.Optional(NonEmptyString)
+                }),
+                closedObject({
+                    kind: Type.Literal("stream"), command: Type.Array(NonEmptyString),
+                    cwd: Type.Optional(NonEmptyString), mode: Type.Optional(Type.String()),
+                    match: Type.Optional(Type.String()), batchMs: Type.Optional(Type.Integer()),
+                    maxBatchBytes: Type.Optional(Type.Integer())
+                })
+            ]);
+            /** Headless condition script evaluated before a recurring cron payload runs. */
+
+            function cronAgentTurnPayloadSchema(params) {
+                return closedObject({
+                    kind: Type.Literal("agentTurn"),
+                    message: params.message,
+                    model: Type.Optional(params.model),
+                    thinking: Type.Optional(params.thinking),
+                    timeoutSeconds: Type.Optional(Type.Number()),
+                    lightContext: Type.Optional(Type.Boolean())
+                });
+            }
+            function cronCommandPayloadSchema(params) {
+                return closedObject({
+                    kind: Type.Literal("command"), argv: params.argv
+                });
+            }
+            function cronScriptPayloadSchema(params) {
+                return closedObject({
+                    kind: Type.Literal("script"), script: params.script,
+                    timeoutSeconds: Type.Optional(Type.Number())
+                });
+            }
+            /** Session target accepted by cron jobs. */
+            const CronPayloadSchema = Type.Union([
+                closedObject({ kind: Type.Literal("systemEvent"), text: NonEmptyString })
+            ]);
+            const CronReportedPayloadSchema = Type.Union([
+                ...CronPayloadSchema.anyOf,
+                closedObject({ kind: Type.Literal("heartbeat") })
+            ]);
+
+            const CronFailureDestinationSchema = closedObject({
+\tchannel: Type.Optional(CronAnnounceChannelSchema),
+\tto: Type.Optional(NonBlankString),
+\taccountId: Type.Optional(NonEmptyString),
+\tmode: Type.Optional(Type.Union([Type.Literal("announce"), Type.Literal("webhook")]))
+            });
+            const CronFailureDestinationPatchSchema = closedObject({
+\tchannel: Type.Optional(Type.Union([CronAnnounceChannelSchema, Type.Null()])),
+\tto: Type.Optional(Type.Union([NonBlankString, Type.Null()])),
+\taccountId: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+\tmode: Type.Optional(Type.Union([
+                    Type.Literal("announce"), Type.Literal("webhook"), Type.Null()
+                ]))
+            });
+            const CronCompletionDestinationSchema = closedObject({
+\tmode: Type.Literal("webhook"),
+\tto: NonBlankString
+            });
+            const CronDeliverySharedProperties = {
+\tchannel: Type.Optional(CronAnnounceChannelSchema),
+\tthreadId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+\taccountId: Type.Optional(NonEmptyString),
+\tbestEffort: Type.Optional(Type.Boolean()),
+\tfailureDestination: Type.Optional(CronFailureDestinationSchema)
+            };
+            const CronDeliveryPatchSharedProperties = {
+\tchannel: Type.Optional(Type.Union([CronAnnounceChannelSchema, Type.Null()])),
+\tthreadId: Type.Optional(Type.Union([
+                    Type.String(), Type.Number(), Type.Null()
+                ])),
+\taccountId: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+\tbestEffort: Type.Optional(Type.Boolean()),
+\tfailureDestination: Type.Optional(Type.Union([CronFailureDestinationPatchSchema, Type.Null()]))
+            };
+            const CronDeliveryNoopSchema = closedObject({
+                mode: Type.Literal("none"),
+                ...CronDeliverySharedProperties,
+                to: Type.Optional(NonBlankString)
+            });
+            const CronDeliveryAnnounceSchema = closedObject({
+                mode: Type.Literal("announce"),
+                ...CronDeliverySharedProperties,
+                completionDestination: Type.Optional(CronCompletionDestinationSchema),
+                to: Type.Optional(NonBlankString)
+            });
+            const CronDeliveryWebhookSchema = closedObject({
+                mode: Type.Literal("webhook"),
+                ...CronDeliverySharedProperties,
+                to: NonBlankString
+            });
+            const CronDeliverySchema = Type.Union([
+                CronDeliveryNoopSchema,
+                CronDeliveryAnnounceSchema,
+                CronDeliveryWebhookSchema
+            ]);
+            /** Patch shape for cron delivery policy updates. */
+            const CronDeliveryPatchSchema = closedObject({
+\tmode: Type.Optional(Type.Union([
+                    Type.Literal("none"), Type.Literal("announce"), Type.Literal("webhook")
+                ])),
+                ...CronDeliveryPatchSharedProperties,
+\tcompletionDestination: Type.Optional(Type.Union([CronCompletionDestinationSchema, Type.Null()])),
+\tto: Type.Optional(Type.Union([NonBlankString, Type.Null()]))
+            });
+            const CronFailureNotificationDeliverySchema = closedObject({});
+
+            const CronJobStateSchema = closedObject({
+\tnextRunAtMs: Type.Optional(Type.Integer()),
+\trunningAtMs: Type.Optional(Type.Integer()),
+\tlastRunAtMs: Type.Optional(Type.Integer()),
+\tlastRunStatus: Type.Optional(Type.String()),
+\tlastErrorReason: Type.Optional(Type.String()),
+\tlastDurationMs: Type.Optional(Type.Integer()),
+\tconsecutiveErrors: Type.Optional(Type.Integer()),
+\tlastDeliveryStatus: Type.Optional(Type.String()),
+\tstreamStatus: Type.Optional(Type.String())
+            });
+            /** Persisted cron job definition returned by scheduler list/get APIs. */
+            const CronJobSchema = closedObject({
+\tid: NonEmptyString,
+\tagentId: Type.Optional(NonEmptyString),
+\tname: NonEmptyString,
+\tdescription: Type.Optional(Type.String()),
+\tenabled: Type.Boolean(),
+\tcreatedAtMs: Type.Integer(),
+\tupdatedAtMs: Type.Integer(),
+\tconfigRevision: Type.Optional(Type.String()),
+\tschedule: CronScheduleSchema,
+\tsessionTarget: Type.String(),
+\twakeMode: Type.String(),
+\tpayload: CronReportedPayloadSchema,
+\tdelivery: Type.Optional(Type.Object({ mode: Type.String() })),
+\tstate: CronJobStateSchema
+            });
+            /** Query params for listing cron jobs with filters and pagination. */
+            const CronListParamsSchema = closedObject({
+\tincludeDisabled: Type.Optional(Type.Boolean()),
+\tlimit: Type.Optional(Type.Integer()),
+\toffset: Type.Optional(Type.Integer()),
+\tquery: Type.Optional(Type.String()),
+\tenabled: Type.Optional(Type.String()),
+\tscheduleKind: Type.Optional(Type.String()),
+\tlastRunStatus: Type.Optional(Type.String()),
+\tsortBy: Type.Optional(Type.String()),
+\tsortDir: Type.Optional(Type.String()),
+\tagentId: Type.Optional(NonEmptyString),
+\tcompact: Type.Optional(Type.Boolean()),
+\tincludeDeliveryPreviews: Type.Optional(Type.Boolean())
+            });
+            /** Empty request payload for scheduler status. */
+            const CronGetParamsSchema = cronIdOrJobIdParams({});
+            const CronUpdateParamsSchema = cronIdOrJobIdParams({
+\tpatch: closedObject({
+\t\tname: Type.Optional(NonEmptyString),
+\t\tdisplayName: Type.Optional(Type.String()),
+                ...CronCommonOptionalFields,
+\t\tschedule: Type.Optional(CronScheduleSchema),
+\t\tpacing: Type.Optional(Type.Unknown()),
+\t\ttrigger: Type.Optional(Type.Unknown()),
+\t\tsessionTarget: Type.Optional(Type.String()),
+\t\twakeMode: Type.Optional(Type.String()),
+\t\tpayload: Type.Optional(Type.Unknown()),
+\t\tdelivery: Type.Optional(Type.Unknown()),
+\t\tfailureAlert: Type.Optional(Type.Unknown()),
+\t\tstate: Type.Optional(Type.Unknown())
+                }),
+\texpectedConfigRevision: Type.Optional(Type.String())
+            });
+            /** Removes a cron job by id or legacy jobId alias. */
+            const CronRemoveParamsSchema = cronIdOrJobIdParams({});
+            const CronRunParamsSchema = cronIdOrJobIdParams({
+\tmode: Type.Optional(Type.String()),
+\texpectedProcessInstanceId: Type.Optional(NonEmptyString)
+            });
+            /** Query params for cron run history. */
+            const CronRunsParamsSchema = closedObject({
+\tagentId: Type.Optional(NonEmptyString),
+\tscope: Type.Optional(Type.String()),
+\tid: Type.Optional(CronRunLogJobIdSchema),
+\tjobId: Type.Optional(CronRunLogJobIdSchema),
+\trunId: Type.Optional(NonEmptyString),
+\tlimit: Type.Optional(Type.Integer()),
+\toffset: Type.Optional(Type.Integer()),
+\tstatuses: Type.Optional(Type.Array(Type.String())),
+\tstatus: Type.Optional(Type.String()),
+\tdeliveryStatuses: Type.Optional(Type.Array(Type.String())),
+\tdeliveryStatus: Type.Optional(Type.String()),
+\tquery: Type.Optional(Type.String()),
+\tsortDir: Type.Optional(Type.String())
+            });
+            closedObject({
+\tts: Type.Integer({ minimum: 0 }),
+\tjobId: NonEmptyString,
+\tstatus: Type.Optional(Type.String()),
+\terrorReason: Type.Optional(Type.String()),
+\tsummary: Type.Optional(Type.String()),
+\tdeliveryStatus: Type.Optional(Type.String()),
+\trunId: Type.Optional(NonEmptyString),
+\trunAtMs: Type.Optional(Type.Integer()),
+\tdurationMs: Type.Optional(Type.Integer()),
+\tmodel: Type.Optional(Type.String()),
+\tprovider: Type.Optional(Type.String()),
+\tusage: Type.Optional(closedObject({
+                    input_tokens: Type.Optional(Type.Number()),
+                    output_tokens: Type.Optional(Type.Number()),
+                    total_tokens: Type.Optional(Type.Number()),
+                    cache_read_tokens: Type.Optional(Type.Number()),
+                    cache_write_tokens: Type.Optional(Type.Number())
+                }))
+            });
+            //#region packages/gateway-protocol/src/schema/environments.ts
         `,
         "server-runtime-subscriptions-fixture.js": `
             const SESSION_COMPANION_IDLE_TTL_MS = 120 * 6e4;
             const SESSION_COMPANION_SWEEP_INTERVAL_MS = 10 * 6e4;
             payload = { action: "restored" };
             params.broadcast("task", payload, { dropIfSlow: true });
+            function createSessionObserverAudience(params) {
+                params.sessionEventSubscribers?.getAll();
+                return { recipients() {} };
+            }
+            deps.broadcastToConnIds("session.observer", digest,
+                audience.recipients(sessionKey), { dropIfSlow: true });
         `,
         "session-companion-rpc-fixture.js": `
             "sessions.companion.ask";
@@ -136,6 +582,307 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             const run = { disableMessageTool: true };
             throw new Error("The session companion is answering another question.");
         `,
+        "session-change-event-fixture.js": `
+            function emitSessionsChanged(context, payload) {
+                context.broadcastToConnIds("sessions.changed", payload, connIds, {
+                    dropIfSlow: true
+                });
+            }
+        `,
+        "sessions-shared-fixture.js": `
+            function emitSessionOperation(context, payload) {
+                const connIds = context.getSessionEventSubscriberConnIds();
+                context.broadcastToConnIds("session.operation", payload, connIds, {
+                    dropIfSlow: true
+                });
+            }
+        `,
+        "server-session-events-fixture.js": `
+            function broadcastSessionMessage(params, update) {
+                const connIds = params.sessionEventSubscribers.getAll();
+                if (update.message === void 0) {
+                    params.broadcastToConnIds("sessions.changed", update, connIds);
+                    return;
+                }
+                const idempotencyKey = readMessageIdempotencyKey(update.message);
+                const message = projectChatDisplayMessage(update.message);
+                if (message) {
+                    params.broadcastToConnIds("session.message", update, connIds);
+                    return;
+                }
+                const sessionEventConnIds = params.sessionEventSubscribers.getAll();
+                params.broadcastToConnIds("sessions.changed", update,
+                    sessionEventConnIds, { dropIfSlow: true });
+            }
+            /** Creates a lifecycle-event broadcaster for session list refreshes. */
+        `,
+        "lifecycle-fixture.js": `
+            const SESSION_LIFECYCLE_CHANGED_ERROR_REASON = "session-changed";
+            function resolveSessionWorkStartError() {}
+        `,
+        "session-utils-list-fixture.js": `
+            function buildSessionsListResult(params) {
+                const { list, sessions } = params;
+                return {
+                    ts: list.now,
+                    path: list.storePath,
+                    count: sessions.length,
+                    totalCount: list.totalCount,
+                    limitApplied: list.limitApplied,
+                    offset: list.offset > 0 ? list.offset : void 0,
+                    nextOffset: list.nextOffset,
+                    hasMore: list.hasMore,
+                    creators: list.creators,
+                    defaults: getSessionDefaults(params.cfg),
+                    sessions
+                };
+            }
+            function filterAndSortSessionEntries(params) {}
+        `,
+        "session-utils-row-fixture.js": `
+            function buildGatewaySessionRow(params) {
+                const thinkingProjection = resolveGatewaySessionThinkingProjectionInternal({});
+                const fastModeState = {};
+                return {
+\t\tkey,
+\t\tspawnedBy: subagentOwner || entry?.spawnedBy,
+\t\tcreatedVia: entry?.createdVia,
+\t\tcreatedAt: entry?.createdAt,
+\t\tkind: gatewayKind,
+\t\tlabel: entry?.label,
+\t\tdisplayName,
+\t\tchannel,
+\t\tupdatedAt,
+\t\tsessionId: entry?.sessionId,
+\t\tthinkingLevel: thinkingProjection.thinkingLevel,
+\t\tthinkingLevels: thinkingProjection.thinkingLevels,
+\t\tthinkingOptions: thinkingProjection.thinkingOptions,
+\t\tthinkingDefault: thinkingProjection.thinkingDefault,
+\t\tfastMode: entry?.fastMode,
+\t\teffectiveFastMode: fastModeState.mode,
+\t\tverboseLevel: entry?.verboseLevel,
+\t\treasoningLevel: entry?.reasoningLevel,
+\t\televatedLevel: entry?.elevatedLevel,
+\t\ttotalTokens,
+\t\ttotalTokensFresh,
+\t\tstatus: subagentRun ? subagentStatus : entry?.status,
+\t\tstartedAt: subagentRun ? subagentStartedAt : entry?.startedAt,
+\t\tendedAt: subagentRun ? subagentEndedAt : entry?.endedAt,
+\t\truntimeMs: subagentRun ? subagentRuntimeMs : entry?.runtimeMs,
+\t\tparentSessionKey: entry?.parentSessionKey,
+\t\tmodelProvider: rowModelProvider,
+\t\tmodel: rowModel,
+\t\tcontextTokens,
+                };
+            }
+            //#endregion
+        `,
+        "sessions-fixture.js": `
+            const sessionCompactHandlers = {
+                "sessions.compact": async () => {
+                    respond(true, {
+                        ok: result.ok,
+                        key: target.canonicalKey,
+                        compacted: result.compacted,
+                        reason: result.reason,
+                        result: result.result
+                    });
+                }
+            };
+            const sessionDeleteHandlers = {
+                "sessions.delete": async () => {
+                    const mainKey = resolveMainSessionKey(cfg);
+                    const isSelectedNonDefaultGlobal = target.canonicalKey === "global" &&
+                        requestedAgentId !== resolveDefaultAgentId(cfg);
+                    if (target.canonicalKey === mainKey && !isSelectedNonDefaultGlobal) {
+                        errorShape(
+                            ErrorCodes.INVALID_REQUEST,
+                            "Cannot delete the main session (\${mainKey})."
+                        );
+                    }
+                    expectedLifecycleRevision;
+                    expectedSessionId;
+                    expectedSessionUpdatedAt;
+                    ErrorCodes.INVALID_REQUEST;
+                    details: { reason: SESSION_LIFECYCLE_CHANGED_ERROR_REASON };
+                    const archived = deletion.archivedTranscripts.map((entry) => entry.path);
+                    worktreePreserved = { id, branch, path };
+                    respond(true, { ok: true, key, deleted, archived, worktreePreserved });
+                }
+            };
+            const sessionHandlers = {
+                "sessions.subscribe": ({ client, context, respond }) => {
+                    const connId = client?.connId?.trim();
+                    if (connId) context.subscribeSessionEvents(connId);
+                    respond(true, { subscribed: Boolean(connId) });
+                },
+                "sessions.unsubscribe": ({ client, context, respond }) => {
+                    respond(true, { subscribed: false });
+                },
+                "sessions.reset": async () => {
+                    if ("incognitoDeleted" in result) {
+                        respond(true, { ok: true, key: result.key, deleted: true });
+                    }
+                    respond(true, {
+                        ok: true,
+                        key: result.key,
+                        entry: result.entry,
+                        resolved: result.resolved
+                    });
+                },
+                "sessions.list": async () => ({
+                    ...session,
+                    hasActiveRun: activeRunState.active,
+                    ...activeRunState.runIds.length > 0 ? {
+                        activeRunIds: activeRunState.runIds
+                    } : {}
+                })
+            };
+        `,
+        "cron-fixture.js": `
+            function cronJobReadView(job) {
+                return { ...job, configRevision: revision };
+            }
+            function compactCronListJob(job) {
+                return {
+                    id: job.id,
+                    name: job.name,
+                    ...job.declarationKey ? { declarationKey: job.declarationKey } : {},
+                    ...job.displayName ? { displayName: job.displayName } : {},
+                    ...job.owner ? { owner: job.owner } : {},
+                    enabled: job.enabled,
+                    nextRunAtMs: job.state.nextRunAtMs,
+                    scheduleKind: job.schedule.kind,
+                    ...job.trigger ? { trigger: true } : {},
+                    lastRunAtMs: job.state.lastRunAtMs,
+                    lastRunStatus: job.state.lastRunStatus,
+                    lastRunError: job.state.lastError,
+                    lastDelivered: job.state.lastDelivered,
+                    lastDeliveryStatus: job.state.lastDeliveryStatus,
+                    lastDeliveryError: job.state.lastDeliveryError,
+                    lastFailureNotificationDelivered: job.state.lastFailureNotificationDelivered,
+                    lastFailureNotificationDeliveryStatus: job.state.lastFailureNotificationDeliveryStatus,
+                    lastFailureNotificationDeliveryError: job.state.lastFailureNotificationDeliveryError
+                };
+            }
+            async function assertValidCronUpdatePatch(params) {}
+            const cronHandlers = {
+                "cron.get": async () => respond(true, cronJobReadView(job), void 0),
+                "cron.list": async () => {
+                    if (p.compact === true) {
+                        respond(true, { jobs: page.jobs.map(compactCronListJob) });
+                    }
+                    if (p.includeDeliveryPreviews === false) respond(true, page);
+                },
+                "cron.update": async () => {
+                    expectedConfigRevision;
+                    code: "CRON_JOB_CHANGED";
+                    respond(true, cronJobReadView(job), void 0);
+                },
+                "cron.remove": async () => {
+                    if (!result.removed) return;
+                },
+                "cron.run": async () => {
+                    expectedProcessInstanceId;
+                    if (isInvalidCronSessionTargetIdError(error)) {
+                        respond(true, { ok: true, ran: false, reason: "invalid-spec" });
+                    }
+                    respond(true, { processInstanceId: getGatewayProcessInstanceId() });
+                },
+                "cron.runs": async () => readCronTaskRunHistoryPage(params)
+            };
+        `,
+        "jobs-fixture.js": `
+            function assertDeliverySupport() {}
+            function mergeCronDelivery(existing, patch, implicitMode) {
+                const hasCompletionDestinationPatch = "completionDestination" in patch;
+                const next = {};
+                if (typeof patch.mode === "string") {
+                    const previousMode = next.mode;
+                    next.mode = patch.mode;
+                    if (previousMode !== next.mode && (previousMode === "webhook" || next.mode === "webhook")) next.to = void 0;
+                    if (next.mode === "webhook") {
+                        next.channel = void 0;
+                        next.threadId = void 0;
+                        next.accountId = void 0;
+                    }
+                    if (!hasCompletionDestinationPatch && (next.mode === "none" || next.mode === "webhook")) next.completionDestination = void 0;
+                }
+                if ("channel" in patch) next.channel = normalizeOptionalString(patch.channel);
+                if ("to" in patch) next.to = normalizeOptionalString(patch.to);
+                if ("threadId" in patch) next.threadId = normalizeOptionalThreadValue(patch.threadId);
+                if ("accountId" in patch) next.accountId = normalizeOptionalString(patch.accountId);
+                if (hasCompletionDestinationPatch) {
+                    if (patch.completionDestination == null) next.completionDestination = void 0;
+                }
+                if ("failureDestination" in patch) {
+                    if (patch.failureDestination == null) next.failureDestination = void 0;
+                }
+                return next;
+            }
+            function mergeCronFailureAlert(existing, patch) {}
+            function applyJobPatch() {}
+        `,
+        "normalize-fixture.js": `
+            function coerceDelivery(delivery) {
+                const next = { ...delivery };
+                if ("channel" in delivery && delivery.channel === null) next.channel = null;
+                if ("to" in delivery && delivery.to === null) next.to = null;
+                if ("threadId" in delivery && delivery.threadId === null) next.threadId = null;
+                if ("accountId" in delivery && delivery.accountId === null) next.accountId = null;
+                if ("failureDestination" in next) if (next.failureDestination === null) next.failureDestination = null;
+                if ("completionDestination" in next) if (next.completionDestination === null) next.completionDestination = null;
+                function coerceFailureDestination(value) {
+                    const next = { ...value };
+                    if ("mode" in next) if (next.mode === null) next.mode = null;
+                    return next;
+                }
+                return next;
+            }
+            function normalizeSessionTarget(raw) {}
+            function normalizeCronJobPatch(raw) {}
+        `,
+        "service-fixture.js": `
+            async function listPage(state, opts) {
+                return {
+                    jobs,
+                    snapshotRevision,
+                    total,
+                    offset,
+                    limit,
+                    hasMore: nextOffset < total,
+                    nextOffset: nextOffset < total ? nextOffset : null
+                };
+            }
+            //#region src/cron/service/ops-run.ts
+            const stopped = { ok: true, ran: false, reason: "already-running" };
+            const notDue = { ok: true, ran: false, reason: "not-due" };
+            const invalid = { ok: true, ran: false, reason: "invalid-spec" };
+            async function enqueueRun(state, id, mode) {
+                return { ok: true, enqueued: true, runId };
+            }
+        `,
+        "list-snapshot-revision-fixture.js": `
+            function readCronTaskRunHistoryPage(options) {
+                return {
+                    entries,
+                    total,
+                    offset: boundedOffset,
+                    limit,
+                    hasMore: nextOffset < total,
+                    nextOffset: nextOffset < total ? nextOffset : null
+                };
+            }
+            //#region src/cron/list-snapshot-revision.ts
+            function resolveCronListSnapshotRevision(jobs) {}
+        `,
+        "server-cron-fixture.js": `
+            const deps = {
+                onEvent: (evt) => {
+                    params.broadcast("cron", evt, { dropIfSlow: true });
+                }
+            };
+        `,
         "tasks-fixture.js": `
             const DEFAULT_TASKS_LIST_LIMIT = 100;
             const MAX_TASKS_LIST_LIMIT = 500;
@@ -161,7 +908,59 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
         `,
         "server-constants-fixture.js": `
             const MAX_PAYLOAD_BYTES = 25 * 1024 * 1024;
+            const MAX_BUFFERED_BYTES = 50 * 1024 * 1024;
             const MAX_PREAUTH_PAYLOAD_BYTES = 64 * 1024;
+        `,
+        "client-info-fixture.js": `
+            const GATEWAY_CLIENT_MODES = { BACKEND: "backend" };
+            const GATEWAY_CLIENT_CAPS = {
+                SESSION_SCOPED_EVENTS: "session-scoped-events"
+            };
+        `,
+        "error-codes-fixture.js": `
+            const GatewayClientIdSchema = Type.Enum(GATEWAY_CLIENT_IDS);
+            const GatewayClientModeSchema = Type.Enum(GATEWAY_CLIENT_MODES);
+        `,
+        "message-handler-fixture.js": `
+            async function admitGatewayConnect(context) {
+                const isBrowserCopilot = isBrowserCopilotClient(connectParams.client);
+                if (isBrowserCopilot &&
+                    !hasGatewayClientCap(connectParams.caps, GATEWAY_CLIENT_CAPS.SESSION_SCOPED_EVENTS)) {
+                    close();
+                }
+                if (isBrowserCopilot && !browserCopilotOrigin) close();
+            }
+        `,
+        "server.impl-fixture.js": `
+            const SESSION_SUBSCRIPTION_EVENTS = /* @__PURE__ */ new Set([
+                "agent",
+                "chat",
+                "chat.side_result",
+                "session.observer"
+            ]);
+            function createGatewayBroadcaster(params) {
+                const clientSeq = /* @__PURE__ */ new WeakMap();
+                const broadcastInternal = (event, payload, opts, targetConnIds) => {
+                    const isTargeted = Boolean(targetConnIds);
+                    for (const c of params.clients) {
+                        if (
+                            hasGatewayClientCap(c.connect.caps, GATEWAY_CLIENT_CAPS.SESSION_SCOPED_EVENTS) &&
+                            SESSION_SUBSCRIPTION_EVENTS.has(event) &&
+                            !params.sessionMessageSubscribers?.get(sessionKey).has(c.connId)
+                        ) continue;
+                        const nextSeq = (clientSeq.get(c) ?? 0) + 1;
+                        const slow = c.socket.bufferedAmount > MAX_BUFFERED_BYTES;
+                        if (slow && opts?.dropIfSlow) {
+                            if (!isTargeted) clientSeq.set(c, nextSeq);
+                            continue;
+                        }
+                        const eventSeq = isTargeted ? void 0 : nextSeq;
+                        if (!isTargeted) clientSeq.set(c, nextSeq);
+                        c.socket.send({ event, payload, seq: eventSeq });
+                    }
+                };
+                return { broadcastInternal };
+            }
         `,
         "server-methods-fixture.js": `
             //#region src/gateway/server-methods.ts
@@ -169,12 +968,27 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             methods: ["agent", "agent.wait"];
             methods: ["agent.identity.get", "agents.list"];
             methods: ["chat.abort", "chat.history", "chat.send"];
-            methods: ["session.typing", "sessions.list", "sessions.send"];
+            methods: ["system.info"];
+            methods: [
+                "session.typing",
+                "sessions.compact",
+                "sessions.delete",
+                "sessions.list",
+                "sessions.reset",
+                "sessions.send",
+                "sessions.subscribe",
+                "sessions.unsubscribe"
+            ];
             methods: ["tasks.cancel", "tasks.get", "tasks.list"];
             methods: [
                 "wake",
                 "cron.list",
-                "cron.add"
+                "cron.add",
+                "cron.get",
+                "cron.remove",
+                "cron.run",
+                "cron.runs",
+                "cron.update"
             ];
         `,
         "server-methods-list-fixture.js": `
@@ -274,13 +1088,31 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             version: sourceVersion,
         });
         expect(reviewed.audit.gateway).toMatchObject({
+            broadcastSequence: {
+                dropIfSlowAdvances: true,
+                firstSequence: 1,
+                scope: "per-client",
+                targetedOmitsSequence: true,
+            },
             challengeEvent: "connect.challenge",
             helloType: "hello-ok",
             limits: {
                 authenticatedFrameBytes: 25 * 1024 * 1024,
+                bufferedAmountBytes: 50 * 1024 * 1024,
                 preauthenticationFrameBytes: 64 * 1024,
             },
             protocolVersion: 4,
+            sessionScopedEvents: {
+                backendModeAccepted: true,
+                capability: "session-scoped-events",
+                connectParameter: {
+                    defaultEmptyArray: true,
+                    element: "non-empty-string",
+                    optional: true,
+                },
+                filteredEvents: ["agent", "chat", "chat.side_result", "session.observer"],
+                requiresSessionMessageSubscription: true,
+            },
         });
         expect(reviewed.audit.chat.streamingPolicy).toEqual({
             coalescedAgentStreams: ["assistant", "thinking"],
@@ -300,7 +1132,276 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(23);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(43);
+        expect(reviewed.audit.chat.methodAccess).toEqual([
+            {
+                controlPlaneWrite: false,
+                name: "chat.send",
+                scope: "operator.write",
+            },
+        ]);
+        expect(reviewed.audit.chat.taskNotificationSend).toEqual({
+            acknowledgedStatuses: ["in_flight", "ok", "started"],
+            idempotencyKeyIsRunId: true,
+            requiredParams: ["idempotencyKey", "message", "sessionKey"],
+        });
+        expect(reviewed.audit.sessions.adapter.list.requestParams).toEqual([
+            "archived",
+            "includeGlobal",
+            "includeUnknown",
+            "limit",
+            "sortBy",
+        ]);
+        expect(reviewed.audit.sessions.adapter.list.responseMetadata).toEqual([
+            "count",
+            "creators",
+            "defaults",
+            "hasMore",
+            "limitApplied",
+            "nextOffset",
+            "offset",
+            "path",
+            "totalCount",
+            "ts",
+        ]);
+        expect(reviewed.audit.sessions.adapter.list.derivedRowFields).toEqual([
+            "activeRunIds",
+            "hasActiveRun",
+        ]);
+        expect(reviewed.audit.sessions.adapter.list.rowFields).toEqual([
+            "activeRunIds",
+            "channel",
+            "contextTokens",
+            "createdAt",
+            "createdVia",
+            "displayName",
+            "effectiveFastMode",
+            "elevatedLevel",
+            "endedAt",
+            "fastMode",
+            "hasActiveRun",
+            "key",
+            "kind",
+            "label",
+            "model",
+            "modelProvider",
+            "parentSessionKey",
+            "reasoningLevel",
+            "runtimeMs",
+            "sessionId",
+            "spawnedBy",
+            "startedAt",
+            "status",
+            "thinkingDefault",
+            "thinkingLevel",
+            "thinkingLevels",
+            "thinkingOptions",
+            "totalTokens",
+            "totalTokensFresh",
+            "updatedAt",
+            "verboseLevel",
+        ]);
+        expect(reviewed.audit.sessions.adapter.deleteLifecycle).toMatchObject({
+            conflict: { code: "INVALID_REQUEST", reason: "session-changed" },
+            generationFields: [
+                "expectedLifecycleRevision",
+                "expectedSessionId",
+                "expectedSessionUpdatedAt",
+            ],
+            generationGuardedScope: "operator.admin",
+            mainSessionProtection: {
+                canonicalKeyComparison: true,
+                configuredKeyResolver: "resolveMainSessionKey",
+                errorCode: "INVALID_REQUEST",
+                selectedNonDefaultGlobalException: true,
+            },
+        });
+        expect(reviewed.audit.sessions.adapter.methodAccess).toEqual([
+            {
+                lane: "one-shot-admin",
+                method: "sessions.compact",
+                scope: "operator.admin",
+            },
+            { lane: "one-shot-admin", method: "sessions.delete", scope: "dynamic" },
+            { lane: "persistent", method: "sessions.list", scope: "operator.read" },
+            {
+                lane: "one-shot-admin",
+                method: "sessions.reset",
+                scope: "operator.admin",
+            },
+            {
+                lane: "persistent",
+                method: "sessions.subscribe",
+                scope: "operator.read",
+            },
+        ]);
+        expect(reviewed.audit.sessions.adapter.subscription).toEqual({
+            acknowledgementField: "subscribed",
+            acknowledgementValue: "Boolean(connId)",
+            connectionIdSource: "client.connId.trim",
+            effectiveWithSessionScopedCap: [
+                "session.message",
+                "session.operation",
+                "session.tool",
+                "sessions.changed",
+            ],
+            registration: "subscribeSessionEvents",
+            registryTargetedEvents: [
+                "session.message",
+                "session.observer",
+                "session.operation",
+                "session.tool",
+                "sessions.changed",
+            ],
+            requestParams: [],
+            requiredAcknowledgement: true,
+        });
+        expect(reviewed.audit.cron.adapter.operations.list.requestLiterals).toEqual({
+            compact: false,
+            includeDeliveryPreviews: false,
+        });
+        expect(
+            reviewed.audit.cron.adapter.operations.list
+                .fullJobProjectionRequiresCompactFalse
+        ).toBeTrue();
+        expect(
+            reviewed.audit.cron.adapter.operations.list.compactOmittedJobFields
+        ).toEqual([
+            "agentId",
+            "configRevision",
+            "createdAtMs",
+            "delivery",
+            "description",
+            "payload",
+            "schedule",
+            "sessionTarget",
+            "state",
+            "updatedAtMs",
+            "wakeMode",
+        ]);
+        expect(reviewed.audit.cron.adapter.delivery).toEqual({
+            full: {
+                completionDestination: {
+                    mode: "webhook",
+                    requiredFields: ["mode", "to"],
+                },
+                failureDestination: {
+                    modes: ["announce", "webhook"],
+                    optionalFields: ["accountId", "channel", "mode", "to"],
+                },
+                modes: ["announce", "none", "webhook"],
+                sharedFields: [
+                    "accountId",
+                    "bestEffort",
+                    "channel",
+                    "failureDestination",
+                    "threadId",
+                ],
+                variantFields: {
+                    announce: ["completionDestination", "to"],
+                    none: ["to"],
+                    webhookRequired: ["to"],
+                },
+            },
+            merge: {
+                explicitNullClears: [
+                    "accountId",
+                    "channel",
+                    "completionDestination",
+                    "failureDestination",
+                    "threadId",
+                    "to",
+                ],
+                failureDestinationNullClearsWholeDestination: true,
+                modeSwitchAcrossWebhookBoundaryClearsTo: true,
+                noneOrWebhookModeClearsOmittedCompletionDestination: true,
+                webhookModeClears: ["accountId", "channel", "threadId"],
+            },
+            patch: {
+                fields: [
+                    "accountId",
+                    "bestEffort",
+                    "channel",
+                    "completionDestination",
+                    "failureDestination",
+                    "mode",
+                    "threadId",
+                    "to",
+                ],
+                failureDestinationNullableFields: ["accountId", "channel", "mode", "to"],
+                nonNullableFields: ["bestEffort", "mode"],
+                nullableFields: [
+                    "accountId",
+                    "channel",
+                    "completionDestination",
+                    "failureDestination",
+                    "threadId",
+                    "to",
+                ],
+            },
+        });
+        expect(
+            reviewed.audit.cron.adapter.operations.run.acknowledgementVariants
+        ).toEqual([
+            {
+                fields: ["enqueued", "ok", "processInstanceId", "runId"],
+                kind: "enqueued",
+            },
+            {
+                fields: ["ok", "ran", "reason"],
+                kind: "invalid-spec-fallback",
+            },
+            {
+                fields: ["ok", "processInstanceId", "ran", "reason"],
+                kind: "not-run",
+            },
+        ]);
+        expect(reviewed.audit.cron.adapter.methodAccess).toEqual([
+            { lane: "persistent", method: "cron.get", scope: "operator.read" },
+            { lane: "persistent", method: "cron.list", scope: "operator.read" },
+            {
+                lane: "one-shot-admin",
+                method: "cron.remove",
+                scope: "operator.admin",
+            },
+            { lane: "one-shot-admin", method: "cron.run", scope: "operator.admin" },
+            { lane: "persistent", method: "cron.runs", scope: "operator.read" },
+            {
+                lane: "one-shot-admin",
+                method: "cron.update",
+                scope: "operator.admin",
+            },
+            { lane: "persistent", method: "system.info", scope: "operator.read" },
+        ]);
+        expect(reviewed.audit.cron.adapter.operations.systemInfo).toEqual({
+            method: "system.info",
+            processInstanceId: { minimumCharacters: 1, optional: true },
+            requestParams: [],
+            responseFields: [
+                "arch",
+                "cpuCount",
+                "cpuModel",
+                "defaultAgentUtilityModel",
+                "diskAvailableBytes",
+                "diskPath",
+                "diskTotalBytes",
+                "hostname",
+                "lanAddress",
+                "loadAverage",
+                "machineName",
+                "memoryFreeBytes",
+                "memoryTotalBytes",
+                "nodeVersion",
+                "osLabel",
+                "pid",
+                "platform",
+                "port",
+                "processInstanceId",
+                "release",
+                "uptimeMs",
+            ],
+            responseSchema: "closed-object",
+        });
         expect(reviewed.audit.sessions.plan.authority).toMatchObject({
             dedicatedGatewayEvent: false,
             gatewayEvent: "agent",
@@ -413,7 +1514,177 @@ describe("explicit OpenClaw source audit", () => {
                 "tasks.get",
                 "tasks.list",
             ]);
-            expect(audit.sourceArtifacts).toHaveLength(23);
+            expect(audit.sessions.adapter.event).toEqual({
+                backpressurePaths: [
+                    {
+                        event: "sessions.changed",
+                        path: "session-change",
+                        slowClient: "drop-event",
+                    },
+                    {
+                        event: "sessions.changed",
+                        path: "transcript-fallback",
+                        slowClient: "drop-event",
+                    },
+                    {
+                        event: "session.message",
+                        path: "transcript-message",
+                        slowClient: "close-socket",
+                    },
+                    {
+                        event: "sessions.changed",
+                        path: "transcript-snapshot",
+                        slowClient: "close-socket",
+                    },
+                ],
+                delivery: "path-dependent-drop-or-close",
+                name: "sessions.changed",
+                sequence: "omitted",
+                targeted: true,
+            });
+            expect(audit.cron.adapter.operations.runs.resultFields).toEqual([
+                "entries",
+                "hasMore",
+                "limit",
+                "nextOffset",
+                "offset",
+                "total",
+            ]);
+            expect(audit.sourceArtifacts).toHaveLength(43);
+        });
+    });
+
+    test("rejects drift in the chat.send write permission", async () => {
+        await withTemporaryDirectory("mira-openclaw-chat-scope-", async (sourceRoot) => {
+            await writeSyntheticOpenClawPackage(sourceRoot);
+            const descriptorPath = path.join(
+                sourceRoot,
+                "dist",
+                "core-descriptors-fixture.js"
+            );
+            const source = await readFile(descriptorPath, "utf8");
+            await writeFile(
+                descriptorPath,
+                source.replace(
+                    '{ name: "chat.send", scope: "operator.write" }',
+                    '{ name: "chat.send", scope: "operator.read" }'
+                ),
+                "utf8"
+            );
+
+            const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+            expect(error.message).toContain(
+                "permission descriptor changed for chat.send"
+            );
+        });
+    });
+
+    test("rejects drift in the system.info read permission", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-system-scope-",
+            async (sourceRoot) => {
+                await writeSyntheticOpenClawPackage(sourceRoot);
+                const descriptorPath = path.join(
+                    sourceRoot,
+                    "dist",
+                    "core-descriptors-fixture.js"
+                );
+                const source = await readFile(descriptorPath, "utf8");
+                await writeFile(
+                    descriptorPath,
+                    source.replace(
+                        '{ name: "system.info", scope: "operator.read" }',
+                        '{ name: "system.info", scope: "operator.write" }'
+                    ),
+                    "utf8"
+                );
+
+                const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                expect(error.message).toContain(
+                    "permission descriptor changed for system.info"
+                );
+            }
+        );
+    });
+
+    test("rejects a non-empty system.info request or unvalidated process identity", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-system-shape-",
+            async (temporaryRoot) => {
+                const requestRoot = path.join(temporaryRoot, "request");
+                await writeSyntheticOpenClawPackage(requestRoot);
+                const requestPath = path.join(requestRoot, "dist", "src-fixture.js");
+                const requestSource = await readFile(requestPath, "utf8");
+                await writeFile(
+                    requestPath,
+                    requestSource.replace(
+                        "const SystemInfoParamsSchema = closedObject({});",
+                        "const SystemInfoParamsSchema = closedObject({ verbose: Type.Boolean() });"
+                    ),
+                    "utf8"
+                );
+                const requestError = await rejectedError(
+                    auditInstalledOpenClaw(requestRoot)
+                );
+                expect(requestError.message).toContain("system.info params changed");
+
+                const resultRoot = path.join(temporaryRoot, "result");
+                await writeSyntheticOpenClawPackage(resultRoot);
+                const resultPath = path.join(resultRoot, "dist", "src-fixture.js");
+                const resultSource = await readFile(resultPath, "utf8");
+                await writeFile(
+                    resultPath,
+                    resultSource.replace(
+                        "processInstanceId: Type.Optional(Type.String({ minLength: 1 }))",
+                        "processInstanceId: Type.Optional(Type.String())"
+                    ),
+                    "utf8"
+                );
+                const resultError = await rejectedError(
+                    auditInstalledOpenClaw(resultRoot)
+                );
+                expect(resultError.message).toContain(
+                    "system.info process identity changed"
+                );
+            }
+        );
+    });
+
+    test("rejects drift in the protocol-v4 connect capability parameter", async () => {
+        await withTemporaryDirectory("mira-openclaw-caps-drift-", async (sourceRoot) => {
+            await writeSyntheticOpenClawPackage(sourceRoot);
+            const protocolPath = path.join(sourceRoot, "dist", "src-fixture.js");
+            const source = await readFile(protocolPath, "utf8");
+            await writeFile(
+                protocolPath,
+                source.replace(
+                    "caps: Type.Optional(Type.Array(NonEmptyString, { default: [] }))",
+                    "capabilities: Type.Optional(Type.Array(NonEmptyString, { default: [] }))"
+                ),
+                "utf8"
+            );
+
+            const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+            expect(error.message).toContain("Gateway connect caps changed");
+        });
+    });
+
+    test("rejects drift that disconnects the backend mode enum from its schema", async () => {
+        await withTemporaryDirectory("mira-openclaw-mode-drift-", async (sourceRoot) => {
+            await writeSyntheticOpenClawPackage(sourceRoot);
+            const schemaPath = path.join(sourceRoot, "dist", "error-codes-fixture.js");
+            const source = await readFile(schemaPath, "utf8");
+            await writeFile(
+                schemaPath,
+                source.replace(
+                    "const GatewayClientModeSchema = Type.Enum(GATEWAY_CLIENT_MODES)",
+                    'const GatewayClientModeSchema = Type.String({ title: "GATEWAY_CLIENT_MODES" })'
+                ),
+                "utf8"
+            );
+
+            const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+            expect(error.message).toContain("Gateway client mode schema changed");
         });
     });
 

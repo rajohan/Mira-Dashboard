@@ -1,4 +1,10 @@
 {
+    "broadcastSequence": {
+        "dropIfSlowAdvances": true,
+        "firstSequence": 1,
+        "scope": "per-client",
+        "targetedOmitsSequence": true
+    },
     "challengeEvent": "connect.challenge",
     "frameTypes": ["event", "req", "res"],
     "gatewayEvents": [
@@ -12,6 +18,7 @@
     "helloType": "hello-ok",
     "limits": {
         "authenticatedFrameBytes": 26214400,
+        "bufferedAmountBytes": 52428800,
         "preauthenticationFrameBytes": 65536
     },
     "method": "connect",
@@ -19,5 +26,16 @@
     "minimumNodeProtocolVersion": 3,
     "minimumProbeProtocolVersion": 3,
     "protocolVersion": 4,
-    "schemaVersion": 1
+    "schemaVersion": 1,
+    "sessionScopedEvents": {
+        "backendModeAccepted": true,
+        "capability": "session-scoped-events",
+        "connectParameter": {
+            "defaultEmptyArray": true,
+            "element": "non-empty-string",
+            "optional": true
+        },
+        "filteredEvents": ["agent", "chat", "chat.side_result", "session.observer"],
+        "requiresSessionMessageSubscription": true
+    }
 }

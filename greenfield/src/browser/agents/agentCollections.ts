@@ -3,12 +3,15 @@ import { createCollection } from "@tanstack/react-db";
 import type { QueryClient } from "@tanstack/react-query";
 
 import {
-    type AgentStatus,
+    type AgentStatusProjection,
     agentDefinitionSchema,
-    agentStatusSchema,
+    agentStatusProjectionSchema,
 } from "../../contracts/agentModel.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import { agentConfigurationQueryKey, agentStatusesQueryKey } from "./agentQueries.ts";
+
+/** Foreground repair interval for lossy targeted Gateway session markers. */
+export const agentStatusRefreshIntervalMs = 10_000;
 
 /**
  * Creates the normalized agent directory and status collections for one browser runtime.
@@ -47,11 +50,14 @@ export function createAgentCollections(
                     {},
                     { signal }
                 );
-                return result.statuses.map((status): AgentStatus => ({ ...status }));
+                return result.statuses.map((status): AgentStatusProjection => ({
+                    ...status,
+                }));
             },
             queryKey: agentStatusesQueryKey,
-            schema: agentStatusSchema,
-            staleTime: 10_000,
+            refetchInterval: agentStatusRefreshIntervalMs,
+            schema: agentStatusProjectionSchema,
+            staleTime: agentStatusRefreshIntervalMs,
         })
     );
     return Object.freeze({ definitions, statuses });

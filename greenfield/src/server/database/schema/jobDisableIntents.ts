@@ -32,7 +32,7 @@ export const jobDisableIntents = sqliteTable(
             enum: ["automation", "system", "user"],
         }),
         endedReason: text("ended_reason", {
-            enum: ["expired", "re-enabled", "replaced"],
+            enum: ["expired", "re-enabled", "replaced", "target-deleted"],
         }),
         expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
         externalJobId: text("external_job_id"),
@@ -58,7 +58,7 @@ export const jobDisableIntents = sqliteTable(
         ),
         check(
             "job_disable_intents_end_check",
-            sql`(${table.endedAt} IS NULL AND ${table.endedByKind} IS NULL AND ${table.endedById} IS NULL AND ${table.endedReason} IS NULL) OR (${table.endedAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.endedAt)} AND ${table.endedAt} >= ${table.createdAt} AND ${table.endedByKind} IS NOT NULL AND ${table.endedById} IS NOT NULL AND ${table.endedReason} IN ('expired', 're-enabled', 'replaced') AND ${jobActorCheck(table.endedByKind, table.endedById, { allowSystem: true })} AND (${table.endedReason} <> 'expired' OR (${table.endedByKind} = 'system' AND ${table.expiresAt} IS NOT NULL AND ${table.endedAt} >= ${table.expiresAt})))`
+            sql`(${table.endedAt} IS NULL AND ${table.endedByKind} IS NULL AND ${table.endedById} IS NULL AND ${table.endedReason} IS NULL) OR (${table.endedAt} IS NOT NULL AND ${timestampMillisecondsCheck(table.endedAt)} AND ${table.endedAt} >= ${table.createdAt} AND ${table.endedByKind} IS NOT NULL AND ${table.endedById} IS NOT NULL AND ${table.endedReason} IN ('expired', 're-enabled', 'replaced', 'target-deleted') AND ${jobActorCheck(table.endedByKind, table.endedById, { allowSystem: true })} AND (${table.endedReason} <> 'expired' OR (${table.endedByKind} = 'system' AND ${table.expiresAt} IS NOT NULL AND ${table.endedAt} >= ${table.expiresAt})))`
         ),
         check(
             "job_disable_intents_expiry_check",

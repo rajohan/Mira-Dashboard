@@ -4,6 +4,8 @@ import { count, eq } from "drizzle-orm";
 
 import { agentTaskRuns } from "../../database/schema/agentTaskRuns.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
+import type { GatewaySessionsProvider } from "../gatewaySessions/provider.ts";
+import { createGatewaySessionsService } from "../gatewaySessions/service.ts";
 import { AgentNotFoundError } from "./errors.ts";
 import {
     agentServiceFor,
@@ -13,7 +15,93 @@ import {
     runAgentEffect,
 } from "./testSupport/agentService.ts";
 
+const unexpectedGatewaySessionControl = (): Promise<never> =>
+    Promise.reject(new TypeError("Unexpected Gateway session control"));
+
 describe("agent service", () => {
+    test("keeps Dashboard task state while retaining stale Gateway session availability", async () => {
+        const database = await openFreshMigratedDatabase();
+        let sessionReadCount = 0;
+        const provider: GatewaySessionsProvider = Object.freeze({
+            compactSession: unexpectedGatewaySessionControl,
+            deleteSessionTranscript: unexpectedGatewaySessionControl,
+            listCurrentSessions: () => {
+                sessionReadCount += 1;
+                if (sessionReadCount > 1) {
+                    return Promise.reject(new Error("private Gateway failure"));
+                }
+                return Promise.resolve({
+                    sessions: [
+                        {
+                            displayName: "Mira",
+                            hasActiveRun: false,
+                            key: "agent:main:main",
+                            kind: "main" as const,
+                            model: "gpt-5.6-sol",
+                            modelProvider: "openai",
+                            totalTokensFresh: false,
+                            updatedAtMs: 9000,
+                        },
+                        {
+                            displayName: "Unreviewed",
+                            hasActiveRun: true,
+                            key: "agent:unreviewed:main",
+                            kind: "main" as const,
+                            totalTokensFresh: false,
+                            updatedAtMs: 9500,
+                        },
+                    ],
+                    truncated: false,
+                });
+            },
+            resetSession: unexpectedGatewaySessionControl,
+        });
+        const gatewaySessionsService = createGatewaySessionsService({
+            nowMs: () => 10_000,
+            provider,
+        });
+        const service = agentServiceFor(database, { gatewaySessionsService });
+
+        try {
+            const mutationStatus = await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Keep task ownership separate",
+                })
+            );
+            expect(mutationStatus).toMatchObject({ state: "working" });
+            expect("gatewayAvailability" in mutationStatus).toBeFalse();
+
+            const fresh = await runAgentEffect(service.listStatuses());
+            expect(fresh.statuses).toHaveLength(5);
+            expect(
+                fresh.statuses.some(({ agentId }) => agentId === "unreviewed")
+            ).toBeFalse();
+            expect(
+                fresh.statuses.find(({ agentId }) => agentId === "main")
+            ).toMatchObject({
+                freshness: "fresh",
+                gatewayAvailability: "idle",
+                hasActiveRun: false,
+                providerModel: "openai/gpt-5.6-sol",
+                sessionKey: "agent:main:main",
+                state: "working",
+            });
+
+            const stale = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(stale).toMatchObject({
+                currentTask: "Keep task ownership separate",
+                freshness: "stale",
+                gatewayAvailability: "stale",
+                hasActiveRun: false,
+                sessionKey: "agent:main:main",
+                state: "working",
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("starts, touches, replaces, and clears one attributed current task", async () => {
         const database = await openFreshMigratedDatabase();
         let nowMs = 10_000;
@@ -205,9 +293,14 @@ describe("agent service", () => {
                 throw new TypeError("Restarted agent must be working");
             }
             expect(restarted.startedAtMs).toBe(10_001);
-            expect(exact).toEqual(restarted);
+            const expectedReadStatus = {
+                ...restarted,
+                freshness: "unavailable",
+                gatewayAvailability: "disconnected",
+            };
+            expect(exact).toEqual(expectedReadStatus);
             expect(listed.statuses.find(({ agentId }) => agentId === "main")).toEqual(
-                restarted
+                expectedReadStatus
             );
             expect(history.runs.map(({ id }) => id)).toEqual([
                 agentTestUuid(1),

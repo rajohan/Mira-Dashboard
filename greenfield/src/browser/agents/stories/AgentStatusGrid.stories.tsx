@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
 
-import type { AgentDefinition, AgentStatus } from "../../../contracts/agentModel.ts";
+import type {
+    AgentDefinition,
+    AgentStatusProjection,
+} from "../../../contracts/agentModel.ts";
 import { AgentStatusGrid } from "../AgentStatusGrid.tsx";
 
 const timestampMs = 1_800_000_000_000;
@@ -30,16 +33,29 @@ const mixedStatuses = Object.freeze([
     {
         agentId: "mira-2026",
         currentTask: "Expand the reviewed Storybook component catalog",
+        freshness: "fresh",
+        gatewayAvailability: "active",
+        hasActiveRun: true,
         lastActivityAtMs: timestampMs,
+        lastSeenAtMs: timestampMs,
+        observedAtMs: timestampMs,
+        providerModel: "openai/gpt-5.6-sol",
+        sessionKey: "agent:mira-2026:main",
         startedAtMs: timestampMs - 25 * 60_000,
         state: "working",
     },
     {
         agentId: "coder",
+        freshness: "stale",
+        gatewayAvailability: "stale",
+        hasActiveRun: false,
         lastActivityAtMs: timestampMs - 75 * 60_000,
+        lastSeenAtMs: timestampMs - 75 * 60_000,
+        observedAtMs: timestampMs - 60_000,
+        sessionKey: "agent:coder:main",
         state: "idle",
     },
-] satisfies readonly AgentStatus[]);
+] satisfies readonly AgentStatusProjection[]);
 
 const meta = {
     args: {
@@ -63,6 +79,8 @@ export const AllIdle: Story = {
     args: {
         statuses: agents.map((agent) => ({
             agentId: agent.id,
+            freshness: "unavailable" as const,
+            gatewayAvailability: "disconnected" as const,
             lastActivityAtMs: timestampMs - 60_000,
             state: "idle" as const,
         })),

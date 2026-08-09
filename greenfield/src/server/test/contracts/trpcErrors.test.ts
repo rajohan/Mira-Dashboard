@@ -3,19 +3,29 @@ import { describe, expect, test } from "bun:test";
 import { TRPCError } from "@trpc/server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
-import { contractAuthenticationErrorReasons } from "../../../contracts/registry.ts";
+import {
+    contractAuthenticationErrorReasons,
+    contractOperationErrorReasons,
+} from "../../../contracts/registry.ts";
 import { DatabaseRuntimeWriteAdmissionTimeoutError } from "../../database/runtime/databaseErrors.ts";
 import { AuthenticationWorkSettlementError } from "../../domains/security/authenticationWorkGate.ts";
-import { authenticationPolicyError, publicProcedure, router } from "../../trpc/trpc.ts";
+import {
+    authenticationPolicyError,
+    operationOutcomeUnknownError,
+    publicProcedure,
+    router,
+} from "../../trpc/trpc.ts";
 import { createTestRequestContext } from "../support/requestContext.ts";
 
 const sentinel = "secret /home/ubuntu/private-stack-path";
 
 type ErrorProcedure =
     | (typeof contractAuthenticationErrorReasons)[number]
+    | (typeof contractOperationErrorReasons)[number]
     | "database-write-unavailable"
     | "expected"
     | "forged-policy-cause"
+    | "tampered-operation-cause"
     | "tampered-policy-cause"
     | "unexpected";
 
@@ -24,6 +34,8 @@ const errorProcedurePaths = {
     expected: "events.stream",
     "forged-policy-cause": "accountSecurity.summary",
     mfa_enrollment_required: "accountSecurity.stepUpRecovery",
+    operation_outcome_unknown: "openClawCron.run",
+    "tampered-operation-cause": "openClawCron.setEnabled",
     step_up_required: "auth.changePassword",
     "tampered-policy-cause": "auth.revokeSession",
     unexpected: "system.runtimeIdentity",
@@ -91,6 +103,24 @@ async function queryWireBody(procedure: ErrorProcedure): Promise<{
                 });
             }),
         }),
+        openClawCron: router({
+            run: publicProcedure.query(() => {
+                throw operationOutcomeUnknownError(
+                    "The OpenClaw cron outcome could not be confirmed"
+                );
+            }),
+            setEnabled: publicProcedure.query(() => {
+                const error = operationOutcomeUnknownError(
+                    "The OpenClaw cron outcome could not be confirmed"
+                );
+                const { cause } = error;
+                if (cause === undefined) {
+                    throw new Error("Operation policy cause is missing");
+                }
+                Object.assign(cause, { reason: "unknown_policy_reason" });
+                throw error;
+            }),
+        }),
         system: router({
             runtimeIdentity: publicProcedure.query(() => {
                 throw Object.assign(new Error(sentinel), {
@@ -152,6 +182,18 @@ describe("tRPC error transport", () => {
         });
     }
 
+    for (const reason of contractOperationErrorReasons) {
+        test(`exposes the allowlisted ${reason} operation reason`, async () => {
+            const { response, text } = await queryWireBody(reason);
+
+            expect(response.status).toBe(503);
+            expect(text).toContain(`"reason":"${reason}"`);
+            expect(text).not.toContain(sentinel);
+            expect(text).not.toContain('"stack"');
+            expect(text).not.toContain('"path"');
+        });
+    }
+
     test("does not trust an arbitrary cause with an allowlisted-looking reason", async () => {
         const { response, text } = await queryWireBody("forged-policy-cause");
 
@@ -169,6 +211,16 @@ describe("tRPC error transport", () => {
         expect(response.status).toBe(403);
         expect(text).toContain("Recent authentication is required");
         expect(text).not.toContain(sentinel);
+        expect(text).not.toContain('"reason"');
+        expect(text).not.toContain('"stack"');
+        expect(text).not.toContain('"path"');
+    });
+
+    test("does not expose a tampered operation-policy cause", async () => {
+        const { response, text } = await queryWireBody("tampered-operation-cause");
+
+        expect(response.status).toBe(503);
+        expect(text).toContain("The OpenClaw cron outcome could not be confirmed");
         expect(text).not.toContain('"reason"');
         expect(text).not.toContain('"stack"');
         expect(text).not.toContain('"path"');

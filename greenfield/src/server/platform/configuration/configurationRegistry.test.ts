@@ -16,6 +16,7 @@ describe("application configuration registry", () => {
             "PORT",
             "MIRA_DASHBOARD_PUBLIC_ORIGIN",
             "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
+            "OPENCLAW_GATEWAY_TOKEN",
             "OPENCLAW_GATEWAY_URL",
             "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
             "MIRA_DASHBOARD_WEBAUTHN_ORIGINS",
@@ -25,7 +26,7 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_TOTP_KEYRING",
             "MIRA_DASHBOARD_LOG_LEVEL",
         ]);
-        expect(applicationConfigurationRegistry).toHaveLength(13);
+        expect(applicationConfigurationRegistry).toHaveLength(14);
         expect(
             applicationConfigurationRegistry
                 .map((entry) => entry.environmentName)
@@ -67,7 +68,7 @@ describe("application configuration registry", () => {
             applicationConfigurationRegistry
                 .filter((entry) => entry.secret)
                 .map((entry) => entry.environmentName)
-        ).toEqual(["MIRA_DASHBOARD_TOTP_KEYRING"]);
+        ).toEqual(["OPENCLAW_GATEWAY_TOKEN", "MIRA_DASHBOARD_TOTP_KEYRING"]);
     });
 
     test("names parsed fields consistently with typed web configuration", () => {
@@ -90,6 +91,7 @@ describe("application configuration registry", () => {
             MIRA_DASHBOARD_WEBAUTHN_RP_ID: "webAuthnRelyingParty.rpId",
             MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "webAuthnRelyingParty.rpName",
             NODE_ENV: "nodeEnvironment",
+            OPENCLAW_GATEWAY_TOKEN: "gatewayToken",
             OPENCLAW_GATEWAY_URL: "gatewayUrl",
             PORT: "port",
         });
@@ -118,8 +120,11 @@ describe("application configuration registry", () => {
         expect(Object.keys(workerEnvironment)).toEqual([
             "NODE_ENV",
             "MIRA_DASHBOARD_PROJECT_ROOT",
+            "OPENCLAW_GATEWAY_URL",
+            "OPENCLAW_GATEWAY_TOKEN",
             "MIRA_DASHBOARD_LOG_LEVEL",
         ]);
+        expect(workerEnvironment).toHaveProperty("OPENCLAW_GATEWAY_TOKEN");
         expect(workerEnvironment).not.toHaveProperty("MIRA_DASHBOARD_TOTP_KEYRING");
     });
 });

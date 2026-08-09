@@ -11,6 +11,12 @@ import {
 } from "../../test/support/requestContext.ts";
 import { appRouter } from "../../trpc/appRouter.ts";
 import {
+    GatewaySessionProviderAbortError,
+    type GatewaySessionProviderRequest,
+    type GatewaySessionsProvider,
+} from "../gatewaySessions/provider.ts";
+import { createGatewaySessionsService } from "../gatewaySessions/service.ts";
+import {
     agentServiceFor,
     openFreshMigratedDatabase,
 } from "./testSupport/agentService.ts";
@@ -104,6 +110,56 @@ describe("agent procedures", () => {
             );
             expect(failure).toBeInstanceOf(TRPCError);
             expect((failure as TRPCError).code).toBe("NOT_FOUND");
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("propagates resolver cancellation through both Gateway availability reads", async () => {
+        const database = await openFreshMigratedDatabase();
+        let started = Promise.withResolvers<AbortSignal | undefined>();
+        const provider: GatewaySessionsProvider = Object.freeze({
+            compactSession: () => Promise.reject(new Error("Unexpected compact")),
+            deleteSessionTranscript: () => Promise.reject(new Error("Unexpected delete")),
+            listCurrentSessions: (request: GatewaySessionProviderRequest) => {
+                const { signal } = request;
+                started.resolve(signal);
+                return new Promise<never>((_resolve, reject) => {
+                    const rejectAborted = () =>
+                        reject(new GatewaySessionProviderAbortError());
+                    if (signal?.aborted === true) {
+                        rejectAborted();
+                        return;
+                    }
+                    signal?.addEventListener("abort", rejectAborted, { once: true });
+                });
+            },
+            resetSession: () => Promise.reject(new Error("Unexpected reset")),
+        });
+        const agentService = agentServiceFor(database, {
+            gatewaySessionsService: createGatewaySessionsService({ provider }),
+        });
+
+        try {
+            for (const operation of ["getStatus", "listStatuses"] as const) {
+                started = Promise.withResolvers<AbortSignal | undefined>();
+                const controller = new AbortController();
+                const context = await createTestRequestContext(
+                    createTestSessionAuthentication(["agents:read"]),
+                    createTestApplicationRuntime(),
+                    { agentService }
+                );
+                const caller = appRouter.createCaller(context, {
+                    signal: controller.signal,
+                }).agents;
+                const pending =
+                    operation === "getStatus"
+                        ? caller.getStatus({ id: "main" })
+                        : caller.listStatuses({});
+                expect(await started.promise).toBe(controller.signal);
+                controller.abort();
+                expect(await captureFailure(() => pending)).toBeInstanceOf(Error);
+            }
         } finally {
             database.sqlite.close(true);
         }

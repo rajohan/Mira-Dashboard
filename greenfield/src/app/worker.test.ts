@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
+import { Redacted } from "effect";
+
 import { deriveDashboardProjectLayout } from "../server/platform/filesystem/projectLayout.ts";
+import type { PersistentGatewayTaskNotificationTransport } from "../server/platform/gateway/persistentGatewayTransport.ts";
 import type { ProjectFileLogDestination } from "../server/platform/observability/projectFileLogSink.ts";
 import type { RuntimeRelease } from "../server/platform/release/runtimeRelease.ts";
 import type { ProcessTerminationController } from "../server/platform/runtime/processSignals.ts";
@@ -46,7 +49,8 @@ function processFixture(
     initializationFailure?: Error,
     runtimeFailure?: Error,
     runtimeStopsUnexpectedly = false,
-    waitForForceDuringDisposal = false
+    waitForForceDuringDisposal = false,
+    runtimeCreationFailure?: Error
 ) {
     const events: string[] = [];
     const logLines: string[] = [];
@@ -77,6 +81,20 @@ function processFixture(
             },
         }),
     } satisfies ProjectFileLogDestination);
+    const gatewayTransport = Object.freeze({
+        start() {
+            events.push("gateway-start");
+        },
+        stop() {
+            events.push("gateway-stop");
+            return Promise.resolve();
+        },
+        taskNotificationSender: Object.freeze({
+            send() {
+                return Promise.resolve();
+            },
+        }),
+    } satisfies PersistentGatewayTaskNotificationTransport);
     const termination: ProcessTerminationController = Object.freeze({
         dispose() {
             events.push("signals-dispose");
@@ -125,15 +143,31 @@ function processFixture(
         },
     });
     const dependencies = Object.freeze({
+        createGatewayTransport(options) {
+            events.push("gateway-create");
+            expect(options.clientVersion).toBe(releaseId);
+            expect(options.url).toBe("ws://127.0.0.1:18789/");
+            expect(Redacted.value(options.token)).toBe("worker-gateway-token-test-value");
+            return gatewayTransport;
+        },
         createLogDestination(logsDirectory, processRole) {
             events.push(`logs:${processRole}:${logsDirectory}`);
             return destination;
         },
-        createRuntime(_configuration, observedLayout, observedRelease, logger) {
+        createRuntime(observedLayout, observedRelease, logger, observedGatewayTransport) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
             expect(logger).toBeDefined();
+            expect(observedGatewayTransport).toBe(gatewayTransport);
+            expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
+                "start",
+                "stop",
+                "taskNotificationSender",
+            ]);
             events.push("runtime-create");
+            if (runtimeCreationFailure !== undefined) {
+                throw runtimeCreationFailure;
+            }
             return runtime;
         },
         createTerminationController() {
@@ -164,6 +198,8 @@ const processOptions = Object.freeze({
         MIRA_DASHBOARD_LOG_LEVEL: "debug",
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
         NODE_ENV: "production",
+        OPENCLAW_GATEWAY_TOKEN: "worker-gateway-token-test-value",
+        OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
     },
     releaseRoot: release.releaseRoot,
 });
@@ -179,6 +215,7 @@ describe("Dashboard worker process", () => {
             `release:worker:${layout.production.releases}:${release.releaseRoot}`,
             `logs:worker:${layout.production.state.logs}`,
             "signals-create",
+            "gateway-create",
             "runtime-create",
             "runtime-initialize",
             "runtime-dispose",
@@ -191,6 +228,12 @@ describe("Dashboard worker process", () => {
         expect(fixture.forceSignals).toEqual([
             expect.objectContaining({ aborted: false }),
         ]);
+        expect(fixture.events.filter((event) => event === "gateway-create")).toHaveLength(
+            1
+        );
+        expect(fixture.logLines.join("\n")).not.toContain(
+            "worker-gateway-token-test-value"
+        );
     });
 
     test("disposes partial ownership and reports a redacted startup failure", () => {
@@ -268,5 +311,21 @@ describe("Dashboard worker process", () => {
             event: string;
         };
         expect(fatal.event).toBe("runtime.start_failed");
+    });
+
+    test("stops an unowned Gateway transport when runtime construction fails", async () => {
+        const failure = new Error("private runtime construction failure");
+        const fixture = processFixture(undefined, undefined, false, false, failure);
+
+        expect(
+            await runDashboardWorkerProcess(processOptions, fixture.dependencies).catch(
+                (error: unknown) => error
+            )
+        ).toBe(failure);
+        expect(fixture.events).toContain("gateway-stop");
+        expect(fixture.events).not.toContain("runtime-initialize");
+        expect(fixture.logLines.join("\n")).not.toContain(
+            "worker-gateway-token-test-value"
+        );
     });
 });

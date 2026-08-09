@@ -3,6 +3,7 @@ import { Effect } from "effect";
 
 import {
     cacheEntrySchema,
+    cacheHeartbeatResultSchema,
     cacheStatusResultSchema,
     getCacheEntryInputSchema,
     refreshCacheEntryInputSchema,
@@ -43,6 +44,10 @@ export const cacheRoutes = {
         .input(getCacheEntryInputSchema)
         .output(cacheEntrySchema)
         .query(({ ctx, input }) => runCacheEffect(ctx.cacheService.getEntry(input))),
+    getHeartbeat: cacheReadProcedure
+        .input(emptyInputSchema)
+        .output(cacheHeartbeatResultSchema)
+        .query(({ ctx }) => runCacheEffect(ctx.cacheService.getHeartbeat())),
     getStatus: cacheReadProcedure
         .input(emptyInputSchema)
         .output(cacheStatusResultSchema)

@@ -4,7 +4,9 @@ import superjson from "superjson";
 
 import {
     contractAuthenticationErrorReasons,
+    contractOperationErrorReasons,
     type ContractAuthenticationErrorReason,
+    type ContractOperationErrorReason,
 } from "../../contracts/registry.ts";
 import type {
     ApplicationCapability,
@@ -20,6 +22,9 @@ const internalErrorMessage = "Internal server error";
 const contractAuthenticationErrorReasonSet: ReadonlySet<string> = new Set(
     contractAuthenticationErrorReasons
 );
+const contractOperationErrorReasonSet: ReadonlySet<string> = new Set(
+    contractOperationErrorReasons
+);
 
 class AuthenticationPolicyErrorCause extends Error {
     public readonly reason: ContractAuthenticationErrorReason;
@@ -27,6 +32,16 @@ class AuthenticationPolicyErrorCause extends Error {
     public constructor(reason: ContractAuthenticationErrorReason) {
         super("Authentication policy requirement was not met");
         this.name = "AuthenticationPolicyErrorCause";
+        this.reason = reason;
+    }
+}
+
+class OperationPolicyErrorCause extends Error {
+    public readonly reason: ContractOperationErrorReason;
+
+    public constructor(reason: ContractOperationErrorReason) {
+        super("External operation outcome requires reconciliation");
+        this.name = "OperationPolicyErrorCause";
         this.reason = reason;
     }
 }
@@ -44,10 +59,20 @@ function authenticationPolicyReason(
     return error.cause.reason;
 }
 
+function operationPolicyReason(
+    error: TRPCError
+): ContractOperationErrorReason | undefined {
+    return error.code === "SERVICE_UNAVAILABLE" &&
+        error.cause instanceof OperationPolicyErrorCause &&
+        contractOperationErrorReasonSet.has(error.cause.reason)
+        ? error.cause.reason
+        : undefined;
+}
+
 const trpc = initTRPC.context<RequestContext>().create({
     errorFormatter({ error, shape }) {
         const { path: _path, stack: _stack, ...safeData } = shape.data;
-        const reason = authenticationPolicyReason(error);
+        const reason = authenticationPolicyReason(error) ?? operationPolicyReason(error);
         return {
             ...shape,
             data: {
@@ -98,6 +123,19 @@ export function authenticationPolicyError(
     return new TRPCError({
         cause: new AuthenticationPolicyErrorCause(reason),
         code: "FORBIDDEN",
+        message,
+    });
+}
+
+/**
+ * Builds one fixed client-actionable uncertainty result after external dispatch.
+ * @param message Safe domain-specific summary without provider diagnostics.
+ * @returns Stable service-unavailable error that requires refresh before retry.
+ */
+export function operationOutcomeUnknownError(message: string): TRPCError {
+    return new TRPCError({
+        cause: new OperationPolicyErrorCause("operation_outcome_unknown"),
+        code: "SERVICE_UNAVAILABLE",
         message,
     });
 }
@@ -194,6 +232,30 @@ export const sessionProcedure = authenticatedProcedure.use(({ ctx, next }) => {
         },
     });
 });
+
+/**
+ * Builds a capability-scoped procedure restricted to an authenticated browser session.
+ * @returns Procedure builder with a narrowed browser-session request context.
+ */
+export function sessionCapabilityProcedure(capability: ApplicationCapability) {
+    return capabilityProcedure(capability).use(({ ctx, next }) => {
+        if (ctx.principal.kind !== "session") {
+            throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "A browser session is required",
+            });
+        }
+        return next({
+            ctx: {
+                ...ctx,
+                sessionIdentity: {
+                    sessionId: ctx.principal.authenticatorId,
+                    userId: ctx.principal.id,
+                },
+            },
+        });
+    });
+}
 
 /** Application tRPC router factory. */
 export const router = trpc.router;

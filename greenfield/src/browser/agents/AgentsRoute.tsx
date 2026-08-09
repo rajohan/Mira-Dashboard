@@ -4,7 +4,7 @@ import { RefreshCw } from "lucide-react";
 
 import type {
     AgentDefinition,
-    AgentStatus,
+    AgentStatusProjection,
     AgentTaskRun,
 } from "../../contracts/agentModel.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
@@ -22,7 +22,7 @@ import { useAgentCollectionQueryState } from "./useAgentCollectionQueryState.ts"
 import { useAgentRealtimeInvalidation } from "./useAgentRealtimeInvalidation.ts";
 
 const emptyAgents: readonly AgentDefinition[] = Object.freeze([]);
-const emptyStatuses: readonly AgentStatus[] = Object.freeze([]);
+const emptyStatuses: readonly AgentStatusProjection[] = Object.freeze([]);
 const emptyRuns: readonly AgentTaskRun[] = Object.freeze([]);
 
 /** @returns Dashboard-owned agent state, current tasks, and durable task history. */
@@ -75,7 +75,7 @@ export function AgentsRoute() {
                         Refresh
                     </Button>
                 }
-                description="Reviewed agent roles, Dashboard-owned current tasks, and durable status history."
+                description="Reviewed roles, Dashboard-owned tasks, and separate Gateway session availability; availability is not online status or health."
                 eyebrow="Operations"
                 title="Agents"
             />

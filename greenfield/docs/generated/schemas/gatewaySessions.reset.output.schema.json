@@ -1,0 +1,630 @@
+{
+  "$id": "urn:mira-dashboard:gatewaySessions.reset.output",
+  "type": "object",
+  "properties": {
+    "action": {
+      "enum": [
+        "compact",
+        "reset",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "key": {
+      "type": "string",
+      "maxLength": 512,
+      "minLength": 1,
+      "pattern": "\\S",
+      "allOf": [
+        {
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+        }
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "changed",
+        "unchanged"
+      ],
+      "type": "string"
+    },
+    "refresh": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "type": "object",
+              "properties": {
+                "filter": {
+                  "enum": [
+                    "ALL",
+                    "MAIN",
+                    "SUBAGENT",
+                    "HOOK",
+                    "CRON"
+                  ],
+                  "type": "string"
+                },
+                "projectionTruncated": {
+                  "type": "boolean"
+                },
+                "sessions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "activeRunIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "allOf": [
+                            {
+                              "pattern": "^[^\\u0000]*$"
+                            },
+                            {
+                              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                            }
+                          ]
+                        },
+                        "maxItems": 32
+                      },
+                      "channel": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "contextTokens": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "createdAtMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 8640000000000000
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "displayNameTruncated": {
+                        "const": true
+                      },
+                      "effectiveFastMode": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "const": "auto"
+                          }
+                        ]
+                      },
+                      "elevatedLevel": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "endedAtMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 8640000000000000
+                      },
+                      "fastMode": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "const": "auto"
+                          }
+                        ]
+                      },
+                      "hasActiveRun": {
+                        "type": "boolean"
+                      },
+                      "key": {
+                        "type": "string",
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "kind": {
+                        "enum": [
+                          "main",
+                          "subagent",
+                          "hook",
+                          "cron",
+                          "unknown"
+                        ],
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string",
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "modelProvider": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "omittedMetadataFields": {
+                        "type": "array",
+                        "items": {
+                          "enum": [
+                            "channel",
+                            "elevatedLevel",
+                            "model",
+                            "modelProvider",
+                            "reasoningLevel",
+                            "thinkingDefault",
+                            "thinkingLevel",
+                            "thinkingLevels",
+                            "thinkingOptions",
+                            "verboseLevel"
+                          ],
+                          "type": "string"
+                        },
+                        "maxItems": 10,
+                        "$comment": "Live Valibot validation additionally requires omitted Gateway metadata fields to be unique and canonically ordered."
+                      },
+                      "reasoningLevel": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "runtimeMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "startedAtMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 8640000000000000
+                      },
+                      "status": {
+                        "enum": [
+                          "running",
+                          "done",
+                          "failed",
+                          "killed",
+                          "timeout"
+                        ],
+                        "type": "string"
+                      },
+                      "thinkingDefault": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "thinkingLevel": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      },
+                      "thinkingLevels": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "maxLength": 80,
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "allOf": [
+                                {
+                                  "pattern": "^[^\\u0000]*$"
+                                },
+                                {
+                                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                }
+                              ]
+                            },
+                            "label": {
+                              "type": "string",
+                              "maxLength": 160,
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "allOf": [
+                                {
+                                  "pattern": "^[^\\u0000]*$"
+                                },
+                                {
+                                  "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "maxItems": 32
+                      },
+                      "thinkingOptions": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 80,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "allOf": [
+                            {
+                              "pattern": "^[^\\u0000]*$"
+                            },
+                            {
+                              "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                            }
+                          ]
+                        },
+                        "maxItems": 32
+                      },
+                      "totalTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "totalTokensFresh": {
+                        "type": "boolean"
+                      },
+                      "updatedAtMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 8640000000000000
+                      },
+                      "verboseLevel": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "allOf": [
+                          {
+                            "pattern": "^[^\\u0000]*$"
+                          },
+                          {
+                            "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "displayName",
+                      "hasActiveRun",
+                      "key",
+                      "kind",
+                      "totalTokensFresh"
+                    ],
+                    "additionalProperties": false,
+                    "$comment": "Live Valibot validation additionally requires a token count whenever Gateway marks the token count fresh. Live Valibot validation additionally requires active-run and session lifecycle timestamps to agree."
+                  },
+                  "maxItems": 200,
+                  "$comment": "Live Valibot validation additionally requires unique session keys and primary-main, kind, recency, then key ordering."
+                },
+                "source": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "checkedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "connection": {
+                          "const": "connected"
+                        },
+                        "freshness": {
+                          "const": "fresh"
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        }
+                      },
+                      "required": [
+                        "checkedAtMs",
+                        "connection",
+                        "freshness",
+                        "observedAtMs"
+                      ],
+                      "additionalProperties": false,
+                      "$comment": "Live Valibot validation additionally requires fresh Gateway check and observation timestamps to match."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "checkedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        },
+                        "connection": {
+                          "const": "disconnected"
+                        },
+                        "freshness": {
+                          "const": "stale"
+                        },
+                        "observedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8640000000000000
+                        }
+                      },
+                      "required": [
+                        "checkedAtMs",
+                        "connection",
+                        "freshness",
+                        "observedAtMs"
+                      ],
+                      "additionalProperties": false,
+                      "$comment": "Live Valibot validation additionally requires a stale Gateway check timestamp at or after its observation timestamp."
+                    }
+                  ]
+                },
+                "stats": {
+                  "type": "object",
+                  "properties": {
+                    "activeInLastHour": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "byKind": {
+                      "type": "object",
+                      "properties": {
+                        "cron": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "hook": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "main": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "subagent": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "unknown": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "cron",
+                        "hook",
+                        "main",
+                        "subagent",
+                        "unknown"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "byModel": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "model": {
+                            "type": "string",
+                            "maxLength": 160,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "allOf": [
+                              {
+                                "pattern": "^[^\\u0000]*$"
+                              },
+                              {
+                                "pattern": "^(?![\\s\\S]*(?:[\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40(?:\\uDC01|[\\uDC20-\\uDC7F])))[\\s\\S]*$"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "maxItems": 200
+                    },
+                    "shown": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "tokenTotalState": {
+                      "enum": [
+                        "complete",
+                        "overflow",
+                        "partial"
+                      ],
+                      "type": "string"
+                    },
+                    "totalTokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unknownModelCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "activeInLastHour",
+                    "byKind",
+                    "byModel",
+                    "shown",
+                    "tokenTotalState",
+                    "unknownModelCount"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "filter",
+                "projectionTruncated",
+                "sessions",
+                "source",
+                "stats"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires the filter, projected rows, and derived same-snapshot statistics to agree."
+            },
+            "status": {
+              "const": "available"
+            }
+          },
+          "required": [
+            "snapshot",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "action",
+    "key",
+    "outcome",
+    "refresh"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally allows an unchanged outcome only for compact and requires any returned snapshot to use the ALL filter.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

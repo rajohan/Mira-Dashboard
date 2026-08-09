@@ -4,9 +4,12 @@ import * as v from "valibot";
 import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts";
 import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
+import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
+import type { GatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
 import type { JobService } from "../server/domains/jobs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
+import type { OpenClawCronService } from "../server/domains/openClawCron/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../server/domains/security/mfa/accountLifecycle.ts";
@@ -136,6 +139,8 @@ export interface ServerOptions {
     /** Explicit public browser origin when TLS terminates at a trusted proxy. */
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
+    readonly gatewayConnectionService: GatewayConnectionService;
+    readonly gatewaySessionsService: GatewaySessionsService;
     /** Manifest-indexed browser artifacts and controlled SPA navigation. */
     readonly frontendAssets?: FrontendAssetHandler;
     /** Graceful request-drain budget before active connections are forced closed. */
@@ -146,6 +151,7 @@ export interface ServerOptions {
     readonly jobService: JobService["Service"];
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
+    readonly openClawCronService: OpenClawCronService;
     readonly port: number;
     readonly readiness: ReadinessController;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
@@ -186,11 +192,14 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             automationSecurityLifecycle: options.automationSecurityLifecycle,
             browserOrigin,
             cacheService: options.cacheService,
+            gatewayConnectionService: options.gatewayConnectionService,
+            gatewaySessionsService: options.gatewaySessionsService,
             mfaAccountLifecycle: options.mfaAccountLifecycle,
             mfaLoginLifecycle: options.mfaLoginLifecycle,
             jobService: options.jobService,
             monitoringCatalogService: options.monitoringCatalogService,
             monitoringService: options.monitoringService,
+            openClawCronService: options.openClawCronService,
             securityAuditLifecycle: options.securityAuditLifecycle,
             taskService: options.taskService,
             trustedProxyAddresses: options.trustedProxyAddresses,

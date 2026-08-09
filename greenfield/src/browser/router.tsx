@@ -39,6 +39,10 @@ const jobsRoute = createRoute({
     path: "/jobs",
     validateSearch: parseJobsRouteSearch,
 }).lazy(() => import("./routes/jobs.lazy.tsx").then((module) => module.Route));
+const sessionsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/sessions",
+}).lazy(() => import("./routes/sessions.lazy.tsx").then((module) => module.Route));
 const reportsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/reports",
@@ -57,6 +61,7 @@ const routeTree = rootRoute.addChildren([
     incidentsRoute,
     jobsRoute,
     reportsRoute,
+    sessionsRoute,
     tasksRoute,
 ]);
 

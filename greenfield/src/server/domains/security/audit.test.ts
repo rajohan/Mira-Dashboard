@@ -76,4 +76,18 @@ describe("security audit boundary", () => {
             revokedCredentials: 2,
         });
     });
+
+    test("retains only classified external-operation settlement values", () => {
+        expect(
+            parseUnknownJson(
+                serializeRedactedAuditMetadata({
+                    settlement: "partial",
+                    targetId: "private-provider-id",
+                })
+            )
+        ).toEqual({ settlement: "partial" });
+        expect(
+            parseUnknownJson(serializeRedactedAuditMetadata({ settlement: "uncertain" }))
+        ).toEqual({});
+    });
 });

@@ -14,6 +14,9 @@
         "enum": [
           "agents.status",
           "cache.entries",
+          "gateway.connection",
+          "openclaw-cron.records",
+          "gateway.sessions",
           "jobs.runs",
           "schedules.records",
           "monitoring.incidents",

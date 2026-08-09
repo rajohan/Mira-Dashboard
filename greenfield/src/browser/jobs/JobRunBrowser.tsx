@@ -361,9 +361,13 @@ export function JobRunBrowser({
         void navigate({
             replace: true,
             search: {
+                ...(search.cronJobId === undefined
+                    ? {}
+                    : { cronJobId: search.cronJobId }),
                 ...(search.scheduleId === undefined
                     ? {}
                     : { scheduleId: search.scheduleId }),
+                ...(search.source === undefined ? {} : { source: search.source }),
                 ...(runId === undefined ? {} : { runId }),
             },
         });

@@ -473,6 +473,14 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 endedReason: "re-enabled",
             })
         ).toBeDefined();
+        expect(
+            v.parse(jobDisableIntentCloseSchema, {
+                endedAt: jobUpdatedAt,
+                endedById: jobUserId,
+                endedByKind: "user",
+                endedReason: "target-deleted",
+            })
+        ).toBeDefined();
 
         expect(v.parse(jobRunInsertSchema, validJobRunInsert)).toBeDefined();
         expect(v.parse(jobRunSelectSchema, validJobRunRow)).toBeDefined();

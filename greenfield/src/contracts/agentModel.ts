@@ -14,6 +14,9 @@ export const dashboardAgentMaximum = 16;
 /** Maximum Unicode code points retained for one current-task description. */
 export const agentCurrentTaskMaximumLength = 512;
 
+/** Maximum Unicode code points retained for one provider/model display value. */
+export const agentGatewayProviderModelMaximumLength = 241;
+
 /** Stable Dashboard-owned agent identifier. */
 export const agentIdSchema = v.pipe(
     v.string("Agent id is invalid"),
@@ -131,6 +134,125 @@ export const agentStatusSchema = v.variant("state", [
     ),
 ]);
 
+export const agentGatewayAvailabilities = [
+    "active",
+    "idle",
+    "disconnected",
+    "stale",
+    "unknown",
+] as const;
+
+export const agentGatewayAvailabilitySchema = v.picklist(
+    agentGatewayAvailabilities,
+    "Agent Gateway availability is invalid"
+);
+
+export const agentGatewayFreshnessStates = ["fresh", "stale", "unavailable"] as const;
+
+export const agentGatewayFreshnessSchema = v.picklist(
+    agentGatewayFreshnessStates,
+    "Agent Gateway freshness is invalid"
+);
+
+const agentGatewaySessionKeySchema = boundedControlSafeTextSchema(
+    512,
+    "Agent Gateway session key is invalid"
+);
+
+const agentGatewayProviderModelSchema = boundedControlSafeTextSchema(
+    agentGatewayProviderModelMaximumLength,
+    "Agent Gateway provider model is invalid"
+);
+
+const agentStatusProjectionObjectSchema = v.strictObject({
+    agentId: agentIdSchema,
+    currentTask: v.optional(agentCurrentTaskSchema),
+    freshness: agentGatewayFreshnessSchema,
+    gatewayAvailability: agentGatewayAvailabilitySchema,
+    hasActiveRun: v.optional(v.boolean("Agent Gateway active-run state is invalid")),
+    lastActivityAtMs: v.optional(agentTimestampSchema),
+    lastSeenAtMs: v.optional(agentTimestampSchema),
+    observedAtMs: v.optional(agentTimestampSchema),
+    providerModel: v.optional(agentGatewayProviderModelSchema),
+    sessionKey: v.optional(agentGatewaySessionKeySchema),
+    startedAtMs: v.optional(agentTimestampSchema),
+    state: v.picklist(["idle", "working"], "Agent state is invalid"),
+});
+
+type AgentStatusProjectionValue = v.InferOutput<typeof agentStatusProjectionObjectSchema>;
+
+/**
+ * Returns whether Dashboard task state and Gateway availability remain separate,
+ * internally complete projections.
+ * @param status Combined read projection to inspect.
+ * @returns Whether fields required by each independent state are consistent.
+ */
+export function agentStatusProjectionIsConsistent(
+    status: AgentStatusProjectionValue
+): boolean {
+    const dashboardStateIsConsistent =
+        status.state === "working"
+            ? status.currentTask !== undefined &&
+              status.lastActivityAtMs !== undefined &&
+              status.startedAtMs !== undefined &&
+              status.lastActivityAtMs >= status.startedAtMs
+            : status.currentTask === undefined && status.startedAtMs === undefined;
+    if (!dashboardStateIsConsistent) return false;
+
+    const hasSessionMetadata =
+        status.sessionKey !== undefined ||
+        status.providerModel !== undefined ||
+        status.hasActiveRun !== undefined ||
+        status.lastSeenAtMs !== undefined;
+    switch (status.gatewayAvailability) {
+        case "active": {
+            return (
+                status.freshness === "fresh" &&
+                status.observedAtMs !== undefined &&
+                status.sessionKey !== undefined &&
+                status.hasActiveRun === true
+            );
+        }
+        case "idle": {
+            return (
+                status.freshness === "fresh" &&
+                status.observedAtMs !== undefined &&
+                status.sessionKey !== undefined &&
+                status.hasActiveRun === false
+            );
+        }
+        case "stale": {
+            return (
+                status.freshness === "stale" &&
+                status.observedAtMs !== undefined &&
+                status.sessionKey !== undefined &&
+                status.hasActiveRun !== undefined
+            );
+        }
+        case "unknown": {
+            return (
+                (status.freshness === "fresh" || status.freshness === "stale") &&
+                status.observedAtMs !== undefined &&
+                !hasSessionMetadata
+            );
+        }
+        case "disconnected": {
+            return (
+                !hasSessionMetadata &&
+                ((status.freshness === "stale" && status.observedAtMs !== undefined) ||
+                    (status.freshness === "unavailable" &&
+                        status.observedAtMs === undefined))
+            );
+        }
+    }
+}
+
+/** Dashboard task state plus a separate, non-authoritative Gateway session overlay. */
+export const agentStatusProjectionSchema = v.pipe(
+    agentStatusProjectionObjectSchema,
+    v.check(agentStatusProjectionIsConsistent, "Agent status projection is inconsistent")
+);
+
 const activeAgentTaskRunSchema = v.strictObject({
     agentId: agentIdSchema,
     id: agentTaskRunIdSchema,
@@ -190,5 +312,28 @@ export const agentTaskRunSchema = v.variant("status", [
 ]);
 
 export type AgentConfiguration = v.InferOutput<typeof agentConfigurationSchema>;
+export type AgentGatewayAvailability = v.InferOutput<
+    typeof agentGatewayAvailabilitySchema
+>;
+export type AgentGatewayFreshness = v.InferOutput<typeof agentGatewayFreshnessSchema>;
 export type AgentStatus = v.InferOutput<typeof agentStatusSchema>;
+export type AgentStatusProjection = v.InferOutput<typeof agentStatusProjectionSchema>;
+export type WorkingAgentStatusProjection = AgentStatusProjection & {
+    readonly currentTask: string;
+    readonly lastActivityAtMs: number;
+    readonly startedAtMs: number;
+    readonly state: "working";
+};
 export type AgentTaskRun = v.InferOutput<typeof agentTaskRunSchema>;
+
+/** @returns Whether one validated read projection contains a working Dashboard task. */
+export function isWorkingAgentStatusProjection(
+    status: AgentStatusProjection
+): status is WorkingAgentStatusProjection {
+    return (
+        status.state === "working" &&
+        status.currentTask !== undefined &&
+        status.lastActivityAtMs !== undefined &&
+        status.startedAtMs !== undefined
+    );
+}

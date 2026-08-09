@@ -4,6 +4,7 @@ import { hasValidPossessionFactorInventory } from "../../src/contracts/accountSe
 import {
     activeRunTimeIsConsistent,
     agentDefinitionsHaveUniqueIds,
+    agentStatusProjectionIsConsistent,
     canonicalAgentDefinitions,
     completedRunTimeIsConsistent,
     workingStatusTimeIsConsistent,
@@ -42,11 +43,26 @@ import {
     cacheEntryMetadataFitsBudget,
     cacheEntryPayloadFitsBudget,
     cacheEntryStatusIsConsistent,
+    cacheHeartbeatConnectionIsConsistent,
+    cacheHeartbeatCronLastKnownGoodIsConsistent,
+    cacheHeartbeatResultIsConsistent,
+    cacheHeartbeatSessionsLastKnownGoodIsConsistent,
     cacheStatusEntriesAreCanonical,
     cacheStatusResultIsConsistent,
     systemHostCapacityIsConsistent,
 } from "../../src/contracts/cache.ts";
 import { cacheRealtimeIdentityMatches } from "../../src/contracts/cacheRealtime.ts";
+import { gatewayConnectionSnapshotIsConsistent } from "../../src/contracts/gatewayConnection.ts";
+import {
+    freshGatewaySessionSourceTimesAreConsistent,
+    gatewaySessionActionResultIsConsistent,
+    gatewaySessionLifecycleIsConsistent,
+    gatewaySessionOmittedMetadataFieldsAreCanonical,
+    gatewaySessionPageIsCanonical,
+    gatewaySessionSnapshotIsConsistent,
+    gatewaySessionTokenFreshnessIsConsistent,
+    staleGatewaySessionSourceTimesAreConsistent,
+} from "../../src/contracts/gatewaySessions.ts";
 import {
     incidentPageCursorIsConsistent,
     newestIncidentOrderIsStable,
@@ -94,6 +110,16 @@ import {
     notificationPageMaximum,
     notificationPageCursorIsConsistent,
 } from "../../src/contracts/notifications.ts";
+import {
+    openClawCronAtScheduleIsValid,
+    openClawCronEnabledTransitionIsConsistent,
+    openClawCronJobIsConsistent,
+    openClawCronLastKnownGoodTimesAreConsistent,
+    openClawCronPageIsConsistent,
+    openClawCronRunOutcomeIsConsistent,
+    openClawCronRunPageIsConsistent,
+    openClawCronUpdatePatchIsNonempty,
+} from "../../src/contracts/openClawCron.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
 import {
     newestReportOrderIsStable,
@@ -166,6 +192,74 @@ const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
     [
+        gatewayConnectionSnapshotIsConsistent,
+        "Live Valibot validation additionally requires connected phase and fresh state to agree and past transport timestamps not to exceed the check time.",
+    ],
+    [
+        openClawCronAtScheduleIsValid,
+        "Live Valibot validation additionally requires the one-time schedule string to parse to a finite timestamp.",
+    ],
+    [
+        openClawCronLastKnownGoodTimesAreConsistent,
+        "Live Valibot validation additionally requires staleness to begin at or after the last observation.",
+    ],
+    [
+        openClawCronJobIsConsistent,
+        "Live Valibot validation additionally requires delivery metadata and desired enabled-state synchronization to agree with the projected job.",
+    ],
+    [
+        openClawCronPageIsConsistent,
+        "Live Valibot validation additionally requires jobs, offsets, continuation, and total count to describe one coherent bounded page.",
+    ],
+    [
+        openClawCronRunPageIsConsistent,
+        "Live Valibot validation additionally requires run rows, offsets, continuation, and total count to describe one coherent bounded page.",
+    ],
+    [
+        openClawCronRunOutcomeIsConsistent,
+        "Live Valibot validation additionally requires a reason exactly when an immediate run was not accepted.",
+    ],
+    [
+        openClawCronEnabledTransitionIsConsistent,
+        "Live Valibot validation additionally requires a disable intent only for disabling and an explicit null intent when enabling.",
+    ],
+    [
+        openClawCronUpdatePatchIsNonempty,
+        "Live Valibot validation additionally requires at least one reviewed OpenClaw cron field to change.",
+    ],
+    [
+        gatewaySessionTokenFreshnessIsConsistent,
+        "Live Valibot validation additionally requires a token count whenever Gateway marks the token count fresh.",
+    ],
+    [
+        gatewaySessionLifecycleIsConsistent,
+        "Live Valibot validation additionally requires active-run and session lifecycle timestamps to agree.",
+    ],
+    [
+        gatewaySessionOmittedMetadataFieldsAreCanonical,
+        "Live Valibot validation additionally requires omitted Gateway metadata fields to be unique and canonically ordered.",
+    ],
+    [
+        gatewaySessionPageIsCanonical,
+        "Live Valibot validation additionally requires unique session keys and primary-main, kind, recency, then key ordering.",
+    ],
+    [
+        freshGatewaySessionSourceTimesAreConsistent,
+        "Live Valibot validation additionally requires fresh Gateway check and observation timestamps to match.",
+    ],
+    [
+        staleGatewaySessionSourceTimesAreConsistent,
+        "Live Valibot validation additionally requires a stale Gateway check timestamp at or after its observation timestamp.",
+    ],
+    [
+        gatewaySessionSnapshotIsConsistent,
+        "Live Valibot validation additionally requires the filter, projected rows, and derived same-snapshot statistics to agree.",
+    ],
+    [
+        gatewaySessionActionResultIsConsistent,
+        "Live Valibot validation additionally allows an unchanged outcome only for compact and requires any returned snapshot to use the ALL filter.",
+    ],
+    [
         systemMetricCapacityIsConsistent,
         "Live Valibot validation additionally requires capacity bytes and the rounded percentage to describe one consistent state.",
     ],
@@ -198,6 +292,22 @@ const runtimeCheckComments = new Map<unknown, string>([
         "Live Valibot validation additionally requires cache totals, truncation, snapshot timestamps, and freshness relative to the snapshot clock to agree.",
     ],
     [
+        cacheHeartbeatConnectionIsConsistent,
+        "Live Valibot validation additionally requires the compact Gateway phase and connection freshness to agree.",
+    ],
+    [
+        cacheHeartbeatSessionsLastKnownGoodIsConsistent,
+        "Live Valibot validation additionally requires compact Gateway-session staleness to begin at or after the last observation.",
+    ],
+    [
+        cacheHeartbeatCronLastKnownGoodIsConsistent,
+        "Live Valibot validation additionally requires compact OpenClaw-cron staleness to begin at or after the last observation.",
+    ],
+    [
+        cacheHeartbeatResultIsConsistent,
+        "Live Valibot validation additionally requires nested heartbeat observations not to exceed the clamped response clock and cached projections not to remain fresh while Gateway is disconnected.",
+    ],
+    [
         cacheRealtimeIdentityMatches,
         "Live Valibot validation additionally requires the realtime entity and compact cache key to match exactly.",
     ],
@@ -208,6 +318,10 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         workingStatusTimeIsConsistent,
         "Live Valibot validation additionally requires working-status activity not to precede task start.",
+    ],
+    [
+        agentStatusProjectionIsConsistent,
+        "Live Valibot validation additionally keeps Dashboard task state and Gateway session availability separate and requires the fields implied by each state.",
     ],
     [
         activeRunTimeIsConsistent,

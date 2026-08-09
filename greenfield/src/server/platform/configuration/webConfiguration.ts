@@ -18,7 +18,10 @@ import {
 } from "../../domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import { parseRecentAuthenticationWindowMs } from "../../domains/security/recentAuthentication.ts";
 import { parseBrowserOrigin } from "../../rawHttp/requestSecurity.ts";
-import { parseGatewayCredentialVerifierUrl } from "../gateway/gatewayCredentialVerifier.ts";
+import {
+    configurationGatewayToken,
+    configurationGatewayUrl,
+} from "./gatewayConfiguration.ts";
 import {
     type ApplicationLogLevel,
     type ApplicationNodeEnvironment,
@@ -32,6 +35,7 @@ import {
 
 /** Immutable, validated configuration consumed by the greenfield web process. */
 export interface WebConfiguration {
+    readonly gatewayToken: Redacted.Redacted<string>;
     readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
     readonly nodeEnvironment: ApplicationNodeEnvironment;
@@ -61,6 +65,7 @@ export const webConfigurationEnvironmentSchema = v.object({
     MIRA_DASHBOARD_WEBAUTHN_RP_ID: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_WEBAUTHN_RP_NAME: optionalEnvironmentValueSchema,
     NODE_ENV: optionalEnvironmentValueSchema,
+    OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
     PORT: optionalEnvironmentValueSchema,
 });
@@ -134,20 +139,6 @@ function publicOrigin(input: PickedApplicationEnvironment): string {
     );
     try {
         return parseBrowserOrigin(value);
-    } catch {
-        return configurationError(field, "invalid");
-    }
-}
-
-function gatewayUrl(input: PickedApplicationEnvironment): string {
-    const field = "OPENCLAW_GATEWAY_URL" as const;
-    const value = requiredConfigurationString(
-        input,
-        field,
-        applicationConfigurationLimits.gatewayUrlMaximumLength
-    );
-    try {
-        return parseGatewayCredentialVerifierUrl(value);
     } catch {
         return configurationError(field, "invalid");
     }
@@ -282,7 +273,8 @@ export function parseWebConfiguration(
         configurationError("MIRA_DASHBOARD_PUBLIC_ORIGIN", "inconsistent");
     }
     const configuration = Object.freeze({
-        gatewayUrl: gatewayUrl(input),
+        gatewayToken: configurationGatewayToken(input),
+        gatewayUrl: configurationGatewayUrl(input),
         logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [
             "debug",
             "error",

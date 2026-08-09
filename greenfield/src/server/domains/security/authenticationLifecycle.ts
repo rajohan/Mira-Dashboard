@@ -16,6 +16,7 @@ export type {
     ChangePasswordResult,
     LoginResult,
     PendingLoginLifecyclePort,
+    RecentMfaAuthorization,
     VerifyGatewayCredential,
 } from "./authenticationLifecycleTypes.ts";
 export type {

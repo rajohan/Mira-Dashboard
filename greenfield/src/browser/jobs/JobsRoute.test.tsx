@@ -19,6 +19,7 @@ import type {
     ListJobRunsInput,
     SetJobClaimingPausedInput,
 } from "../../contracts/jobs.ts";
+import type { ListOpenClawCronInput } from "../../contracts/openClawCron.ts";
 import type {
     ListScheduleRunsInput,
     ListSchedulesInput,
@@ -464,6 +465,18 @@ class JobsRouteTransport implements DashboardTrpcTransport {
                 return detail === undefined
                     ? Promise.reject(new TypeError("Unknown job run"))
                     : Promise.resolve(detail);
+            }
+            case "openClawCron.list": {
+                const request = input as ListOpenClawCronInput;
+                return Promise.resolve({
+                    freshness: { kind: "fresh", observedAtMs: timestampMs },
+                    hasMore: false,
+                    jobs: [],
+                    limit: request.limit,
+                    offset: request.offset,
+                    snapshotRevision: `sha256:${"a".repeat(43)}`,
+                    total: 0,
+                });
             }
             case "schedules.list": {
                 if (this.failScheduleList) {
@@ -1402,6 +1415,46 @@ describe("Dashboard jobs route", () => {
             expect(transport.callsFor("schedules.update")).toHaveLength(1)
         );
         await waitFor(() => expect(screen.queryByText(failureMessage)).toBeNull());
+    });
+
+    test("switches to the isolated OpenClaw cron source with one exact bounded query", async () => {
+        const transport = new JobsRouteTransport();
+        const { router } = renderJobsRoute("/jobs", transport);
+        const user = userEvent.setup();
+
+        const source = await screen.findByRole("group", { name: "Job source" });
+        expect(
+            within(source).getByRole("button", { name: "Dashboard jobs" })
+        ).toHaveAttribute("aria-pressed", "true");
+        await user.click(within(source).getByRole("button", { name: "OpenClaw cron" }));
+
+        expect(
+            within(source).getByRole("button", { name: "OpenClaw cron" })
+        ).toHaveAttribute("aria-pressed", "true");
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "OpenClaw cron" })
+        ).toBeTruthy();
+        await waitFor(() =>
+            expect(transport.callsFor("openClawCron.list")).toHaveLength(1)
+        );
+        expect(transport.callsFor("openClawCron.list")[0]?.input).toEqual({
+            enabled: "all",
+            lastRunStatus: "all",
+            limit: 100,
+            offset: 0,
+            scheduleKind: "all",
+            sortBy: "name",
+            sortDir: "asc",
+        });
+        expect(screen.getByText("No OpenClaw cron jobs")).toBeTruthy();
+        expect(router.state.location.search).toEqual({ source: "openclaw" });
+
+        act(() => router.history.back());
+        await waitFor(() =>
+            expect(
+                within(source).getByRole("button", { name: "Dashboard jobs" })
+            ).toHaveAttribute("aria-pressed", "true")
+        );
     });
 
     test("redirects anonymous sessions before jobs data or realtime is mounted", async () => {

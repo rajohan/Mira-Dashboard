@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 
-import type { AgentStatus } from "../../../../contracts/agentModel.ts";
+import type {
+    AgentStatus,
+    AgentStatusProjection,
+} from "../../../../contracts/agentModel.ts";
 import { dashboardAgentConfiguration, findDashboardAgent } from "../directory.ts";
 import { AgentNotFoundError } from "../errors.ts";
 import { AgentService } from "../service.ts";
@@ -20,6 +23,15 @@ function testStatus(agentId: string, currentTask: string | null): AgentStatus {
     };
 }
 
+function testReadStatus(agentId: string): AgentStatusProjection {
+    return {
+        agentId,
+        freshness: "unavailable",
+        gatewayAvailability: "disconnected",
+        state: "idle",
+    };
+}
+
 /**
  * Creates a deterministic non-persistent service for unrelated context/router tests.
  * @returns Inert agent service with reviewed configuration and idle statuses.
@@ -30,13 +42,12 @@ export function createTestAgentService(): AgentService["Service"] {
         getStatus: ({ id }) =>
             findDashboardAgent(id) === undefined
                 ? Effect.fail(missingAgent(id))
-                : Effect.succeed({ agentId: id, state: "idle" }),
+                : Effect.succeed(testReadStatus(id)),
         listStatuses: () =>
             Effect.succeed({
-                statuses: dashboardAgentConfiguration.agents.map(({ id }) => ({
-                    agentId: id,
-                    state: "idle" as const,
-                })),
+                statuses: dashboardAgentConfiguration.agents.map(({ id }) =>
+                    testReadStatus(id)
+                ),
             }),
         listTaskHistory: ({ agentId }) =>
             agentId !== undefined && findDashboardAgent(agentId) === undefined
