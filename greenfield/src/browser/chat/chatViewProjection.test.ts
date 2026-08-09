@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
-import { mergeChatMessages, projectChatHistory } from "./chatViewProjection.ts";
+import {
+    deriveGatewaySessionStats,
+    type GatewaySession,
+    type ListGatewaySessionsResult,
+} from "../../contracts/gatewaySessions.ts";
+import {
+    mergeChatMessages,
+    projectChatHistory,
+    projectChatSessions,
+} from "./chatViewProjection.ts";
 
 const sessionKey = "agent:main:main";
 
@@ -17,6 +26,36 @@ function completeMessage(id: string, text = id) {
 }
 
 describe("chat view projection", () => {
+    test("retains provider auto fast mode beside its effective speed", () => {
+        const observedAtMs = 1_800_000_000_000;
+        const session: GatewaySession = {
+            displayName: "Mira main",
+            effectiveFastMode: false,
+            fastMode: "auto",
+            hasActiveRun: false,
+            key: sessionKey,
+            kind: "main",
+            totalTokensFresh: false,
+        };
+        const snapshot: ListGatewaySessionsResult = {
+            filter: "ALL",
+            projectionTruncated: false,
+            sessions: [session],
+            source: {
+                checkedAtMs: observedAtMs,
+                connection: "connected",
+                freshness: "fresh",
+                observedAtMs,
+            },
+            stats: deriveGatewaySessionStats([session], observedAtMs),
+        };
+
+        expect(projectChatSessions(snapshot, undefined)[0]).toMatchObject({
+            fastMode: "auto",
+            speed: "standard",
+        });
+    });
+
     test("retains a truncated preview until its one explicit detail is available", () => {
         const data = {
             pageParams: ["0"],

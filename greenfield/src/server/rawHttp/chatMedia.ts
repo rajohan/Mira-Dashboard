@@ -145,6 +145,7 @@ export interface ChatRawHttpHandlerOptions {
     readonly browserOrigin?: string;
     readonly mediaFetcher: OpenClawOutgoingMediaFetcher;
     readonly mediaReferences: InMemoryChatMediaReferences;
+    readonly refreshMediaReferences?: (signal: AbortSignal) => Promise<void>;
     readonly scheduler?: ChatRawHttpScheduler;
     readonly uploadTimeoutMs?: number;
     readonly workLimits?: ChatRawHttpWorkLimits;
@@ -661,6 +662,22 @@ export function createChatRawHttpHandler(
         workLimits.maximumConcurrentDownloads,
         workLimits.maximumDownloadBytes
     );
+    let mediaReferenceRefresh: Promise<void> | undefined;
+    const refreshMediaReferences = async (signal: AbortSignal): Promise<void> => {
+        if (options.refreshMediaReferences === undefined) return;
+        const activeRefresh = mediaReferenceRefresh;
+        if (activeRefresh !== undefined) {
+            await activeRefresh;
+            return;
+        }
+        const refresh = options.refreshMediaReferences(signal);
+        mediaReferenceRefresh = refresh;
+        try {
+            await refresh;
+        } finally {
+            if (mediaReferenceRefresh === refresh) mediaReferenceRefresh = undefined;
+        }
+    };
     return async (request, requestUrl) => {
         const attachment = attachmentPathPattern.exec(requestUrl.pathname);
         const media = mediaPathPattern.exec(requestUrl.pathname);
@@ -760,7 +777,15 @@ export function createChatRawHttpHandler(
         if (!hasCapability(authentication.principal, "chat:read")) {
             return noStoreResponse("Forbidden", 403);
         }
-        const reference = options.mediaReferences.resolve(media![1]!);
+        let reference = options.mediaReferences.resolve(media![1]!);
+        if (reference === undefined) {
+            try {
+                await refreshMediaReferences(request.signal);
+            } catch {
+                // A refresh failure is intentionally indistinguishable from absence.
+            }
+            reference = options.mediaReferences.resolve(media![1]!);
+        }
         if (reference === undefined) return noStoreResponse("Not found", 404);
         let authorized: boolean;
         try {

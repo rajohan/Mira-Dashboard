@@ -172,10 +172,12 @@ describe("chat message bubble", () => {
                     attachments: [
                         {
                             downloadUrl:
-                                "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview",
+                                "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=download",
                             id: "raster",
                             mediaType: "image/png",
                             name: "photo.png",
+                            previewUrl:
+                                "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview",
                             renderPolicy: "inline-image",
                             sizeBytes: 12,
                         },
@@ -353,10 +355,12 @@ describe("chat message bubble", () => {
                         attachments: [
                             {
                                 downloadUrl:
-                                    "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=preview",
+                                    "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=download",
                                 id: "text-preview",
                                 mediaType: "text/plain",
                                 name: "notes.txt",
+                                previewUrl:
+                                    "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=preview",
                                 renderPolicy: "bounded-text",
                                 sizeBytes: 23,
                             },
@@ -369,7 +373,15 @@ describe("chat message bubble", () => {
                     }}
                 />
             );
+            expect(screen.getByRole("link", { name: "notes.txt" })).toHaveAttribute(
+                "href",
+                "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=download"
+            );
             await user.click(screen.getByRole("button", { name: "Preview notes.txt" }));
+            expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+                "href",
+                "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb43?disposition=download"
+            );
             await waitFor(() =>
                 expect(screen.getByText("Bounded historical text")).toBeVisible()
             );

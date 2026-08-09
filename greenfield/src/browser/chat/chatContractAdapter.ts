@@ -78,10 +78,13 @@ export function projectChatContractMessage(
                 }
                 case "attachment": {
                     attachments.push({
-                        downloadUrl: part.url,
+                        downloadUrl: part.downloadUrl ?? part.url,
                         id: part.id,
                         mediaType: part.mediaType,
                         name: part.fileName,
+                        ...(part.renderPolicy === "download-only"
+                            ? {}
+                            : { previewUrl: part.url }),
                         renderPolicy: part.renderPolicy,
                         sizeBytes: part.sizeBytes ?? 0,
                     });

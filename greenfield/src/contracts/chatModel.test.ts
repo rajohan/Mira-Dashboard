@@ -61,12 +61,14 @@ describe("chat model contract", () => {
             renderPolicy:
                 | "bounded-text"
                 | "download-only"
-                | "inline-image" = "inline-image"
+                | "inline-image" = "inline-image",
+            downloadUrl?: string
         ) => ({
             content: {
                 kind: "complete",
                 parts: [
                     {
+                        ...(downloadUrl === undefined ? {} : { downloadUrl }),
                         fileName: "diagram.png",
                         id: "part-1",
                         kind: "attachment",
@@ -85,6 +87,16 @@ describe("chat model contract", () => {
         expect(
             v.safeParse(chatMessageSchema, attachment(`${base}?disposition=preview`))
                 .success
+        ).toBeTrue();
+        expect(
+            v.safeParse(
+                chatMessageSchema,
+                attachment(
+                    `${base}?disposition=preview`,
+                    "bounded-text",
+                    `${base}?disposition=download`
+                )
+            ).success
         ).toBeTrue();
         expect(
             v.safeParse(
@@ -114,6 +126,16 @@ describe("chat model contract", () => {
             v.safeParse(
                 chatMessageSchema,
                 attachment(`${base}?disposition=preview`, "download-only")
+            ).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(
+                chatMessageSchema,
+                attachment(
+                    `${base}?disposition=preview`,
+                    "bounded-text",
+                    "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb41?disposition=download"
+                )
             ).success
         ).toBeFalse();
     });

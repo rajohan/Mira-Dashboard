@@ -43,6 +43,7 @@ export function projectChatSessions(
             ? {}
             : { contextTokens: session.contextTokens }),
         displayName: session.displayName,
+        ...(session.fastMode === undefined ? {} : { fastMode: session.fastMode }),
         isDefault: session.key === gatewayPrimarySessionKey,
         key: session.key,
         ...(session.model === undefined ? {} : { model: session.model }),

@@ -202,6 +202,7 @@ describe("persistent Gateway chat provider", () => {
             kind: "complete",
             parts: [
                 {
+                    downloadUrl: `/api/chat/media/${attachmentId}?disposition=download`,
                     fileName: "diagram.png",
                     id: "1",
                     kind: "attachment",
@@ -224,6 +225,59 @@ describe("persistent Gateway chat provider", () => {
             },
             runId: "provider-run-in-flight",
             text: "Partial answer",
+        });
+    });
+
+    test("projects separate bounded-text preview and full download URLs", async () => {
+        const textAttachmentId = "019fe633-9133-4ba0-8b80-809dd80dfb42";
+        const harness = createHarness({
+            "chat.history": {
+                hasMore: false,
+                messages: [
+                    {
+                        content: [
+                            {
+                                attachment: {
+                                    label: "notes.txt",
+                                    mimeType: "text/plain",
+                                    sizeBytes: 2 * 1024 * 1024,
+                                    url: `/api/chat/media/outgoing/${encodeURIComponent(
+                                        sessionKey
+                                    )}/${textAttachmentId}/full`,
+                                },
+                                type: "attachment",
+                            },
+                        ],
+                        id: "message-text-media",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 512 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [
+                {
+                    downloadUrl: `/api/chat/media/${textAttachmentId}?disposition=download`,
+                    fileName: "notes.txt",
+                    id: "1",
+                    kind: "attachment",
+                    mediaType: "text/plain",
+                    renderPolicy: "bounded-text",
+                    sizeBytes: 2 * 1024 * 1024,
+                    url: `/api/chat/media/${textAttachmentId}?disposition=preview`,
+                },
+            ],
         });
     });
 
@@ -282,6 +336,7 @@ describe("persistent Gateway chat provider", () => {
             kind: "complete",
             parts: [
                 {
+                    downloadUrl: `/api/chat/media/${svgAttachmentId}?disposition=download`,
                     fileName: "active.svg",
                     id: "1",
                     kind: "attachment",

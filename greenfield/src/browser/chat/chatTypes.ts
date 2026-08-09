@@ -6,6 +6,7 @@ export interface ChatSessionOption {
     readonly activeRunCount: number;
     readonly contextTokens?: number;
     readonly displayName: string;
+    readonly fastMode?: boolean | "auto";
     readonly isDefault: boolean;
     readonly key: string;
     readonly model?: string;
@@ -47,6 +48,7 @@ export interface ChatMessageAttachment {
     readonly id: string;
     readonly mediaType: string;
     readonly name: string;
+    readonly previewUrl?: string;
     readonly progress?: number;
     readonly renderPolicy?: "bounded-text" | "download-only" | "inline-image";
     readonly sizeBytes: number;
@@ -129,6 +131,7 @@ export interface ChatDisplaySettings {
 
 /** Mutable provider preferences used by subsequent sends. */
 export interface ChatSendSettings {
+    readonly fastMode?: boolean | "auto";
     readonly model?: string;
     readonly speed: "fast" | "standard";
     readonly thinking?: string;

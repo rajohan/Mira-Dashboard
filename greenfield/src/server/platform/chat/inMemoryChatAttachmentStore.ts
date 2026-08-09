@@ -665,7 +665,7 @@ class InMemoryChatAttachmentStoreImplementation implements InMemoryChatAttachmen
                 committed = true;
                 ticket.state = "committed";
                 ticket.reservation = undefined;
-                this.#releaseTicketBytes(ticket);
+                this.#removeTicket(ticket);
             },
             // oxlint-disable-next-line typescript/require-await -- Reservation implementations retain the asynchronous port contract.
             release: async (releaseSignal?: AbortSignal) => {

@@ -72,7 +72,6 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
         const sessionKey = boundedIdentity(reference.sessionKey, 512);
         const messageId = boundedIdentity(reference.messageId, 256);
         const now = this.#now();
-        this.#sweep(now);
         const current = this.#references.get(attachmentId);
         if (
             current !== undefined &&
@@ -104,9 +103,13 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
         });
         if (!parsed.success) return undefined;
         const now = this.#now();
-        this.#sweep(now);
         const reference = this.#references.get(parsed.output);
         if (reference === undefined) return undefined;
+        if (reference.expiresAtMs <= now) {
+            // Preserve one stale association so the raw handler can revalidate it
+            // against the authoritative message and let that read register it anew.
+            this.#references.delete(parsed.output);
+        }
         return Object.freeze({
             attachmentId: reference.attachmentId,
             messageId: reference.messageId,
@@ -120,12 +123,6 @@ class InMemoryChatMediaReferencesImplementation implements InMemoryChatMediaRefe
             throw new TypeError("Chat media reference clock is invalid");
         }
         return now;
-    }
-
-    #sweep(now: number): void {
-        for (const [attachmentId, reference] of this.#references) {
-            if (reference.expiresAtMs <= now) this.#references.delete(attachmentId);
-        }
     }
 }
 

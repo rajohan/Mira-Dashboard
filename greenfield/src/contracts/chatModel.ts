@@ -174,6 +174,15 @@ const chatMessagePartVariantSchema = v.variant("kind", [
         ),
     }),
     v.strictObject({
+        downloadUrl: v.optional(
+            v.pipe(
+                v.string("Chat attachment download URL is invalid"),
+                v.regex(
+                    /^\/api\/chat\/media\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\?disposition=download$/u,
+                    "Chat attachment download URL is invalid"
+                )
+            )
+        ),
         fileName: boundedControlSafeTextSchema(
             255,
             "Chat attachment file name is invalid"
@@ -216,11 +225,18 @@ export function chatMessagePartToolStateIsConsistent(
 export function chatMessageAttachmentDispositionIsConsistent(
     part: v.InferOutput<typeof chatMessagePartVariantSchema>
 ): boolean {
-    return (
-        part.kind !== "attachment" ||
-        (part.renderPolicy === "download-only"
+    if (part.kind !== "attachment") return true;
+    const primaryDispositionMatches =
+        part.renderPolicy === "download-only"
             ? part.url.endsWith("?disposition=download")
-            : part.url.endsWith("?disposition=preview"))
+            : part.url.endsWith("?disposition=preview");
+    const expectedDownloadUrl = part.url.replace(
+        /\?disposition=(?:preview|download)$/u,
+        "?disposition=download"
+    );
+    return (
+        primaryDispositionMatches &&
+        (part.downloadUrl === undefined || part.downloadUrl === expectedDownloadUrl)
     );
 }
 

@@ -213,7 +213,11 @@ export function ChatSettingsPanel({
                                         ariaLabel="Response speed"
                                         disabled={busy}
                                         onChange={(speed) =>
-                                            onSendSettingsChange({ ...send, speed })
+                                            onSendSettingsChange({
+                                                ...send,
+                                                fastMode: speed === "fast",
+                                                speed,
+                                            })
                                         }
                                         options={[
                                             { label: "Standard", value: "standard" },

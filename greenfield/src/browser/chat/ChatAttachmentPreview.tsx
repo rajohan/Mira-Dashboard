@@ -78,11 +78,29 @@ export type ChatPreviewAttachment = Pick<
     "mediaType" | "name" | "sizeBytes"
 > &
     Partial<Pick<ChatDraftAttachment, "file">> &
-    Partial<Pick<ChatMessageAttachment, "downloadUrl" | "renderPolicy">>;
+    Partial<Pick<ChatMessageAttachment, "downloadUrl" | "previewUrl" | "renderPolicy">>;
 
 interface ChatAttachmentPreviewProps {
     readonly attachment?: ChatPreviewAttachment;
     readonly onClose: () => void;
+}
+
+function validatedManagedPreviewUrl(
+    attachment: ChatPreviewAttachment | undefined
+): string | undefined {
+    const candidate = attachment?.previewUrl ?? attachment?.downloadUrl;
+    return candidate !== undefined && managedPreviewUrlPattern.test(candidate)
+        ? candidate
+        : undefined;
+}
+
+function validatedManagedDownloadUrl(
+    attachment: ChatPreviewAttachment | undefined
+): string | undefined {
+    const candidate = attachment?.downloadUrl;
+    return candidate !== undefined && managedDownloadUrlPattern.test(candidate)
+        ? candidate
+        : undefined;
 }
 
 function initialRemoteTextPreview(
@@ -91,8 +109,7 @@ function initialRemoteTextPreview(
     if (attachment?.file !== undefined || attachment?.renderPolicy !== "bounded-text") {
         return { status: "idle" };
     }
-    return attachment.downloadUrl !== undefined &&
-        managedPreviewUrlPattern.test(attachment.downloadUrl) &&
+    return validatedManagedPreviewUrl(attachment) !== undefined &&
         safeTextPreviewTypes.has(attachment.mediaType)
         ? { status: "loading" }
         : {
@@ -137,18 +154,14 @@ export function ChatAttachmentPreview({
         ) {
             return;
         }
-        if (
-            attachment.downloadUrl === undefined ||
-            !managedPreviewUrlPattern.test(attachment.downloadUrl) ||
-            !safeTextPreviewTypes.has(attachment.mediaType)
-        ) {
+        const previewUrl = validatedManagedPreviewUrl(attachment);
+        if (previewUrl === undefined || !safeTextPreviewTypes.has(attachment.mediaType)) {
             return;
         }
-        const downloadUrl = attachment.downloadUrl;
         const controller = new AbortController();
         void (async () => {
             try {
-                const response = await fetch(downloadUrl, {
+                const response = await fetch(previewUrl, {
                     credentials: "same-origin",
                     headers: { Accept: attachment.mediaType },
                     signal: controller.signal,
@@ -203,17 +216,8 @@ export function ChatAttachmentPreview({
         };
     }, [attachment]);
 
-    const managedRemotePreviewUrl =
-        attachment?.downloadUrl !== undefined &&
-        managedPreviewUrlPattern.test(attachment.downloadUrl)
-            ? attachment.downloadUrl
-            : undefined;
-    const managedRemoteUrl =
-        attachment?.downloadUrl !== undefined &&
-        (managedPreviewUrlPattern.test(attachment.downloadUrl) ||
-            managedDownloadUrlPattern.test(attachment.downloadUrl))
-            ? attachment.downloadUrl
-            : undefined;
+    const managedRemotePreviewUrl = validatedManagedPreviewUrl(attachment);
+    const managedRemoteDownloadUrl = validatedManagedDownloadUrl(attachment);
     const previewUrl = localUrl ?? managedRemotePreviewUrl;
     const imagePreviewAllowed =
         attachment !== undefined &&
@@ -224,7 +228,7 @@ export function ChatAttachmentPreview({
         attachment?.file !== undefined &&
         previewUrl !== undefined &&
         attachment.mediaType.startsWith("audio/");
-    const downloadUrl = localUrl ?? managedRemoteUrl;
+    const downloadUrl = localUrl ?? managedRemoteDownloadUrl;
 
     return (
         <Modal

@@ -402,6 +402,7 @@ function projectAttachmentPart(
     const sizeBytes = safeInteger(attachment.sizeBytes);
     const renderPolicy = attachmentRenderPolicy(mediaType);
     return {
+        downloadUrl: `${url}?disposition=download`,
         fileName,
         id: partId,
         kind: "attachment",

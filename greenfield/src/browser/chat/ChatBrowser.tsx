@@ -160,6 +160,15 @@ function emptyDraft(): SessionDraft {
     return { attachments: [], text: "", version: 0 };
 }
 
+function effectiveChatSpeed(
+    fastMode: ChatSendSettings["fastMode"] | null,
+    fallback: ChatSendSettings["speed"]
+): ChatSendSettings["speed"] {
+    if (fastMode === true) return "fast";
+    if (fastMode === false) return "standard";
+    return fallback;
+}
+
 function inactiveCompanionOperation(): boolean {
     return false;
 }
@@ -441,6 +450,9 @@ export function ChatBrowser({
     });
     const currentDisplay = displaySettings;
     const providerSendSettings: ChatSendSettings = {
+        ...(selectedSession?.fastMode === undefined
+            ? {}
+            : { fastMode: selectedSession.fastMode }),
         ...(selectedSession?.model === undefined ? {} : { model: selectedSession.model }),
         speed: selectedSession?.speed ?? "standard",
         ...(selectedSession?.thinking === undefined
@@ -1012,7 +1024,9 @@ export function ChatBrowser({
                             ...(expectedSessionId === undefined
                                 ? {}
                                 : { expectedSessionId }),
-                            fastMode: next.speed === "fast",
+                            ...(next.fastMode === undefined
+                                ? {}
+                                : { fastMode: next.fastMode }),
                             model: next.model ?? null,
                             thinkingLevel: next.thinking ?? null,
                         },
@@ -1024,10 +1038,13 @@ export function ChatBrowser({
                     setSendSettings((current) => ({
                         ...current,
                         [sessionKey]: {
+                            ...(output.fastMode === null || output.fastMode === undefined
+                                ? {}
+                                : { fastMode: output.fastMode }),
                             ...(output.model === null || output.model === undefined
                                 ? {}
                                 : { model: output.model }),
-                            speed: output.fastMode === true ? "fast" : "standard",
+                            speed: effectiveChatSpeed(output.fastMode, next.speed),
                             ...(output.thinkingLevel === null ||
                             output.thinkingLevel === undefined
                                 ? {}

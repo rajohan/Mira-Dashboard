@@ -223,7 +223,57 @@ describe("in-memory chat attachment store", () => {
             await captureFailure(() =>
                 store.reserve({ actorId, idempotencyKey, sessionKey, ticketId })
             )
-        ).toEqual(new ChatAttachmentStoreError("conflict"));
+        ).toEqual(new ChatAttachmentStoreError("not-found"));
+        store.dispose();
+    });
+
+    test("releases a committed ticket from the live capacity pool", async () => {
+        const ids = [
+            ticketId,
+            pngAttachmentId,
+            "00000000-0000-4000-8000-000000000004",
+            "00000000-0000-4000-8000-000000000005",
+        ];
+        const store = createInMemoryChatAttachmentStore({
+            createId: () => {
+                const id = ids.shift();
+                if (id === undefined) throw new Error("Fixture id budget exhausted");
+                return id;
+            },
+            maximumTickets: 1,
+        });
+        const first = await store.prepare(
+            {
+                files: [prepareInput.files[0]!],
+                idempotencyKey,
+                sessionKey,
+            },
+            actorId
+        );
+        await store.upload({
+            actorId,
+            attachmentId: first.uploads[0]!.attachmentId,
+            bytes: png,
+            contentType: "image/png",
+            ticketId: first.ticketId,
+        });
+        const reservation = await store.reserve({
+            actorId,
+            idempotencyKey,
+            sessionKey,
+            ticketId: first.ticketId,
+        });
+        await reservation.commit();
+
+        const next = await store.prepare(
+            {
+                files: [prepareInput.files[0]!],
+                idempotencyKey: "B".repeat(32),
+                sessionKey,
+            },
+            actorId
+        );
+        expect(next.ticketId).toBe("00000000-0000-4000-8000-000000000004");
         store.dispose();
     });
 

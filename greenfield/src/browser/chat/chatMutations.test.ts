@@ -46,6 +46,31 @@ describe("chat mutations", () => {
         expect(mutation).toHaveBeenCalledTimes(1);
     });
 
+    test("preserves provider automatic fast mode on an ordinary send", async () => {
+        const identity = createChatSendIdentity();
+        let observedInput: unknown;
+        const mutation = jest.fn((_: string, input: unknown) => {
+            observedInput = input;
+            return Promise.resolve({
+                admission: "created",
+                run: { id: identity.clientRunId },
+            });
+        });
+        await executeChatSend({ mutation } as unknown as DashboardTrpcClient, {
+            attachments: [],
+            identity,
+            message: "Keep provider defaults",
+            onAttachmentProgress: jest.fn(),
+            sessionKey: "agent:main:main",
+            settings: { fastMode: "auto", speed: "standard" },
+            signal: new AbortController().signal,
+        });
+
+        expect(v.parse(chatSendInputSchema, observedInput).settings?.fastMode).toBe(
+            "auto"
+        );
+    });
+
     test("gates only explicitly unknown mutation outcomes", () => {
         expect(
             chatSendFailureDisposition({

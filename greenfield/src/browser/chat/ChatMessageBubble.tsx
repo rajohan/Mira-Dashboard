@@ -183,19 +183,22 @@ function MessageAttachment({
     onDynamicContentLoad?: () => void;
     onPreview: (attachmentId: string) => void;
 }>) {
-    const managedUrl =
+    const previewCandidate = attachment.previewUrl ?? attachment.downloadUrl;
+    const managedPreviewUrl =
+        previewCandidate !== undefined &&
+        managedChatMediaUrlPattern.test(previewCandidate) &&
+        previewCandidate.endsWith("?disposition=preview")
+            ? previewCandidate
+            : undefined;
+    const managedDownloadUrl =
         attachment.downloadUrl !== undefined &&
         managedChatMediaUrlPattern.test(attachment.downloadUrl) &&
-        attachment.downloadUrl.endsWith(
-            attachment.renderPolicy === "download-only"
-                ? "?disposition=download"
-                : "?disposition=preview"
-        )
+        attachment.downloadUrl.endsWith("?disposition=download")
             ? attachment.downloadUrl
             : undefined;
     const imageUrl =
-        managedUrl !== undefined && attachment.renderPolicy === "inline-image"
-            ? managedUrl
+        managedPreviewUrl !== undefined && attachment.renderPolicy === "inline-image"
+            ? managedPreviewUrl
             : undefined;
     return (
         <li className="border-primary-600 bg-primary-800 max-w-full overflow-hidden rounded-lg border">
@@ -217,11 +220,11 @@ function MessageAttachment({
             )}
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2">
                 <span className="min-w-0">
-                    {imageUrl === undefined && managedUrl !== undefined ? (
+                    {imageUrl === undefined && managedDownloadUrl !== undefined ? (
                         <a
                             className="text-accent-300 focus-visible:ring-accent-400 block max-w-72 truncate rounded outline-none focus-visible:ring-2"
                             download={attachment.name}
-                            href={managedUrl}
+                            href={managedDownloadUrl}
                         >
                             {attachment.name}
                         </a>

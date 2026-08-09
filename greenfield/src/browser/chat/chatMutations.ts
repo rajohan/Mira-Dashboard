@@ -105,7 +105,9 @@ export async function executeChatSend(
             message: input.message,
             sessionKey: input.sessionKey,
             settings: {
-                fastMode: input.settings.speed === "fast",
+                ...(input.settings.fastMode === undefined
+                    ? {}
+                    : { fastMode: input.settings.fastMode }),
                 ...(input.settings.thinking === undefined
                     ? {}
                     : { thinkingLevel: input.settings.thinking }),

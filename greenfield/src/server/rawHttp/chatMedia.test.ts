@@ -527,6 +527,145 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("reauthorizes an expired media association before rejecting it", async () => {
+        const now = { value: 1000 };
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences({
+            nowMs: () => now.value,
+            ttlMs: 1000,
+        });
+        const reference = {
+            attachmentId,
+            messageId: "message-1",
+            sessionKey: "agent:main:main",
+        };
+        references.register(reference);
+        now.value = 2000;
+        let authorizationCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: (input) => {
+                authorizationCount += 1;
+                expect(input).toMatchObject(reference);
+                references.register(reference);
+                return true;
+            },
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () =>
+                    Promise.resolve(
+                        new Response(png, { headers: { "content-type": "image/png" } })
+                    ),
+            },
+            mediaReferences: references,
+        });
+
+        for (let requestIndex = 0; requestIndex < 2; requestIndex += 1) {
+            const request = authenticatedRequest(
+                `/api/chat/media/${attachmentId}?disposition=preview`
+            );
+            expect(await handlerStatus(handler, request)).toBe(200);
+        }
+        expect(authorizationCount).toBe(2);
+        store.dispose();
+        references.dispose();
+    });
+
+    test("refreshes an empty post-restart reference cache before returning 404", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        let refreshCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: ({ attachmentId: candidate }) => candidate === attachmentId,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () =>
+                    Promise.resolve(
+                        new Response(png, { headers: { "content-type": "image/png" } })
+                    ),
+            },
+            mediaReferences: references,
+            refreshMediaReferences: () => {
+                refreshCount += 1;
+                references.register({
+                    attachmentId,
+                    messageId: "message-after-restart",
+                    sessionKey: "agent:main:main",
+                });
+                return Promise.resolve();
+            },
+        });
+
+        const request = authenticatedRequest(
+            `/api/chat/media/${attachmentId}?disposition=download`
+        );
+        expect(await handlerStatus(handler, request)).toBe(200);
+        expect(refreshCount).toBe(1);
+        store.dispose();
+        references.dispose();
+    });
+
+    test("shares one complete restart refresh across concurrent media ids", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        let refreshCount = 0;
+        let releaseRefresh!: () => void;
+        let markRefreshStarted!: () => void;
+        const refreshStarted = new Promise<void>((resolve) => {
+            markRefreshStarted = resolve;
+        });
+        const refreshReleased = new Promise<void>((resolve) => {
+            releaseRefresh = resolve;
+        });
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () =>
+                    Promise.resolve(
+                        new Response(png, { headers: { "content-type": "image/png" } })
+                    ),
+            },
+            mediaReferences: references,
+            refreshMediaReferences: async () => {
+                refreshCount += 1;
+                markRefreshStarted();
+                await refreshReleased;
+                for (const candidate of [attachmentId, crossSessionAttachmentId]) {
+                    references.register({
+                        attachmentId: candidate,
+                        messageId: `message-${candidate}`,
+                        sessionKey: "agent:main:main",
+                    });
+                }
+            },
+        });
+
+        const first = handlerStatus(
+            handler,
+            authenticatedRequest(`/api/chat/media/${attachmentId}?disposition=download`)
+        );
+        await refreshStarted;
+        const second = handlerStatus(
+            handler,
+            authenticatedRequest(
+                `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+            )
+        );
+        await Promise.resolve();
+        expect(refreshCount).toBe(1);
+
+        releaseRefresh();
+        expect(await Promise.all([first, second])).toEqual([200, 200]);
+        store.dispose();
+        references.dispose();
+    });
+
     test("denies cross-owner media and forces active SVG content to download", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences({ nowMs: () => 1000 });

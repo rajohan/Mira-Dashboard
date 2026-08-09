@@ -29,7 +29,7 @@ import {
 import { chatRuntimeStoreContext as ChatRuntimeStoreContext } from "./chatRuntimeContextValue.ts";
 import { createChatRuntimeStore } from "./chatRuntimeStore.ts";
 
-const { act, fireEvent, render, screen, waitFor } =
+const { act, fireEvent, render, screen, waitFor, within } =
     await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
@@ -606,6 +606,39 @@ describe("chat browser", () => {
         }
     });
 
+    test("releases Stop after a definitive abort rejection", async () => {
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.abort"
+                    ? Promise.reject(new Error("private abort failure"))
+                    : Promise.reject(new Error("Unexpected mutation")),
+            query: (name) =>
+                name === "chat.runtime"
+                    ? Promise.resolve(activeRuntimePage())
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await user.click(
+                await screen.findByRole("button", { name: "Stop response 1" })
+            );
+            expect(
+                await screen.findByText("The request could not be completed. Try again.")
+            ).toBeVisible();
+            expect(screen.queryByText("private abort failure")).toBeNull();
+            expect(screen.getByRole("button", { name: "Stop response 1" })).toBeEnabled();
+            expect(
+                view.mutation.mock.calls.filter((call) => call[0] === "chat.abort")
+            ).toHaveLength(1);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
     test("restores an untouched draft after a definite send failure", async () => {
         const view = harness({
             mutation: (name) =>
@@ -665,6 +698,302 @@ describe("chat browser", () => {
             expect(notice.tagName).toBe("OUTPUT");
             expect(notice).toHaveAttribute("aria-live", "polite");
             expect(screen.queryByRole("alert")).toBeNull();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("handles local slash-command validation without dispatching chat sends", async () => {
+        const view = harness({
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            const composer = screen.getByRole("textbox", { name: "Message" });
+            const send = screen.getByRole("button", { name: "Send message" });
+
+            await user.type(composer, "/reset");
+            await user.click(send);
+            expect(screen.getByText(/confirm Reset provider transcript/iu)).toBeVisible();
+
+            await user.clear(composer);
+            await user.type(composer, "/model unavailable/model");
+            await user.click(send);
+            expect(
+                screen.getByText("That model is not available for this session.")
+            ).toBeVisible();
+
+            await user.clear(composer);
+            await user.type(composer, "/thinking impossible");
+            await user.click(send);
+            expect(
+                screen.getByText("That thinking level is not available for this session.")
+            ).toBeVisible();
+            expect(view.mutation).not.toHaveBeenCalled();
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("dispatches valid model, thinking, and compact slash commands once", async () => {
+        let providerObservedAtMs = observedAtMs;
+        let currentSession: GatewaySession = {
+            ...primarySession,
+            thinkingOptions: ["high", "low"],
+        };
+        const view = harness({
+            mutation: (name, input) => {
+                if (name === "chat.updateSessionSettings") {
+                    const settings = input as {
+                        fastMode?: boolean | "auto";
+                        model: string | null;
+                        thinkingLevel: string | null;
+                    };
+                    currentSession = {
+                        ...currentSession,
+                        effectiveFastMode: settings.fastMode,
+                        ...(settings.model === null ? {} : { model: settings.model }),
+                        ...(settings.thinkingLevel === null
+                            ? {}
+                            : { thinkingLevel: settings.thinkingLevel }),
+                    };
+                    return Promise.resolve({
+                        fastMode: settings.fastMode,
+                        model: settings.model,
+                        sessionId: primarySession.sessionId,
+                        sessionKey: gatewayPrimarySessionKey,
+                        thinkingLevel: settings.thinkingLevel,
+                    });
+                }
+                if (name === "gatewaySessions.compact") {
+                    return Promise.resolve({ compacted: true });
+                }
+                return Promise.reject(new Error("Unexpected mutation"));
+            },
+            query: (name) =>
+                name === "chat.listModels"
+                    ? Promise.resolve({
+                          models: [
+                              {
+                                  id: "openai/gpt-5.6-sol",
+                                  label: "GPT-5.6 Sol",
+                                  provider: "openai",
+                                  supportsFastMode: true,
+                                  thinkingLevels: ["high", "low"],
+                              },
+                              {
+                                  id: "openai/gpt-4.1",
+                                  label: "GPT-4.1",
+                                  provider: "openai",
+                                  supportsFastMode: false,
+                                  thinkingLevels: ["high", "low"],
+                              },
+                          ],
+                      })
+                    : undefined,
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot("fresh", currentSession),
+            sessionSnapshotQuery: () => {
+                providerObservedAtMs += 1;
+                return snapshot("fresh", currentSession, providerObservedAtMs);
+            },
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            const composer = screen.getByRole("textbox", { name: "Message" });
+            const send = screen.getByRole("button", { name: "Send message" });
+
+            await user.type(composer, "/model openai/gpt-4.1");
+            await user.click(send);
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter(
+                        (call) => call[0] === "chat.updateSessionSettings"
+                    )
+                ).toHaveLength(1)
+            );
+            await waitFor(() => expect(composer).toHaveValue(""));
+
+            await user.type(composer, "/thinking low");
+            await user.click(send);
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter(
+                        (call) => call[0] === "chat.updateSessionSettings"
+                    )
+                ).toHaveLength(2)
+            );
+            await waitFor(() => expect(composer).toHaveValue(""));
+
+            await user.type(composer, "/compact");
+            await user.click(send);
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter(
+                        (call) => call[0] === "gatewaySessions.compact"
+                    )
+                ).toHaveLength(1)
+            );
+            expect(composer).toHaveValue("");
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("validates and removes attachments while toggling display settings", async () => {
+        const view = harness({
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            const attachment = new File(["remove me"], "remove-me.txt", {
+                type: "text/plain",
+            });
+            const fileInput =
+                view.rendered.container.querySelector<HTMLInputElement>(
+                    'input[type="file"]'
+                );
+            expect(fileInput).not.toBeNull();
+            fireEvent.change(fileInput as HTMLInputElement, {
+                target: { files: [attachment] },
+            });
+            expect(await screen.findByText("remove-me.txt")).toBeVisible();
+            await user.click(
+                screen.getByRole("button", { name: "Remove remove-me.txt" })
+            );
+            await waitFor(() => expect(screen.queryByText("remove-me.txt")).toBeNull());
+
+            const rejectedVideo = new File(["video"], "blocked.mp4", {
+                type: "video/mp4",
+            });
+            fireEvent.change(fileInput as HTMLInputElement, {
+                target: { files: [rejectedVideo] },
+            });
+            expect(await screen.findByRole("alert")).toHaveTextContent(
+                /Video attachments are not supported/iu
+            );
+
+            await user.click(screen.getByRole("button", { name: "Chat settings" }));
+            const showThinking = screen.getByRole("button", {
+                name: /Show thinking/iu,
+            });
+            const previousPressed = showThinking.getAttribute("aria-pressed");
+            await user.click(showThinking);
+            expect(showThinking).not.toHaveAttribute("aria-pressed", previousPressed);
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("compacts and resets through newer provider observations", async () => {
+        let providerObservedAtMs = observedAtMs;
+        const view = harness({
+            mutation: (name) => {
+                if (name === "gatewaySessions.compact") {
+                    return Promise.resolve({ compacted: true });
+                }
+                if (name === "gatewaySessions.reset") {
+                    return Promise.resolve({ reset: true });
+                }
+                return Promise.reject(new Error("Unexpected mutation"));
+            },
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+            sessionSnapshotQuery: () => {
+                providerObservedAtMs += 1;
+                return snapshot("fresh", primarySession, providerObservedAtMs);
+            },
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            await user.click(screen.getByRole("button", { name: "Chat settings" }));
+            await user.click(screen.getByRole("button", { name: "Compact context" }));
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter(
+                        (call) => call[0] === "gatewaySessions.compact"
+                    )
+                ).toHaveLength(1)
+            );
+            await user.click(screen.getByRole("button", { name: "Chat settings" }));
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", { name: "Compact context" })
+                ).toBeEnabled()
+            );
+
+            await user.click(
+                screen.getByRole("button", { name: "Reset provider transcript" })
+            );
+            const confirmation = await screen.findByRole("dialog", {
+                name: "Reset chat session?",
+            });
+            await user.click(
+                within(confirmation).getByRole("button", {
+                    name: "Reset provider transcript",
+                })
+            );
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter(
+                        (call) => call[0] === "gatewaySessions.reset"
+                    )
+                ).toHaveLength(1)
+            );
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", { name: "Chat settings" })
+                ).toBeEnabled()
+            );
+        } finally {
+            await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+            view.rendered.unmount();
+            view.queryClient.clear();
+        }
+    });
+
+    test("releases settings controls after a definitive provider rejection", async () => {
+        const view = harness({
+            mutation: (name) =>
+                name === "chat.updateSessionSettings"
+                    ? Promise.reject(new Error("private provider rejection"))
+                    : Promise.reject(new Error("Unexpected mutation")),
+            requestedSessionKey: gatewayPrimarySessionKey,
+            sessionSnapshot: snapshot(),
+        });
+        const user = userEvent.setup();
+        try {
+            await waitForConnectedComposer();
+            await user.click(screen.getByRole("button", { name: "Chat settings" }));
+            await user.click(screen.getByRole("button", { name: /Response speed/iu }));
+            await user.click(screen.getByRole("option", { name: "Fast" }));
+            await waitFor(() =>
+                expect(
+                    view.mutation.mock.calls.filter(
+                        (call) => call[0] === "chat.updateSessionSettings"
+                    )
+                ).toHaveLength(1)
+            );
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", { name: /Response speed/iu })
+                ).toBeEnabled()
+            );
+            expect(screen.queryByText("private provider rejection")).toBeNull();
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
             view.rendered.unmount();

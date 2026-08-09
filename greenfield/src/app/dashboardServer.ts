@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { Redacted } from "effect";
 
+import { chatHistoryPageMaximum } from "../contracts/chatModel.ts";
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
@@ -22,7 +23,10 @@ import {
     GatewaySessionProviderUnavailableError,
     type GatewaySessionsProvider,
 } from "../server/domains/gatewaySessions/provider.ts";
-import { createGatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
+import {
+    createGatewaySessionsService,
+    type GatewaySessionsService,
+} from "../server/domains/gatewaySessions/service.ts";
 import { createJobRepository } from "../server/domains/jobs/repository.ts";
 import {
     createJobService,
@@ -186,6 +190,41 @@ export interface DashboardServerOptions extends Omit<
     /** Explicit WebAuthn trust configuration; request host headers are never used. */
     readonly webAuthnRelyingParty?: WebAuthnRelyingPartyConfiguration;
     readonly webAuthnVerificationTimeoutMs?: number;
+}
+
+interface DashboardChatMediaReferenceRefreshDependencies {
+    readonly chatService: Pick<ChatService, "history">;
+    readonly gatewaySessionsService: Pick<GatewaySessionsService, "list">;
+}
+
+/**
+ * Rehydrates the bounded visible media-reference window after process loss.
+ * @param dependencies Bounded session and chat-history read ports.
+ * @returns One shared raw-handler refresh callback.
+ */
+export function createDashboardChatMediaReferenceRefresh(
+    dependencies: DashboardChatMediaReferenceRefreshDependencies
+): (signal: AbortSignal) => Promise<void> {
+    return async (signal) => {
+        const snapshot = await dependencies.gatewaySessionsService.list(
+            { filter: "ALL" },
+            signal
+        );
+        for (const session of snapshot.sessions) {
+            try {
+                await dependencies.chatService.history(
+                    {
+                        cursor: "0",
+                        limit: chatHistoryPageMaximum,
+                        sessionKey: session.key,
+                    },
+                    signal
+                );
+            } catch (error) {
+                if (signal.aborted) throw error;
+            }
+        }
+    };
 }
 
 /**
@@ -695,6 +734,10 @@ export async function createDashboardServer(
                         token: options.gatewayToken,
                     }),
                     mediaReferences: chatMediaReferences,
+                    refreshMediaReferences: createDashboardChatMediaReferenceRefresh({
+                        chatService: activeChatService,
+                        gatewaySessionsService,
+                    }),
                 });
                 const speechHandler = createChatSpeechRawHttpHandler({
                     authenticateCredential: (credential) =>

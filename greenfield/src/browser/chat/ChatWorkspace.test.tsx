@@ -92,6 +92,7 @@ describe("chat workspace", () => {
                 onSendSettingsChange={onSendSettingsChange}
                 sendSettings={{
                     ...props.sendSettings,
+                    fastMode: "auto",
                     model: "openai/gpt-5.6-sol",
                 }}
                 view={{
@@ -116,8 +117,35 @@ describe("chat workspace", () => {
         await user.click(modelSelect);
         await user.click(screen.getByRole("option", { name: "gpt-5.6-terra" }));
         expect(onSendSettingsChange).toHaveBeenLastCalledWith({
+            fastMode: "auto",
             model: "openai/gpt-5.6-terra",
             speed: "standard",
+            thinking: "high",
+        });
+    });
+
+    test("replaces automatic fast mode only after an explicit speed change", async () => {
+        const user = userEvent.setup();
+        const props = properties();
+        const onSendSettingsChange = jest.fn();
+        render(
+            <ChatWorkspace
+                {...props}
+                onSendSettingsChange={onSendSettingsChange}
+                sendSettings={{
+                    ...props.sendSettings,
+                    fastMode: "auto",
+                }}
+            />
+        );
+
+        await user.click(screen.getByRole("button", { name: "Chat settings" }));
+        await user.click(screen.getByRole("button", { name: /Response speed/iu }));
+        await user.click(screen.getByRole("option", { name: "Fast" }));
+        expect(onSendSettingsChange).toHaveBeenLastCalledWith({
+            fastMode: true,
+            model: "gpt-5",
+            speed: "fast",
             thinking: "high",
         });
     });

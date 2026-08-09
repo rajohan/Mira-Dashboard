@@ -36,6 +36,8 @@ describe("chat contract adapter", () => {
                     },
                     { id: "text-2", kind: "text", text: "After" },
                     {
+                        downloadUrl:
+                            "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=download",
                         fileName: "chart.png",
                         id: "media-1",
                         kind: "attachment",
@@ -55,8 +57,12 @@ describe("chat contract adapter", () => {
         expect(projectChatContractMessage(message, sessionKey, 0)).toMatchObject({
             attachments: [
                 {
+                    downloadUrl:
+                        "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=download",
                     id: "media-1",
                     name: "chart.png",
+                    previewUrl:
+                        "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40?disposition=preview",
                     renderPolicy: "inline-image",
                 },
             ],
