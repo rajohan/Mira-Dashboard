@@ -35,7 +35,7 @@ describe("agent procedure contracts", () => {
             },
             {
                 access: {
-                    capabilities: ["agents:read"],
+                    capabilities: ["agents:read", "gateway-sessions:read"],
                     capabilityPolicy: "all",
                     kind: "authenticated",
                 },
@@ -44,7 +44,7 @@ describe("agent procedure contracts", () => {
             },
             {
                 access: {
-                    capabilities: ["agents:read"],
+                    capabilities: ["agents:read", "gateway-sessions:read"],
                     capabilityPolicy: "all",
                     kind: "authenticated",
                 },

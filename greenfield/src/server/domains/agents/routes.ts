@@ -33,6 +33,15 @@ async function runAgentEffect<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
 }
 
 const readProcedure = capabilityProcedure("agents:read");
+const gatewayStatusReadProcedure = readProcedure.use(({ ctx, next }) => {
+    if (!ctx.principal.capabilities.includes("gateway-sessions:read")) {
+        throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Required application capability is not granted",
+        });
+    }
+    return next({ ctx });
+});
 const writeProcedure = principalKindProcedure(
     "agents:write",
     "automation",
@@ -50,13 +59,13 @@ export const agentRoutes = {
             );
             return { agents: configuration.agents.map((agent) => ({ ...agent })) };
         }),
-    getStatus: readProcedure
+    getStatus: gatewayStatusReadProcedure
         .input(getAgentStatusInputSchema)
         .output(agentStatusProjectionSchema)
         .query(({ ctx, input, signal }) =>
             runAgentEffect(ctx.agentService.getStatus(input, signal))
         ),
-    listStatuses: readProcedure
+    listStatuses: gatewayStatusReadProcedure
         .input(emptyAgentInputSchema)
         .output(listAgentStatusesResultSchema)
         .query(({ ctx, signal }) =>

@@ -587,7 +587,7 @@ describe("persistent OpenClaw cron provider", () => {
             ran: false,
             reason: "already-running",
         });
-        queue(transport, "cron.remove", { ok: true, removed: true });
+        queue(transport, "cron.remove", { removed: true });
         const provider = createPersistentOpenClawCronProvider(transport);
 
         expect(

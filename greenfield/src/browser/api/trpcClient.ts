@@ -80,6 +80,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/gatewaySessions.ts");
             return module.gatewaySessionProcedureContracts;
         }
+        case "gateway": {
+            const module = await import("../../contracts/gatewayConnection.ts");
+            return module.gatewayConnectionProcedureContracts;
+        }
         case "incidents": {
             const module = await import("../../contracts/incidents.ts");
             return module.incidentProcedureContracts;

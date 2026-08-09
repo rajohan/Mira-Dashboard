@@ -143,6 +143,11 @@ const agentReadAccess = {
     capabilityPolicy: "all",
     kind: "authenticated",
 } as const;
+const agentGatewayStatusReadAccess = {
+    capabilities: ["agents:read", "gateway-sessions:read"],
+    capabilityPolicy: "all",
+    kind: "authenticated",
+} as const;
 const agentWriteAccess = {
     capabilities: ["agents:write"],
     capabilityPolicy: "all",
@@ -176,7 +181,7 @@ export const agentProcedureContracts = [
         transport: agentQueryTransport,
     },
     {
-        access: agentReadAccess,
+        access: agentGatewayStatusReadAccess,
         domain: "agents",
         errors: ["FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
         input: getAgentStatusInputSchema,
@@ -190,7 +195,7 @@ export const agentProcedureContracts = [
         transport: agentQueryTransport,
     },
     {
-        access: agentReadAccess,
+        access: agentGatewayStatusReadAccess,
         domain: "agents",
         errors: ["FORBIDDEN", "UNAUTHORIZED"],
         input: emptyAgentInputSchema,

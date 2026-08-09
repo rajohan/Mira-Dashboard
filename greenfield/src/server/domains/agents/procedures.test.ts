@@ -54,6 +54,28 @@ describe("agent procedures", () => {
         }
     });
 
+    test("requires both read capabilities before projecting Gateway session data", async () => {
+        for (const capabilities of [
+            ["agents:read"],
+            ["gateway-sessions:read"],
+        ] as const) {
+            const caller = appRouter.createCaller(
+                await createTestRequestContext(
+                    createTestAutomationAuthentication(capabilities)
+                )
+            ).agents;
+            for (const operation of ["getStatus", "listStatuses"] as const) {
+                const failure = await captureFailure(() =>
+                    operation === "getStatus"
+                        ? caller.getStatus({ id: "main" })
+                        : caller.listStatuses({})
+                );
+                expect(failure).toBeInstanceOf(TRPCError);
+                expect((failure as TRPCError).code).toBe("FORBIDDEN");
+            }
+        }
+    });
+
     test("serves session reads and automation current-task writes", async () => {
         const database = await openFreshMigratedDatabase();
         const agentService = agentServiceFor(database);
@@ -72,7 +94,7 @@ describe("agent procedures", () => {
             ).toMatchObject({ state: "working" });
 
             const sessionContext = await createTestRequestContext(
-                createTestSessionAuthentication(["agents:read"]),
+                createTestSessionAuthentication(["agents:read", "gateway-sessions:read"]),
                 createTestApplicationRuntime(),
                 { agentService }
             );
@@ -101,7 +123,10 @@ describe("agent procedures", () => {
         const database = await openFreshMigratedDatabase();
         try {
             const context = await createTestRequestContext(
-                createTestAutomationAuthentication(["agents:read"]),
+                createTestAutomationAuthentication([
+                    "agents:read",
+                    "gateway-sessions:read",
+                ]),
                 createTestApplicationRuntime(),
                 { agentService: agentServiceFor(database) }
             );
@@ -145,7 +170,10 @@ describe("agent procedures", () => {
                 started = Promise.withResolvers<AbortSignal | undefined>();
                 const controller = new AbortController();
                 const context = await createTestRequestContext(
-                    createTestSessionAuthentication(["agents:read"]),
+                    createTestSessionAuthentication([
+                        "agents:read",
+                        "gateway-sessions:read",
+                    ]),
                     createTestApplicationRuntime(),
                     { agentService }
                 );

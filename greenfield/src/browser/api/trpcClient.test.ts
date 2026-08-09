@@ -192,6 +192,23 @@ describe("Dashboard browser tRPC client", () => {
         expect(calls).toEqual([{ input: {}, kind: "query", path: "cache.getStatus" }]);
     });
 
+    test("loads the Gateway connection contract on demand", async () => {
+        const calls: TransportCall[] = [];
+        const output = {
+            checkedAtMs: 1000,
+            connectionGeneration: 0,
+            freshness: "unavailable",
+            phase: "stopped",
+            reconnectAttempt: 0,
+        } as const;
+        const client = createDashboardTrpcClient(createRecordingTransport(output, calls));
+
+        expect(await client.query("gateway.connection.get", {})).toEqual(output);
+        expect(calls).toEqual([
+            { input: {}, kind: "query", path: "gateway.connection.get" },
+        ]);
+    });
+
     test("rejects invalid input before transport access", async () => {
         const calls: TransportCall[] = [];
         const client = createDashboardTrpcClient(

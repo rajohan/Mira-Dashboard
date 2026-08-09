@@ -390,7 +390,6 @@ const upstreamSystemInfoSchema = v.object({
 });
 
 const upstreamRemoveAcknowledgementSchema = v.strictObject({
-    ok: v.literal(true),
     removed: v.literal(true),
 });
 
