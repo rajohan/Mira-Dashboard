@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import type { ComponentProps } from "react";
 import { useState } from "react";
 import { useArgs } from "storybook/preview-api";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import { TimePicker } from "../TimePicker.tsx";
 
@@ -84,6 +84,11 @@ export const Default: Story = {
                 name: "32",
             })
         );
+        await waitFor(async () => {
+            await expect(
+                within(canvasElement.ownerDocument.body).queryByRole("listbox")
+            ).not.toBeInTheDocument();
+        });
 
         await expect(hour).toHaveTextContent("21");
         await expect(minute).toHaveTextContent("32");
