@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { Redacted } from "effect";
 
-import { chatHistoryPageMaximum } from "../contracts/chatModel.ts";
+import {
+    chatHistoryPageMaximum,
+    chatHistoryRetainedPageMaximum,
+} from "../contracts/chatModel.ts";
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
@@ -212,14 +215,26 @@ export function createDashboardChatMediaReferenceRefresh(
         );
         for (const session of snapshot.sessions) {
             try {
-                await dependencies.chatService.history(
-                    {
-                        cursor: "0",
-                        limit: chatHistoryPageMaximum,
-                        sessionKey: session.key,
-                    },
-                    signal
-                );
+                let cursor = "0";
+                const visitedCursors = new Set<string>();
+                for (
+                    let pageIndex = 0;
+                    pageIndex < chatHistoryRetainedPageMaximum;
+                    pageIndex += 1
+                ) {
+                    if (visitedCursors.has(cursor)) break;
+                    visitedCursors.add(cursor);
+                    const page = await dependencies.chatService.history(
+                        {
+                            cursor,
+                            limit: chatHistoryPageMaximum,
+                            sessionKey: session.key,
+                        },
+                        signal
+                    );
+                    if (page.nextCursor === undefined) break;
+                    cursor = page.nextCursor;
+                }
             } catch (error) {
                 if (signal.aborted) throw error;
             }

@@ -12,6 +12,7 @@ import type {
 } from "../../contracts/chat.ts";
 import {
     chatHistoryPageMaximum,
+    chatHistoryRetainedPageMaximum,
     chatRuntimePageMaximum,
 } from "../../contracts/chatModel.ts";
 import type {
@@ -30,7 +31,7 @@ export const chatCompanionQueryRoot = [...chatQueryRoot, "companion"] as const;
 export const openClawTaskQueryRoot = ["openclaw-tasks"] as const;
 export const openClawTaskListQueryRoot = [...openClawTaskQueryRoot, "list"] as const;
 export const openClawTaskDetailQueryRoot = [...openClawTaskQueryRoot, "detail"] as const;
-export const chatHistoryBrowserPageMaximum = 5;
+export const chatHistoryBrowserPageMaximum = chatHistoryRetainedPageMaximum;
 export const openClawTasksBrowserPageMaximum = 5;
 export type OpenClawTaskListProjection = "active" | "finished";
 

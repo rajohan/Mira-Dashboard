@@ -18,6 +18,8 @@ import { jobIdempotencyKeySchema } from "./jobModel.ts";
 
 export const chatHistoryPageDefault = 50;
 export const chatHistoryPageMaximum = 100;
+/** Shared browser-retention and media-reference rehydration page ceiling. */
+export const chatHistoryRetainedPageMaximum = 5;
 export const chatHistoryResponseMaximumBytes = 512 * 1024;
 export const chatHistoryProviderPageMaximum = 2;
 export const chatMessageHydrationMaximumBytes = 1024 * 1024;

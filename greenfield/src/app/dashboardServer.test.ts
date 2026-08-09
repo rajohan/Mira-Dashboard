@@ -11,6 +11,7 @@ import {
     cacheStatusResultSchema,
 } from "../contracts/cache.ts";
 import type { ChatHistoryOutput } from "../contracts/chat.ts";
+import { chatHistoryRetainedPageMaximum } from "../contracts/chatModel.ts";
 import {
     type GatewaySession,
     deriveGatewaySessionStats,
@@ -163,6 +164,44 @@ describe("Dashboard chat media-reference refresh", () => {
         }
         expect(caught).toBe(failure);
         expect(historyCalls).toBe(1);
+    });
+
+    test("walks the retained history window and stops at completion or its hard cap", async () => {
+        const calls: { cursor: string; sessionKey: string }[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push({ cursor: input.cursor, sessionKey: input.sessionKey });
+                    const cursor = Number(input.cursor);
+                    const complete =
+                        input.sessionKey === "agent:short:main" && cursor === 1;
+                    return Promise.resolve({
+                        ...emptyMediaRefreshHistory(input.sessionKey),
+                        ...(complete ? {} : { nextCursor: String(cursor + 1) }),
+                    });
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            "agent:short:main",
+                            "agent:long:main",
+                        ])
+                    ),
+            },
+        });
+
+        await refresh(new AbortController().signal);
+
+        expect(calls).toEqual([
+            { cursor: "0", sessionKey: "agent:short:main" },
+            { cursor: "1", sessionKey: "agent:short:main" },
+            ...Array.from({ length: chatHistoryRetainedPageMaximum }, (_, cursor) => ({
+                cursor: String(cursor),
+                sessionKey: "agent:long:main",
+            })),
+        ]);
     });
 });
 
