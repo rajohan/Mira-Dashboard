@@ -8,36 +8,10 @@ import { Button } from "../ui/Button.tsx";
 import { buttonClassNames } from "../ui/buttonStyles.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
-
-type NotificationSeverity = NotificationRecord["severity"];
-
-function notificationDestination(
-    notification: NotificationRecord
-): Readonly<{ href: string; label: string }> | undefined {
-    if (notification.linkUrl !== undefined) {
-        return { href: notification.linkUrl, label: "Open notification" };
-    }
-    if (notification.reportId !== undefined) {
-        return {
-            href: `/reports?reportId=${encodeURIComponent(notification.reportId)}`,
-            label: "Open report",
-        };
-    }
-    if (notification.incidentId !== undefined) {
-        return {
-            href: `/incidents?incidentId=${encodeURIComponent(notification.incidentId)}`,
-            label: "Open incident",
-        };
-    }
-    return undefined;
-}
-
-function severityBadgeVariant(
-    severity: NotificationSeverity
-): "danger" | "info" | "warning" {
-    if (severity === "critical" || severity === "error") return "danger";
-    return severity === "warning" ? "warning" : "info";
-}
+import {
+    notificationDestination,
+    notificationSeverityBadgeVariant,
+} from "./notificationPresentation.ts";
 
 interface NotificationListItemProps {
     readonly actionsDisabled: boolean;
@@ -103,7 +77,9 @@ export function NotificationListItem({
                             {notification.message}
                         </Text>
                     </div>
-                    <Badge variant={severityBadgeVariant(notification.severity)}>
+                    <Badge
+                        variant={notificationSeverityBadgeVariant(notification.severity)}
+                    >
                         <span className="capitalize">{notification.severity}</span>
                     </Badge>
                 </div>
