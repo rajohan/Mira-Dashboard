@@ -206,7 +206,7 @@ const upstreamSessionsListResponseSchema = v.strictObject({
     hasMore: v.boolean(),
     limitApplied: upstreamPositiveIntegerSchema,
     nextOffset: v.nullable(upstreamNonnegativeIntegerSchema),
-    offset: v.optional(upstreamNonnegativeIntegerSchema),
+    offset: v.optional(v.nullable(upstreamNonnegativeIntegerSchema)),
     path: upstreamPathSchema,
     sessions: v.pipe(
         v.array(upstreamSessionRowSchema),

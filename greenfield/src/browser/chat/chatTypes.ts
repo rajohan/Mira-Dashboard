@@ -71,10 +71,12 @@ export interface ChatThinkingPart {
 /** Ordered tool activity with explicit accessible lifecycle state. */
 export interface ChatToolPart {
     readonly callId: string;
+    readonly callIdSource?: "synthetic";
     readonly error?: string;
     readonly input?: unknown;
     readonly kind: "tool";
     readonly name: string;
+    readonly nameSource?: "synthetic";
     readonly output?: unknown;
     readonly status: "completed" | "failed" | "running";
 }
@@ -107,6 +109,7 @@ export interface ChatDisplayMessage {
     readonly idempotencyKey?: string;
     readonly hydration?: "error" | "loading" | "required";
     readonly parts: readonly ChatMessagePart[];
+    readonly providerRunId?: string;
     readonly role: "assistant" | "control" | "user";
     readonly runId?: string;
     readonly sequence: number;

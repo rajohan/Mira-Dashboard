@@ -13,6 +13,7 @@ import type {
     ChatDisplayMessage,
     ChatMessageAttachment,
     ChatMessagePart,
+    ChatToolPart,
 } from "./chatTypes.ts";
 
 function contractLocalRunId(message: ChatMessage): string | undefined {
@@ -31,6 +32,84 @@ function messageRole(role: ChatMessage["role"]): ChatDisplayMessage["role"] {
     if (role === "user") return "user";
     if (role === "assistant") return "assistant";
     return "control";
+}
+
+/**
+ * Converges split provider tool lifecycle rows without losing the original input.
+ * Terminal observations are never downgraded by a later replayed running marker.
+ * @param previous Existing call projection.
+ * @param current Newer call or result projection for the same exact call id.
+ * @returns One complete tool part suitable for a single disclosure bubble.
+ */
+export function mergeChatToolPart(
+    previous: ChatToolPart,
+    current: ChatToolPart
+): ChatToolPart {
+    const previousIsTerminal = previous.status !== "running";
+    const currentIsTerminal = current.status !== "running";
+    const terminal = previousIsTerminal && !currentIsTerminal ? previous : current;
+    const named = previous.nameSource === "synthetic" ? current : previous;
+    return {
+        callId: previous.callId,
+        ...((previous.callIdSource ?? current.callIdSource) === undefined
+            ? {}
+            : { callIdSource: "synthetic" as const }),
+        ...((current.error ?? previous.error) === undefined
+            ? {}
+            : { error: current.error ?? previous.error }),
+        ...((previous.input ?? current.input) === undefined
+            ? {}
+            : { input: previous.input ?? current.input }),
+        kind: "tool",
+        name: named.name,
+        ...(named.nameSource === undefined ? {} : { nameSource: named.nameSource }),
+        ...((current.output ?? previous.output) === undefined
+            ? {}
+            : { output: current.output ?? previous.output }),
+        status: terminal.status,
+    };
+}
+
+/**
+ * Matches exact provider IDs, or the latest still-running same-name fallback call.
+ * @param call Previously rendered tool call.
+ * @param result Terminal tool result being reconciled.
+ * @returns Whether the result can safely complete this call.
+ */
+export function chatToolResultMatchesCall(
+    call: ChatToolPart,
+    result: ChatToolPart
+): boolean {
+    if (call.status !== "running" || result.status === "running") return false;
+    const usesSyntheticIdentity =
+        call.callIdSource === "synthetic" || result.callIdSource === "synthetic";
+    if (usesSyntheticIdentity) {
+        return (
+            call.callIdSource === "synthetic" &&
+            result.callIdSource === "synthetic" &&
+            call.nameSource !== "synthetic" &&
+            result.nameSource !== "synthetic" &&
+            call.name === result.name
+        );
+    }
+    return call.callId === result.callId;
+}
+
+function appendChatMessagePart(parts: ChatMessagePart[], part: ChatMessagePart): void {
+    if (part.kind !== "tool") {
+        parts.push(part);
+        return;
+    }
+    const index = parts.findIndex(
+        (candidate) =>
+            candidate.kind === "tool" && chatToolResultMatchesCall(candidate, part)
+    );
+    if (index === -1) {
+        parts.push(part);
+        return;
+    }
+    const previous = parts[index];
+    if (previous?.kind === "tool") parts[index] = mergeChatToolPart(previous, part);
 }
 
 /**
@@ -65,12 +144,18 @@ export function projectChatContractMessage(
                     break;
                 }
                 case "tool": {
-                    parts.push({
+                    appendChatMessagePart(parts, {
                         callId: part.callId,
+                        ...(part.callIdSource === undefined
+                            ? {}
+                            : { callIdSource: part.callIdSource }),
                         ...(part.input === undefined ? {} : { input: part.input }),
                         ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
                         kind: "tool",
                         name: part.name,
+                        ...(part.nameSource === undefined
+                            ? {}
+                            : { nameSource: part.nameSource }),
                         ...(part.output === undefined ? {} : { output: part.output }),
                         status: toolPartStatus(part.phase),
                     });
@@ -110,6 +195,7 @@ export function projectChatContractMessage(
             ? {}
             : { idempotencyKey: message.idempotencyKey }),
         parts,
+        ...(message.runId === undefined ? {} : { providerRunId: message.runId }),
         role: messageRole(message.role),
         ...(localRunId === undefined ? {} : { runId: localRunId }),
         sequence: message.sequence ?? fallbackSequence,
@@ -348,7 +434,7 @@ export function projectChatRuntimeSnapshot(
                 break;
             }
             case "tool": {
-                parts.push({
+                appendChatMessagePart(parts, {
                     callId: part.callId,
                     ...(part.input === undefined ? {} : { input: part.input }),
                     ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
@@ -443,14 +529,52 @@ export function projectChatRuntimeSnapshot(
  */
 export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunProjection {
     const parts: ChatMessagePart[] = [];
-    if (!run.projectionTruncated && run.text !== "") {
+    if (run.parts !== undefined && run.parts.length > 0) {
+        for (const part of run.parts) {
+            switch (part.kind) {
+                case "assistant": {
+                    parts.push({ kind: "text", text: part.text });
+                    break;
+                }
+                case "thinking": {
+                    parts.push({
+                        kind: "thinking",
+                        status: "running",
+                        text: part.text,
+                    });
+                    break;
+                }
+                case "tool": {
+                    appendChatMessagePart(parts, {
+                        callId: part.callId,
+                        ...(part.input === undefined ? {} : { input: part.input }),
+                        ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
+                        kind: "tool",
+                        name: part.name,
+                        ...(part.output === undefined ? {} : { output: part.output }),
+                        status: toolPartStatus(part.phase),
+                    });
+                    break;
+                }
+                case "item": {
+                    parts.push({
+                        kind: "control",
+                        text:
+                            part.text === undefined
+                                ? part.type
+                                : `${part.type}: ${part.text}`,
+                        tone: "muted",
+                    });
+                    break;
+                }
+                case "user": {
+                    break;
+                }
+            }
+        }
+    } else if (run.text !== "") {
         parts.push({ kind: "text", text: run.text });
     }
-    parts.push({
-        kind: "control",
-        text: "This activity started outside the Dashboard.",
-        tone: "muted",
-    });
     if (run.projectionTruncated) {
         parts.push({
             kind: "control",
@@ -479,6 +603,7 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             attachments: [],
             id: `external:${run.sessionKey}:${run.providerRunId}`,
             parts,
+            providerRunId: run.providerRunId,
             role: "assistant",
             sequence: Number.MAX_SAFE_INTEGER - 2,
             sessionKey: run.sessionKey,

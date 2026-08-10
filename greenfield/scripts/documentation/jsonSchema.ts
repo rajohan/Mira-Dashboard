@@ -74,6 +74,7 @@ import {
     chatMessageFitsHydrationBudget,
     chatMessagePartsHaveUniqueIds,
     chatMessagePartToolStateIsConsistent,
+    chatExternalRunFitsBudget,
     chatPlanStepsHaveAtMostOneActive,
     chatRunSummaryIsConsistent,
     chatRuntimeEventProviderRangeIsConsistent,
@@ -311,6 +312,10 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         chatExternalRunsHaveUniqueProviderIds,
         "Live Valibot validation additionally requires every external chat projection to have a unique provider run ID.",
+    ],
+    [
+        chatExternalRunFitsBudget,
+        "Live Valibot validation additionally limits each external chat run projection to its reviewed UTF-8 byte budget.",
     ],
     [
         chatRuntimeOutputIsConsistent,

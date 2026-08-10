@@ -95,7 +95,7 @@ export interface PersistentGatewayChatMediaReferenceRegistrar {
 
 const upstreamInFlightRunSchema = v.strictObject({
     plan: v.optional(
-        v.strictObject({
+        v.object({
             steps: v.pipe(v.array(v.unknown()), v.maxLength(64)),
         })
     ),
@@ -225,6 +225,21 @@ function boundedControlString(value: unknown, maximum: number): string | undefin
     return text;
 }
 
+function resolveControlAlias(
+    values: readonly unknown[],
+    maximum: number
+): string | null | undefined {
+    let resolved: string | undefined;
+    for (const value of values) {
+        if (value === undefined || value === null) continue;
+        const candidate = boundedControlString(value, maximum);
+        if (candidate === undefined) return null;
+        if (resolved !== undefined && resolved !== candidate) return null;
+        resolved = candidate;
+    }
+    return resolved;
+}
+
 class ChatProviderEventReconciliationRequiredError extends Error {}
 
 function projectChatDeltaText(value: unknown): string | undefined {
@@ -271,6 +286,29 @@ function safeJsonText(value: unknown, maximum: number): string | undefined {
     } catch {
         return undefined;
     }
+}
+
+function providerVisibleToolResult(value: unknown): unknown {
+    if (!Array.isArray(value)) return value;
+    const text: string[] = [];
+    for (const item of value) {
+        if (typeof item === "string") {
+            text.push(item);
+            continue;
+        }
+        const block = asRecord(item);
+        const type =
+            typeof block?.type === "string" ? block.type.toLowerCase() : undefined;
+        if (
+            (type !== "text" && type !== "output_text") ||
+            typeof block?.text !== "string"
+        ) {
+            text.push("Unsupported provider content.");
+            continue;
+        }
+        text.push(block.text);
+    }
+    return text.join("\n");
 }
 
 function parseOrUnavailable<
@@ -429,8 +467,76 @@ function projectMessageParts(
     registrar: PersistentGatewayChatMediaReferenceRegistrar
 ): readonly unknown[] | undefined {
     const rawContent = message.content;
+    const rawRole = boundedControlString(message.role, 32)?.toLowerCase();
     let blocks: readonly unknown[];
-    if (Array.isArray(rawContent)) blocks = rawContent;
+    if (rawRole?.startsWith("tool") === true) {
+        const topLevelToolFields = {
+            __topLevelCallId: message.callId,
+            __topLevelName: message.name,
+            __topLevelToolCallId: message.toolCallId,
+            __topLevelToolCallSnakeId: message.tool_call_id,
+            __topLevelToolName: message.toolName,
+            __topLevelToolSnakeName: message.tool_name,
+        };
+        if (Array.isArray(rawContent)) {
+            const contentBlocks: readonly unknown[] = rawContent;
+            const explicitToolResult = contentBlocks.some((value) => {
+                const block = asRecord(value);
+                const type =
+                    typeof block?.type === "string" ? block.type.toLowerCase() : "";
+                return type === "toolresult" || type === "tool_result";
+            });
+            if (explicitToolResult) {
+                blocks = contentBlocks.map((value) => {
+                    const block = asRecord(value);
+                    const type =
+                        typeof block?.type === "string" ? block.type.toLowerCase() : "";
+                    return type === "toolresult" || type === "tool_result"
+                        ? { ...block, ...topLevelToolFields }
+                        : value;
+                });
+            } else {
+                const attachmentBlocks = contentBlocks.filter((value) => {
+                    const block = asRecord(value);
+                    return block?.type === "attachment";
+                });
+                const outputBlocks = contentBlocks.filter((value) => {
+                    const block = asRecord(value);
+                    return block?.type !== "attachment";
+                });
+                const topLevelOutput =
+                    outputBlocks.length === 0
+                        ? (message.result ??
+                          message.output ??
+                          message.text ??
+                          message.error)
+                        : providerVisibleToolResult(outputBlocks);
+                blocks = [
+                    {
+                        ...topLevelToolFields,
+                        content: topLevelOutput,
+                        isError: message.isError === true || message.error !== undefined,
+                        type: "tool_result",
+                    },
+                    ...attachmentBlocks,
+                ];
+            }
+        } else {
+            blocks = [
+                {
+                    ...topLevelToolFields,
+                    content:
+                        rawContent ??
+                        message.result ??
+                        message.output ??
+                        message.text ??
+                        message.error,
+                    isError: message.isError === true || message.error !== undefined,
+                    type: "tool_result",
+                },
+            ];
+        }
+    } else if (Array.isArray(rawContent)) blocks = rawContent;
     else if (rawContent === undefined) blocks = [];
     else blocks = [{ type: "text", text: rawContent }];
     if (blocks.length > 128) return undefined;
@@ -468,31 +574,79 @@ function projectMessageParts(
             parts.push({ id: partId, kind: "thinking", text });
             continue;
         }
-        if (type === "toolcall" || type === "tool_call" || type === "tooluse") {
+        if (
+            type === "toolcall" ||
+            type === "tool_call" ||
+            type === "tooluse" ||
+            type === "tool_use"
+        ) {
+            const providerName = resolveControlAlias(
+                [block.name, block.toolName, block.tool_name],
+                200
+            );
+            const providerCallId = resolveControlAlias(
+                [block.toolCallId, block.tool_call_id, block.callId, block.id],
+                256
+            );
+            if (providerName === null || providerCallId === null) return undefined;
             parts.push({
-                callId: boundedControlString(block.id ?? block.toolCallId, 256) ?? partId,
+                callId: providerCallId ?? partId,
+                ...(providerCallId === undefined ? { callIdSource: "synthetic" } : {}),
                 id: partId,
-                input: safeJsonText(block.arguments ?? block.input, 32 * 1024),
+                input: safeJsonText(
+                    block.args ?? block.arguments ?? block.input,
+                    32 * 1024
+                ),
                 isError: false,
                 kind: "tool",
-                name: boundedControlString(block.name ?? block.toolName, 200) ?? "tool",
+                name: providerName ?? "tool",
+                ...(providerName === undefined ? { nameSource: "synthetic" } : {}),
                 phase: "started",
             });
             continue;
         }
         if (type === "toolresult" || type === "tool_result") {
-            const isError = block.isError === true;
-            const output = safeJsonText(block.result ?? block.content, 32 * 1024);
+            const isError = block.isError === true || block.error !== undefined;
+            const providerName = resolveControlAlias(
+                [
+                    block.name,
+                    block.toolName,
+                    block.tool_name,
+                    block.__topLevelToolName,
+                    block.__topLevelToolSnakeName,
+                    block.__topLevelName,
+                ],
+                200
+            );
+            const output = safeJsonText(
+                block.result ??
+                    block.output ??
+                    providerVisibleToolResult(block.content) ??
+                    block.text ??
+                    block.error,
+                32 * 1024
+            );
+            const providerCallId = resolveControlAlias(
+                [
+                    block.toolCallId,
+                    block.tool_call_id,
+                    block.callId,
+                    block.id,
+                    block.__topLevelToolCallId,
+                    block.__topLevelToolCallSnakeId,
+                    block.__topLevelCallId,
+                ],
+                256
+            );
+            if (providerName === null || providerCallId === null) return undefined;
             parts.push({
-                callId:
-                    boundedControlString(block.toolCallId ?? block.tool_call_id, 256) ??
-                    partId,
+                callId: providerCallId ?? partId,
+                ...(providerCallId === undefined ? { callIdSource: "synthetic" } : {}),
                 id: partId,
                 isError,
                 kind: "tool",
-                name:
-                    boundedControlString(block.toolName ?? block.tool_name, 200) ??
-                    "tool",
+                name: providerName ?? "tool",
+                ...(providerName === undefined ? { nameSource: "synthetic" } : {}),
                 ...(output === undefined && !isError
                     ? {}
                     : {
@@ -625,7 +779,22 @@ function projectPlanSteps(
     ) {
         throw new ChatProviderUnavailableError();
     }
-    const steps = value.map((step) => parseOrUnavailable(chatPlanStepSchema, step));
+    const steps = value.map((step) => {
+        const record = asRecord(step);
+        if (record === undefined) throw new ChatProviderUnavailableError();
+        const text = record.text ?? record.step;
+        if (
+            record.text !== undefined &&
+            record.step !== undefined &&
+            record.text !== record.step
+        ) {
+            throw new ChatProviderUnavailableError();
+        }
+        return parseOrUnavailable(chatPlanStepSchema, {
+            status: record.status,
+            text,
+        });
+    });
     if (steps.filter(({ status }) => status === "in_progress").length > 1) {
         throw new ChatProviderUnavailableError();
     }

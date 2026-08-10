@@ -86,13 +86,17 @@ function updateToolPart(
     const index = parts.findIndex(
         (part) => part.kind === "tool" && part.callId === event.callId
     );
+    const previous = index === -1 ? undefined : parts[index];
+    const previousTool = previous?.kind === "tool" ? previous : undefined;
+    const input = event.input ?? previousTool?.input;
+    const output = event.output ?? previousTool?.output;
     const projection = {
         callId: event.callId,
-        ...(event.input === undefined ? {} : { input: event.input }),
+        ...(input === undefined ? {} : { input }),
         isError: event.isError,
         kind: "tool" as const,
-        name: event.name,
-        ...(event.output === undefined ? {} : { output: event.output }),
+        name: previousTool?.name ?? event.name,
+        ...(output === undefined ? {} : { output }),
         phase: event.phase,
         sequence: index === -1 ? event.sequence : parts[index]!.sequence,
     };

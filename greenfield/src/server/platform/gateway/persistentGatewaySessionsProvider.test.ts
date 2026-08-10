@@ -141,6 +141,7 @@ describe("persistent Gateway sessions provider", () => {
                     hasMore: true,
                     limitApplied: 5,
                     nextOffset: 5,
+                    offset: null,
                     totalCount: 6,
                 }
             )

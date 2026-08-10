@@ -3,7 +3,7 @@ import { describe, expect, jest, test } from "bun:test";
 import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -119,6 +119,7 @@ describe("chat message bubble", () => {
                             error: "Unavailable",
                             kind: "tool",
                             name: "status",
+                            output: "Unavailable",
                             status: "failed",
                         },
                     ],
@@ -130,8 +131,87 @@ describe("chat message bubble", () => {
         );
         const toggle = screen.getByRole("button", { name: /status failed/iu });
         expect(toggle).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getAllByText("Unavailable")).toHaveLength(1);
+        expect(
+            screen.getByRole("region", { name: "Status tool output" })
+        ).toHaveAttribute("tabindex", "0");
         await user.click(toggle);
         expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
+
+    test("groups tool description, input, and output in one completed bubble", async () => {
+        const user = userEvent.setup();
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-complete-tool",
+                    parts: [
+                        {
+                            callId: "call-1",
+                            input: {
+                                cmd: "bun test",
+                                workdir: "/workspace/mira-dashboard",
+                            },
+                            kind: "tool",
+                            name: "functions.exec_command",
+                            output: "8 pass\n0 fail",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const tool = screen.getByRole("region", {
+            name: "Bash, completed",
+        });
+        const toggle = screen.getByRole("button", { name: /Bash completed/iu });
+        expect(toggle).toHaveAttribute("aria-expanded", "false");
+        expect(within(tool).queryByText("Tool output")).toBeNull();
+        await user.click(toggle);
+        expect(within(tool).getByText("Description")).toBeVisible();
+        expect(within(tool).getByText("bun test (mira-dashboard)")).toBeVisible();
+        expect(within(tool).getByText("Tool input")).toBeVisible();
+        expect(within(tool).getByText("Tool output")).toBeVisible();
+        expect(within(tool).getByText(/8 pass/iu)).toBeVisible();
+        expect(
+            within(tool).getByRole("region", { name: "Bash tool input" })
+        ).toHaveAttribute("tabindex", "0");
+        expect(
+            within(tool).getByRole("region", { name: "Bash tool output" })
+        ).toHaveAttribute("tabindex", "0");
+        expect(within(tool).queryByText("running")).toBeNull();
+    });
+
+    test("removes a tool-only message when tool visibility is disabled", () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, showTools: false }}
+                message={{
+                    attachments: [],
+                    id: "hidden-tool-message",
+                    parts: [
+                        {
+                            callId: "call-1",
+                            kind: "tool",
+                            name: "lookup",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        expect(screen.queryByRole("article")).toBeNull();
+        expect(screen.queryByText("No visible message content.")).toBeNull();
     });
 
     test("local hide invokes only the browser-owned callback", async () => {

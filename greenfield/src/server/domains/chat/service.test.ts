@@ -6,7 +6,9 @@ import { eq } from "drizzle-orm";
 import type { ChatSendInput } from "../../../contracts/chat.ts";
 import {
     chatDeltaCoalescingMilliseconds,
+    chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
+    chatRuntimeSnapshotMaximumBytes,
 } from "../../../contracts/chatModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
@@ -488,7 +490,7 @@ describe("ChatService", () => {
             await service.runtime(runtimeInput());
             const subscription = provider.requests[0]!;
             for (let runIndex = 0; runIndex < 9; runIndex += 1) {
-                for (let sequence = 1; sequence <= 4; sequence += 1) {
+                for (let sequence = 1; sequence <= 5; sequence += 1) {
                     await subscription.onEvent({
                         kind: "delta",
                         mode: "append",
@@ -497,7 +499,7 @@ describe("ChatService", () => {
                         receivedAtMs: 1000 + runIndex * 10 + sequence,
                         sessionKey: "agent:main:main",
                         stream: "assistant",
-                        text: "x".repeat(64 * 1024),
+                        text: "😀".repeat(32 * 1024),
                     });
                 }
             }
@@ -515,6 +517,10 @@ describe("ChatService", () => {
             expect(utf8ByteLength(JSON.stringify(runtime))).toBeLessThanOrEqual(
                 chatRuntimeResponseMaximumBytes
             );
+            for (const external of runtime.externalRuns) {
+                if (external.text.length === 0) continue;
+                expect(external.text.endsWith("😀")).toBeTrue();
+            }
             expect(
                 database.orm
                     .select()
@@ -564,8 +570,7 @@ describe("ChatService", () => {
                     kind: "terminal",
                     outcome: "completed",
                     providerRunId: external.providerRunId,
-                    providerSequence:
-                        external.providerRunId === "external-late-baseline" ? 6 : 5,
+                    providerSequence: 6,
                     receivedAtMs: 2100,
                     sessionKey: "agent:main:main",
                 });
@@ -578,6 +583,117 @@ describe("ChatService", () => {
             const cleaned = await service.runtime(runtimeInput());
             expect(cleaned.externalRuns).toEqual([]);
             expect(cleaned.externalRunsTruncated).toBeFalse();
+
+            for (let sequence = 1; sequence <= 5; sequence += 1) {
+                await subscription.onEvent({
+                    kind: "delta",
+                    mode: "append",
+                    providerRunId: "external-multibyte",
+                    providerSequence: sequence,
+                    receivedAtMs: 2200 + sequence,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    text: "界".repeat(64 * 1024),
+                });
+            }
+            const multibyteRuntime = await service.runtime(runtimeInput());
+            const multibyte = multibyteRuntime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-multibyte"
+            );
+            expect(multibyte).toMatchObject({
+                hasUnprojectedActivity: true,
+                parts: [],
+                projectionTruncated: true,
+            });
+            expect(multibyte?.text.length).toBeGreaterThan(0);
+            expect(utf8ByteLength(JSON.stringify(multibyte))).toBeLessThanOrEqual(
+                chatRuntimeSnapshotMaximumBytes
+            );
+
+            for (
+                let sequence = 1;
+                sequence <= chatRuntimeProjectionPartsMaximum + 1;
+                sequence += 1
+            ) {
+                await subscription.onEvent({
+                    itemId: `item-${sequence}`,
+                    itemType: "progress",
+                    kind: "item",
+                    providerRunId: "external-many-parts",
+                    providerSequence: sequence,
+                    receivedAtMs: 2300 + sequence,
+                    sessionKey: "agent:main:main",
+                });
+            }
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-many-parts",
+                providerSequence: chatRuntimeProjectionPartsMaximum + 2,
+                receivedAtMs: 3000,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "Final response",
+            });
+            const manyPartsRuntime = await service.runtime(runtimeInput());
+            const manyParts = manyPartsRuntime.externalRuns.find(
+                ({ providerRunId }) => providerRunId === "external-many-parts"
+            );
+            expect(manyParts?.parts).toHaveLength(chatRuntimeProjectionPartsMaximum);
+            expect(manyParts?.parts?.at(-1)).toMatchObject({
+                kind: "assistant",
+                text: "Final response",
+            });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("bounds a multibyte provider in-flight projection before runtime validation", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: {
+                    runId: "provider-multibyte-in-flight",
+                    text: "界".repeat(256 * 1024),
+                },
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const runtime = await service.runtime(runtimeInput());
+            expect(runtime.externalRuns[0]).toMatchObject({
+                hasUnprojectedActivity: true,
+                parts: [],
+                projectionTruncated: true,
+                providerRunId: "provider-multibyte-in-flight",
+            });
+            expect(
+                utf8ByteLength(JSON.stringify(runtime.externalRuns[0]))
+            ).toBeLessThanOrEqual(chatRuntimeSnapshotMaximumBytes);
         } finally {
             await service.dispose();
             database.sqlite.close(true);
@@ -865,6 +981,7 @@ describe("ChatService", () => {
             expect(scheduler.entries).toHaveLength(1);
             await subscription.onEvent({
                 callId: "call-1",
+                input: '{"query":"runtime"}',
                 isError: false,
                 kind: "tool",
                 name: "search",
@@ -878,11 +995,43 @@ describe("ChatService", () => {
             expect(topics()).toEqual(["chat.runtime", "chat.runtime"]);
 
             await subscription.onEvent({
-                kind: "delta",
-                mode: "append",
+                callId: "call-1",
+                isError: false,
+                kind: "tool",
+                name: "search",
+                output: "found",
+                phase: "succeeded",
                 providerRunId: "external-burst",
                 providerSequence: 6,
                 receivedAtMs: 1006,
+                sessionKey: "agent:main:main",
+            });
+            const toolRuntime = await service.runtime(runtimeInput());
+            expect(toolRuntime.externalRuns[0]).toMatchObject({
+                hasUnprojectedActivity: false,
+                projectionTruncated: false,
+            });
+            expect(toolRuntime.externalRuns[0]?.parts).toEqual([
+                { kind: "assistant", sequence: 1, text: "one-two-three" },
+                { kind: "thinking", sequence: 2, text: "private reasoning" },
+                {
+                    callId: "call-1",
+                    input: '{"query":"runtime"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    output: "found",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+            ]);
+
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-burst",
+                providerSequence: 7,
+                receivedAtMs: 1007,
                 sessionKey: "agent:main:main",
                 stream: "assistant",
                 text: "!",
@@ -892,12 +1041,13 @@ describe("ChatService", () => {
                 kind: "terminal",
                 outcome: "completed",
                 providerRunId: "external-burst",
-                providerSequence: 7,
-                receivedAtMs: 1007,
+                providerSequence: 8,
+                receivedAtMs: 1008,
                 sessionKey: "agent:main:main",
             });
             expect(scheduler.entries).toEqual([]);
             expect(topics()).toEqual([
+                "chat.runtime",
                 "chat.runtime",
                 "chat.runtime",
                 "chat.runtime",

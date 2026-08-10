@@ -179,6 +179,48 @@ describe("shared virtualizer follow-to-end controller", () => {
         act(() => rendered.unmount());
     });
 
+    test("keeps a short non-overflowing list sticky after a no-op upward wheel", async () => {
+        let scrollHeight = 200;
+        const rendered = render(<FollowFixture items={["first", "latest"]} />);
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => scrollHeight });
+        await flushAnimationFrames();
+        log.scrollTop = 0;
+
+        fireEvent.wheel(log, { deltaY: -100 });
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "true"
+        );
+
+        scrollHeight = 300;
+        rendered.rerender(<FollowFixture items={["first", "latest", "new-latest"]} />);
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBe(300);
+        act(() => rendered.unmount());
+    });
+
+    test("keeps a short non-overflowing list sticky after a no-op upward key", async () => {
+        let scrollHeight = 200;
+        const rendered = render(<FollowFixture items={["first", "latest"]} />);
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => scrollHeight });
+        await flushAnimationFrames();
+        log.scrollTop = 0;
+
+        fireEvent.keyDown(log, { key: "ArrowUp" });
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "true"
+        );
+
+        scrollHeight = 300;
+        rendered.rerender(<FollowFixture items={["first", "latest", "new-latest"]} />);
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBe(300);
+        act(() => rendered.unmount());
+    });
+
     test("keeps follow behavior opt-in for existing consumers", () => {
         render(<DefaultFixture />);
 
@@ -254,6 +296,75 @@ describe("shared virtualizer follow-to-end controller", () => {
             itemKeys: ["item-11"],
             wasFollowing: true,
         });
+        act(() => rendered.unmount());
+    });
+
+    test("disables shared end-follow before observers can fight an upward gesture", async () => {
+        const items = Array.from({ length: 10 }, (_, index) => `item-${index}`);
+        let scrollHeight = 1000;
+        const rendered = render(<FollowFixture items={items} />);
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => scrollHeight });
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBe(1000);
+
+        fireEvent.wheel(log, { deltaY: -100 });
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "false"
+        );
+
+        // A layout update can land before the browser dispatches its scroll event.
+        // It must not re-arm follow-to-end during that gesture window.
+        scrollHeight = 1200;
+        rendered.rerender(<FollowFixture items={items} layoutRevision={2} />);
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBe(1000);
+
+        act(() => {
+            log.scrollTop = 400;
+            fireEvent.scroll(log);
+        });
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBe(400);
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "false"
+        );
+        act(() => rendered.unmount());
+    });
+
+    test("keeps a near-end upward gesture detached until the reader returns", async () => {
+        const items = Array.from({ length: 10 }, (_, index) => `item-${index}`);
+        let scrollHeight = 1000;
+        const rendered = render(<FollowFixture items={items} />);
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => scrollHeight });
+        await flushAnimationFrames();
+
+        fireEvent.wheel(log, { deltaY: -20 });
+        act(() => {
+            log.scrollTop = 980;
+            fireEvent.scroll(log);
+        });
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "false"
+        );
+
+        scrollHeight = 1200;
+        rendered.rerender(<FollowFixture items={items} layoutRevision={2} />);
+        await flushAnimationFrames();
+        expect(log.scrollTop).toBe(980);
+
+        act(() => {
+            log.scrollTop = 1200;
+            fireEvent.scroll(log);
+        });
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "true"
+        );
         act(() => rendered.unmount());
     });
 

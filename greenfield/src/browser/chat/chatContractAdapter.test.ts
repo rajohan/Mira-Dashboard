@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/chatModel.ts";
 import {
     adaptChatRuntimeEvent,
+    chatToolResultMatchesCall,
     projectChatContractMessage,
     projectChatExternalRun,
     projectChatRuntimeSnapshot,
@@ -75,6 +76,145 @@ describe("chat contract adapter", () => {
             role: "assistant",
             sequence: 7,
         });
+    });
+
+    test("coalesces split call and result parts with one stable tool lifecycle", () => {
+        const message: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [
+                    {
+                        callId: "call-1",
+                        id: "call-part",
+                        input: '{"cmd":"bun test","workdir":"/workspace/app"}',
+                        isError: false,
+                        kind: "tool",
+                        name: "functions.exec_command",
+                        phase: "started",
+                    },
+                    {
+                        callId: "call-1",
+                        id: "result-part",
+                        isError: false,
+                        kind: "tool",
+                        name: "tool",
+                        output: "8 pass",
+                        phase: "succeeded",
+                    },
+                ],
+            },
+            id: "message-tool-pair",
+            role: "assistant",
+            source: "gateway-history",
+        };
+
+        expect(projectChatContractMessage(message, sessionKey, 0).parts).toEqual([
+            {
+                callId: "call-1",
+                input: '{"cmd":"bun test","workdir":"/workspace/app"}',
+                kind: "tool",
+                name: "functions.exec_command",
+                output: "8 pass",
+                status: "completed",
+            },
+        ]);
+    });
+
+    test("pairs synthetic same-name results with the first unresolved call", () => {
+        const message: ChatMessage = {
+            content: {
+                kind: "complete",
+                parts: [
+                    {
+                        callId: "1",
+                        callIdSource: "synthetic",
+                        id: "call-1",
+                        input: "first",
+                        isError: false,
+                        kind: "tool",
+                        name: "search",
+                        phase: "started",
+                    },
+                    {
+                        callId: "2",
+                        callIdSource: "synthetic",
+                        id: "call-2",
+                        input: "second",
+                        isError: false,
+                        kind: "tool",
+                        name: "search",
+                        phase: "started",
+                    },
+                    {
+                        callId: "3",
+                        callIdSource: "synthetic",
+                        id: "result-1",
+                        isError: false,
+                        kind: "tool",
+                        name: "search",
+                        output: "first result",
+                        phase: "succeeded",
+                    },
+                ],
+            },
+            id: "synthetic-tool-pair",
+            role: "assistant",
+            source: "gateway-history",
+        };
+
+        expect(projectChatContractMessage(message, sessionKey, 0).parts).toEqual([
+            {
+                callId: "1",
+                callIdSource: "synthetic",
+                input: "first",
+                kind: "tool",
+                name: "search",
+                output: "first result",
+                status: "completed",
+            },
+            {
+                callId: "2",
+                callIdSource: "synthetic",
+                input: "second",
+                kind: "tool",
+                name: "search",
+                status: "running",
+            },
+        ]);
+    });
+
+    test("consumes a terminal tool result only once", () => {
+        const result = {
+            callId: "call-1",
+            kind: "tool" as const,
+            name: "search",
+            output: "found",
+            status: "completed" as const,
+        };
+        expect(
+            chatToolResultMatchesCall(
+                {
+                    callId: "call-1",
+                    input: '{"query":"runtime"}',
+                    kind: "tool",
+                    name: "search",
+                    status: "running",
+                },
+                result
+            )
+        ).toBeTrue();
+        expect(
+            chatToolResultMatchesCall(
+                {
+                    callId: "call-1",
+                    kind: "tool",
+                    name: "search",
+                    output: "first result",
+                    status: "completed",
+                },
+                result
+            )
+        ).toBeFalse();
     });
 
     test("maps every runtime lifecycle family explicitly", () => {
@@ -178,7 +318,24 @@ describe("chat contract adapter", () => {
     test("projects provider-origin runs without fabricating local admission identity", () => {
         const externalRun: ChatExternalRun = {
             continuity: "interrupted",
-            hasUnprojectedActivity: true,
+            hasUnprojectedActivity: false,
+            parts: [
+                {
+                    kind: "assistant",
+                    sequence: 1,
+                    text: "Provider response",
+                },
+                {
+                    callId: "provider-tool-1",
+                    input: '{"query":"runtime"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    output: "Found runtime activity",
+                    phase: "succeeded",
+                    sequence: 2,
+                },
+            ],
             plan: {
                 phase: "update",
                 steps: [{ status: "in_progress", text: "Inspect provider state" }],
@@ -197,20 +354,25 @@ describe("chat contract adapter", () => {
             parts: [
                 { kind: "text", text: "Provider response" },
                 {
-                    kind: "control",
-                    text: expect.stringContaining("started outside the Dashboard"),
+                    input: '{"query":"runtime"}',
+                    kind: "tool",
+                    output: "Found runtime activity",
+                    status: "completed",
                 },
                 {
                     kind: "control",
                     text: expect.stringContaining("Activity updates were interrupted"),
                 },
-                {
-                    kind: "control",
-                    text: expect.stringContaining("could not be shown"),
-                },
             ],
             role: "assistant",
         });
+        expect(projection.message.parts).not.toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    text: expect.stringContaining("started outside the Dashboard"),
+                }),
+            ])
+        );
         expect(projection.message).not.toHaveProperty("clientRunId");
         expect(projection.message).not.toHaveProperty("runId");
         expect(projection.plan).toMatchObject({

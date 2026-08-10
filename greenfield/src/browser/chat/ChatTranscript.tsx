@@ -8,6 +8,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Virtualizer, type VirtualizerItemsAppendedEvent } from "../ui/Virtualizer.tsx";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
+import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
 import type {
     ChatDisplayMessage,
     ChatDisplaySettings,
@@ -59,7 +60,7 @@ function messageRevision(message: ChatDisplayMessage): number {
         } else {
             hash = hashRevisionPart(
                 hash,
-                `${part.kind}|${part.callId}|${part.status}|${part.error ?? ""}|${revisionDetail(part.output)}`
+                `${part.kind}|${part.callId}|${part.callIdSource ?? ""}|${part.name}|${part.status}|${revisionDetail(part.input)}|${part.error ?? ""}|${revisionDetail(part.output)}`
             );
         }
     }
@@ -148,6 +149,7 @@ export function ChatTranscript({
     );
     const currentNotice =
         notice.sessionKey === sessionKey ? notice : emptyTranscriptNotice(sessionKey);
+    const visibleMessages = visibleChatTranscriptMessages(messages, display, readAloud);
     const stopReadAloud = useEffectEvent(() => onStopReadAloud?.());
     const stopActiveReadAloud = useEffectEvent(() => {
         if (readAloud?.phase !== "idle") stopReadAloud();
@@ -157,7 +159,7 @@ export function ChatTranscript({
         wasFollowing,
     }: VirtualizerItemsAppendedEvent): void {
         const addedIds = new Set(itemKeys.map(String));
-        const assistantCount = messages.filter(
+        const assistantCount = visibleMessages.filter(
             (message) => addedIds.has(message.id) && message.role === "assistant"
         ).length;
         if (assistantCount === 0) return;
@@ -195,7 +197,7 @@ export function ChatTranscript({
 
     useEffect(() => () => stopActiveReadAloud(), [sessionKey]);
 
-    if (messages.length === 0 && initialLoading) {
+    if (visibleMessages.length === 0 && initialLoading) {
         return (
             <div className="flex min-h-0 flex-1 items-center justify-center">
                 <LoadingState label="Loading chat history…" />
@@ -203,7 +205,7 @@ export function ChatTranscript({
         );
     }
 
-    if (messages.length === 0) {
+    if (visibleMessages.length === 0) {
         return (
             <EmptyState
                 className="m-3 flex min-h-0 flex-1 flex-col justify-center border-0 bg-transparent"
@@ -219,7 +221,7 @@ export function ChatTranscript({
             ? currentNotice.announcement
             : `${currentNotice.newMessageCount} new ${currentNotice.newMessageCount === 1 ? "message" : "messages"}`;
     const layoutRevision = transcriptLayoutRevision(
-        messages,
+        visibleMessages,
         display,
         activeRunIds,
         readAloud,
@@ -234,7 +236,7 @@ export function ChatTranscript({
                 {newMessageLabel}
             </output>
             <Virtualizer<HTMLDivElement>
-                count={messages.length}
+                count={visibleMessages.length}
                 estimateSize={() => estimatedMessageHeightPx}
                 followToEnd={{
                     layoutRevision,
@@ -242,7 +244,7 @@ export function ChatTranscript({
                     onItemsAppended: handleItemsAppended,
                     scopeKey: sessionKey,
                 }}
-                getItemKey={(index) => messages[index]?.id ?? `message:${index}`}
+                getItemKey={(index) => visibleMessages[index]?.id ?? `message:${index}`}
                 initialRect={{ height: 560, width: 880 }}
                 overscan={8}
             >
@@ -310,7 +312,7 @@ export function ChatTranscript({
                                 style={{ height: `${virtualization.totalSize}px` }}
                             >
                                 {virtualization.virtualItems.map((virtualItem) => {
-                                    const message = messages[virtualItem.index];
+                                    const message = visibleMessages[virtualItem.index];
                                     if (message === undefined) return null;
                                     return (
                                         <div

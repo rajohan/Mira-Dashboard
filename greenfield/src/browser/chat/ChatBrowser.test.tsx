@@ -1239,11 +1239,7 @@ describe("chat browser", () => {
                 view.query.mock.calls.find((call) => call[0] === "openClawTasks.get")?.[1]
             ).toEqual({ taskId: task.id });
 
-            await user.click(
-                screen.getByRole("button", {
-                    name: "Close details for Default task detail",
-                })
-            );
+            await user.click(taskButton());
             await waitFor(() =>
                 expect(
                     screen.queryByRole("region", {

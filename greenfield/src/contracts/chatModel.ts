@@ -35,6 +35,7 @@ export const chatRuntimeExternalProjectionReserveBytes = 64 * 1024;
 export const chatRuntimeDurableResponseMaximumBytes =
     chatRuntimeResponseMaximumBytes - chatRuntimeExternalProjectionReserveBytes;
 export const chatRuntimeSnapshotMaximumBytes = 512 * 1024;
+export const chatRuntimeProjectionPartsMaximum = 512;
 export const chatRunEventMaximum = 4096;
 export const chatRunEventBytesMaximum = 1024 * 1024;
 /** One immutable journal row must leave most of the per-run journal available. */
@@ -164,11 +165,13 @@ const chatMessagePartVariantSchema = v.variant("kind", [
     }),
     v.strictObject({
         callId: chatToolCallIdSchema,
+        callIdSource: v.optional(v.literal("synthetic")),
         id: chatPartIdSchema,
         input: v.optional(chatDiagnosticTextSchema),
         isError: v.boolean("Chat tool failure state is invalid"),
         kind: v.literal("tool"),
         name: chatToolNameSchema,
+        nameSource: v.optional(v.literal("synthetic")),
         output: v.optional(chatDiagnosticTextSchema),
         phase: v.picklist(
             ["started", "running", "succeeded", "failed"],
@@ -620,7 +623,10 @@ export function chatRuntimeProjectionPartsAreOrdered(
 
 const chatRuntimeProjectionPartsSchema = v.pipe(
     v.array(chatRuntimeProjectionPartSchema, "Chat runtime projection parts are invalid"),
-    v.maxLength(512, "Chat runtime projection part count is outside its budget"),
+    v.maxLength(
+        chatRuntimeProjectionPartsMaximum,
+        "Chat runtime projection part count is outside its budget"
+    ),
     v.check(
         chatRuntimeProjectionPartsAreOrdered,
         "Chat runtime projection parts are not in strict sequence order"
@@ -668,17 +674,34 @@ const chatExternalPlanSchema = v.strictObject({
 });
 
 /** Honest provider-origin projection with no fabricated local actor or UUID admission. */
-export const chatExternalRunSchema = v.strictObject({
+const chatExternalRunObjectSchema = v.strictObject({
     continuity: v.picklist(["complete", "interrupted"]),
     hasUnprojectedActivity: v.boolean(),
+    /** Ordered provider activity retained even when no local admission exists. */
+    parts: v.optional(chatRuntimeProjectionPartsSchema),
     plan: v.optional(chatExternalPlanSchema),
     /** True when response budgeting deliberately omits provider projection detail. */
     projectionTruncated: v.optional(v.boolean(), false),
     providerRunId: chatProviderRunIdSchema,
     sessionKey: gatewaySessionKeySchema,
     source: v.picklist(["provider-in-flight", "provider-runtime"]),
+    /** Assistant-only compatibility projection used by bounded response fallback. */
     text: chatMessageTextSchema,
     updatedAtMs: timestampMillisecondsSchema("External chat run timestamp is invalid"),
 });
+
+export function chatExternalRunFitsBudget(
+    run: v.InferOutput<typeof chatExternalRunObjectSchema>
+): boolean {
+    return utf8ByteLength(JSON.stringify(run)) <= chatRuntimeSnapshotMaximumBytes;
+}
+
+export const chatExternalRunSchema = v.pipe(
+    chatExternalRunObjectSchema,
+    v.check(
+        chatExternalRunFitsBudget,
+        "External chat run projection is outside its budget"
+    )
+);
 
 export type ChatExternalRun = v.InferOutput<typeof chatExternalRunSchema>;

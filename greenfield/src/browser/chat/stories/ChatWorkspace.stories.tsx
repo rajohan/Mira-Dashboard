@@ -423,11 +423,7 @@ export const TaskDetailCanClose: Story = {
             canvas.getByRole("region", { name: "Task detail: Review deployment" })
         ).toBeVisible();
 
-        await userEvent.click(
-            canvas.getByRole("button", {
-                name: "Close details for Review deployment",
-            })
-        );
+        await userEvent.click(task());
         await expect(task()).toHaveAttribute("aria-expanded", "false");
         await expect(task()).toHaveFocus();
         await expect(

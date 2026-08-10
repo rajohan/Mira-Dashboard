@@ -494,7 +494,7 @@ describe("chat workspace", () => {
         expect(screen.getByRole("log", { name: "Messages" })).toBeVisible();
     });
 
-    test("keeps task detail beside its row and exposes both close controls", async () => {
+    test("keeps task detail beside its row and toggles it from the disclosure", async () => {
         const user = userEvent.setup();
         const props = properties();
         const onSelectTask = jest.fn();
@@ -528,10 +528,9 @@ describe("chat workspace", () => {
 
         await user.click(firstTask);
         expect(onSelectTask).toHaveBeenLastCalledWith(undefined);
-        await user.click(
-            screen.getByRole("button", { name: "Close details for First task" })
-        );
-        expect(onSelectTask).toHaveBeenLastCalledWith(undefined);
+        expect(
+            screen.queryByRole("button", { name: "Close details for First task" })
+        ).toBeNull();
 
         rendered.rerender(
             <ChatWorkspace
@@ -654,13 +653,16 @@ describe("chat workspace", () => {
         expect(open.textContent).toBe("");
         expect(open.parentElement).toHaveClass(
             "border-primary-700",
-            "items-start",
+            "top-1/2",
+            "-translate-y-1/2",
+            "items-center",
+            "lg:self-stretch",
             "lg:border-l"
         );
         expect(open).toHaveClass(
             "h-10",
             "flex-none",
-            "self-start",
+            "self-center",
             "focus-visible:ring-1",
             "focus-visible:ring-offset-0"
         );

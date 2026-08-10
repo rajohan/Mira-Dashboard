@@ -49,14 +49,17 @@ import {
 import {
     chatExternalRunsPerProcessMaximum,
     chatExternalRunsPerSessionMaximum,
+    chatExternalRunFitsBudget,
     chatExternalRunSchema,
     chatHistoryProviderPageMaximum,
     chatHistoryResponseMaximumBytes,
     chatMessageTextMaximumCodeUnits,
+    chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
     mergeChatStreamText,
     type ChatExternalRun,
     type ChatMessage,
+    type ChatRuntimeProjectionPart,
 } from "../../../contracts/chatModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { type ChatCoalescerScheduler, ChatRuntimeEventCoalescer } from "./coalescer.ts";
@@ -340,7 +343,13 @@ function compareExternalRuns(left: ChatExternalRun, right: ChatExternalRun): num
 }
 
 function compactExternalRun(run: ChatExternalRun): ChatExternalRun {
-    if (run.text.length === 0 && run.plan === undefined) return run;
+    if (
+        run.text.length === 0 &&
+        run.plan === undefined &&
+        (run.parts?.length ?? 0) === 0
+    ) {
+        return run;
+    }
     return v.parse(chatExternalRunSchema, {
         continuity: run.continuity,
         hasUnprojectedActivity: true,
@@ -351,6 +360,133 @@ function compactExternalRun(run: ChatExternalRun): ChatExternalRun {
         text: "",
         updatedAtMs: run.updatedAtMs,
     });
+}
+
+function safeCodeUnitPrefix(text: string, requestedLength: number): string {
+    let length = Math.min(requestedLength, text.length);
+    if (length <= 0 || length >= text.length) return text.slice(0, length);
+    if ((text.codePointAt(length - 1) ?? 0) > 65_535) length -= 1;
+    return text.slice(0, length);
+}
+
+function boundExternalRunProjection(run: ChatExternalRun): ChatExternalRun {
+    if (chatExternalRunFitsBudget(run)) return v.parse(chatExternalRunSchema, run);
+    const compact: ChatExternalRun = {
+        ...run,
+        hasUnprojectedActivity: true,
+        parts: [],
+        projectionTruncated: true,
+    };
+    if (chatExternalRunFitsBudget(compact)) {
+        return v.parse(chatExternalRunSchema, compact);
+    }
+
+    let base: ChatExternalRun = { ...compact, text: "" };
+    if (!chatExternalRunFitsBudget(base) && base.plan !== undefined) {
+        const { plan: _omittedPlan, ...withoutPlan } = base;
+        base = withoutPlan;
+    }
+    let lower = 1;
+    let upper = compact.text.length;
+    let best = base;
+    while (lower <= upper) {
+        const middle = Math.floor((lower + upper) / 2);
+        const candidate: ChatExternalRun = {
+            ...base,
+            text: safeCodeUnitPrefix(compact.text, middle),
+        };
+        if (chatExternalRunFitsBudget(candidate)) {
+            best = candidate;
+            lower = middle + 1;
+        } else {
+            upper = middle - 1;
+        }
+    }
+    return v.parse(chatExternalRunSchema, best);
+}
+
+function updateExternalStreamPart(
+    parts: readonly ChatRuntimeProjectionPart[],
+    event: Extract<ChatProviderEvent, { kind: "delta" }>
+): readonly ChatRuntimeProjectionPart[] {
+    const kind = event.stream;
+    const previous = parts.at(-1);
+    if (previous?.kind !== kind) {
+        return [
+            ...parts,
+            {
+                kind,
+                sequence: (previous?.sequence ?? 0) + 1,
+                text: event.text,
+            },
+        ];
+    }
+    let text = event.text;
+    if (event.mode === "append") text = previous.text + event.text;
+    if (event.mode === "merge") text = mergeChatStreamText(previous.text, event.text);
+    return [
+        ...parts.slice(0, -1),
+        {
+            kind,
+            sequence: previous.sequence,
+            text,
+        },
+    ];
+}
+
+function updateExternalToolPart(
+    parts: readonly ChatRuntimeProjectionPart[],
+    event: Extract<ChatProviderEvent, { kind: "tool" }>
+): readonly ChatRuntimeProjectionPart[] {
+    const index = parts.findIndex(
+        (part) => part.kind === "tool" && part.callId === event.callId
+    );
+    const previous = index === -1 ? undefined : parts[index];
+    const previousTool = previous?.kind === "tool" ? previous : undefined;
+    const previousIsTerminal =
+        previousTool !== undefined &&
+        (previousTool.phase === "succeeded" || previousTool.phase === "failed");
+    const terminal =
+        previousIsTerminal && event.phase !== "succeeded" && event.phase !== "failed"
+            ? previousTool
+            : undefined;
+    const projection: ChatRuntimeProjectionPart = {
+        callId: event.callId,
+        ...((previousTool?.input ?? event.input) === undefined
+            ? {}
+            : { input: previousTool?.input ?? event.input }),
+        isError: terminal?.isError ?? event.isError,
+        kind: "tool",
+        name: previousTool?.name ?? event.name,
+        ...((event.output ?? previousTool?.output) === undefined
+            ? {}
+            : { output: event.output ?? previousTool?.output }),
+        phase: terminal?.phase ?? event.phase,
+        sequence: previousTool?.sequence ?? (parts.at(-1)?.sequence ?? 0) + 1,
+    };
+    if (index === -1) return [...parts, projection];
+    return parts.map((part, partIndex) => (partIndex === index ? projection : part));
+}
+
+function updateExternalItemPart(
+    parts: readonly ChatRuntimeProjectionPart[],
+    event: Extract<ChatProviderEvent, { kind: "item" }>
+): readonly ChatRuntimeProjectionPart[] {
+    const index = parts.findIndex(
+        (part) => part.kind === "item" && part.id === event.itemId
+    );
+    const previous = index === -1 ? undefined : parts[index];
+    const previousItem = previous?.kind === "item" ? previous : undefined;
+    const text = event.text ?? previousItem?.text;
+    const projection: ChatRuntimeProjectionPart = {
+        id: event.itemId,
+        kind: "item",
+        sequence: previousItem?.sequence ?? (parts.at(-1)?.sequence ?? 0) + 1,
+        ...(text === undefined ? {} : { text }),
+        type: previousItem?.type ?? event.itemType,
+    };
+    if (index === -1) return [...parts, projection];
+    return parts.map((part, partIndex) => (partIndex === index ? projection : part));
 }
 
 function runtimeWithExternalRuns(
@@ -424,7 +560,7 @@ function budgetExternalRuns(
                 providerRunId: full.providerRunId,
                 sessionKey: full.sessionKey,
                 source: full.source,
-                text: full.text.slice(0, middle),
+                text: safeCodeUnitPrefix(full.text, middle),
                 updatedAtMs: full.updatedAtMs,
             });
             if (
@@ -709,6 +845,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         const runs = this.#externalRuns.get(event.sessionKey);
         const previous = runs?.get(providerRunId);
         let text = previous?.text ?? "";
+        let parts: readonly ChatRuntimeProjectionPart[] =
+            previous?.parts ??
+            (text === "" ? [] : [{ kind: "assistant", sequence: 1, text }]);
         const beganAfterProviderSequenceOne =
             previous === undefined && event.providerSequence > 1;
         let hasUnprojectedActivity =
@@ -722,39 +861,65 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             if (event.mode === "merge") {
                 text = mergeChatStreamText(previousText, event.text);
             }
+            parts = updateExternalStreamPart(parts, event);
+        } else if (event.kind === "delta" && event.stream === "thinking") {
+            parts = updateExternalStreamPart(parts, event);
+        } else if (event.kind === "tool") {
+            parts = updateExternalToolPart(parts, event);
+        } else if (event.kind === "item") {
+            parts = updateExternalItemPart(parts, event);
         } else if (event.kind === "plan") {
             plan = { phase: "update", steps: [...event.steps] };
-        } else if (
-            event.kind === "tool" ||
-            event.kind === "item" ||
-            (event.kind === "delta" && event.stream === "thinking")
-        ) {
-            hasUnprojectedActivity = true;
         }
         if (text.length > chatMessageTextMaximumCodeUnits) {
-            text = text.slice(0, chatMessageTextMaximumCodeUnits);
+            text = safeCodeUnitPrefix(text, chatMessageTextMaximumCodeUnits);
             hasUnprojectedActivity = true;
             projectionTruncated = true;
         }
-        this.#storeExternalRun(
-            v.parse(chatExternalRunSchema, {
-                continuity:
-                    previous?.continuity ??
-                    (beganAfterProviderSequenceOne ? "interrupted" : "complete"),
-                hasUnprojectedActivity,
-                ...(plan === undefined ? {} : { plan }),
-                projectionTruncated,
-                providerRunId,
-                sessionKey: event.sessionKey,
-                source: "provider-runtime",
-                text,
-                updatedAtMs: Math.max(
-                    previous?.updatedAtMs ?? 0,
-                    event.receivedAtMs,
-                    this.#nowMs()
-                ),
-            })
+        const oversizedStreamPart = parts.some(
+            (part) =>
+                (part.kind === "assistant" || part.kind === "thinking") &&
+                part.text.length > chatMessageTextMaximumCodeUnits
         );
+        if (oversizedStreamPart) {
+            parts = parts.map((part) =>
+                part.kind === "assistant" || part.kind === "thinking"
+                    ? {
+                          ...part,
+                          text: safeCodeUnitPrefix(
+                              part.text,
+                              chatMessageTextMaximumCodeUnits
+                          ),
+                      }
+                    : part
+            );
+            hasUnprojectedActivity = true;
+            projectionTruncated = true;
+        }
+        if (parts.length > chatRuntimeProjectionPartsMaximum) {
+            parts = parts.slice(-chatRuntimeProjectionPartsMaximum);
+            hasUnprojectedActivity = true;
+            projectionTruncated = true;
+        }
+        const candidate = {
+            continuity:
+                previous?.continuity ??
+                (beganAfterProviderSequenceOne ? "interrupted" : "complete"),
+            hasUnprojectedActivity,
+            parts: [...parts],
+            ...(plan === undefined ? {} : { plan }),
+            projectionTruncated,
+            providerRunId,
+            sessionKey: event.sessionKey,
+            source: "provider-runtime" as const,
+            text,
+            updatedAtMs: Math.max(
+                previous?.updatedAtMs ?? 0,
+                event.receivedAtMs,
+                this.#nowMs()
+            ),
+        };
+        this.#storeExternalRun(boundExternalRunProjection(candidate));
         await this.#externalCoalescer(event.sessionKey).push(providerEventDraft(event));
     }
 
@@ -870,9 +1035,10 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 .get(gap.sessionKey)
                 ?.get(gap.providerRunId);
             this.#storeExternalRun(
-                v.parse(chatExternalRunSchema, {
+                boundExternalRunProjection({
                     continuity: "interrupted",
                     hasUnprojectedActivity: true,
+                    ...(previous?.parts === undefined ? {} : { parts: previous.parts }),
                     ...(previous?.plan === undefined ? {} : { plan: previous.plan }),
                     providerRunId: gap.providerRunId,
                     sessionKey: gap.sessionKey,
@@ -1204,12 +1370,27 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         );
         if (local !== undefined) return;
         this.#storeExternalRun(
-            v.parse(chatExternalRunSchema, {
+            boundExternalRunProjection({
                 continuity: "complete",
                 hasUnprojectedActivity: false,
+                parts:
+                    inFlightRun.text === ""
+                        ? []
+                        : [
+                              {
+                                  kind: "assistant",
+                                  sequence: 1,
+                                  text: inFlightRun.text,
+                              },
+                          ],
                 ...(inFlightRun.plan === undefined
                     ? {}
-                    : { plan: { phase: "update", steps: inFlightRun.plan.steps } }),
+                    : {
+                          plan: {
+                              phase: "update",
+                              steps: [...inFlightRun.plan.steps],
+                          },
+                      }),
                 providerRunId: inFlightRun.runId,
                 sessionKey,
                 source: "provider-in-flight",

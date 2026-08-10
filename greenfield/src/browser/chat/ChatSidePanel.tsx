@@ -137,7 +137,6 @@ interface TaskDetailProps {
     readonly error?: string;
     readonly id: string;
     readonly onCancel: () => void;
-    readonly onClose: () => void;
     readonly task: ChatBackgroundTaskView;
 }
 
@@ -147,26 +146,13 @@ function TaskDetail({
     error,
     id,
     onCancel,
-    onClose,
     task,
 }: TaskDetailProps) {
     return (
         <section aria-label={`Task detail: ${task.label}`} className="min-w-0" id={id}>
-            <div className="flex min-w-0 items-start justify-between gap-2">
-                <p className="text-primary-100 min-w-0 flex-1 font-medium wrap-break-word">
-                    {task.label}
-                </p>
-                <Button
-                    aria-label={`Close details for ${task.label}`}
-                    className="shrink-0"
-                    onClick={onClose}
-                    size="sm"
-                    variant="ghost"
-                >
-                    <Icon icon={X} size="sm" tone="inherit" />
-                    Close
-                </Button>
-            </div>
+            <p className="text-primary-100 min-w-0 font-medium wrap-break-word">
+                {task.label}
+            </p>
             <Text className="mt-1" size="sm" tone="muted">
                 {task.summary ?? "No more details are available yet."}
             </Text>
@@ -526,7 +512,7 @@ export function ChatSidePanel({
                                                 </Badge>
                                             }
                                         >
-                                            {(_open, close) => (
+                                            {() => (
                                                 <TaskDetail
                                                     cancelBusy={taskCancelGatedIds.includes(
                                                         task.id
@@ -539,7 +525,6 @@ export function ChatSidePanel({
                                                         : { error: taskDetailError })}
                                                     id={taskDetailId}
                                                     onCancel={() => onCancelTask(task.id)}
-                                                    onClose={close}
                                                     task={task}
                                                 />
                                             )}

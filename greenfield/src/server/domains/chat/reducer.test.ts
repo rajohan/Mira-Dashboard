@@ -287,6 +287,7 @@ describe("chat runtime reducer", () => {
             }),
             event({
                 callId: "fixture-tool-1",
+                input: '{"path":"/tmp/fixture.json"}',
                 isError: false,
                 kind: "tool",
                 name: "fixture.lookup",
@@ -353,6 +354,7 @@ describe("chat runtime reducer", () => {
             },
             {
                 callId: "fixture-tool-1",
+                input: '{"path":"/tmp/fixture.json"}',
                 isError: false,
                 kind: "tool",
                 name: "fixture.lookup",

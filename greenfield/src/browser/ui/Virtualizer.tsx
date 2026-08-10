@@ -197,7 +197,9 @@ function useFollowToEndController<TItemElement extends Element>({
     }
 
     function scheduleFollow(isStructuralChange = false, shouldPrimeEnd = false): void {
-        if (!enabled || !followingReference.current) return;
+        if (!enabled || !followingReference.current || userScrollIntent.current) {
+            return;
+        }
         if (isStructuralChange) {
             structuralFollow.current = true;
             framesRemaining.current = structuralFollowMaximumFrames;
@@ -261,13 +263,18 @@ function useFollowToEndController<TItemElement extends Element>({
         const threshold = options?.scrollEndThreshold ?? defaultFollowEndThresholdPx;
         const nextAtEnd =
             element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+        const moved = Math.abs(element.scrollTop - previousScrollTop.current) > 1;
         const movedUp = element.scrollTop + 1 < previousScrollTop.current;
         const structuralCorrectionPending =
             movedUp && structuralFollow.current && frame.current !== undefined;
-        if (nextAtEnd) {
+        if (movedUp && userScrollIntent.current) {
+            cancelScheduledFollow();
+            userScrollIntent.current = false;
+            setFollowState(false);
+        } else if (nextAtEnd) {
             userScrollIntent.current = false;
             setFollowState(true);
-        } else if (movedUp && userScrollIntent.current && !structuralCorrectionPending) {
+        } else if (moved && userScrollIntent.current && !structuralCorrectionPending) {
             cancelScheduledFollow();
             userScrollIntent.current = false;
             setFollowState(false);
@@ -280,10 +287,27 @@ function useFollowToEndController<TItemElement extends Element>({
         previousScrollTop.current = element.scrollTop;
         setAtEnd(nextAtEnd);
     });
-    const handleUserScrollIntent = useEffectEvent(() => {
+    const handleUserScrollIntent = useEffectEvent((awayFromEnd: boolean) => {
         if (!enabled) return;
+        const element = scrollContainerRef.current;
+        const canScrollAway =
+            element !== null && element.scrollHeight > element.clientHeight;
+        if (awayFromEnd && !canScrollAway) {
+            userScrollIntent.current = false;
+            return;
+        }
         userScrollIntent.current = true;
         cancelScheduledFollow();
+        if (awayFromEnd && element !== null) {
+            // Disable sticky following at gesture time. Waiting for the browser's
+            // later scroll event leaves a race where observers or row measurement
+            // can schedule another end correction first.
+            setFollowState(false);
+            setAtEnd(false);
+        }
+    });
+    const clearUnusedUserScrollIntent = useEffectEvent(() => {
+        userScrollIntent.current = false;
     });
     const restoreVisibleFollow = useEffectEvent(() => {
         if (!enabled) return;
@@ -346,14 +370,24 @@ function useFollowToEndController<TItemElement extends Element>({
         const element = scrollContainerRef.current;
         if (element === null) return;
         const onKeyDown = (event: KeyboardEvent) => {
-            if (isKeyboardScroll(event, element)) handleUserScrollIntent();
+            if (!isKeyboardScroll(event, element)) return;
+            const awayFromEnd =
+                event.key === "ArrowUp" ||
+                event.key === "Home" ||
+                event.key === "PageUp" ||
+                (event.key === " " && event.shiftKey);
+            if (awayFromEnd) handleUserScrollIntent(true);
         };
         const onPointerDown = (event: PointerEvent) => {
-            if (isScrollbarPointer(event, element)) handleUserScrollIntent();
+            if (isScrollbarPointer(event, element)) handleUserScrollIntent(false);
         };
+        const onPointerEnd = () => clearUnusedUserScrollIntent();
         const onScroll = () => handleScroll();
-        const onTouchMove = () => handleUserScrollIntent();
-        const onWheel = () => handleUserScrollIntent();
+        const onTouchMove = () => handleUserScrollIntent(false);
+        const onTouchEnd = () => clearUnusedUserScrollIntent();
+        const onWheel = (event: WheelEvent) => {
+            if (event.deltaY < 0) handleUserScrollIntent(true);
+        };
         const onVisibilityChange = () => restoreVisibleFollow();
         const resizeObserver =
             typeof ResizeObserver === "undefined"
@@ -365,7 +399,10 @@ function useFollowToEndController<TItemElement extends Element>({
                 : new MutationObserver(() => scheduleFollowAfterContentMutation());
         element.addEventListener("keydown", onKeyDown);
         element.addEventListener("pointerdown", onPointerDown);
+        element.addEventListener("pointercancel", onPointerEnd);
+        element.addEventListener("pointerup", onPointerEnd);
         element.addEventListener("scroll", onScroll, { passive: true });
+        element.addEventListener("touchend", onTouchEnd, { passive: true });
         element.addEventListener("touchmove", onTouchMove, { passive: true });
         element.addEventListener("wheel", onWheel, { passive: true });
         document.addEventListener("visibilitychange", onVisibilityChange);
@@ -379,7 +416,10 @@ function useFollowToEndController<TItemElement extends Element>({
         return () => {
             element.removeEventListener("keydown", onKeyDown);
             element.removeEventListener("pointerdown", onPointerDown);
+            element.removeEventListener("pointercancel", onPointerEnd);
+            element.removeEventListener("pointerup", onPointerEnd);
             element.removeEventListener("scroll", onScroll);
+            element.removeEventListener("touchend", onTouchEnd);
             element.removeEventListener("touchmove", onTouchMove);
             element.removeEventListener("wheel", onWheel);
             document.removeEventListener("visibilitychange", onVisibilityChange);

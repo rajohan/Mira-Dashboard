@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from "bun:test";
 
+import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
 import { ChatTranscript } from "./ChatTranscript.tsx";
 import type { ChatDisplayMessage } from "./chatTypes.ts";
 
@@ -50,6 +51,33 @@ async function flushAnimationFrames(): Promise<void> {
 }
 
 describe("chat transcript", () => {
+    test("removes hidden tool-only messages from the virtualized row set", () => {
+        const toolOnly: ChatDisplayMessage = {
+            attachments: [],
+            id: "tool-only",
+            parts: [
+                {
+                    callId: "call-1",
+                    input: { query: "runtime" },
+                    kind: "tool",
+                    name: "search",
+                    status: "running",
+                },
+            ],
+            role: "assistant",
+            sequence: 2,
+            sessionKey,
+        };
+        const messages = [message("message-1", 1), toolOnly];
+        expect(
+            visibleChatTranscriptMessages(messages, {
+                ...display,
+                showTools: false,
+            }).map(({ id }) => id)
+        ).toEqual(["message-1"]);
+        expect(visibleChatTranscriptMessages(messages, display)).toHaveLength(2);
+    });
+
     test("announces an atomic polite count while the reader is off the bottom", async () => {
         const first = message("message-1", 1);
         const rendered = render(<ChatTranscript {...properties([first])} />);

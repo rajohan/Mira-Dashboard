@@ -418,12 +418,12 @@ export function ChatWorkspace({
                     />
                 </div>
                 {!activityOpen && (
-                    <div className="border-primary-700 absolute top-2 right-1 z-30 flex shrink-0 items-start lg:static lg:border-l lg:p-1">
+                    <div className="border-primary-700 absolute top-1/2 right-1 z-30 flex shrink-0 -translate-y-1/2 items-center lg:static lg:translate-y-0 lg:self-stretch lg:border-l lg:p-1">
                         <Button
                             aria-controls="chat-activity-panel"
                             aria-expanded={false}
                             aria-label="Open activity panel"
-                            className="focus-visible:ring-accent-400 h-10 min-h-10 min-w-10 flex-none justify-center self-start px-0 focus-visible:ring-1 focus-visible:ring-offset-0"
+                            className="focus-visible:ring-accent-400 h-10 min-h-10 min-w-10 flex-none justify-center self-center px-0 focus-visible:ring-1 focus-visible:ring-offset-0"
                             onClick={() => {
                                 activityWasToggled.current = true;
                                 setActivityOpen(true);
