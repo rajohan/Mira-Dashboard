@@ -133,6 +133,9 @@ function processFixture(totpFailure?: Error) {
             expect(options.readiness.isReady()).toBe(false);
             expect(options.browserOrigin).toBe("https://dashboard.example.com");
             expect(options.dashboardLogsRoot).toBe(layout.production.state.logs);
+            expect(options.dashboardLogMaintenanceRoot).toBe(
+                layout.production.state.logMaintenance
+            );
             expect(Redacted.value(options.elevenLabsApiKey!)).toBe(
                 "elevenlabs-api-key-test-value"
             );

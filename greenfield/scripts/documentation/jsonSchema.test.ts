@@ -53,6 +53,7 @@ import {
     listTasksResultSchema,
     updateTaskInputSchema,
 } from "../../src/contracts/tasks.ts";
+import { terminalSessionSummarySchema } from "../../src/contracts/terminal.ts";
 import {
     webAuthnAuthenticationResponseSchema,
     webAuthnTransportListSchema,
@@ -169,6 +170,18 @@ describe("contract JSON Schema conversion", () => {
         expect(document).toContain(
             "delivery metadata and desired enabled-state synchronization"
         );
+    });
+
+    test("documents the runtime-only terminal replay window invariant", () => {
+        const document = JSON.stringify(
+            convertContractSchema(
+                terminalSessionSummarySchema,
+                "test.terminalSessionSummary",
+                "output"
+            )
+        );
+
+        expect(document).toContain("oldest retained replay sequence");
     });
 
     test("documents chat budgets, projection invariants, and MIME normalization", () => {

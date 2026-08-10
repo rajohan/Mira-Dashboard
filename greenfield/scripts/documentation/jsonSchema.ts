@@ -210,6 +210,7 @@ import {
 } from "../../src/contracts/tasks.ts";
 import {
     terminalPathIsCanonical,
+    terminalReplayWindowIsValid,
     terminalRootsAreCanonical,
 } from "../../src/contracts/terminal.ts";
 import {
@@ -268,6 +269,10 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         terminalRootsAreCanonical,
         "Live Valibot validation additionally requires unique terminal root IDs in canonical ascending order.",
+    ],
+    [
+        terminalReplayWindowIsValid,
+        "Live Valibot validation additionally requires the oldest retained replay sequence not to exceed the next output sequence.",
     ],
     [
         chatSpeechTranscriptFitsByteBudget,

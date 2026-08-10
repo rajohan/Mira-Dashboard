@@ -54,7 +54,9 @@ function processFixture(
     runtimeFailure?: Error,
     runtimeStopsUnexpectedly = false,
     waitForForceDuringDisposal = false,
-    runtimeCreationFailure?: Error
+    runtimeCreationFailure?: Error,
+    availabilityFailure?: Error,
+    availabilityStartFailure?: Error
 ) {
     const events: string[] = [];
     const logLines: string[] = [];
@@ -81,6 +83,9 @@ function processFixture(
             },
             write(line: string): undefined {
                 logLines.push(line);
+                events.push(
+                    `log:${String((JSON.parse(line) as { event?: unknown }).event)}`
+                );
                 return;
             },
         }),
@@ -105,9 +110,15 @@ function processFixture(
         },
         forceSignal: forceController.signal,
         termination:
-            runtimeFailure !== undefined || runtimeStopsUnexpectedly
+            runtimeFailure !== undefined ||
+            runtimeStopsUnexpectedly ||
+            availabilityFailure !== undefined
                 ? new Promise<"SIGTERM">(() => {})
                 : Promise.resolve("SIGTERM" as const),
+    });
+    const logMaintenance = Object.freeze({
+        availablePolicies: () => Promise.resolve(["docker-managed" as const]),
+        run: () => Promise.resolve(),
     });
     const runtime: DashboardWorkerRuntime = Object.freeze({
         completion,
@@ -147,6 +158,13 @@ function processFixture(
         },
     });
     let terminalBrokerStopped = false;
+    let availabilityStopped = false;
+    let resolveAvailabilityCompletion!: () => void;
+    let rejectAvailabilityCompletion!: (error: unknown) => void;
+    const availabilityCompletion = new Promise<void>((resolve, reject) => {
+        resolveAvailabilityCompletion = resolve;
+        rejectAvailabilityCompletion = reject;
+    });
     const dependencies = Object.freeze({
         createGatewayTransport(options) {
             events.push("gateway-create");
@@ -159,12 +177,18 @@ function processFixture(
             events.push(`logs:${processRole}:${logsDirectory}`);
             return destination;
         },
+        createLogMaintenanceExecutor(observedLayout) {
+            expect(observedLayout).toBe(layout);
+            events.push("log-maintenance-create");
+            return logMaintenance;
+        },
         createRuntime(
             observedLayout,
             observedRelease,
             logger,
             observedGatewayTransport,
-            observedWorkspaceRoot
+            observedWorkspaceRoot,
+            observedLogMaintenance
         ) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
@@ -175,6 +199,7 @@ function processFixture(
                 path: workspaceRoot,
                 writable: true,
             });
+            expect(observedLogMaintenance).toBe(logMaintenance);
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
                 "start",
                 "stop",
@@ -207,6 +232,32 @@ function processFixture(
                     id: "workspace",
                     path: workspaceRoot,
                     writable: true,
+                })
+            );
+        },
+        startLogMaintenanceAvailability(options) {
+            expect(options.availablePolicies).toBe(logMaintenance.availablePolicies);
+            expect(options.logMaintenanceRoot).toBe(
+                layout.production.state.logMaintenance
+            );
+            events.push("log-maintenance-availability-start");
+            if (availabilityStartFailure !== undefined) {
+                return Promise.reject(availabilityStartFailure);
+            }
+            if (availabilityFailure !== undefined) {
+                queueMicrotask(() => rejectAvailabilityCompletion(availabilityFailure));
+            }
+            return Promise.resolve(
+                Object.freeze({
+                    completion: availabilityCompletion,
+                    stop() {
+                        if (!availabilityStopped) {
+                            availabilityStopped = true;
+                            events.push("log-maintenance-availability-stop");
+                            resolveAvailabilityCompletion();
+                        }
+                        return Promise.resolve();
+                    },
                 })
             );
         },
@@ -309,10 +360,15 @@ describe("Dashboard worker process", () => {
             "signals-create",
             "terminal-broker-start",
             "gateway-create",
+            "log-maintenance-create",
             "runtime-create",
             "runtime-initialize",
+            "log-maintenance-availability-start",
+            "log:runtime.started",
+            "log-maintenance-availability-stop",
             "terminal-broker-stop",
             "runtime-dispose",
+            "log:runtime.stopped",
             "signals-dispose",
             "log-flush",
         ]);
@@ -365,6 +421,57 @@ describe("Dashboard worker process", () => {
         };
         expect(fatal.event).toBe("runtime.start_failed");
         expect(JSON.stringify(fatal)).not.toContain("private coordinator failure");
+    });
+
+    test("fails and clears availability before disposing after a publisher defect", async () => {
+        const failure = new Error("private availability publication failure");
+        const fixture = processFixture(
+            undefined,
+            undefined,
+            false,
+            false,
+            undefined,
+            failure
+        );
+
+        expect(
+            await runDashboardWorkerProcess(processOptions, fixture.dependencies).catch(
+                (error: unknown) => error
+            )
+        ).toBe(failure);
+        expect(fixture.events.indexOf("log-maintenance-availability-stop")).toBeLessThan(
+            fixture.events.indexOf("terminal-broker-stop")
+        );
+        expect(fixture.events.indexOf("terminal-broker-stop")).toBeLessThan(
+            fixture.events.indexOf("runtime-dispose")
+        );
+        expect(fixture.logLines.join("\n")).not.toContain(
+            "private availability publication failure"
+        );
+    });
+
+    test("disposes initialized ownership when the initial availability publish fails", async () => {
+        const failure = new Error("private initial publication failure");
+        const fixture = processFixture(
+            undefined,
+            undefined,
+            false,
+            false,
+            undefined,
+            undefined,
+            failure
+        );
+
+        expect(
+            await runDashboardWorkerProcess(processOptions, fixture.dependencies).catch(
+                (error: unknown) => error
+            )
+        ).toBe(failure);
+        expect(fixture.events).toContain("runtime-initialize");
+        expect(fixture.events).not.toContain("log-maintenance-availability-stop");
+        expect(fixture.events.indexOf("terminal-broker-stop")).toBeLessThan(
+            fixture.events.indexOf("runtime-dispose")
+        );
     });
 
     test("allows a second signal to force runtime-failure cleanup", async () => {

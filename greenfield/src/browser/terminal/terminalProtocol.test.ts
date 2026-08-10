@@ -30,6 +30,7 @@ const summary = Object.freeze({
     idleExpiresAtMs: 1_800_000_600_000,
     location: { path: "/", rootId: "dashboard" },
     nextSequence: 1,
+    replayAvailableFromSequence: 1,
     sessionId,
     startedAtMs: 1_800_000_000_000,
     state: "connected" as const,

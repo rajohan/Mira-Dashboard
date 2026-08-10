@@ -94,6 +94,15 @@ describe("durable job action registry", () => {
                 execute: null as never,
             })
         ).toThrow("Job action executor is invalid");
+        expect(() =>
+            validateJobActionRegistration({
+                ...smoke,
+                afterSuccessfulSettlement: null as never,
+                execute: () => {
+                    throw new Error("not executed by this validation test");
+                },
+            })
+        ).toThrow("Job action settlement handler is invalid");
     });
 
     test("bounds progress and output before persistence", () => {

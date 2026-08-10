@@ -46,6 +46,7 @@ const session = Object.freeze({
     idleExpiresAtMs: nowMs + 30_000,
     location: { path: "/", rootId: "dashboard" },
     nextSequence: 2,
+    replayAvailableFromSequence: 1,
     sessionId,
     startedAtMs: nowMs,
     state: "connected" as const,
@@ -769,6 +770,75 @@ describe("terminal WebSocket raw boundary", () => {
             "input:03",
             "input:04",
         ]);
+        expect(peer.closed).toHaveLength(0);
+        boundary.shutdown();
+    });
+
+    test("waits for the broker drain callback after accepted PTY acknowledgements", async () => {
+        const relay = relayFixture([
+            "backpressured",
+            "accepted",
+            "backpressured",
+            "backpressured",
+            "accepted",
+        ]);
+        const broker = brokerFixture(relay.relay);
+        const boundary = createTerminalSocketBoundary({
+            authenticateCredential: () => authenticatedResolution(),
+            authenticationLifecycle: authenticationLifecycle(),
+            broker: broker.broker,
+            nowMs: () => nowMs,
+        });
+        const upgrade = upgradeFixture();
+        await boundary.handle(request(), terminalUrl(), upgrade);
+        if (upgrade.data === undefined) throw new Error("Expected upgraded connection");
+        const peer = peerFixture();
+        const socket = Object.freeze({ data: upgrade.data, ...peer.peer });
+        boundary.websocket.open(socket);
+
+        boundary.websocket.message(socket, Uint8Array.from([1]));
+        boundary.websocket.message(socket, Uint8Array.from([2]));
+        boundary.websocket.message(socket, Uint8Array.from([3]));
+        expect(relay.calls).toEqual(["resume-output", "input:01"]);
+
+        broker.callbacks?.onControl({
+            acceptedBytes: 1,
+            status: "accepted",
+            type: "input-status",
+        });
+        expect(relay.calls).toEqual(["resume-output", "input:01"]);
+        broker.callbacks?.onInputDrain();
+        expect(relay.calls).toEqual([
+            "resume-output",
+            "input:01",
+            "input:02",
+            "input:03",
+        ]);
+
+        boundary.websocket.message(socket, Uint8Array.from([4]));
+        broker.callbacks?.onControl({
+            acceptedBytes: 1,
+            status: "accepted",
+            type: "input-status",
+        });
+        expect(relay.calls.at(-1)).toBe("input:03");
+        broker.callbacks?.onInputDrain();
+        expect(relay.calls).toEqual([
+            "resume-output",
+            "input:01",
+            "input:02",
+            "input:03",
+            "input:04",
+        ]);
+
+        broker.callbacks?.onControl({
+            acceptedBytes: 1,
+            status: "accepted",
+            type: "input-status",
+        });
+        broker.callbacks?.onInputDrain();
+        boundary.websocket.message(socket, Uint8Array.from([5]));
+        expect(relay.calls.at(-1)).toBe("input:05");
         expect(peer.closed).toHaveLength(0);
         boundary.shutdown();
     });

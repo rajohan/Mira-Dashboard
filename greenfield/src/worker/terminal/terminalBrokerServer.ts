@@ -20,6 +20,7 @@ import {
     nonnegativeSafeIntegerSchema,
 } from "../../shared/validation.ts";
 import {
+    type WorkerPtyInputResult,
     type WorkerTerminalAttachment,
     WorkerTerminalBrokerError,
     type WorkerTerminalRelaySink,
@@ -240,6 +241,8 @@ function createConnectionHandler(
     const decoder = new TerminalBrokerFrameDecoder();
     let attachment: WorkerTerminalAttachment | undefined;
     let closed = false;
+    let deferredInputDrain = false;
+    let inputInProgress = false;
     let processing: Promise<unknown> = Promise.resolve();
 
     const close = (): void => {
@@ -254,6 +257,10 @@ function createConnectionHandler(
     const sink: WorkerTerminalRelaySink = {
         close,
         sendControl(event) {
+            if (event.type === "input-drain" && inputInProgress) {
+                deferredInputDrain = true;
+                return closed ? "closed" : "accepted";
+            }
             return send(event);
         },
         sendOutput(sequence, data) {
@@ -301,13 +308,21 @@ function createConnectionHandler(
         const current = attachment;
         if (current === undefined) return lifecycle(frame);
         if (frame.kind === "input") {
-            const result = current.input(frame.data);
-            if (result.status !== "accepted") {
-                send({
-                    acceptedBytes: result.acceptedBytes,
-                    status: result.status,
-                    type: "input-status",
-                });
+            inputInProgress = true;
+            let result: WorkerPtyInputResult;
+            try {
+                result = current.input(frame.data);
+            } finally {
+                inputInProgress = false;
+            }
+            send({
+                acceptedBytes: result.acceptedBytes,
+                status: result.status,
+                type: "input-status",
+            });
+            if (deferredInputDrain) {
+                deferredInputDrain = false;
+                send({ type: "input-drain" });
             }
             return;
         }

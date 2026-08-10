@@ -236,6 +236,10 @@ function sameOwner(left: WorkerTerminalOwner, right: WorkerTerminalOwner): boole
     return left.id === right.id && left.authenticatorId === right.authenticatorId;
 }
 
+function ownerIndexKey(owner: WorkerTerminalOwner): string {
+    return JSON.stringify([owner.id, owner.authenticatorId]);
+}
+
 function validateTicket(
     ticket: WorkerTerminalTicket,
     now: number,
@@ -298,6 +302,7 @@ function safeSummary(session: WorkerTerminalSession): TerminalSessionSummary {
         idleExpiresAtMs: session.idleExpiresAtMs,
         location: session.location,
         nextSequence: session.nextSequence,
+        replayAvailableFromSequence: replayAvailableFromSequence(session),
         sessionId: session.sessionId,
         startedAtMs: session.startedAtMs,
         state: session.state,
@@ -384,7 +389,7 @@ export function createWorkerTerminalSessionBroker(
     const createPty = dependencies.pty ?? createPtyProcess;
     const scheduler = dependencies.scheduler ?? defaultScheduler();
     const sessions = new Map<string, WorkerTerminalSession>();
-    const sessionByUser = new Map<string, string>();
+    const sessionByOwner = new Map<string, string>();
     let shuttingDown = false;
 
     function requireSession(
@@ -404,8 +409,9 @@ export function createWorkerTerminalSessionBroker(
         if (session.attachment !== undefined) closeSink(session.attachment.sink);
         session.attachment = undefined;
         sessions.delete(session.sessionId);
-        if (sessionByUser.get(session.owner.id) === session.sessionId) {
-            sessionByUser.delete(session.owner.id);
+        const ownerKey = ownerIndexKey(session.owner);
+        if (sessionByOwner.get(ownerKey) === session.sessionId) {
+            sessionByOwner.delete(ownerKey);
         }
     }
 
@@ -685,7 +691,7 @@ export function createWorkerTerminalSessionBroker(
             await Promise.resolve();
             if (shuttingDown) throw new WorkerTerminalBrokerError("unavailable");
             const validatedOwner = validateOwner(owner);
-            const sessionId = sessionByUser.get(validatedOwner.id);
+            const sessionId = sessionByOwner.get(ownerIndexKey(validatedOwner));
             const session = sessionId === undefined ? undefined : sessions.get(sessionId);
             return session === undefined || !sameOwner(session.owner, validatedOwner)
                 ? undefined
@@ -719,7 +725,8 @@ export function createWorkerTerminalSessionBroker(
             if (shuttingDown) throw new WorkerTerminalBrokerError("unavailable");
             const now = checkedNow(nowMs);
             const owner = validateOwner(input.owner);
-            if (sessionByUser.has(owner.id)) {
+            const ownerKey = ownerIndexKey(owner);
+            if (sessionByOwner.has(ownerKey)) {
                 throw new WorkerTerminalBrokerError("conflict");
             }
             if (sessions.size >= terminalConcurrentSessionMaximum) {
@@ -748,7 +755,7 @@ export function createWorkerTerminalSessionBroker(
                 ),
             };
             sessions.set(sessionId, session);
-            sessionByUser.set(owner.id, sessionId);
+            sessionByOwner.set(ownerKey, sessionId);
             scheduleSession(session);
             return safeSummary(session);
         },

@@ -44,6 +44,10 @@ import {
     type FixedSystemLogrotateBroker,
 } from "../worker/logs/fixedSystemLogrotateBroker.ts";
 import {
+    startLogMaintenanceAvailabilityPublisher,
+    type LogMaintenanceAvailabilityPublisher,
+} from "../worker/logs/logMaintenanceAvailabilityPublisher.ts";
+import {
     createLogMaintenanceExecutor,
     type LogMaintenanceExecutor,
 } from "../worker/logs/logMaintenanceExecutor.ts";
@@ -79,12 +83,16 @@ export interface DashboardWorkerProcessDependencies {
         logsDirectory: string,
         processRole: "worker"
     ) => ProjectFileLogDestination;
+    readonly createLogMaintenanceExecutor: (
+        layout: DashboardProjectLayout
+    ) => LogMaintenanceExecutor;
     readonly createRuntime: (
         layout: DashboardProjectLayout,
         release: RuntimeRelease,
         logger: StructuredLogger,
         persistentGatewayTransport: PersistentGatewayTaskNotificationTransport,
-        workspaceRoot: WorkerWorkspaceFileRootConfiguration
+        workspaceRoot: WorkerWorkspaceFileRootConfiguration,
+        logMaintenance: LogMaintenanceExecutor
     ) => DashboardWorkerRuntime;
     readonly createTerminationController: () => ProcessTerminationController;
     readonly loadRelease: (
@@ -99,6 +107,10 @@ export interface DashboardWorkerProcessDependencies {
     readonly startTerminalBroker: (
         options: WorkerTerminalBrokerLifecycleOptions
     ) => Promise<WorkerTerminalBrokerLifecycle>;
+    readonly startLogMaintenanceAvailability: (options: {
+        readonly availablePolicies: LogMaintenanceExecutor["availablePolicies"];
+        readonly logMaintenanceRoot: string;
+    }) => Promise<LogMaintenanceAvailabilityPublisher>;
 }
 
 function runtimeManagedLogManifest(layout: DashboardProjectLayout): ManagedLogManifest {
@@ -151,7 +163,15 @@ const defaultDependencies = Object.freeze({
     createGatewayTransport: createPersistentGatewayTaskNotificationTransport,
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
-    createRuntime: (layout, release, _logger, gatewayTransport, workspaceRoot) => {
+    createLogMaintenanceExecutor: createWorkerLogMaintenanceExecutor,
+    createRuntime: (
+        layout,
+        release,
+        _logger,
+        gatewayTransport,
+        workspaceRoot,
+        logMaintenance
+    ) => {
         const writer = createDescriptorWorkspaceFileStructuralWriter({
             roots: [workspaceRoot],
             spoolRoot: layout.production.state.workspaceFileUploads,
@@ -163,7 +183,7 @@ const defaultDependencies = Object.freeze({
                 startupMode: "validate-only",
                 stateDirectory: layout.production.state.root,
             },
-            logMaintenance: createWorkerLogMaintenanceExecutor(layout),
+            logMaintenance,
             persistentGatewayTransport: gatewayTransport,
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
@@ -178,6 +198,7 @@ const defaultDependencies = Object.freeze({
         loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
     resolveProjectLayout: resolveDashboardProjectLayout,
     resolveWorkspaceFileRoot: resolveReviewedWorkerWorkspaceFileRoot,
+    startLogMaintenanceAvailability: startLogMaintenanceAvailabilityPublisher,
     startTerminalBroker: startWorkerTerminalBrokerLifecycle,
 } satisfies DashboardWorkerProcessDependencies);
 
@@ -235,6 +256,7 @@ export async function runDashboardWorkerProcess(
     const termination = dependencies.createTerminationController();
     let runtime: DashboardWorkerRuntime | undefined;
     let gatewayTransport: PersistentGatewayTaskNotificationTransport | undefined;
+    let logMaintenanceAvailability: LogMaintenanceAvailabilityPublisher | undefined;
     let terminalBroker: WorkerTerminalBrokerLifecycle | undefined;
     let failure: Error | undefined;
     try {
@@ -251,18 +273,32 @@ export async function runDashboardWorkerProcess(
             token: configuration.gatewayToken,
             url: configuration.gatewayUrl,
         });
+        const logMaintenance = dependencies.createLogMaintenanceExecutor(layout);
         runtime = dependencies.createRuntime(
             layout,
             release,
             logger,
             gatewayTransport,
-            workspaceRoot
+            workspaceRoot,
+            logMaintenance
         );
         const runtimeCompletion = runtime.completion.then(
             () => ({ kind: "stopped" as const }),
             (error: unknown) => ({ error, kind: "failed" as const })
         );
         await runtime.initialize();
+        logMaintenanceAvailability = await dependencies.startLogMaintenanceAvailability({
+            availablePolicies: logMaintenance.availablePolicies,
+            logMaintenanceRoot: layout.production.state.logMaintenance,
+        });
+        const logMaintenanceAvailabilityCompletion =
+            logMaintenanceAvailability.completion.then(
+                () => ({ kind: "log-maintenance-availability-stopped" as const }),
+                (error: unknown) => ({
+                    error,
+                    kind: "log-maintenance-availability-failed" as const,
+                })
+            );
         logger.info({
             component: "runtime",
             event: "runtime.started",
@@ -271,6 +307,7 @@ export async function runDashboardWorkerProcess(
         const exit = await Promise.race([
             termination.termination.then(() => ({ kind: "signal" as const })),
             runtimeCompletion,
+            logMaintenanceAvailabilityCompletion,
         ]);
         if (exit.kind === "failed") {
             throw exit.error;
@@ -278,6 +315,15 @@ export async function runDashboardWorkerProcess(
         if (exit.kind === "stopped") {
             throw new Error("Dashboard worker runtime stopped unexpectedly");
         }
+        if (exit.kind === "log-maintenance-availability-failed") {
+            throw exit.error;
+        }
+        if (exit.kind === "log-maintenance-availability-stopped") {
+            throw new Error(
+                "Dashboard worker log-maintenance availability stopped unexpectedly"
+            );
+        }
+        await logMaintenanceAvailability.stop();
         await terminalBroker.stop();
         await runtime.dispose(termination.forceSignal);
         await runtime.completion;
@@ -288,6 +334,13 @@ export async function runDashboardWorkerProcess(
         });
     } catch (error) {
         failure = normalizeWorkerProcessFailure(error);
+        if (logMaintenanceAvailability) {
+            try {
+                await logMaintenanceAvailability.stop();
+            } catch {
+                // Preserve the initiating process failure.
+            }
+        }
         if (terminalBroker) {
             try {
                 await terminalBroker.stop();

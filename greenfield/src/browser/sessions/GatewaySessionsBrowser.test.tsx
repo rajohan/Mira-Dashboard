@@ -14,6 +14,7 @@ import {
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
+import { dashboardUnavailableReadRetryMaximum } from "../api/trpcError.ts";
 import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { gatewaySessionQueryKey } from "./gatewaySessionQueries.ts";
 import { GatewaySessionsBrowser } from "./GatewaySessionsBrowser.tsx";
@@ -68,8 +69,31 @@ function deferred<T>() {
     return { promise, resolve: resolveDeferred };
 }
 
+async function exhaustUnavailableReadRetries(
+    queryClient: ReturnType<typeof createDashboardQueryClient>
+): Promise<void> {
+    for (let cycle = 0; cycle < dashboardUnavailableReadRetryMaximum + 2; cycle += 1) {
+        await act(async () => {
+            await Promise.resolve();
+            jest.runOnlyPendingTimers();
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+        const state = queryClient.getQueryState(gatewaySessionQueryKey);
+        if (state?.fetchStatus === "idle" && state.error !== null) {
+            await act(async () => {
+                jest.advanceTimersByTime(0);
+                await Promise.resolve();
+            });
+            return;
+        }
+    }
+    throw new Error("Unavailable read retries did not settle");
+}
+
 describe("Gateway sessions browser", () => {
     test("shows a safe initial unavailable state without raw transport details", async () => {
+        jest.useFakeTimers();
         let available = false;
         const query = jest.fn(() =>
             available
@@ -87,6 +111,8 @@ describe("Gateway sessions browser", () => {
         const user = userEvent.setup();
 
         try {
+            await exhaustUnavailableReadRetries(rendered.queryClient);
+            jest.useRealTimers();
             expect(
                 await screen.findByRole("heading", {
                     name: "OpenClaw sessions unavailable",
@@ -111,10 +137,12 @@ describe("Gateway sessions browser", () => {
             expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         } finally {
             rendered.queryClient.clear();
+            jest.useRealTimers();
         }
     });
 
     test("keeps cached rows and marks a failed background refresh separately", async () => {
+        jest.useFakeTimers();
         const client = {
             query: () =>
                 Promise.reject(
@@ -137,6 +165,8 @@ describe("Gateway sessions browser", () => {
             expect(
                 screen.getByRole("table", { name: "Current OpenClaw sessions" })
             ).toBeTruthy();
+            await exhaustUnavailableReadRetries(queryClient);
+            jest.useRealTimers();
             await waitFor(() =>
                 expect(screen.getByRole("alert")).toHaveTextContent(
                     "A background refresh failed"
@@ -146,6 +176,7 @@ describe("Gateway sessions browser", () => {
             expect(screen.queryByText(/private background detail/u)).toBeNull();
         } finally {
             queryClient.clear();
+            jest.useRealTimers();
         }
     });
 

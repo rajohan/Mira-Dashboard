@@ -44,6 +44,7 @@ async function fixture(
         idleExpiresAtMs: now + 10 * 60_000,
         location: { path: "/", rootId: "workspace" },
         nextSequence: 1,
+        replayAvailableFromSequence: 1,
         sessionId,
         startedAtMs: now,
         state: "awaiting-connection" as const,

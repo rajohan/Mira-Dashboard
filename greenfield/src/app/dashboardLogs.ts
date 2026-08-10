@@ -6,6 +6,7 @@ import { createLogMaintenanceJobQueue } from "../server/domains/jobs/logMaintena
 import type { JobRepository } from "../server/domains/jobs/repository.ts";
 import { createSqliteLogMaintenanceAuditWriter } from "../server/domains/logs/operationAudit.ts";
 import { createLogsService, type LogsService } from "../server/domains/logs/service.ts";
+import { createLogMaintenanceAvailabilityProbe } from "../server/platform/logs/logMaintenanceAvailability.ts";
 import { createSafeLogReader } from "../server/platform/logs/safeLogReader.ts";
 import { createLogSourceCatalog } from "../server/platform/logs/sourceCatalog.ts";
 
@@ -17,6 +18,7 @@ export interface DashboardLogsOptions {
         JobRepository,
         "enqueueManualRun" | "findRunByIdempotency"
     >;
+    readonly logMaintenanceRoot: string;
     readonly now?: () => Date;
     readonly onAuditSettlementFailure?: (fields: {
         readonly policyId: LogMaintenancePolicyId;
@@ -38,6 +40,10 @@ export function createDashboardLogsService(options: DashboardLogsOptions): LogsS
         dashboardLogsRoot: options.dashboardLogsRoot,
         now: nowMs,
     });
+    const maintenanceAvailability = createLogMaintenanceAvailabilityProbe({
+        logMaintenanceRoot: options.logMaintenanceRoot,
+        nowMs,
+    });
     return createLogsService({
         auditWriter: createSqliteLogMaintenanceAuditWriter({
             clock,
@@ -46,6 +52,7 @@ export function createDashboardLogsService(options: DashboardLogsOptions): LogsS
         }),
         catalog,
         maintenanceQueue: createLogMaintenanceJobQueue({
+            availablePolicies: maintenanceAvailability.availablePolicies,
             nowMs,
             repository: options.jobRepository,
             wakeEventPump: options.wakeEventPump,

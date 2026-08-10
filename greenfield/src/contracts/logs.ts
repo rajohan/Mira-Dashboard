@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
+import { logMaintenancePolicyIds } from "../shared/logMaintenanceUnits.ts";
 import {
     boundedControlSafeTextSchema,
     boundedNonBlankTextSchema,
@@ -148,13 +149,7 @@ export const logSnapshotOutputSchema = v.strictObject({
     sourceId: logSourceIdSchema,
 });
 
-export const logMaintenancePolicyIds = [
-    "docker-managed",
-    "host-alternatives",
-    "host-apport",
-    "host-dpkg",
-    "host-rsyslog",
-] as const;
+export { logMaintenancePolicyIds } from "../shared/logMaintenanceUnits.ts";
 export const logMaintenancePolicyIdSchema = v.picklist(
     logMaintenancePolicyIds,
     "Log maintenance policy is invalid"

@@ -31,6 +31,7 @@ export function LogsBrowser() {
         sources.find(({ id }) => id === selectedSourceId) ??
         sources.find(({ availability }) => availability === "available") ??
         sources[0];
+    const sourceAvailable = selectedSource?.availability === "available";
     let selection: LogSnapshotSelection | undefined;
     if (selectedSource !== undefined) {
         selection =
@@ -43,11 +44,7 @@ export function LogsBrowser() {
                 : { mode: "tail", sourceId: selectedSource.id };
     }
     const snapshotQuery = useQuery(
-        logSnapshotQueryOptions(
-            client,
-            selection,
-            selectedSource?.availability === "available"
-        )
+        logSnapshotQueryOptions(client, selection, sourceAvailable)
     );
 
     if (sourcesQuery.isPending && sourcesQuery.data === undefined) {
@@ -95,16 +92,22 @@ export function LogsBrowser() {
             }
             maintenanceLoading={maintenanceQuery.isPending}
             onClearSearch={() => setSearch(undefined)}
-            onRefresh={() =>
-                void Promise.allSettled([
-                    sourcesQuery.refetch(),
-                    snapshotQuery.refetch(),
-                    maintenanceQuery.refetch(),
-                ])
-            }
+            onRefresh={() => {
+                void (async () => {
+                    const maintenanceRefresh = maintenanceQuery.refetch();
+                    const refreshedSources = await sourcesQuery.refetch();
+                    const refreshedSelection = refreshedSources.data?.sources.find(
+                        ({ id }) => id === selectedSource?.id
+                    );
+                    if (refreshedSelection?.availability === "available") {
+                        await snapshotQuery.refetch();
+                    }
+                    await maintenanceRefresh;
+                })();
+            }}
             onRequestMaintenance={requestMaintenance}
             onSearch={(query) => {
-                if (selectedSource !== undefined) {
+                if (selectedSource !== undefined && sourceAvailable) {
                     setSearch({ query, sourceId: selectedSource.id });
                 }
             }}
@@ -114,18 +117,22 @@ export function LogsBrowser() {
             }}
             refreshing={
                 sourcesQuery.isRefetching ||
-                snapshotQuery.isRefetching ||
+                (sourceAvailable && snapshotQuery.isRefetching) ||
                 maintenanceQuery.isRefetching
             }
-            searchQuery={selection?.mode === "search" ? selection.query : undefined}
+            searchQuery={
+                sourceAvailable && selection?.mode === "search"
+                    ? selection.query
+                    : undefined
+            }
             selectedSourceId={selectedSource?.id}
-            snapshot={snapshotQuery.data}
+            snapshot={sourceAvailable ? snapshotQuery.data : undefined}
             snapshotError={
-                snapshotQuery.error === null
+                !sourceAvailable || snapshotQuery.error === null
                     ? undefined
                     : logFailureMessage(snapshotQuery.error)
             }
-            snapshotLoading={snapshotQuery.isPending}
+            snapshotLoading={sourceAvailable && snapshotQuery.isPending}
             sources={sources}
         />
     );

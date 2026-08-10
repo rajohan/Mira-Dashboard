@@ -205,7 +205,7 @@ export function ChatTranscript({
         );
     }
 
-    if (visibleMessages.length === 0) {
+    if (visibleMessages.length === 0 && !hasOlder) {
         return (
             <EmptyState
                 className="m-3 flex min-h-0 flex-1 flex-col justify-center border-0 bg-transparent"

@@ -29,8 +29,7 @@ interface LogsContextPorts {
 
 function service(context: RequestContext): LogsService {
     const candidate = (context as RequestContext & LogsContextPorts).logsService;
-    if (candidate === undefined)
-        throw new Error("Request context is missing the logs service");
+    if (candidate === undefined) throw new LogsServiceError("unavailable");
     return candidate;
 }
 

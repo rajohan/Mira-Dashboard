@@ -29,7 +29,7 @@ interface TerminalRequestPorts {
 function service(context: RequestContext): TerminalService {
     const candidate = (context as RequestContext & TerminalRequestPorts).terminalService;
     if (candidate === undefined) {
-        throw new Error("Request context is missing the terminal service");
+        throw new TerminalServiceError("unavailable");
     }
     return candidate;
 }
@@ -153,7 +153,11 @@ export const terminalRoutes = {
         .output(terminalRuntimeSchema)
         .query(({ ctx }) => {
             authorize(ctx);
-            return service(ctx).getRuntime();
+            try {
+                return service(ctx).getRuntime();
+            } catch (error) {
+                return throwServiceFailure(error);
+            }
         }),
     prepareResume: writeProcedure
         .input(prepareTerminalResumeInputSchema)

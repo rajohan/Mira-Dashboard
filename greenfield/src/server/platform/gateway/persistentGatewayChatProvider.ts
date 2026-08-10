@@ -289,7 +289,24 @@ function safeJsonText(value: unknown, maximum: number): string | undefined {
 }
 
 function providerVisibleToolResult(value: unknown): unknown {
-    if (!Array.isArray(value)) return value;
+    if (value === undefined) return undefined;
+    if (
+        value === null ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
+        return value;
+    }
+    if (!Array.isArray(value)) {
+        const block = asRecord(value);
+        const type =
+            typeof block?.type === "string" ? block.type.toLowerCase() : undefined;
+        return (type === "text" || type === "output_text") &&
+            typeof block?.text === "string"
+            ? block.text
+            : "Unsupported provider content.";
+    }
     const text: string[] = [];
     for (const item of value) {
         if (typeof item === "string") {
@@ -470,14 +487,6 @@ function projectMessageParts(
     const rawRole = boundedControlString(message.role, 32)?.toLowerCase();
     let blocks: readonly unknown[];
     if (rawRole?.startsWith("tool") === true) {
-        const topLevelToolFields = {
-            __topLevelCallId: message.callId,
-            __topLevelName: message.name,
-            __topLevelToolCallId: message.toolCallId,
-            __topLevelToolCallSnakeId: message.tool_call_id,
-            __topLevelToolName: message.toolName,
-            __topLevelToolSnakeName: message.tool_name,
-        };
         if (Array.isArray(rawContent)) {
             const contentBlocks: readonly unknown[] = rawContent;
             const explicitToolResult = contentBlocks.some((value) => {
@@ -487,14 +496,7 @@ function projectMessageParts(
                 return type === "toolresult" || type === "tool_result";
             });
             if (explicitToolResult) {
-                blocks = contentBlocks.map((value) => {
-                    const block = asRecord(value);
-                    const type =
-                        typeof block?.type === "string" ? block.type.toLowerCase() : "";
-                    return type === "toolresult" || type === "tool_result"
-                        ? { ...block, ...topLevelToolFields }
-                        : value;
-                });
+                blocks = contentBlocks;
             } else {
                 const attachmentBlocks = contentBlocks.filter((value) => {
                     const block = asRecord(value);
@@ -513,7 +515,6 @@ function projectMessageParts(
                         : providerVisibleToolResult(outputBlocks);
                 blocks = [
                     {
-                        ...topLevelToolFields,
                         content: topLevelOutput,
                         isError: message.isError === true || message.error !== undefined,
                         type: "tool_result",
@@ -524,7 +525,6 @@ function projectMessageParts(
         } else {
             blocks = [
                 {
-                    ...topLevelToolFields,
                     content:
                         rawContent ??
                         message.result ??
@@ -607,17 +607,45 @@ function projectMessageParts(
         }
         if (type === "toolresult" || type === "tool_result") {
             const isError = block.isError === true || block.error !== undefined;
-            const providerName = resolveControlAlias(
-                [
-                    block.name,
-                    block.toolName,
-                    block.tool_name,
-                    block.__topLevelToolName,
-                    block.__topLevelToolSnakeName,
-                    block.__topLevelName,
-                ],
+            const topLevelToolName = resolveControlAlias(
+                [message.name, message.toolName, message.tool_name],
                 200
             );
+            const topLevelToolCallId = resolveControlAlias(
+                [message.callId, message.toolCallId, message.tool_call_id],
+                256
+            );
+            if (topLevelToolName === null || topLevelToolCallId === null) {
+                return undefined;
+            }
+            let providerName = topLevelToolName;
+            let providerCallId = topLevelToolCallId;
+            if (rawRole?.startsWith("tool") === true) {
+                const blockProviderName = resolveControlAlias(
+                    [block.name, block.toolName, block.tool_name],
+                    200
+                );
+                const blockProviderCallId = resolveControlAlias(
+                    [block.toolCallId, block.tool_call_id, block.callId, block.id],
+                    256
+                );
+                if (blockProviderName === null || blockProviderCallId === null) {
+                    return undefined;
+                }
+                const resolvedProviderName = resolveControlAlias(
+                    [topLevelToolName, blockProviderName],
+                    200
+                );
+                const resolvedProviderCallId = resolveControlAlias(
+                    [topLevelToolCallId, blockProviderCallId],
+                    256
+                );
+                if (resolvedProviderName === null || resolvedProviderCallId === null) {
+                    return undefined;
+                }
+                providerName = resolvedProviderName;
+                providerCallId = resolvedProviderCallId;
+            }
             const output = safeJsonText(
                 block.result ??
                     block.output ??
@@ -626,19 +654,9 @@ function projectMessageParts(
                     block.error,
                 32 * 1024
             );
-            const providerCallId = resolveControlAlias(
-                [
-                    block.toolCallId,
-                    block.tool_call_id,
-                    block.callId,
-                    block.id,
-                    block.__topLevelToolCallId,
-                    block.__topLevelToolCallSnakeId,
-                    block.__topLevelCallId,
-                ],
-                256
-            );
-            if (providerName === null || providerCallId === null) return undefined;
+            if (providerName === null || providerCallId === null) {
+                return undefined;
+            }
             parts.push({
                 callId: providerCallId ?? partId,
                 ...(providerCallId === undefined ? { callIdSource: "synthetic" } : {}),
@@ -816,19 +834,27 @@ function projectToolEvent(
     else if (rawPhase === "result" || rawPhase === "error") {
         phase = isError ? "failed" : "succeeded";
     }
+    const providerCallId = resolveControlAlias(
+        [data.toolCallId, data.tool_call_id, data.callId],
+        256
+    );
+    const providerName = resolveControlAlias(
+        [data.toolName, data.tool_name, data.name],
+        200
+    );
+    if (providerCallId === null || providerName === null) {
+        throw new ChatProviderEventReconciliationRequiredError();
+    }
     return Object.freeze({
         ...eventBase(event),
         callId:
-            boundedControlString(
-                data.toolCallId ?? data.tool_call_id ?? data.callId,
-                256
-            ) ?? `${event.frame.payload.runId}:${event.frame.payload.seq}`,
+            providerCallId ?? `${event.frame.payload.runId}:${event.frame.payload.seq}`,
+        ...(providerCallId === undefined ? { callIdSource: "synthetic" as const } : {}),
         input: safeJsonText(data.args ?? data.input, 32 * 1024),
         isError,
         kind: "tool",
-        name:
-            boundedControlString(data.toolName ?? data.tool_name ?? data.name, 200) ??
-            "tool",
+        name: providerName ?? "tool",
+        ...(providerName === undefined ? { nameSource: "synthetic" as const } : {}),
         ...(output === undefined && !isError
             ? {}
             : {

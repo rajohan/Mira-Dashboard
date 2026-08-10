@@ -13,6 +13,8 @@ describe("Dashboard shell layout", () => {
                 "flex-1",
                 "overflow-hidden",
                 "px-4",
+                "pt-8",
+                "pb-3",
                 "sm:px-6",
                 "lg:px-8",
             ])

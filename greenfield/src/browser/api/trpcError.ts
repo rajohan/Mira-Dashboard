@@ -133,6 +133,35 @@ export function isDashboardOperationOutcomeUnknown(error: unknown): boolean {
         : false;
 }
 
+/** Maximum transient read failures tolerated while the shared Gateway reconnects. */
+export const dashboardUnavailableReadRetryMaximum = 6;
+
+/**
+ * Retries only safe reads whose fixed browser classification is transiently unavailable.
+ * Authentication, validation, protocol, and application conflicts remain fail-fast.
+ * @param failureCount Number of failures already observed for this read.
+ * @param error Unknown rejection.
+ * @returns Whether TanStack Query may retry the read.
+ */
+export function retryDashboardUnavailableRead(
+    failureCount: number,
+    error: unknown
+): boolean {
+    return (
+        failureCount < dashboardUnavailableReadRetryMaximum &&
+        classifyDashboardBrowserFailure(error) === "unavailable"
+    );
+}
+
+/**
+ * Calculates a bounded reconnect-aware delay for safe read retries.
+ * @param attemptIndex Zero-based retry index.
+ * @returns Delay in milliseconds before the next attempt.
+ */
+export function dashboardUnavailableReadRetryDelay(attemptIndex: number): number {
+    return Math.min(1000 * 2 ** Math.max(0, attemptIndex), 5000);
+}
+
 /**
  * Formats one fixed, non-sensitive browser message.
  * @param error Unknown rejection.

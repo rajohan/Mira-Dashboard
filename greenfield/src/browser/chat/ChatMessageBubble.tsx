@@ -36,8 +36,6 @@ import type {
     ChatToolPart,
 } from "./chatTypes.ts";
 
-/* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- Bounded tool input and output must remain keyboard-scrollable. */
-
 const managedChatMediaUrlPattern =
     /^\/api\/chat\/media\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\?disposition=(?:preview|download)$/u;
 
@@ -177,6 +175,8 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                             <section
                                 aria-label={`${label} tool input`}
                                 className="text-primary-300 max-h-64 overflow-auto text-xs"
+                                data-virtualizer-scroll-region
+                                // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded tool input must remain keyboard-scrollable.
                                 tabIndex={0}
                             >
                                 <pre className="wrap-break-word whitespace-pre-wrap">
@@ -195,6 +195,8 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                                 <section
                                     aria-label={`${label} tool output`}
                                     className="text-primary-300 max-h-64 overflow-auto text-xs"
+                                    data-virtualizer-scroll-region
+                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded tool output must remain keyboard-scrollable.
                                     tabIndex={0}
                                 >
                                     <pre className="wrap-break-word whitespace-pre-wrap">

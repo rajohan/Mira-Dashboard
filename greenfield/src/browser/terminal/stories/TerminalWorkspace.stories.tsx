@@ -32,6 +32,7 @@ const connectedSession: TerminalSessionSummary = {
     idleExpiresAtMs: 1_800_000_600_000,
     location: { path: "/", rootId: "dashboard" },
     nextSequence: 8,
+    replayAvailableFromSequence: 1,
     sessionId: "019fe7a8-03fe-7000-8ea2-874b1ea1b40e",
     startedAtMs: 1_800_000_000_000,
     state: "connected",

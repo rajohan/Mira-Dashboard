@@ -78,6 +78,38 @@ describe("chat transcript", () => {
         expect(visibleChatTranscriptMessages(messages, display)).toHaveLength(2);
     });
 
+    test("keeps older-history paging available when filters hide the loaded page", () => {
+        const toolOnly: ChatDisplayMessage = {
+            attachments: [],
+            id: "tool-only-page",
+            parts: [
+                {
+                    callId: "call-1",
+                    kind: "tool",
+                    name: "search",
+                    status: "completed",
+                },
+            ],
+            role: "assistant",
+            sequence: 1,
+            sessionKey,
+        };
+        const onLoadOlder = jest.fn();
+        const rendered = render(
+            <ChatTranscript
+                {...properties([toolOnly])}
+                display={{ ...display, showTools: false }}
+                hasOlder
+                onLoadOlder={onLoadOlder}
+            />
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
+        expect(onLoadOlder).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText("No messages yet")).toBeNull();
+        act(() => rendered.unmount());
+    });
+
     test("announces an atomic polite count while the reader is off the bottom", async () => {
         const first = message("message-1", 1);
         const rendered = render(<ChatTranscript {...properties([first])} />);

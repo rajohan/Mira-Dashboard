@@ -114,10 +114,12 @@ export type ChatProviderEvent =
       }>
     | Readonly<{
           callId: string;
+          callIdSource?: "synthetic";
           input?: string;
           isError: boolean;
           kind: "tool";
           name: string;
+          nameSource?: "synthetic";
           output?: string;
           phase: "failed" | "running" | "started" | "succeeded";
           providerRunId: string;

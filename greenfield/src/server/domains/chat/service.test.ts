@@ -610,9 +610,10 @@ describe("ChatService", () => {
                 chatRuntimeSnapshotMaximumBytes
             );
 
+            const lifetimeProjectionSegments = 4097;
             for (
                 let sequence = 1;
-                sequence <= chatRuntimeProjectionPartsMaximum + 1;
+                sequence <= lifetimeProjectionSegments;
                 sequence += 1
             ) {
                 await subscription.onEvent({
@@ -629,7 +630,7 @@ describe("ChatService", () => {
                 kind: "delta",
                 mode: "append",
                 providerRunId: "external-many-parts",
-                providerSequence: chatRuntimeProjectionPartsMaximum + 2,
+                providerSequence: lifetimeProjectionSegments + 1,
                 receivedAtMs: 3000,
                 sessionKey: "agent:main:main",
                 stream: "assistant",
@@ -640,6 +641,12 @@ describe("ChatService", () => {
                 ({ providerRunId }) => providerRunId === "external-many-parts"
             );
             expect(manyParts?.parts).toHaveLength(chatRuntimeProjectionPartsMaximum);
+            expect(manyParts?.parts?.map(({ sequence }) => sequence)).toEqual(
+                Array.from(
+                    { length: chatRuntimeProjectionPartsMaximum },
+                    (_, index) => index + 1
+                )
+            );
             expect(manyParts?.parts?.at(-1)).toMatchObject({
                 kind: "assistant",
                 text: "Final response",

@@ -381,6 +381,66 @@ describe("chat contract adapter", () => {
         });
     });
 
+    test("keeps truncated assistant text authoritative and folds synthetic tool lifecycle", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: true,
+            parts: [
+                { kind: "assistant", sequence: 1, text: "stale tail" },
+                {
+                    callId: "synthetic-start",
+                    callIdSource: "synthetic",
+                    input: '{"query":"runtime"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    phase: "started",
+                    sequence: 2,
+                },
+                {
+                    callId: "synthetic-result",
+                    callIdSource: "synthetic",
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    output: "found",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+            ],
+            projectionTruncated: true,
+            providerRunId: "provider-truncated",
+            sessionKey,
+            source: "provider-runtime",
+            text: "The complete accumulated assistant response.",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            {
+                callId: "synthetic-start",
+                callIdSource: "synthetic",
+                input: '{"query":"runtime"}',
+                kind: "tool",
+                name: "search",
+                output: "found",
+                status: "completed",
+            },
+            { kind: "text", text: "The complete accumulated assistant response." },
+            {
+                kind: "control",
+                text: "Some OpenClaw activity details were not returned.",
+                tone: "warning",
+            },
+            {
+                kind: "control",
+                text: "Some additional OpenClaw activity could not be shown.",
+                tone: "warning",
+            },
+        ]);
+        expect(JSON.stringify(projection)).not.toContain("stale tail");
+    });
+
     test("treats truncated projections as explicit placeholders, not empty transcripts", () => {
         const snapshot: ChatRuntimeSnapshot = {
             firstSequence: 1,

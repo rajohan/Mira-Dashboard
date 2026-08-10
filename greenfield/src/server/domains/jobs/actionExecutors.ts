@@ -12,6 +12,7 @@ import {
     type JobActionExecutor,
     type JobExecutableActionDefinition,
     type JobActionRegistration,
+    type JobActionSuccessfulSettlementHandler,
     JobActionRetryableError,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
@@ -63,6 +64,7 @@ const workspaceFileWriteResultSchema = v.strictObject({
 
 interface JobActionExecutorEntry {
     readonly actionKey: string;
+    readonly afterSuccessfulSettlement?: JobActionSuccessfulSettlementHandler;
     readonly execute: JobActionExecutor;
 }
 
@@ -84,6 +86,9 @@ export interface WorkspaceFileWriteExecutionPort {
         readonly revision: string;
         readonly sizeBytes: number;
     }>;
+    readonly removeSettledReplacementIntent: (
+        command: ReturnType<typeof parseWorkspaceFileJobPayload>["command"]
+    ) => Promise<void>;
 }
 
 export type JobWorkerActionResolver = (
@@ -226,6 +231,18 @@ export function createWorkspaceFileWriteJobExecutor(
         });
 }
 
+function createWorkspaceFileReplacementSettlementHandler(
+    writer: WorkspaceFileWriteExecutionPort
+): JobActionSuccessfulSettlementHandler {
+    return async (payload) => {
+        const parsed = parseWorkspaceFileJobPayload(payload);
+        if (parsed.command.operation !== "replace") {
+            throw new TypeError("Workspace replacement settlement payload is invalid");
+        }
+        await writer.removeSettledReplacementIntent(parsed.command);
+    };
+}
+
 const systemHostExecutor = createSystemHostExecutor();
 
 /**
@@ -262,6 +279,12 @@ export function createJobWorkerActionRegistry(
                 definition.actionKey,
                 validateJobActionRegistration({
                     ...definition,
+                    ...(executor.afterSuccessfulSettlement === undefined
+                        ? {}
+                        : {
+                              afterSuccessfulSettlement:
+                                  executor.afterSuccessfulSettlement,
+                          }),
                     execute: executor.execute,
                 }),
             ];
@@ -308,6 +331,8 @@ export function createJobWorkerActionResolver(
                   }),
                   Object.freeze({
                       actionKey: workspaceFileReplaceJobActionKey,
+                      afterSuccessfulSettlement:
+                          createWorkspaceFileReplacementSettlementHandler(workspaceFiles),
                       execute: createWorkspaceFileWriteJobExecutor(workspaceFiles),
                   }),
               ]),

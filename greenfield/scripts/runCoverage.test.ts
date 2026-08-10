@@ -10,8 +10,6 @@ import {
 describe("coverage runner", () => {
     test("keeps Bun coverage free of browser globals", () => {
         expect(createCoverageTestArguments("/tmp/coverage-output", "bun")).toEqual([
-            "--parallel=3",
-            "--timings=.bun-test-timings.json",
             "--bail=1",
             "--only-failures",
             "--coverage",
@@ -29,10 +27,8 @@ describe("coverage runner", () => {
         ]);
     });
 
-    test("runs browser coverage with three isolated workers", () => {
+    test("runs browser coverage in one isolated process", () => {
         expect(createCoverageTestArguments("/tmp/coverage-browser", "browser")).toEqual([
-            "--parallel=3",
-            "--timings=.bun-browser-test-timings.json",
             "--only-failures",
             "--coverage",
             "--coverage-reporter",

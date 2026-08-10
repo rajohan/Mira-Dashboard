@@ -42,7 +42,7 @@ function service(context: RequestContext): WorkspaceFilesService {
     const candidate = (context as RequestContext & WorkspaceFileRequestPorts)
         .workspaceFilesService;
     if (candidate === undefined) {
-        throw new Error("Request context is missing the workspace files service");
+        throw new WorkspaceFileError("unavailable");
     }
     return candidate;
 }

@@ -1,13 +1,11 @@
 import type { LogMaintenancePolicyId } from "../../contracts/logs.ts";
+import { fixedSystemLogrotateUnits as sharedSystemLogrotateUnits } from "../../shared/logMaintenanceUnits.ts";
 
 export type HostLogrotatePolicyId = Exclude<LogMaintenancePolicyId, "docker-managed">;
 
-export const fixedSystemLogrotateUnits = Object.freeze({
-    "host-alternatives": "mira-dashboard-log-maintenance@host-alternatives.service",
-    "host-apport": "mira-dashboard-log-maintenance@host-apport.service",
-    "host-dpkg": "mira-dashboard-log-maintenance@host-dpkg.service",
-    "host-rsyslog": "mira-dashboard-log-maintenance@host-rsyslog.service",
-} satisfies Readonly<Record<HostLogrotatePolicyId, string>>);
+export { fixedSystemLogrotateUnits } from "../../shared/logMaintenanceUnits.ts";
+const reviewedSystemLogrotateUnits: Readonly<Record<HostLogrotatePolicyId, string>> =
+    sharedSystemLogrotateUnits;
 
 const systemctlDefault = "/usr/bin/systemctl";
 const processDeadlineMs = 5 * 60_000;
@@ -128,10 +126,9 @@ export function createFixedSystemLogrotateBroker(
     const broker: FixedSystemLogrotateBroker = {
         async availablePolicies(signal?: AbortSignal) {
             const available: HostLogrotatePolicyId[] = [];
-            for (const [policyId, unit] of Object.entries(fixedSystemLogrotateUnits) as [
-                HostLogrotatePolicyId,
-                string,
-            ][]) {
+            for (const [policyId, unit] of Object.entries(
+                reviewedSystemLogrotateUnits
+            ) as [HostLogrotatePolicyId, string][]) {
                 try {
                     const result = await execute(
                         executable,
@@ -149,7 +146,7 @@ export function createFixedSystemLogrotateBroker(
             return available;
         },
         async run(policyId: HostLogrotatePolicyId, signal?: AbortSignal) {
-            const unit = fixedSystemLogrotateUnits[policyId];
+            const unit = reviewedSystemLogrotateUnits[policyId];
             if (unit === undefined) throw brokerFailure();
             try {
                 const result = await execute(

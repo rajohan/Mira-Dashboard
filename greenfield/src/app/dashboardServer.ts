@@ -202,6 +202,8 @@ export interface DashboardServerOptions extends Omit<
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
     /** Optional only for isolated composition tests; production always supplies it. */
+    readonly dashboardLogMaintenanceRoot?: string;
+    /** Optional only for isolated composition tests; production always supplies it. */
     readonly dashboardLogsRoot?: string;
     /** Optional server-only speech credential; absence keeps both voice controls hidden. */
     readonly elevenLabsApiKey?: Redacted.Redacted<string>;
@@ -468,6 +470,14 @@ export async function createDashboardServer(
         }
     };
     try {
+        if (
+            (options.dashboardLogsRoot === undefined) !==
+            (options.dashboardLogMaintenanceRoot === undefined)
+        ) {
+            throw new TypeError(
+                "Dashboard logs and log-maintenance roots must be configured together"
+            );
+        }
         const browserOrigin = validateDashboardWebAuthnBrowserOrigin(
             options.browserOrigin,
             options.webAuthnRelyingParty
@@ -609,12 +619,14 @@ export async function createDashboardServer(
             wakeEventPump,
         });
         const logsService =
-            options.dashboardLogsRoot === undefined
+            options.dashboardLogsRoot === undefined ||
+            options.dashboardLogMaintenanceRoot === undefined
                 ? undefined
                 : createDashboardLogsService({
                       dashboardLogsRoot: options.dashboardLogsRoot,
                       database,
                       jobRepository,
+                      logMaintenanceRoot: options.dashboardLogMaintenanceRoot,
                       ...(domainNow === undefined ? {} : { now: domainNow }),
                       onAuditSettlementFailure: ({ policyId, settlement }) =>
                           options.applicationRuntime.logger.error({
@@ -1226,6 +1238,7 @@ export async function runDashboardWebProcess(
         server = await dependencies.createServer({
             applicationRuntime,
             browserOrigin: configuration.publicOrigin,
+            dashboardLogMaintenanceRoot: layout.production.state.logMaintenance,
             dashboardLogsRoot: layout.production.state.logs,
             ...(configuration.elevenLabsApiKey === undefined
                 ? {}

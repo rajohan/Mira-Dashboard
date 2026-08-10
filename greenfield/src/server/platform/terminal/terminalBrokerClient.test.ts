@@ -20,6 +20,7 @@ const summary = Object.freeze({
     idleExpiresAtMs: 1_800_000_600_000,
     location: { path: "/", rootId: "dashboard" },
     nextSequence: 1,
+    replayAvailableFromSequence: 1,
     sessionId,
     startedAtMs: 1_800_000_000_000,
     state: "awaiting-connection" as const,
@@ -233,11 +234,260 @@ describe("terminal broker web client", () => {
         expect(inputDecoder.push(channel.sent.at(-1) ?? new Uint8Array())).toEqual([
             { data: new Uint8Array([0, 4, 27]), kind: "input" },
         ]);
+        channel.handlers?.onDrain();
+        expect(drains).toBe(0);
+        channel.emit(
+            encodeTerminalBrokerControl({
+                acceptedBytes: 3,
+                status: "accepted",
+                type: "input-status",
+            })
+        );
+        expect(controls.at(-1)).toEqual({
+            acceptedBytes: 3,
+            status: "accepted",
+            type: "input-status",
+        });
         channel.emit(encodeTerminalBrokerControl({ type: "input-drain" }));
-        expect(drains).toBe(1);
+        expect(drains).toBe(0);
         relay.detach();
         expect(closed).toBe(1);
         expect(channel.closeCalls).toBe(1);
         expect(JSON.stringify(channel.sent.slice(1))).not.toContain(rawToken);
+    });
+
+    test("closes on an input acknowledgement that does not match its frame", async () => {
+        const channel = new FakeChannel();
+        channel.onSend = (data) => {
+            const message = decodeSingleControl(data);
+            if (message.type !== "attach") return;
+            queueMicrotask(() => {
+                channel.emit(
+                    encodeTerminalBrokerControl({
+                        replayAvailableFromSequence: 1,
+                        resumed: false,
+                        session: { ...summary, state: "connected" },
+                        type: "ready",
+                    })
+                );
+            });
+        };
+        let closed = 0;
+        const client = createTerminalBrokerClient({
+            transport: {
+                connect: () => Promise.resolve(channel),
+                request: () => Promise.reject(new Error("unused")),
+            },
+        });
+        const relay = await client.attach({
+            callbacks: {
+                onClose: () => {
+                    closed += 1;
+                },
+                onControl: () => {},
+                onInputDrain: () => {},
+                onOutput: () => "accepted",
+            },
+            connectionToken: `${"a".repeat(32)}.${"b".repeat(64)}`,
+            owner,
+            sessionId,
+        });
+        channel.onSend = undefined;
+
+        expect(relay.input(new Uint8Array([1, 2, 3]))).toBe("accepted");
+        channel.emit(
+            encodeTerminalBrokerControl({
+                acceptedBytes: 2,
+                status: "accepted",
+                type: "input-status",
+            })
+        );
+
+        expect(closed).toBe(1);
+        expect(channel.closeCalls).toBe(1);
+        expect(relay.input(new Uint8Array([4]))).toBe("closed");
+    });
+
+    test("does not release newer transport pressure on an older accepted acknowledgement", async () => {
+        const channel = new FakeChannel();
+        channel.onSend = (data) => {
+            const message = decodeSingleControl(data);
+            if (message.type !== "attach") return;
+            queueMicrotask(() => {
+                channel.emit(
+                    encodeTerminalBrokerControl({
+                        replayAvailableFromSequence: 1,
+                        resumed: false,
+                        session: { ...summary, state: "connected" },
+                        type: "ready",
+                    })
+                );
+            });
+        };
+        let drains = 0;
+        const client = createTerminalBrokerClient({
+            transport: {
+                connect: () => Promise.resolve(channel),
+                request: () => Promise.reject(new Error("unused")),
+            },
+        });
+        const relay = await client.attach({
+            callbacks: {
+                onClose: () => {},
+                onControl: () => {},
+                onInputDrain: () => {
+                    drains += 1;
+                },
+                onOutput: () => "accepted",
+            },
+            connectionToken: `${"a".repeat(32)}.${"b".repeat(64)}`,
+            owner,
+            sessionId,
+        });
+        channel.onSend = undefined;
+
+        expect(relay.input(new Uint8Array([1]))).toBe("accepted");
+        channel.sendDisposition = "backpressured";
+        expect(relay.input(new Uint8Array([2, 3]))).toBe("backpressured");
+        channel.handlers?.onDrain();
+        channel.emit(
+            encodeTerminalBrokerControl({
+                acceptedBytes: 1,
+                status: "accepted",
+                type: "input-status",
+            })
+        );
+        expect(drains).toBe(0);
+
+        channel.emit(
+            encodeTerminalBrokerControl({
+                acceptedBytes: 2,
+                status: "accepted",
+                type: "input-status",
+            })
+        );
+        expect(drains).toBe(1);
+        relay.detach();
+    });
+
+    test("ignores an unsolicited PTY drain before later input backpressure", async () => {
+        const channel = new FakeChannel();
+        channel.onSend = (data) => {
+            const message = decodeSingleControl(data);
+            if (message.type !== "attach") return;
+            queueMicrotask(() => {
+                channel.emit(
+                    encodeTerminalBrokerControl({
+                        replayAvailableFromSequence: 1,
+                        resumed: false,
+                        session: { ...summary, state: "connected" },
+                        type: "ready",
+                    })
+                );
+            });
+        };
+        let drains = 0;
+        const client = createTerminalBrokerClient({
+            transport: {
+                connect: () => Promise.resolve(channel),
+                request: () => Promise.reject(new Error("unused")),
+            },
+        });
+        const relay = await client.attach({
+            callbacks: {
+                onClose: () => {},
+                onControl: () => {},
+                onInputDrain: () => {
+                    drains += 1;
+                },
+                onOutput: () => "accepted",
+            },
+            connectionToken: `${"a".repeat(32)}.${"b".repeat(64)}`,
+            owner,
+            sessionId,
+        });
+        channel.onSend = undefined;
+
+        channel.emit(encodeTerminalBrokerControl({ type: "input-drain" }));
+        expect(relay.input(new Uint8Array([1]))).toBe("accepted");
+        channel.emit(
+            encodeTerminalBrokerControl({
+                acceptedBytes: 1,
+                status: "backpressured",
+                type: "input-status",
+            })
+        );
+        expect(drains).toBe(0);
+
+        channel.emit(encodeTerminalBrokerControl({ type: "input-drain" }));
+        expect(drains).toBe(1);
+        relay.detach();
+    });
+
+    test("waits for both IPC and PTY pressure to drain in either order", async () => {
+        const channel = new FakeChannel();
+        channel.onSend = (data) => {
+            const message = decodeSingleControl(data);
+            if (message.type !== "attach") return;
+            queueMicrotask(() => {
+                channel.emit(
+                    encodeTerminalBrokerControl({
+                        replayAvailableFromSequence: 1,
+                        resumed: false,
+                        session: { ...summary, state: "connected" },
+                        type: "ready",
+                    })
+                );
+            });
+        };
+        let drains = 0;
+        const client = createTerminalBrokerClient({
+            transport: {
+                connect: () => Promise.resolve(channel),
+                request: () => Promise.reject(new Error("unused")),
+            },
+        });
+        const relay = await client.attach({
+            callbacks: {
+                onClose: () => {},
+                onControl: () => {},
+                onInputDrain: () => {
+                    drains += 1;
+                },
+                onOutput: () => "accepted",
+            },
+            connectionToken: `${"a".repeat(32)}.${"b".repeat(64)}`,
+            owner,
+            sessionId,
+        });
+        channel.onSend = undefined;
+        channel.sendDisposition = "backpressured";
+
+        expect(relay.input(new Uint8Array([1]))).toBe("backpressured");
+        channel.emit(
+            encodeTerminalBrokerControl({
+                acceptedBytes: 1,
+                status: "backpressured",
+                type: "input-status",
+            })
+        );
+        channel.emit(encodeTerminalBrokerControl({ type: "input-drain" }));
+        expect(drains).toBe(0);
+        channel.handlers?.onDrain();
+        expect(drains).toBe(1);
+
+        expect(relay.input(new Uint8Array([2]))).toBe("backpressured");
+        channel.emit(
+            encodeTerminalBrokerControl({
+                acceptedBytes: 1,
+                status: "backpressured",
+                type: "input-status",
+            })
+        );
+        channel.handlers?.onDrain();
+        expect(drains).toBe(1);
+        channel.emit(encodeTerminalBrokerControl({ type: "input-drain" }));
+        expect(drains).toBe(2);
+        relay.detach();
     });
 });

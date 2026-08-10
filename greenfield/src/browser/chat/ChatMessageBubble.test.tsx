@@ -179,12 +179,16 @@ describe("chat message bubble", () => {
         expect(within(tool).getByText("Tool input")).toBeVisible();
         expect(within(tool).getByText("Tool output")).toBeVisible();
         expect(within(tool).getByText(/8 pass/iu)).toBeVisible();
-        expect(
-            within(tool).getByRole("region", { name: "Bash tool input" })
-        ).toHaveAttribute("tabindex", "0");
-        expect(
-            within(tool).getByRole("region", { name: "Bash tool output" })
-        ).toHaveAttribute("tabindex", "0");
+        const inputRegion = within(tool).getByRole("region", {
+            name: "Bash tool input",
+        });
+        const outputRegion = within(tool).getByRole("region", {
+            name: "Bash tool output",
+        });
+        expect(inputRegion).toHaveAttribute("data-virtualizer-scroll-region");
+        expect(inputRegion).toHaveAttribute("tabindex", "0");
+        expect(outputRegion).toHaveAttribute("data-virtualizer-scroll-region");
+        expect(outputRegion).toHaveAttribute("tabindex", "0");
         expect(within(tool).queryByText("running")).toBeNull();
     });
 

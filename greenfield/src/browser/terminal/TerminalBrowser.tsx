@@ -69,6 +69,24 @@ function currentTimeMs(): number {
     return Date.now();
 }
 
+function retainedReplayCursor(session: TerminalSessionSummary): number {
+    return session.replayAvailableFromSequence - 1;
+}
+
+function manualResumeSelection(
+    session: TerminalSessionSummary,
+    disconnectedCursor: number | undefined
+): Readonly<{ cursor: number; replayGap: boolean }> {
+    const replayCursor = retainedReplayCursor(session);
+    const continuesDisplayedOutput =
+        disconnectedCursor !== undefined &&
+        disconnectedCursor >= replayCursor &&
+        disconnectedCursor < session.nextSequence;
+    return continuesDisplayedOutput
+        ? { cursor: disconnectedCursor, replayGap: false }
+        : { cursor: replayCursor, replayGap: replayCursor > 0 };
+}
+
 function connectingAnnouncement(
     phase: "connecting" | "reconnecting" | "resyncing"
 ): string {
@@ -130,6 +148,7 @@ export function TerminalBrowser({
     const [startBusy, setStartBusy] = useState(false);
     const [terminalReady, setTerminalReady] = useState(false);
     const emulator = useRef<TerminalEmulator | undefined>(undefined);
+    const disconnectedCursorBySession = useRef(new Map<string, number>());
     const pendingOutputBytes = useRef(0);
     const reconnectAbort = useRef<AbortController | undefined>(undefined);
     const socket = useRef<TerminalSocketConnection | undefined>(undefined);
@@ -233,6 +252,7 @@ export function TerminalBrowser({
                 return;
             }
             case "exit": {
+                disconnectedCursorBySession.current.delete(message.sessionId);
                 setLocalSession(undefined);
                 setLocalPhase("ended");
                 setAnnouncement(
@@ -274,6 +294,10 @@ export function TerminalBrowser({
                         socket.current = undefined;
                         terminal.setInputEnabled(false);
                         if (event.expected) return;
+                        disconnectedCursorBySession.current.set(
+                            sessionId,
+                            event.afterSequence
+                        );
                         if (event.kind === "protocol") {
                             setActionError(
                                 "The terminal received unexpected data and was closed."
@@ -380,18 +404,20 @@ export function TerminalBrowser({
                         )
                     );
                     if (active.status === "none") {
+                        disconnectedCursorBySession.current.delete(sessionId);
                         setLocalSession(undefined);
                         setLocalPhase("ended");
                         setAnnouncement("Terminal session ended while disconnected.");
                         return;
                     }
                     setLocalSession(active.session);
+                    const replayCursor = retainedReplayCursor(active.session);
                     if (
                         active.session.state === "awaiting-reconnect" &&
                         failure === "not-found" &&
-                        active.session.nextSequence - 1 > cursor
+                        replayCursor > cursor
                     ) {
-                        cursor = active.session.nextSequence - 1;
+                        cursor = replayCursor;
                         resynchronized = true;
                         setReplayGap(true);
                         setLocalPhase("resyncing");
@@ -427,6 +453,7 @@ export function TerminalBrowser({
         const terminal = emulator.current;
         if (terminal === undefined || startBusy) return;
         cancelReconnect();
+        disconnectedCursorBySession.current.clear();
         setActionError(undefined);
         setReplayGap(false);
         setStartBusy(true);
@@ -456,20 +483,25 @@ export function TerminalBrowser({
         cancelReconnect();
         setActionError(undefined);
         setStartBusy(true);
-        const cursor = serverSession.nextSequence - 1;
-        const omittedEarlierOutput = cursor > 0;
-        setReplayGap(omittedEarlierOutput);
+        const resume = manualResumeSelection(
+            serverSession,
+            disconnectedCursorBySession.current.get(serverSession.sessionId)
+        );
+        setReplayGap(resume.replayGap);
         setLocalSession(serverSession);
-        setLocalPhase(omittedEarlierOutput ? "resyncing" : "reconnecting");
+        setLocalPhase(resume.replayGap ? "resyncing" : "reconnecting");
         try {
             const ticket = await boundary.run((signal) =>
                 client.mutation(
                     "terminal.prepareResume",
-                    { afterSequence: cursor, sessionId: serverSession.sessionId },
+                    {
+                        afterSequence: resume.cursor,
+                        sessionId: serverSession.sessionId,
+                    },
                     { signal }
                 )
             );
-            openSocket(ticket, omittedEarlierOutput ? "resyncing" : "reconnecting");
+            openSocket(ticket, resume.replayGap ? "resyncing" : "reconnecting");
         } catch (error) {
             setActionError(terminalFailureMessage(error));
             setLocalPhase("active-elsewhere");
@@ -496,6 +528,7 @@ export function TerminalBrowser({
             );
             socket.current?.close();
             socket.current = undefined;
+            disconnectedCursorBySession.current.delete(session.sessionId);
             setLocalSession(undefined);
             setLocalPhase("ended");
             setInputPaused(false);

@@ -568,8 +568,11 @@ export class TerminalSocketConnection {
             return;
         }
         if (event.type === "input-status") {
-            this.#inputBackpressured = event.status === "backpressured";
-            if (event.status === "closed") this.#unavailableClose();
+            if (event.status === "closed") {
+                this.#unavailableClose();
+            } else if (event.status === "backpressured") {
+                this.#inputBackpressured = true;
+            }
             return;
         }
         if (event.type === "exit") {

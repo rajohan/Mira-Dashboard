@@ -282,6 +282,7 @@ describe("Dashboard worker runtime", () => {
                         revision: "a".repeat(64),
                         sizeBytes: 0,
                     }),
+                removeSettledReplacementIntent: () => Promise.resolve(),
                 dispose() {
                     fixture.events.push("workspace-files-dispose");
                 },

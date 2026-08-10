@@ -94,6 +94,9 @@ export interface DescriptorWorkspaceFileStructuralWriter {
         readonly sizeBytes: number;
     }>;
     readonly dispose: () => void;
+    readonly removeSettledReplacementIntent: (
+        command: WorkerWorkspaceFileWriteCommand
+    ) => Promise<void>;
 }
 
 interface OpenRoot extends WorkerWorkspaceFileRootConfiguration {
@@ -1101,6 +1104,37 @@ export function createDescriptorWorkspaceFileStructuralWriter(
                     await Fs.promises.unlink(temporaryPath).catch(() => {});
                 }
                 await directory.close();
+            }
+        },
+        async removeSettledReplacementIntent(command) {
+            if (disposed) throw failure("unavailable");
+            try {
+                validateCommand(command, roots);
+                if (command.operation !== "replace") {
+                    throw failure("invalid-input");
+                }
+                const loaded = await readWorkspaceFileReplaceIntent(
+                    intentStore,
+                    command.spoolId
+                );
+                if (loaded === undefined) return;
+                if (
+                    loaded.state !== "settled" ||
+                    !intentMatchesCommand(
+                        loaded.intent,
+                        command,
+                        stageName(command.spoolId)
+                    )
+                ) {
+                    throw failure("access-denied");
+                }
+                await removeWorkspaceFileReplaceIntent(
+                    intentStore,
+                    command.spoolId,
+                    loaded
+                );
+            } catch (error) {
+                throw classifiedFailure(error);
             }
         },
         dispose() {

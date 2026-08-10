@@ -140,15 +140,24 @@ export type JobActionExecutor = (
     payload: JsonObject
 ) => Effect.Effect<JobRunResult, unknown>;
 
+/** Worker-only cleanup that may run only after a successful claim is durably settled. */
+export type JobActionSuccessfulSettlementHandler = (payload: JsonObject) => Promise<void>;
+
+interface JobActionWorkerAuthority {
+    readonly afterSuccessfulSettlement?: JobActionSuccessfulSettlementHandler;
+    readonly execute: JobActionExecutor;
+}
+
 /** Combined definition and executor accepted only at the worker composition boundary. */
 export type JobActionRegistration = (
     | JobActionDefinition
     | JobUnscheduledActionDefinition
-) & { readonly execute: JobActionExecutor };
+) &
+    JobActionWorkerAuthority;
 
 function isScheduledJobActionRegistration(
     registration: JobActionRegistration
-): registration is JobActionDefinition & { readonly execute: JobActionExecutor } {
+): registration is JobActionDefinition & JobActionWorkerAuthority {
     return registration.scheduleId !== undefined;
 }
 
@@ -219,7 +228,21 @@ export function validateJobActionRegistration(
         ? validateJobActionDefinition(registration)
         : validateJobUnscheduledActionDefinition(registration);
     v.parse(v.function("Job action executor is invalid"), registration.execute);
-    return Object.freeze({ ...definition, execute: registration.execute });
+    if (registration.afterSuccessfulSettlement !== undefined) {
+        v.parse(
+            v.function("Job action settlement handler is invalid"),
+            registration.afterSuccessfulSettlement
+        );
+    }
+    return Object.freeze({
+        ...definition,
+        ...(registration.afterSuccessfulSettlement === undefined
+            ? {}
+            : {
+                  afterSuccessfulSettlement: registration.afterSuccessfulSettlement,
+              }),
+        execute: registration.execute,
+    });
 }
 
 const workerSmokeDefinition = validateJobActionDefinition({

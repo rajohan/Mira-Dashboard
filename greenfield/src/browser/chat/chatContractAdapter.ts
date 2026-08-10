@@ -436,10 +436,16 @@ export function projectChatRuntimeSnapshot(
             case "tool": {
                 appendChatMessagePart(parts, {
                     callId: part.callId,
+                    ...(part.callIdSource === undefined
+                        ? {}
+                        : { callIdSource: part.callIdSource }),
                     ...(part.input === undefined ? {} : { input: part.input }),
                     ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
                     kind: "tool",
                     name: part.name,
+                    ...(part.nameSource === undefined
+                        ? {}
+                        : { nameSource: part.nameSource }),
                     ...(part.output === undefined ? {} : { output: part.output }),
                     status: toolPartStatus(part.phase),
                 });
@@ -529,11 +535,14 @@ export function projectChatRuntimeSnapshot(
  */
 export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunProjection {
     const parts: ChatMessagePart[] = [];
+    const truncatedAssistantText = run.projectionTruncated ? run.text : "";
     if (run.parts !== undefined && run.parts.length > 0) {
         for (const part of run.parts) {
             switch (part.kind) {
                 case "assistant": {
-                    parts.push({ kind: "text", text: part.text });
+                    if (!run.projectionTruncated) {
+                        parts.push({ kind: "text", text: part.text });
+                    }
                     break;
                 }
                 case "thinking": {
@@ -547,10 +556,16 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                 case "tool": {
                     appendChatMessagePart(parts, {
                         callId: part.callId,
+                        ...(part.callIdSource === undefined
+                            ? {}
+                            : { callIdSource: part.callIdSource }),
                         ...(part.input === undefined ? {} : { input: part.input }),
                         ...(part.isError ? { error: part.output ?? "Tool failed" } : {}),
                         kind: "tool",
                         name: part.name,
+                        ...(part.nameSource === undefined
+                            ? {}
+                            : { nameSource: part.nameSource }),
                         ...(part.output === undefined ? {} : { output: part.output }),
                         status: toolPartStatus(part.phase),
                     });
@@ -572,7 +587,10 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                 }
             }
         }
-    } else if (run.text !== "") {
+    }
+    if (truncatedAssistantText !== "") {
+        parts.push({ kind: "text", text: truncatedAssistantText });
+    } else if ((run.parts === undefined || run.parts.length === 0) && run.text !== "") {
         parts.push({ kind: "text", text: run.text });
     }
     if (run.projectionTruncated) {

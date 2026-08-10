@@ -45,7 +45,17 @@ describe("log-maintenance durable queue adapter", () => {
             "019fdf10-0000-7000-8000-000000000002",
         ];
         let wakeups = 0;
+        let availabilityChecks = 0;
         const queue = createLogMaintenanceJobQueue({
+            availablePolicies: () => {
+                availabilityChecks += 1;
+                return Promise.resolve([
+                    "host-rsyslog",
+                    "unreviewed-policy",
+                    "docker-managed",
+                    "host-rsyslog",
+                ] as never);
+            },
             generateId: () => ids.shift() ?? Bun.randomUUIDv7(),
             nowMs: () => 1000,
             repository: fixture.repository,
@@ -56,9 +66,6 @@ describe("log-maintenance durable queue adapter", () => {
 
         expect(await queue.queueablePolicies()).toEqual([
             "docker-managed",
-            "host-alternatives",
-            "host-apport",
-            "host-dpkg",
             "host-rsyslog",
         ]);
         const input = { idempotencyKey, policyId: "host-rsyslog" } as const;
@@ -66,6 +73,7 @@ describe("log-maintenance durable queue adapter", () => {
         const replay = await queue.enqueue(input);
 
         expect(replay).toEqual(first);
+        expect(availabilityChecks).toBe(2);
         expect(wakeups).toBe(1);
         expect(fixture.enqueues).toHaveLength(1);
         expect(fixture.enqueues[0]?.run).toMatchObject({
@@ -95,10 +103,59 @@ describe("log-maintenance durable queue adapter", () => {
         ]);
         expect(fixture.enqueues[0]?.realtimeEvents).toHaveLength(1);
 
-        expect(
-            queue.enqueue({ idempotencyKey, policyId: "host-apport" })
-        ).rejects.toBeInstanceOf(LogMaintenanceJobQueueError);
+        const unavailableError = await queue
+            .enqueue({ idempotencyKey, policyId: "host-apport" })
+            .catch((error: unknown) => error);
+        expect(unavailableError).toBeInstanceOf(LogMaintenanceJobQueueError);
         expect(fixture.enqueues).toHaveLength(1);
+    });
+
+    test("marks every policy unavailable without a worker availability projection", async () => {
+        const fixture = repositoryFixture();
+        let generatedIds = 0;
+        const queue = createLogMaintenanceJobQueue({
+            generateId: () => {
+                generatedIds += 1;
+                return Bun.randomUUIDv7();
+            },
+            repository: fixture.repository,
+        });
+
+        expect(await queue.queueablePolicies()).toEqual([]);
+        const unavailableError = await queue
+            .enqueue({ idempotencyKey, policyId: "docker-managed" })
+            .catch((error: unknown) => error);
+        expect(unavailableError).toBeInstanceOf(LogMaintenanceJobQueueError);
+        expect(generatedIds).toBe(0);
+        expect(fixture.enqueues).toEqual([]);
+    });
+
+    test("fails closed when availability changes to aborted or unavailable", async () => {
+        const fixture = repositoryFixture();
+        const controller = new AbortController();
+        const abortedQueue = createLogMaintenanceJobQueue({
+            availablePolicies: () => {
+                controller.abort();
+                return Promise.resolve(["host-rsyslog"]);
+            },
+            repository: fixture.repository,
+        });
+        const unavailableQueue = createLogMaintenanceJobQueue({
+            availablePolicies: () => Promise.reject(new Error("private worker state")),
+            repository: fixture.repository,
+        });
+
+        const failures = await Promise.all([
+            abortedQueue
+                .queueablePolicies(controller.signal)
+                .catch((error: unknown) => error),
+            unavailableQueue.queueablePolicies().catch((error: unknown) => error),
+        ]);
+        expect(failures).toEqual([
+            expect.any(LogMaintenanceJobQueueError),
+            expect.any(LogMaintenanceJobQueueError),
+        ]);
+        expect(fixture.enqueues).toEqual([]);
     });
 
     test("fails closed before persistence for invalid or aborted requests", async () => {

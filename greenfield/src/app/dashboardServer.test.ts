@@ -489,6 +489,49 @@ describe("Dashboard security composition", () => {
         expect(disposeCalls).toBe(1);
     });
 
+    test("rejects partial log composition before runtime initialization", () => {
+        let disposeCalls = 0;
+        let initializeCalls = 0;
+        let ormCalls = 0;
+        const applicationRuntime = Object.freeze({
+            ...createTestApplicationRuntime({
+                dispose: () => {
+                    disposeCalls += 1;
+                    return Promise.resolve();
+                },
+                initialize: () => {
+                    initializeCalls += 1;
+                    return Promise.resolve();
+                },
+            }),
+            database: Object.freeze({
+                orm: () => {
+                    ormCalls += 1;
+                    return Promise.reject(new Error("Database must not be reached"));
+                },
+                run: runTestImmediateDatabaseWrite,
+            }),
+        });
+
+        expect(
+            createDashboardServer({
+                applicationRuntime,
+                browserOrigin: "https://dashboard.example",
+                dashboardLogsRoot: "/srv/mira-dashboard/logs",
+                gatewayUrl: "ws://127.0.0.1:1",
+                port: 0,
+                readiness: createReadinessController(),
+                totpSecretCipher: testTotpSecretCipher,
+            })
+        ).rejects.toThrow(
+            "Dashboard logs and log-maintenance roots must be configured together"
+        );
+
+        expect(initializeCalls).toBe(0);
+        expect(ormCalls).toBe(0);
+        expect(disposeCalls).toBe(1);
+    });
+
     test("wires the persisted automation lifecycle through the production server", async () => {
         const stateDirectory = await mkdtemp(
             path.join(os.tmpdir(), "dashboard-server-composition-")

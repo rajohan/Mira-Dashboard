@@ -222,30 +222,60 @@ async function reserve(
 }
 
 describe("worker terminal session broker", () => {
-    test("enforces one session per user, authenticator binding, and global capacity", async () => {
+    test("indexes sessions by exact owner while preserving isolation and capacity", async () => {
         const harness = brokerHarness();
         const first = await reserve(harness);
+        const siblingOwner = Object.freeze({
+            authenticatorId: "auth-2",
+            id: owner.id,
+        });
+        const sibling = await reserve(harness, {
+            index: 2,
+            owner: siblingOwner,
+        });
         expect(first.summary).toMatchObject({
             nextSequence: 1,
+            replayAvailableFromSequence: 1,
             sessionId: sessionId(1),
             state: "awaiting-connection",
         });
-        expect(
-            await harness.broker.getActive({
-                authenticatorId: "other-authenticator",
-                id: owner.id,
-            })
-        ).toBeUndefined();
+        expect(await harness.broker.getActive(owner)).toMatchObject({
+            sessionId: first.sessionId,
+        });
+        expect(await harness.broker.getActive(siblingOwner)).toMatchObject({
+            sessionId: sibling.sessionId,
+        });
         expect(
             await captureFailure(() =>
                 reserve(harness, {
-                    index: 2,
-                    owner: { authenticatorId: "auth-2", id: owner.id },
+                    index: 3,
+                    owner,
                 })
             )
         ).toMatchObject({ reason: "conflict" });
+        const siblingTicket = ticketMaterial(
+            9,
+            harness.scheduler.nowMs + terminalConnectionTicketTtlMs
+        );
+        expect(
+            await captureFailure(() =>
+                harness.broker.prepareResume({
+                    owner: siblingOwner,
+                    sessionId: first.sessionId,
+                    ticket: siblingTicket.ticket,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
+        expect(
+            await captureFailure(() =>
+                harness.broker.terminate({
+                    owner: siblingOwner,
+                    sessionId: first.sessionId,
+                })
+            )
+        ).toMatchObject({ reason: "not-found" });
 
-        for (let index = 2; index <= terminalConcurrentSessionMaximum; index += 1) {
+        for (let index = 3; index <= terminalConcurrentSessionMaximum; index += 1) {
             await reserve(harness, {
                 index,
                 owner: { authenticatorId: `auth-${index}`, id: `user-${index}` },
@@ -383,6 +413,11 @@ describe("worker terminal session broker", () => {
         for (let index = 0; index < 9; index += 1) {
             harness.ptys[0]?.emitOutput(chunk);
         }
+        expect(await harness.broker.getActive(owner)).toMatchObject({
+            nextSequence: 12,
+            replayAvailableFromSequence: 4,
+            state: "awaiting-reconnect",
+        });
         const stale = ticketMaterial(
             3,
             harness.scheduler.nowMs + terminalConnectionTicketTtlMs,

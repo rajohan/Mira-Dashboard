@@ -88,14 +88,20 @@ function updateToolPart(
     );
     const previous = index === -1 ? undefined : parts[index];
     const previousTool = previous?.kind === "tool" ? previous : undefined;
-    const input = event.input ?? previousTool?.input;
+    const input = previousTool?.input ?? event.input;
     const output = event.output ?? previousTool?.output;
     const projection = {
         callId: event.callId,
+        ...((previousTool?.callIdSource ?? event.callIdSource) === undefined
+            ? {}
+            : { callIdSource: "synthetic" as const }),
         ...(input === undefined ? {} : { input }),
         isError: event.isError,
         kind: "tool" as const,
         name: previousTool?.name ?? event.name,
+        ...((previousTool?.nameSource ?? event.nameSource) === undefined
+            ? {}
+            : { nameSource: "synthetic" as const }),
         ...(output === undefined ? {} : { output }),
         phase: event.phase,
         sequence: index === -1 ? event.sequence : parts[index]!.sequence,

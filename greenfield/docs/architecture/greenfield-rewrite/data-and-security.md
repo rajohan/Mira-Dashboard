@@ -487,9 +487,11 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   wildcard. Ubuntu system logrotate remains responsible only for the exact `rsyslog`, `apport`,
   `dpkg`, and `alternatives` policies through a fixed worker broker. Both paths exclude journald
   storage, binary login/audit databases, sockets, devices, hardlinks, and symlink escapes.
-  The web and worker units retain `PrivateTmp=true`; the exact host `/tmp/openclaw` directory is
-  mounted read-only into web and writable into worker so private temporary namespaces cannot
-  silently hide the reviewed OpenClaw source or prevent its worker-owned retention policy.
+  The web and worker units retain `PrivateTmp=true`; when the optional host `/tmp/openclaw`
+  directory exists, it is mounted read-only into web and writable into worker so private temporary
+  namespaces cannot silently hide the reviewed OpenClaw source or prevent its worker-owned
+  retention policy. A fresh host where that optional source does not yet exist still starts both
+  units.
 - Markdown and HTML are sanitized at the rendering boundary. A raw HTML feature is not an
   authorization boundary.
 - Exec, terminal, Git, Docker, systemd, backup, restore, and OpenClaw adapters each have a

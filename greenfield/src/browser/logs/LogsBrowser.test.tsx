@@ -292,4 +292,106 @@ describe("LogsBrowser", () => {
             queryClient.clear();
         }
     });
+
+    test("hides cached snapshots when a selected source becomes unavailable", async () => {
+        let sourceUnavailable = false;
+        const unavailableCatalog: ListLogSourcesOutput = {
+            ...sourceCatalog,
+            observedAtMs: observedAtMs + 1,
+            sources: sourceCatalog.sources.map((source) =>
+                source.id === "openclaw.gateway"
+                    ? { ...source, availability: "unreadable" as const }
+                    : source
+            ),
+        };
+        const query = jest.fn((name: string, input: unknown) => {
+            if (name === "logs.listSources") {
+                return Promise.resolve(
+                    sourceUnavailable ? unavailableCatalog : sourceCatalog
+                );
+            }
+            if (name === "logs.maintenanceStatus") {
+                return Promise.resolve(maintenanceStatus);
+            }
+            if (name === "logs.tail") {
+                const { sourceId } = input as { readonly sourceId: string };
+                const result = snapshot(sourceId);
+                return Promise.resolve(
+                    sourceId === "openclaw.gateway"
+                        ? {
+                              ...result,
+                              lines: [
+                                  {
+                                      id: "a".repeat(64),
+                                      line: "sensitive cached line",
+                                      severity: "info" as const,
+                                  },
+                              ],
+                          }
+                        : result
+                );
+            }
+            return Promise.reject(new Error(`Unexpected query: ${name}`));
+        });
+        const client = {
+            mutation: () => Promise.reject(new Error("Unexpected mutation")),
+            query,
+        } as unknown as DashboardTrpcClient;
+        const { queryClient, view } = renderBrowser(client);
+
+        try {
+            const user = userEvent.setup();
+            await screen.findByRole("heading", { name: "Dashboard web stderr" });
+            await user.click(screen.getByRole("button", { name: /Log source/u }));
+            await user.click(screen.getByRole("option", { name: /OpenClaw gateway/u }));
+            expect(await screen.findByText("1 line")).toBeVisible();
+            expect(
+                queryClient.getQueryData([
+                    "logs",
+                    "snapshot",
+                    "openclaw.gateway",
+                    "tail",
+                    null,
+                ])
+            ).toMatchObject({
+                lines: [{ line: "sensitive cached line" }],
+            });
+            const tailCallsBeforeRefresh = query.mock.calls.filter(
+                ([name]) => name === "logs.tail"
+            ).length;
+
+            sourceUnavailable = true;
+            await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+            expect(
+                await screen.findByText(
+                    "This log source is missing or cannot be read safely."
+                )
+            ).toBeVisible();
+            await waitFor(() => expect(screen.queryByText("1 line")).toBeNull());
+            expect(
+                screen.queryByRole("log", {
+                    name: "Log lines with sensitive values removed",
+                })
+            ).toBeNull();
+            expect(screen.queryByText(/Query:/u)).toBeNull();
+            expect(
+                queryClient.getQueryData([
+                    "logs",
+                    "snapshot",
+                    "openclaw.gateway",
+                    "tail",
+                    null,
+                ])
+            ).toMatchObject({
+                lines: [{ line: "sensitive cached line" }],
+            });
+            expect(
+                query.mock.calls.filter(([name]) => name === "logs.tail")
+            ).toHaveLength(tailCallsBeforeRefresh);
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
 });

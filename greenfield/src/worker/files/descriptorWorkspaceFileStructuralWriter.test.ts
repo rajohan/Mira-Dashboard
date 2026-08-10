@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import Fs from "node:fs";
 import Os from "node:os";
 import Path from "node:path";
@@ -322,7 +322,40 @@ describe("descriptor workspace file structural writer", () => {
             Fs.readdirSync(root).filter((name) => name.startsWith(".mira-files-"))
         ).toHaveLength(0);
         expect(Fs.existsSync(Path.join(spool, `${spoolId}.replace-settled`))).toBe(true);
+
+        await recoveredWriter.removeSettledReplacementIntent(command);
+        expect(Fs.existsSync(Path.join(spool, `${spoolId}.replace-settled`))).toBe(false);
     });
+
+    test("reclaims every durably settled replacement intent before capacity is reused", async () => {
+        const { root, spool, writer } = fixture();
+        const target = Path.join(root, "note.txt");
+        Fs.writeFileSync(target, "initial");
+
+        for (let index = 0; index < 257; index += 1) {
+            const contents = `replacement-${index}`;
+            const spoolId = randomUUID();
+            const command: WorkerWorkspaceFileWriteCommand = {
+                expectedRevision: replacementRevision(root, "note.txt"),
+                fileName: "note.txt",
+                locator: { rootId: "workspace", segments: ["note.txt"] },
+                mimeType: "text/plain",
+                operation: "replace",
+                sha256: stageUpload(spool, spoolId, contents),
+                sizeBytes: Buffer.byteLength(contents),
+                spoolId,
+                ticketId: randomUUID(),
+            };
+
+            await writer.apply(command);
+            await writer.removeSettledReplacementIntent(command);
+        }
+
+        expect(Fs.readFileSync(target, "utf8")).toBe("replacement-256");
+        expect(
+            Fs.readdirSync(spool).filter((name) => name.endsWith(".replace-settled"))
+        ).toHaveLength(0);
+    }, 30_000);
 
     test("rejects replacement targets beyond the bounded digest budget", async () => {
         const { root, spool, writer } = fixture();

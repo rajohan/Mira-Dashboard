@@ -29,6 +29,7 @@ const summary = Object.freeze({
     idleExpiresAtMs: 1_800_000_600_000,
     location: { path: "/", rootId: "dashboard" },
     nextSequence: 1,
+    replayAvailableFromSequence: 1,
     sessionId,
     startedAtMs: 1_800_000_000_000,
     state: "connected" as const,
@@ -138,6 +139,7 @@ class FakeLifecycle implements TerminalBrokerIpcLifecycle {
 function fakeBroker() {
     let attachedSink: WorkerTerminalRelaySink | undefined;
     let detachCalls = 0;
+    let drainDuringInput = false;
     let inputBytes: Uint8Array | undefined;
     let resizeCalls = 0;
     let resumeCalls = 0;
@@ -148,6 +150,10 @@ function fakeBroker() {
         },
         input(data) {
             inputBytes = new Uint8Array(data);
+            if (drainDuringInput) {
+                attachedSink?.sendControl({ type: "input-drain" });
+                return { acceptedBytes: data.byteLength, status: "backpressured" };
+            }
             return { acceptedBytes: data.byteLength, status: "accepted" };
         },
         ping() {},
@@ -187,6 +193,9 @@ function fakeBroker() {
         },
         get detachCalls() {
             return detachCalls;
+        },
+        set drainDuringInput(value: boolean) {
+            drainDuringInput = value;
         },
         get inputBytes() {
             return inputBytes;
@@ -341,7 +350,24 @@ describe("terminal broker Unix IPC server", () => {
         );
         await flush();
         expect(harness.broker.inputBytes).toEqual(new Uint8Array([0, 4, 27]));
+        expect(decodeControl(attachedConnection.sent[1] ?? new Uint8Array())).toEqual({
+            acceptedBytes: 3,
+            status: "accepted",
+            type: "input-status",
+        });
         expect(harness.broker.resizeCalls).toBe(1);
+
+        harness.broker.drainDuringInput = true;
+        attachedConnection.emit(encodeTerminalBrokerInput(new Uint8Array([5])));
+        await flush();
+        expect(decodeControl(attachedConnection.sent[2] ?? new Uint8Array())).toEqual({
+            acceptedBytes: 1,
+            status: "backpressured",
+            type: "input-status",
+        });
+        expect(decodeControl(attachedConnection.sent[3] ?? new Uint8Array())).toEqual({
+            type: "input-drain",
+        });
 
         attachedConnection.disposition = "backpressured";
         expect(

@@ -10,6 +10,7 @@ import {
     terminalProcedureContracts,
     terminalRawHttpContracts,
     terminalRuntimeMode,
+    terminalSessionSummarySchema,
     terminalWebSocketProtocol,
 } from "./terminal.ts";
 
@@ -74,5 +75,26 @@ describe("interactive terminal contracts", () => {
             afterSequence: 0,
             sessionId: "019fc968-1a9b-7760-bf1b-d5b863b0e7b4",
         });
+    });
+
+    test("bounds the retained replay floor within the published sequence window", () => {
+        const summary = {
+            dimensions: { columns: 80, rows: 24 },
+            expiresAtMs: 1_800_001_800_000,
+            idleExpiresAtMs: 1_800_000_600_000,
+            location: { path: "/", rootId: "dashboard" },
+            nextSequence: 4,
+            replayAvailableFromSequence: 2,
+            sessionId: "019fc968-1a9b-7760-bf1b-d5b863b0e7b4",
+            startedAtMs: 1_800_000_000_000,
+            state: "awaiting-reconnect",
+        };
+        expect(v.parse(terminalSessionSummarySchema, summary)).toEqual(summary);
+        expect(
+            v.safeParse(terminalSessionSummarySchema, {
+                ...summary,
+                replayAvailableFromSequence: 5,
+            }).success
+        ).toBe(false);
     });
 });

@@ -19,6 +19,10 @@ const queueActor = Object.freeze({
 });
 
 export interface LogMaintenanceJobQueueDependencies {
+    /** Worker/provisioning availability projected through an explicit trusted boundary. */
+    readonly availablePolicies?: (
+        signal?: AbortSignal
+    ) => Promise<readonly LogMaintenancePolicyId[]>;
     readonly generateId?: () => string;
     readonly nowMs?: () => number;
     readonly repository: Pick<JobRepository, "enqueueManualRun" | "findRunByIdempotency">;
@@ -71,13 +75,25 @@ export function createLogMaintenanceJobQueue(
     const generateId = dependencies.generateId ?? (() => Bun.randomUUIDv7());
     const nowMs = dependencies.nowMs ?? Date.now;
 
+    async function queueablePolicies(
+        signal?: AbortSignal
+    ): Promise<readonly LogMaintenancePolicyId[]> {
+        try {
+            requireActive(signal);
+            const projected = await (dependencies.availablePolicies?.(signal) ?? []);
+            requireActive(signal);
+            const available = new Set<LogMaintenancePolicyId>(projected);
+            return Object.freeze(
+                logMaintenancePolicyIds.filter((policyId) => available.has(policyId))
+            );
+        } catch (error) {
+            if (error instanceof LogMaintenanceJobQueueError) throw error;
+            throw queueFailure();
+        }
+    }
+
     return Object.freeze({
-        queueablePolicies(signal?: AbortSignal) {
-            return Promise.resolve().then(() => {
-                requireActive(signal);
-                return logMaintenancePolicyIds;
-            });
-        },
+        queueablePolicies,
         async enqueue(input: RequestLogMaintenanceInput, signal?: AbortSignal) {
             try {
                 requireActive(signal);
@@ -94,6 +110,10 @@ export function createLogMaintenanceJobQueue(
                 if (replay.kind === "idempotency-mismatch") throw queueFailure();
                 if (replay.kind === "replayed") {
                     return Object.freeze({ jobRunId: replay.run.id });
+                }
+                const availablePolicies = await queueablePolicies(signal);
+                if (!availablePolicies.includes(parsed.policyId)) {
+                    throw queueFailure();
                 }
 
                 requireActive(signal);

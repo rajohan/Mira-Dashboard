@@ -294,11 +294,11 @@ describe("production user-systemd service control", () => {
         expect(web).toContain("MemoryMax=1G");
         expect(web).toContain("TasksMax=96");
         expect(web).toContain("ReadOnlyPaths=%h/.openclaw");
-        expect(web).toContain("PrivateTmp=true\nBindReadOnlyPaths=/tmp/openclaw");
-        expect(web).not.toContain("\nBindPaths=/tmp/openclaw");
+        expect(web).toContain("PrivateTmp=true\nBindReadOnlyPaths=-/tmp/openclaw");
+        expect(web).not.toContain("\nBindPaths=-/tmp/openclaw");
         expect(worker).not.toContain("ReadOnlyPaths=%h/.openclaw");
-        expect(worker).toContain("PrivateTmp=true\nBindPaths=/tmp/openclaw");
-        expect(worker).not.toContain("BindReadOnlyPaths=/tmp/openclaw");
+        expect(worker).toContain("PrivateTmp=true\nBindPaths=-/tmp/openclaw");
+        expect(worker).not.toContain("BindReadOnlyPaths=-/tmp/openclaw");
         expect(web).toContain("CPUQuota=100%");
         expect(worker).toContain("MemoryHigh=768M");
         expect(worker).toContain("MemoryMax=1536M");

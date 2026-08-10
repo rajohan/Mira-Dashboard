@@ -367,6 +367,56 @@ describe("chat runtime reducer", () => {
         expect(snapshot?.run.state).toBe("completed");
     });
 
+    test("preserves original tool input and synthetic identity through completion", () => {
+        let snapshot = reduceChatRuntimeSnapshot(
+            undefined,
+            event({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"original"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                occurredAtMs: 1000,
+                phase: "started",
+                runId,
+                sequence: 1,
+            }),
+            run()
+        );
+        snapshot = reduceChatRuntimeSnapshot(
+            snapshot,
+            event({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"replacement"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                occurredAtMs: 1001,
+                output: "done",
+                phase: "succeeded",
+                runId,
+                sequence: 2,
+            }),
+            run({ updatedAtMs: 1001 })
+        );
+
+        expect(snapshot.parts).toEqual([
+            {
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"original"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                output: "done",
+                phase: "succeeded",
+                sequence: 1,
+            },
+        ]);
+    });
+
     test("advances through an ignored provider sequence without adding projection content", () => {
         const initial = reduceChatRuntimeSnapshot(
             undefined,

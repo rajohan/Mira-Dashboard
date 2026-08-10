@@ -1,6 +1,8 @@
 import * as v from "valibot";
 
 import {
+    terminalClientMessageMaximumBytes,
+    terminalSocketBufferedMaximumBytes,
     type TerminalDimensions,
     terminalSessionSummarySchema,
     type TerminalSessionSummary,
@@ -76,7 +78,7 @@ export type TerminalBrokerRelayControl =
       }>
     | Readonly<{
           acceptedBytes: number;
-          status: "backpressured" | "closed";
+          status: "accepted" | "backpressured" | "closed";
           type: "input-status";
       }>
     | Readonly<{
@@ -188,7 +190,10 @@ function parseControlEvent(message: JsonObject): TerminalBrokerRelayControl {
                 v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
                 message.acceptedBytes
             ),
-            status: v.parse(v.picklist(["backpressured", "closed"]), message.status),
+            status: v.parse(
+                v.picklist(["accepted", "backpressured", "closed"]),
+                message.status
+            ),
             type,
         });
     }
@@ -247,6 +252,15 @@ export function createTerminalBrokerClient(
                 });
             const decoder = new TerminalBrokerFrameDecoder();
             let closed = false;
+            const pendingInputAcknowledgements: Array<{
+                readonly bytes: number;
+                readonly causedTransportBackpressure: boolean;
+            }> = [];
+            let pendingInputAcknowledgementBytes = 0;
+            let pendingTransportBackpressureAcknowledgements = 0;
+            let transportInputBackpressured = false;
+            let ptyInputBackpressured = false;
+            let inputDrainNeeded = false;
             let resolveReady: (() => void) | undefined;
             let rejectReady: ((error: TerminalSessionBrokerError) => void) | undefined;
             const ready = new Promise<void>((resolve, reject) => {
@@ -256,10 +270,29 @@ export function createTerminalBrokerClient(
             const close = (): void => {
                 if (closed) return;
                 closed = true;
+                pendingInputAcknowledgements.length = 0;
+                pendingInputAcknowledgementBytes = 0;
+                pendingTransportBackpressureAcknowledgements = 0;
+                transportInputBackpressured = false;
+                ptyInputBackpressured = false;
+                inputDrainNeeded = false;
                 rejectReady?.(new TerminalSessionBrokerError("unavailable"));
                 rejectReady = undefined;
                 callbacks.onClose();
                 channel.close();
+            };
+            const publishInputDrainIfReady = (): void => {
+                if (
+                    closed ||
+                    !inputDrainNeeded ||
+                    transportInputBackpressured ||
+                    ptyInputBackpressured ||
+                    pendingTransportBackpressureAcknowledgements > 0
+                ) {
+                    return;
+                }
+                inputDrainNeeded = false;
+                callbacks.onInputDrain();
             };
             channel.setHandlers({
                 onClose: close,
@@ -289,20 +322,51 @@ export function createTerminalBrokerClient(
                                 return;
                             }
                             const event = parseControlEvent(frame.message);
+                            if (event.type === "input-status") {
+                                const expected = pendingInputAcknowledgements.shift();
+                                if (
+                                    expected === undefined ||
+                                    (event.status === "closed"
+                                        ? event.acceptedBytes !== 0
+                                        : event.acceptedBytes !== expected.bytes)
+                                ) {
+                                    throw new TerminalBrokerProtocolError();
+                                }
+                                pendingInputAcknowledgementBytes -= expected.bytes;
+                                if (expected.causedTransportBackpressure) {
+                                    pendingTransportBackpressureAcknowledgements -= 1;
+                                }
+                                if (event.status === "backpressured") {
+                                    inputDrainNeeded = true;
+                                    ptyInputBackpressured = true;
+                                }
+                            }
                             callbacks.onControl(event);
                             if (event.type === "ready") {
                                 resolveReady?.();
                                 resolveReady = undefined;
                                 rejectReady = undefined;
-                            } else if (event.type === "input-drain") {
-                                callbacks.onInputDrain();
+                            } else if (
+                                event.type === "input-drain" &&
+                                ptyInputBackpressured
+                            ) {
+                                ptyInputBackpressured = false;
+                            }
+                            if (
+                                event.type === "input-status" ||
+                                event.type === "input-drain"
+                            ) {
+                                publishInputDrainIfReady();
                             }
                         }
                     } catch {
                         close();
                     }
                 },
-                onDrain: callbacks.onInputDrain,
+                onDrain() {
+                    transportInputBackpressured = false;
+                    publishInputDrainIfReady();
+                },
             });
             const attachDisposition = channel.send(
                 control({
@@ -329,9 +393,35 @@ export function createTerminalBrokerClient(
                     close();
                 },
                 input(data) {
-                    return closed
-                        ? "closed"
-                        : channel.send(encodeTerminalBrokerInput(data));
+                    if (
+                        closed ||
+                        data.byteLength < 1 ||
+                        data.byteLength > terminalClientMessageMaximumBytes ||
+                        pendingInputAcknowledgements.length >=
+                            terminalSocketBufferedMaximumBytes /
+                                terminalClientMessageMaximumBytes ||
+                        pendingInputAcknowledgementBytes + data.byteLength >
+                            terminalSocketBufferedMaximumBytes
+                    ) {
+                        close();
+                        return "closed";
+                    }
+                    const disposition = channel.send(encodeTerminalBrokerInput(data));
+                    if (disposition !== "closed") {
+                        const causedTransportBackpressure =
+                            disposition === "backpressured";
+                        pendingInputAcknowledgements.push({
+                            bytes: data.byteLength,
+                            causedTransportBackpressure,
+                        });
+                        pendingInputAcknowledgementBytes += data.byteLength;
+                        if (causedTransportBackpressure) {
+                            transportInputBackpressured = true;
+                            inputDrainNeeded = true;
+                            pendingTransportBackpressureAcknowledgements += 1;
+                        }
+                    }
+                    return disposition;
                 },
                 ping: () => sendControl({ type: "ping" }),
                 resize: (dimensions) => sendControl({ dimensions, type: "resize" }),

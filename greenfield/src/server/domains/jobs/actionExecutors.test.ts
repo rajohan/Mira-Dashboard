@@ -8,6 +8,7 @@ import {
     createSystemHostExecutor,
     createWorkspaceFileWriteJobExecutor,
     createJobWorkerActionRegistry,
+    type WorkspaceFileWriteExecutionPort,
 } from "./actionExecutors.ts";
 import {
     type JobActionExecutionContext,
@@ -104,7 +105,8 @@ describe("worker-only job executor registry", () => {
 
     test("keeps the dynamic workspace write executor worker-only and path-free", async () => {
         const calls: unknown[] = [];
-        const executor = createWorkspaceFileWriteJobExecutor({
+        const settledCommands: unknown[] = [];
+        const writer: WorkspaceFileWriteExecutionPort = {
             apply(command, signal) {
                 calls.push({ command, signal });
                 return Promise.resolve({
@@ -113,7 +115,12 @@ describe("worker-only job executor registry", () => {
                     sizeBytes: 12,
                 });
             },
-        });
+            removeSettledReplacementIntent(command) {
+                settledCommands.push(command);
+                return Promise.resolve();
+            },
+        };
+        const executor = createWorkspaceFileWriteJobExecutor(writer);
         const payload = {
             actorBindingSha256: "a".repeat(64),
             command: {
@@ -144,19 +151,40 @@ describe("worker-only job executor registry", () => {
 
         const findAction = createJobWorkerActionResolver(
             { run: () => Promise.resolve() },
-            { apply: () => Promise.reject(new Error("not executed")) }
+            writer
         );
         expect(findAction("workspace-files.apply-write")).toBeDefined();
         expect(findAction("workspace-files.apply-write")).not.toHaveProperty(
             "scheduleId"
+        );
+        expect(findAction("workspace-files.apply-write")).not.toHaveProperty(
+            "afterSuccessfulSettlement"
         );
         expect(findAction("workspace-files.apply-replacement")).toMatchObject({
             attemptLimit: 3,
             retrySafe: true,
         });
 
+        const replacementPayload = {
+            ...payload,
+            command: {
+                ...payload.command,
+                expectedRevision: "d".repeat(64),
+                locator: {
+                    rootId: "workspace",
+                    segments: [payload.command.fileName],
+                },
+                operation: "replace" as const,
+            },
+        };
+        await findAction(
+            "workspace-files.apply-replacement"
+        )?.afterSuccessfulSettlement?.(replacementPayload);
+        expect(settledCommands).toEqual([replacementPayload.command]);
+
         const failedExecutor = createWorkspaceFileWriteJobExecutor({
             apply: () => Promise.reject(new Error("private write failure")),
+            removeSettledReplacementIntent: () => Promise.resolve(),
         });
         const createFailure = await Effect.runPromise(
             failedExecutor(executionContext([]), payload)
@@ -165,18 +193,7 @@ describe("worker-only job executor registry", () => {
         expect(createFailure).not.toBeInstanceOf(JobActionRetryableError);
 
         const replaceFailure = await Effect.runPromise(
-            failedExecutor(executionContext([]), {
-                ...payload,
-                command: {
-                    ...payload.command,
-                    expectedRevision: "d".repeat(64),
-                    locator: {
-                        rootId: "workspace",
-                        segments: [payload.command.fileName],
-                    },
-                    operation: "replace",
-                },
-            })
+            failedExecutor(executionContext([]), replacementPayload)
         ).catch((error: unknown) => error);
         expect(replaceFailure).toBeInstanceOf(JobActionRetryableError);
     });

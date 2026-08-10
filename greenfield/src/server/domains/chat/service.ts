@@ -245,10 +245,16 @@ function providerEventDraft(event: ChatProviderEvent): ChatRuntimeEventDraft {
         case "tool": {
             return {
                 callId: event.callId,
+                ...(event.callIdSource === undefined
+                    ? {}
+                    : { callIdSource: event.callIdSource }),
                 ...(event.input === undefined ? {} : { input: event.input }),
                 isError: event.isError,
                 kind: "tool",
                 name: event.name,
+                ...(event.nameSource === undefined
+                    ? {}
+                    : { nameSource: event.nameSource }),
                 occurredAtMs: event.receivedAtMs,
                 ...(event.output === undefined ? {} : { output: event.output }),
                 phase: event.phase,
@@ -386,6 +392,22 @@ function boundExternalRunProjection(run: ChatExternalRun): ChatExternalRun {
         const { plan: _omittedPlan, ...withoutPlan } = base;
         base = withoutPlan;
     }
+    if (!chatExternalRunFitsBudget(base)) {
+        const fallback: ChatExternalRun = {
+            continuity: run.continuity,
+            hasUnprojectedActivity: true,
+            projectionTruncated: true,
+            providerRunId: run.providerRunId,
+            sessionKey: run.sessionKey,
+            source: run.source,
+            text: "",
+            updatedAtMs: run.updatedAtMs,
+        };
+        if (!chatExternalRunFitsBudget(fallback)) {
+            throw new Error("External chat projection identifiers exceed the budget");
+        }
+        return v.parse(chatExternalRunSchema, fallback);
+    }
     let lower = 1;
     let upper = compact.text.length;
     let best = base;
@@ -452,12 +474,18 @@ function updateExternalToolPart(
             : undefined;
     const projection: ChatRuntimeProjectionPart = {
         callId: event.callId,
+        ...((previousTool?.callIdSource ?? event.callIdSource) === undefined
+            ? {}
+            : { callIdSource: "synthetic" }),
         ...((previousTool?.input ?? event.input) === undefined
             ? {}
             : { input: previousTool?.input ?? event.input }),
         isError: terminal?.isError ?? event.isError,
         kind: "tool",
         name: previousTool?.name ?? event.name,
+        ...((previousTool?.nameSource ?? event.nameSource) === undefined
+            ? {}
+            : { nameSource: "synthetic" }),
         ...((event.output ?? previousTool?.output) === undefined
             ? {}
             : { output: event.output ?? previousTool?.output }),
@@ -897,7 +925,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             projectionTruncated = true;
         }
         if (parts.length > chatRuntimeProjectionPartsMaximum) {
-            parts = parts.slice(-chatRuntimeProjectionPartsMaximum);
+            parts = parts
+                .slice(-chatRuntimeProjectionPartsMaximum)
+                .map((part, index) => ({ ...part, sequence: index + 1 }));
             hasUnprojectedActivity = true;
             projectionTruncated = true;
         }

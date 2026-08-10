@@ -533,6 +533,113 @@ describe("persistent Gateway chat provider", () => {
         expect(JSON.stringify(history)).not.toContain("private_context");
     });
 
+    test("redacts object-shaped tool result content and ignores sentinel identity keys", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: [
+                            {
+                                content: { secret: "provider-private-value" },
+                                type: "tool_result",
+                            },
+                        ],
+                        id: "object-result",
+                        role: "tool",
+                        toolCallId: "provider-call-1",
+                        toolName: "search",
+                    },
+                    {
+                        content: [
+                            {
+                                __topLevelCallId: "spoofed-call",
+                                __topLevelName: "spoofed-name",
+                                callId: "block-call",
+                                content: "visible output",
+                                name: "block-name",
+                                toolCallId: "conflicting-block-call",
+                                toolName: "conflicting-block-name",
+                                type: "tool_result",
+                            },
+                        ],
+                        id: "nested-result",
+                        role: "assistant",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 2,
+            maxChars: 32 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toMatchObject({
+            parts: [
+                {
+                    callId: "provider-call-1",
+                    name: "search",
+                    output: "Unsupported provider content.",
+                },
+            ],
+        });
+        expect(history.messages[1]?.content).toMatchObject({
+            parts: [
+                {
+                    callId: "1",
+                    callIdSource: "synthetic",
+                    name: "tool",
+                    nameSource: "synthetic",
+                    output: "visible output",
+                },
+            ],
+        });
+        const encoded = JSON.stringify(history);
+        expect(encoded).not.toContain("provider-private-value");
+        expect(encoded).not.toContain('"secret"');
+        expect(encoded).not.toContain("spoofed-call");
+        expect(encoded).not.toContain("spoofed-name");
+        expect(encoded).not.toContain("block-call");
+        expect(encoded).not.toContain("block-name");
+        expect(encoded).not.toContain("conflicting-block-call");
+        expect(encoded).not.toContain("conflicting-block-name");
+    });
+
+    test("ignores unrelated tool identity aliases on ordinary text messages", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                messages: [
+                    {
+                        content: [{ text: "Visible assistant text", type: "text" }],
+                        id: "ordinary-text",
+                        name: "assistant-display-name",
+                        role: "assistant",
+                        toolCallId: "\u0000invalid-tool-call-id",
+                        toolName: "unrelated-tool-name",
+                    },
+                ],
+                offset: 0,
+                sessionKey,
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 32 * 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.messages[0]?.content).toEqual({
+            kind: "complete",
+            parts: [{ id: "1", kind: "text", text: "Visible assistant text" }],
+        });
+    });
+
     test("does not downgrade conflicting tool identity aliases to synthetic matching", async () => {
         const harness = createHarness({
             "chat.history": {
@@ -1212,6 +1319,47 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 20,
                 sessionKey,
             },
+        ]);
+    });
+
+    test("marks provider-missing runtime tool identity as synthetic", async () => {
+        const harness = createHarness({});
+        const projected: unknown[] = [];
+        await harness.provider.subscribeChat({
+            onEvent: (event) => {
+                projected.push(event);
+            },
+            onGap: () => {},
+            onReconciliationRequired: () => {},
+            runWatermarks: [],
+            sessionKey,
+        });
+
+        await harness.deliverChat({
+            connectionGeneration: 1,
+            frame: {
+                event: "agent",
+                payload: {
+                    data: { args: { query: "runtime" }, phase: "start" },
+                    runId: "provider-run-synthetic",
+                    seq: 7,
+                    sessionKey,
+                    stream: "tool",
+                    ts: 10,
+                },
+            },
+            receivedAtMs: 20,
+        });
+
+        expect(projected).toEqual([
+            expect.objectContaining({
+                callId: "provider-run-synthetic:7",
+                callIdSource: "synthetic",
+                kind: "tool",
+                name: "tool",
+                nameSource: "synthetic",
+                phase: "started",
+            }),
         ]);
     });
 

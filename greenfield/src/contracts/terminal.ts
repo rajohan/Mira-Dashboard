@@ -189,7 +189,7 @@ export const terminalSessionStateSchema = v.picklist(
     "Terminal session state is invalid"
 );
 
-export const terminalSessionSummarySchema = v.strictObject({
+const terminalSessionSummaryObjectSchema = v.strictObject({
     dimensions: terminalDimensionsSchema,
     expiresAtMs: timestampMillisecondsSchema("Terminal session expiry is invalid"),
     idleExpiresAtMs: timestampMillisecondsSchema(
@@ -197,10 +197,29 @@ export const terminalSessionSummarySchema = v.strictObject({
     ),
     location: terminalLocationSchema,
     nextSequence: positiveSafeIntegerSchema("Terminal output sequence is invalid"),
+    replayAvailableFromSequence: positiveSafeIntegerSchema(
+        "Terminal replay sequence is invalid"
+    ),
     sessionId: terminalSessionIdSchema,
     startedAtMs: timestampMillisecondsSchema("Terminal session start is invalid"),
     state: terminalSessionStateSchema,
 });
+
+/**
+ * Enforces the cross-field replay bound at every broker/browser transport boundary.
+ * @param session Bounded terminal session summary.
+ * @returns Whether the retained replay floor does not exceed the next sequence.
+ */
+export function terminalReplayWindowIsValid(
+    session: v.InferOutput<typeof terminalSessionSummaryObjectSchema>
+): boolean {
+    return session.replayAvailableFromSequence <= session.nextSequence;
+}
+
+export const terminalSessionSummarySchema = v.pipe(
+    terminalSessionSummaryObjectSchema,
+    v.check(terminalReplayWindowIsValid, "Terminal replay window is invalid")
+);
 export type TerminalSessionSummary = v.InferOutput<typeof terminalSessionSummarySchema>;
 
 export const getActiveTerminalSessionOutputSchema = v.variant("status", [
