@@ -51,6 +51,11 @@ function fixture(
             mode: 0o755,
             recursive: true,
         });
+        // Recursive mkdir applies the requested mode to every created parent, and
+        // the process umask differs between local development and GitHub Actions.
+        // The descriptor reader intentionally requires the manifest root itself
+        // to be private, so make that invariant explicit in the fixture.
+        Fs.chmodSync(openClawRoot, 0o700);
         Fs.writeFileSync(
             Path.join(openClawRoot, "openclaw.json"),
             '{"gateway":{"token":"service-raw-secret","url":"ws://localhost"}}'
