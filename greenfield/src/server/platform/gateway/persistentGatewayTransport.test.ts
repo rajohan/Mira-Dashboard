@@ -2141,6 +2141,113 @@ describe("persistent native Gateway transport", () => {
         await stopConnected(transport, socket);
     });
 
+    test("delivers a session.tool lifecycle through the scoped chat subscription", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const delivered: PersistentGatewayDeliveredChatEvent[] = [];
+        transport.start();
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected the persistent socket");
+        completeHandshake(socket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        const unsubscribe = transport.subscribeChat(
+            { runWatermarks: [], sessionKey: "agent:main:main" },
+            {
+                onEvent: (event) => {
+                    delivered.push(event);
+                },
+            }
+        );
+        const subscription = sentFrame(socket, 1);
+        socket.receive({
+            id: subscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+
+        socket.receive({
+            event: "session.tool",
+            payload: {
+                agentId: "main",
+                data: {
+                    args: { cmd: "bun test" },
+                    name: "bash",
+                    phase: "start",
+                    toolCallId: "codex-command-1",
+                },
+                runId: "codex-run-1",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                stream: "tool",
+                ts: 1000,
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "session.tool",
+            payload: {
+                agentId: "main",
+                data: {
+                    name: "bash",
+                    phase: "result",
+                    result: "12 pass",
+                    toolCallId: "codex-command-1",
+                },
+                runId: "codex-run-1",
+                seq: 2,
+                sessionKey: "agent:main:main",
+                stream: "tool",
+                ts: 1001,
+            },
+            type: "event",
+        });
+        await flushMicrotasks();
+
+        expect(delivered).toHaveLength(2);
+        expect(delivered[0]?.frame).toEqual({
+            event: "agent",
+            payload: {
+                agentId: "main",
+                data: {
+                    args: { cmd: "bun test" },
+                    name: "bash",
+                    phase: "start",
+                    toolCallId: "codex-command-1",
+                },
+                runId: "codex-run-1",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                stream: "tool",
+                ts: 1000,
+            },
+        });
+        expect(delivered[1]?.frame).toEqual({
+            event: "agent",
+            payload: {
+                agentId: "main",
+                data: {
+                    name: "bash",
+                    phase: "result",
+                    result: "12 pass",
+                    toolCallId: "codex-command-1",
+                },
+                runId: "codex-run-1",
+                seq: 2,
+                sessionKey: "agent:main:main",
+                stream: "tool",
+                ts: 1001,
+            },
+        });
+
+        unsubscribe();
+        await stopConnected(transport, socket);
+    });
+
     test("baselines an external run observed mid-stream and still delivers its terminal", async () => {
         const scheduler = new ManualScheduler();
         const harness = new SocketHarness();

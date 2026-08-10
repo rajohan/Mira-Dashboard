@@ -86,6 +86,9 @@ describe("workspace file durable job scheduler", () => {
             },
         });
 
+        expect(await scheduler.reconcileEnqueue(command, actor)).toEqual({
+            kind: "absent",
+        });
         const first = await scheduler.enqueue(command, audit);
         const replay = await scheduler.enqueue(command, audit);
 
@@ -133,6 +136,10 @@ describe("workspace file durable job scheduler", () => {
             status: "accepted",
             ticketId,
         });
+        expect(await scheduler.reconcileEnqueue(command, actor)).toEqual({
+            kind: "accepted",
+            result: first,
+        });
         expect(
             await scheduler.getStatus(ticketId, {
                 ...actor,
@@ -163,6 +170,38 @@ describe("workspace file durable job scheduler", () => {
             }).enqueue(command, audit, AbortSignal.abort())
         ).rejects.toBeInstanceOf(WorkspaceFileError);
         expect(fixture.enqueues).toHaveLength(1);
+    });
+
+    test("never reports present mismatched or corrupt enqueue state as absent", async () => {
+        const fixture = repositoryFixture();
+        const scheduler = createWorkspaceFileJobScheduler({
+            repository: fixture.repository,
+        });
+        await scheduler.enqueue(command, audit);
+
+        expect(
+            scheduler.reconcileEnqueue({ ...command, sha256: "b".repeat(64) }, actor)
+        ).rejects.toMatchObject({ reason: "unavailable" });
+
+        const findRun = fixture.repository.findRunByIdempotency;
+        fixture.repository.findRunByIdempotency = (
+            requestedByKind,
+            requestedById,
+            observedKey
+        ) => {
+            const run = findRun(requestedByKind, requestedById, observedKey);
+            return run === undefined ? undefined : { ...run, payloadJson: "{}" };
+        };
+        expect(scheduler.reconcileEnqueue(command, actor)).rejects.toMatchObject({
+            reason: "unavailable",
+        });
+
+        fixture.repository.findRunByIdempotency = () => {
+            throw new Error("status read failed");
+        };
+        expect(scheduler.reconcileEnqueue(command, actor)).rejects.toMatchObject({
+            reason: "unavailable",
+        });
     });
 
     test("queues replacements under the retry-safe recovery action only", async () => {

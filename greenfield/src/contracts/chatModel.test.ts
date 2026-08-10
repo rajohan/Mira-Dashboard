@@ -12,6 +12,7 @@ import {
 import {
     chatMessageSchema,
     chatExternalRunSchema,
+    chatExternalStreamResetMaximum,
     chatPlanExplanationMaximumCodeUnits,
     chatRuntimeEventSchema,
     chatSendInputMaximumBytes,
@@ -224,6 +225,35 @@ describe("chat model contract", () => {
                     steps: [{ status: "pending", text: "Work" }],
                 },
             }).success
+        ).toBeFalse();
+    });
+
+    test("bounds external stream reset watermarks", () => {
+        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture is scoped to this policy case.
+        const external = (streamResets: unknown[]) => ({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            providerRunId: "provider-run",
+            sessionKey: "agent:main:main",
+            source: "provider-runtime",
+            streamResets,
+            text: "working",
+            updatedAtMs: 1000,
+        });
+        const maximum = Array.from(
+            { length: chatExternalStreamResetMaximum },
+            (_, index) => ({ resetId: `reset-${index}`, streamId: `stream-${index}` })
+        );
+
+        expect(v.safeParse(chatExternalRunSchema, external(maximum)).success).toBeTrue();
+        expect(
+            v.safeParse(chatExternalRunSchema, external([...maximum, maximum[0]])).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(
+                chatExternalRunSchema,
+                external([{ resetId: "reset\nleak", streamId: "stream-1" }])
+            ).success
         ).toBeFalse();
     });
 

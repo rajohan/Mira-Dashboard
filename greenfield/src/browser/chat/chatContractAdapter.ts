@@ -455,14 +455,6 @@ export function projectChatRuntimeSnapshot(
                 break;
             }
             case "item": {
-                parts.push({
-                    kind: "control",
-                    text:
-                        part.text === undefined
-                            ? part.type
-                            : `${part.type}: ${part.text}`,
-                    tone: "muted",
-                });
                 break;
             }
             case "user": {
@@ -541,19 +533,39 @@ export function projectChatRuntimeSnapshot(
  */
 export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunProjection {
     const parts: ChatMessagePart[] = [];
-    const truncatedAssistantText = run.projectionTruncated ? run.text : "";
     if (run.parts !== undefined && run.parts.length > 0) {
         for (const part of run.parts) {
             switch (part.kind) {
                 case "assistant": {
-                    if (!run.projectionTruncated) {
-                        parts.push({ kind: "text", text: part.text });
-                    }
+                    parts.push({
+                        kind: "text",
+                        ...(part.segmentId === undefined
+                            ? {}
+                            : {
+                                  sourceKey: `${run.providerRunId}:${part.segmentId}`,
+                              }),
+                        ...(part.streamId === undefined
+                            ? {}
+                            : {
+                                  sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
+                              }),
+                        text: part.text,
+                    });
                     break;
                 }
                 case "thinking": {
                     parts.push({
                         kind: "thinking",
+                        ...(part.segmentId === undefined
+                            ? {}
+                            : {
+                                  sourceKey: `${run.providerRunId}:${part.segmentId}`,
+                              }),
+                        ...(part.streamId === undefined
+                            ? {}
+                            : {
+                                  sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
+                              }),
                         status: "running",
                         text: part.text,
                     });
@@ -578,14 +590,6 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                     break;
                 }
                 case "item": {
-                    parts.push({
-                        kind: "control",
-                        text:
-                            part.text === undefined
-                                ? part.type
-                                : `${part.type}: ${part.text}`,
-                        tone: "muted",
-                    });
                     break;
                 }
                 case "user": {
@@ -594,10 +598,50 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
             }
         }
     }
-    if (truncatedAssistantText !== "") {
-        parts.push({ kind: "text", text: truncatedAssistantText });
-    } else if ((run.parts === undefined || run.parts.length === 0) && run.text !== "") {
-        parts.push({ kind: "text", text: run.text });
+    const assistantIndexes = parts.flatMap((part, index) =>
+        part.kind === "text" ? [index] : []
+    );
+    const renderedAssistantText = assistantIndexes
+        .map((index) => {
+            const part = parts[index];
+            return part?.kind === "text" ? part.text : "";
+        })
+        .join("");
+    if (run.text !== "" && renderedAssistantText !== run.text) {
+        const lastAssistantIndex = assistantIndexes.at(-1);
+        if (
+            lastAssistantIndex !== undefined &&
+            run.text.startsWith(renderedAssistantText)
+        ) {
+            const previous = parts[lastAssistantIndex];
+            if (previous?.kind === "text") {
+                parts[lastAssistantIndex] = {
+                    ...previous,
+                    text: previous.text + run.text.slice(renderedAssistantText.length),
+                };
+            }
+        } else if (lastAssistantIndex === undefined) {
+            parts.push({
+                kind: "text",
+                sourceKey: `${run.providerRunId}:aggregate:assistant`,
+                sourceStreamKey: `${run.providerRunId}:assistant`,
+                text: run.text,
+            });
+        } else {
+            const insertionIndex = parts
+                .slice(0, lastAssistantIndex)
+                .filter((part) => part.kind !== "text").length;
+            const retained: ChatMessagePart[] = parts.filter(
+                (part) => part.kind !== "text"
+            );
+            retained.splice(insertionIndex, 0, {
+                kind: "text",
+                sourceKey: `${run.providerRunId}:aggregate:assistant`,
+                sourceStreamKey: `${run.providerRunId}:assistant`,
+                text: run.text,
+            });
+            parts.splice(0, parts.length, ...retained);
+        }
     }
     if (run.projectionTruncated) {
         parts.push({
@@ -658,6 +702,14 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
         projectionTruncated: run.projectionTruncated,
         providerRunId: run.providerRunId,
         source: run.source,
+        ...(run.streamResets === undefined
+            ? {}
+            : {
+                  streamResets: run.streamResets.map(({ resetId, streamId }) => ({
+                      resetKey: `${run.providerRunId}:${resetId}`,
+                      sourceStreamKey: `${run.providerRunId}:${streamId}`,
+                  })),
+              }),
         updatedAtMs: run.updatedAtMs,
     };
 }

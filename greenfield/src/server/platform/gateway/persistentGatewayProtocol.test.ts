@@ -752,6 +752,70 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 ts: 1000,
             },
         });
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "session.tool",
+                payload: {
+                    data: {
+                        args: { cmd: "bun test" },
+                        name: "bash",
+                        phase: "start",
+                        toolCallId: "codex-command-1",
+                    },
+                    runId: "provider-run-session-tool",
+                    seq: 4,
+                    sessionKey: "agent:main:main",
+                    stream: "tool",
+                    ts: 1002,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "agent",
+            payload: {
+                data: {
+                    args: { cmd: "bun test" },
+                    name: "bash",
+                    phase: "start",
+                    toolCallId: "codex-command-1",
+                },
+                runId: "provider-run-session-tool",
+                seq: 4,
+                sessionKey: "agent:main:main",
+                stream: "tool",
+                ts: 1002,
+            },
+        });
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "agent",
+                payload: {
+                    data: {
+                        isReasoningSnapshot: true,
+                        text: "Cumulative reasoning",
+                    },
+                    runId: "provider-reasoning-snapshot",
+                    seq: 5,
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                    ts: 1003,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "agent",
+            payload: {
+                data: {
+                    isReasoningSnapshot: true,
+                    text: "Cumulative reasoning",
+                },
+                runId: "provider-reasoning-snapshot",
+                seq: 5,
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+                ts: 1003,
+            },
+        });
         const unsupportedPrivateValue = "Bearer unsupported-private-agent-frame";
         const unsupportedAgentEvent = parsePersistentGatewayPrivateChatEvent({
             event: "agent",

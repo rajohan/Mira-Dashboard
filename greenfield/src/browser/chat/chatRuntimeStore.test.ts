@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
+import { projectChatExternalRun } from "./chatContractAdapter.ts";
 import {
     chatRuntimeMessages,
     chatRuntimePlans,
     createChatRuntimeStore,
     retainedFailedOptimisticSendByteLimit,
     retainedFailedOptimisticSendLimit,
+    type ChatExternalRunProjection,
     type ChatRuntimeEvent,
     type ChatRuntimeEventInput,
 } from "./chatRuntimeStore.ts";
@@ -47,6 +49,36 @@ function containsFile(value: unknown): boolean {
 
 function retainedBytes(value: unknown): number {
     return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function providerShapeRichParts(tail: string) {
+    return [
+        {
+            kind: "text" as const,
+            sourceKey: "provider-shape-flip:assistant-1",
+            text: "A",
+        },
+        {
+            callId: "command-1",
+            kind: "tool" as const,
+            name: "bash",
+            status: "completed" as const,
+        },
+        {
+            kind: "text" as const,
+            sourceKey: "provider-shape-flip:assistant-2",
+            text: tail,
+        },
+    ];
+}
+
+function providerAnchorPart(key: string) {
+    return {
+        kind: "thinking" as const,
+        sourceKey: `provider-anchors:${key}`,
+        status: "running" as const,
+        text: key,
+    };
 }
 
 describe("chat runtime store", () => {
@@ -679,6 +711,619 @@ describe("chat runtime store", () => {
         });
         expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
         expect(store.state.sessions[sessionKey]?.needsReconciliation).toBe(false);
+    });
+
+    test("replays identified truncated provider parts idempotently and keeps inserted tools between anchors", () => {
+        const store = createChatRuntimeStore();
+        const projection = {
+            continuity: "complete" as const,
+            hasUnprojectedActivity: false,
+            message: {
+                attachments: [],
+                id: `external:${sessionKey}:provider-replay`,
+                parts: [
+                    {
+                        kind: "thinking" as const,
+                        sourceKey: "provider-replay:reasoning-1",
+                        status: "running" as const,
+                        text: "Reasoning one.",
+                    },
+                    {
+                        callId: "command-1",
+                        input: { cmd: "pwd" },
+                        kind: "tool" as const,
+                        name: "bash",
+                        status: "running" as const,
+                    },
+                    {
+                        kind: "thinking" as const,
+                        sourceKey: "provider-replay:reasoning-2",
+                        status: "running" as const,
+                        text: "Reasoning two.",
+                    },
+                    {
+                        kind: "text" as const,
+                        sourceKey: "provider-replay:assistant-1",
+                        text: "Answer.",
+                    },
+                    {
+                        kind: "control" as const,
+                        text: "Some OpenClaw activity details were not returned.",
+                        tone: "warning" as const,
+                    },
+                ],
+                role: "assistant" as const,
+                sequence: 1,
+                sessionKey,
+            },
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            projectionTruncated: true,
+            providerRunId: "provider-replay",
+            source: "provider-runtime" as const,
+            updatedAtMs: occurredAtMs,
+        };
+        store.installExternalRuns(sessionKey, [projection]);
+        for (let replay = 0; replay < 10; replay += 1) {
+            store.installExternalRuns(sessionKey, [projection]);
+        }
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-replay"]?.message
+                .parts
+        ).toEqual(projection.message.parts);
+
+        const originalTool = projection.message.parts[1];
+        if (originalTool?.kind !== "tool") throw new Error("Expected tool fixture");
+        const updatedParts = [
+            projection.message.parts[0]!,
+            {
+                callId: "command-inserted",
+                input: { cmd: "git status" },
+                kind: "tool" as const,
+                name: "bash",
+                output: "clean",
+                status: "completed" as const,
+            },
+            {
+                ...originalTool,
+                output: "/workspace",
+                status: "completed" as const,
+            },
+            ...projection.message.parts.slice(2),
+        ];
+        store.installExternalRuns(sessionKey, [
+            {
+                ...projection,
+                message: { ...projection.message, parts: updatedParts },
+                observationEpoch: 2,
+                updatedAtMs: occurredAtMs + 1,
+            },
+        ]);
+
+        const parts =
+            store.state.sessions[sessionKey]?.externalRuns["provider-replay"]?.message
+                .parts;
+        expect(
+            parts?.map((part) => (part.kind === "tool" ? part.callId : part.kind))
+        ).toEqual([
+            "thinking",
+            "command-inserted",
+            "command-1",
+            "thinking",
+            "text",
+            "control",
+        ]);
+        expect(parts?.filter((part) => part.kind === "tool")).toEqual([
+            updatedParts[1],
+            updatedParts[2],
+        ]);
+    });
+
+    test("uses rich assistant segments instead of duplicate compact aggregates in both prefix directions", () => {
+        const base = {
+            continuity: "complete" as const,
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            projectionTruncated: true,
+            providerRunId: "provider-shape-flip",
+            source: "provider-runtime" as const,
+            updatedAtMs: occurredAtMs,
+        };
+        const projection = (
+            parts: readonly ReturnType<typeof providerShapeRichParts>[number][]
+        ) => ({
+            ...base,
+            message: {
+                attachments: [],
+                id: `external:${sessionKey}:provider-shape-flip`,
+                parts,
+                role: "assistant" as const,
+                sequence: 1,
+                sessionKey,
+            },
+        });
+        const compact = (text: string) =>
+            projection([
+                {
+                    kind: "text",
+                    sourceKey: "provider-shape-flip:aggregate:assistant",
+                    text,
+                },
+            ]);
+
+        const assertRichAbc = (store: ReturnType<typeof createChatRuntimeStore>) => {
+            expect(
+                store.state.sessions[sessionKey]?.externalRuns["provider-shape-flip"]
+                    ?.message.parts
+            ).toEqual(providerShapeRichParts("BC"));
+        };
+
+        const richThenCompact = createChatRuntimeStore();
+        richThenCompact.installExternalRuns(sessionKey, [
+            projection(providerShapeRichParts("B")),
+        ]);
+        for (let replay = 0; replay < 10; replay += 1) {
+            richThenCompact.installExternalRuns(sessionKey, [compact("ABC")]);
+        }
+        assertRichAbc(richThenCompact);
+
+        const richThenShortCompact = createChatRuntimeStore();
+        richThenShortCompact.installExternalRuns(sessionKey, [
+            projection(providerShapeRichParts("BC")),
+        ]);
+        richThenShortCompact.installExternalRuns(sessionKey, [compact("AB")]);
+        assertRichAbc(richThenShortCompact);
+
+        const compactThenRich = createChatRuntimeStore();
+        compactThenRich.installExternalRuns(sessionKey, [compact("ABC")]);
+        for (let replay = 0; replay < 10; replay += 1) {
+            compactThenRich.installExternalRuns(sessionKey, [
+                projection(providerShapeRichParts("BC")),
+            ]);
+        }
+        assertRichAbc(compactThenRich);
+
+        const shortCompactThenLongRich = createChatRuntimeStore();
+        shortCompactThenLongRich.installExternalRuns(sessionKey, [compact("AB")]);
+        shortCompactThenLongRich.installExternalRuns(sessionKey, [
+            projection(providerShapeRichParts("BC")),
+        ]);
+        assertRichAbc(shortCompactThenLongRich);
+
+        const mismatchedCompact = createChatRuntimeStore();
+        mismatchedCompact.installExternalRuns(sessionKey, [compact("XYZ")]);
+        mismatchedCompact.installExternalRuns(sessionKey, [
+            projection(providerShapeRichParts("B")),
+        ]);
+        expect(
+            mismatchedCompact.state.sessions[sessionKey]?.externalRuns[
+                "provider-shape-flip"
+            ]?.message.parts
+        ).toEqual(providerShapeRichParts("B"));
+
+        const authoritativeCompact = createChatRuntimeStore();
+        const staleRun = {
+            continuity: "complete" as const,
+            hasUnprojectedActivity: true,
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            parts: [
+                {
+                    callId: "command-before",
+                    isError: false,
+                    kind: "tool" as const,
+                    name: "bash",
+                    output: "before",
+                    phase: "succeeded" as const,
+                    sequence: 1,
+                },
+                {
+                    kind: "assistant" as const,
+                    segmentId: "assistant-stale",
+                    sequence: 2,
+                    streamId: "assistant",
+                    text: "stale tail",
+                },
+                {
+                    callId: "command-after",
+                    isError: false,
+                    kind: "tool" as const,
+                    name: "bash",
+                    output: "after",
+                    phase: "succeeded" as const,
+                    sequence: 3,
+                },
+            ],
+            projectionTruncated: true,
+            providerRunId: "provider-authoritative-compact",
+            sessionKey,
+            source: "provider-runtime" as const,
+            text: "stale tail",
+            updatedAtMs: occurredAtMs,
+        };
+        authoritativeCompact.installExternalRuns(sessionKey, [
+            projectChatExternalRun(staleRun),
+        ]);
+        const refreshed = projectChatExternalRun({
+            ...staleRun,
+            observationEpoch: 2,
+            text: "The complete accumulated assistant response.",
+            updatedAtMs: occurredAtMs + 1,
+        });
+        authoritativeCompact.installExternalRuns(sessionKey, [refreshed]);
+        expect(
+            authoritativeCompact.state.sessions[sessionKey]?.externalRuns[
+                "provider-authoritative-compact"
+            ]?.message.parts
+        ).toEqual(refreshed.message.parts);
+
+        const authoritativeRich = createChatRuntimeStore();
+        const oldRichRun = {
+            ...staleRun,
+            providerRunId: "provider-authoritative-rich",
+            parts: [
+                staleRun.parts[0]!,
+                {
+                    kind: "assistant" as const,
+                    segmentId: "assistant-old",
+                    sequence: 2,
+                    streamId: "assistant",
+                    text: "Old answer.",
+                },
+                staleRun.parts[2]!,
+            ],
+            text: "Old answer.",
+        };
+        authoritativeRich.installExternalRuns(sessionKey, [
+            projectChatExternalRun(oldRichRun),
+        ]);
+        const replacedRich = projectChatExternalRun({
+            ...oldRichRun,
+            observationEpoch: 2,
+            parts: [
+                oldRichRun.parts[0]!,
+                oldRichRun.parts[2]!,
+                {
+                    kind: "assistant",
+                    segmentId: "assistant-new",
+                    sequence: 4,
+                    streamId: "assistant",
+                    text: "New answer.",
+                },
+            ],
+            text: "New answer.",
+            updatedAtMs: occurredAtMs + 1,
+        });
+        authoritativeRich.installExternalRuns(sessionKey, [replacedRich]);
+        expect(
+            authoritativeRich.state.sessions[sessionKey]?.externalRuns[
+                "provider-authoritative-rich"
+            ]?.message.parts
+        ).toEqual(replacedRich.message.parts);
+
+        const authoritativeThinking = createChatRuntimeStore();
+        const oldThinkingRun = {
+            ...staleRun,
+            providerRunId: "provider-authoritative-thinking",
+            parts: [
+                {
+                    kind: "thinking" as const,
+                    segmentId: "reasoning-old",
+                    sequence: 1,
+                    streamId: "agent:reasoning",
+                    text: "Old reasoning.",
+                },
+                staleRun.parts[2]!,
+            ],
+            text: "",
+        };
+        authoritativeThinking.installExternalRuns(sessionKey, [
+            projectChatExternalRun(oldThinkingRun),
+        ]);
+        const replacedThinking = projectChatExternalRun({
+            ...oldThinkingRun,
+            observationEpoch: 2,
+            parts: [
+                oldThinkingRun.parts[1]!,
+                {
+                    kind: "thinking",
+                    segmentId: "reasoning-new",
+                    sequence: 3,
+                    streamId: "agent:reasoning",
+                    text: "Replacement reasoning.",
+                },
+            ],
+            streamResets: [
+                {
+                    resetId: "reasoning-reset-2",
+                    streamId: "agent:reasoning",
+                },
+            ],
+            updatedAtMs: occurredAtMs + 1,
+        });
+        authoritativeThinking.installExternalRuns(sessionKey, [replacedThinking]);
+        expect(
+            authoritativeThinking.state.sessions[sessionKey]?.externalRuns[
+                "provider-authoritative-thinking"
+            ]?.message.parts
+        ).toEqual(replacedThinking.message.parts);
+    });
+
+    test("applies compact run-level stream resets once when response budgeting omits parts", () => {
+        const providerRunId = "provider-compact-stream-reset";
+        const reasoningStreamKey = `${providerRunId}:agent:reasoning`;
+        const reset = [
+            {
+                resetKey: `${providerRunId}:reasoning-reset-2`,
+                sourceStreamKey: reasoningStreamKey,
+            },
+        ] as const;
+        const projection = (
+            parts: ChatExternalRunProjection["message"]["parts"],
+            streamResets?: ChatExternalRunProjection["streamResets"]
+        ): ChatExternalRunProjection => ({
+            continuity: "complete",
+            hasUnprojectedActivity: true,
+            message: {
+                attachments: [],
+                id: `external:${sessionKey}:${providerRunId}`,
+                parts,
+                providerRunId,
+                role: "assistant",
+                sequence: 1,
+                sessionKey,
+                timestampMs: occurredAtMs,
+            },
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            projectionTruncated: true,
+            providerRunId,
+            source: "provider-runtime",
+            ...(streamResets === undefined ? {} : { streamResets }),
+            updatedAtMs: occurredAtMs,
+        });
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            projection([
+                {
+                    kind: "thinking",
+                    sourceKey: `${providerRunId}:reasoning-old`,
+                    sourceStreamKey: reasoningStreamKey,
+                    status: "running",
+                    text: "Old reasoning.",
+                },
+                {
+                    kind: "thinking",
+                    sourceKey: `${providerRunId}:preamble-1`,
+                    sourceStreamKey: `${providerRunId}:agent:preamble`,
+                    status: "running",
+                    text: "Keep commentary.",
+                },
+                {
+                    callId: "command-1",
+                    kind: "tool",
+                    name: "bash",
+                    status: "completed",
+                },
+            ]),
+        ]);
+
+        const compact = projection(
+            [
+                {
+                    kind: "control",
+                    text: "Some OpenClaw activity details were not returned.",
+                    tone: "warning",
+                },
+            ],
+            reset
+        );
+        store.installExternalRuns(sessionKey, [compact]);
+        let parts =
+            store.state.sessions[sessionKey]?.externalRuns[providerRunId]?.message.parts;
+        expect(
+            parts?.flatMap((part) => (part.kind === "thinking" ? [part.text] : []))
+        ).toEqual(["Keep commentary."]);
+        expect(parts?.some((part) => part.kind === "tool")).toBeTrue();
+
+        store.installExternalRuns(sessionKey, [
+            projection(
+                [
+                    {
+                        kind: "thinking",
+                        sourceKey: `${providerRunId}:reasoning-new`,
+                        sourceStreamKey: reasoningStreamKey,
+                        status: "running",
+                        text: "New reasoning.",
+                    },
+                ],
+                reset
+            ),
+        ]);
+        store.installExternalRuns(sessionKey, [compact]);
+        parts =
+            store.state.sessions[sessionKey]?.externalRuns[providerRunId]?.message.parts;
+        expect(
+            parts?.flatMap((part) => (part.kind === "thinking" ? [part.text] : []))
+        ).toEqual(["Keep commentary.", "New reasoning."]);
+    });
+
+    test("applies an assistant reset to an already compact aggregate", () => {
+        const providerRunId = "provider-compact-assistant-reset";
+        const run = (text: string, resetId?: string) =>
+            projectChatExternalRun({
+                continuity: "complete",
+                hasUnprojectedActivity: true,
+                observationEpoch: resetId === undefined ? 1 : 2,
+                observedAtMs: occurredAtMs,
+                parts: [],
+                projectionTruncated: true,
+                providerRunId,
+                sessionKey,
+                source: "provider-runtime",
+                ...(resetId === undefined
+                    ? {}
+                    : {
+                          streamResets: [
+                              {
+                                  resetId,
+                                  streamId: "assistant",
+                              },
+                          ],
+                      }),
+                text,
+                updatedAtMs: occurredAtMs,
+            });
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [run("ABC")]);
+        store.installExternalRuns(sessionKey, [run("AB", "assistant-reset-2")]);
+
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns[
+                providerRunId
+            ]?.message.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []))
+        ).toEqual(["AB"]);
+    });
+
+    test("retains a run-level reset when a 512-part window drops the replaced segment", () => {
+        const providerRunId = "provider-window-stream-reset";
+        const reasoningStreamKey = `${providerRunId}:agent:reasoning`;
+        const projection = (
+            parts: ChatExternalRunProjection["message"]["parts"],
+            streamResets?: ChatExternalRunProjection["streamResets"]
+        ): ChatExternalRunProjection => ({
+            continuity: "complete",
+            hasUnprojectedActivity: true,
+            message: {
+                attachments: [],
+                id: `external:${sessionKey}:${providerRunId}`,
+                parts,
+                providerRunId,
+                role: "assistant",
+                sequence: 1,
+                sessionKey,
+            },
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            projectionTruncated: true,
+            providerRunId,
+            source: "provider-runtime",
+            ...(streamResets === undefined ? {} : { streamResets }),
+            updatedAtMs: occurredAtMs,
+        });
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            projection([
+                {
+                    kind: "thinking",
+                    sourceKey: `${providerRunId}:reasoning-old`,
+                    sourceStreamKey: reasoningStreamKey,
+                    status: "running",
+                    text: "Old reasoning.",
+                },
+            ]),
+        ]);
+        const retainedWindow: ChatExternalRunProjection["message"]["parts"] = [
+            ...Array.from({ length: 511 }, (_, index) => ({
+                callId: `command-${index}`,
+                kind: "tool" as const,
+                name: "bash",
+                status: "completed" as const,
+            })),
+            {
+                kind: "thinking",
+                sourceKey: `${providerRunId}:reasoning-later`,
+                sourceStreamKey: reasoningStreamKey,
+                status: "running",
+                text: "Later reasoning.",
+            },
+        ];
+        store.installExternalRuns(sessionKey, [
+            projection(retainedWindow, [
+                {
+                    resetKey: `${providerRunId}:reasoning-reset-2`,
+                    sourceStreamKey: reasoningStreamKey,
+                },
+            ]),
+        ]);
+
+        const parts =
+            store.state.sessions[sessionKey]?.externalRuns[providerRunId]?.message.parts;
+        expect(parts).toHaveLength(512);
+        expect(
+            parts?.flatMap((part) => (part.kind === "thinking" ? [part.text] : []))
+        ).toEqual(["Later reasoning."]);
+        expect(parts?.at(0)).toMatchObject({ callId: "command-0", kind: "tool" });
+        expect(parts?.at(-1)).toMatchObject({
+            kind: "thinking",
+            text: "Later reasoning.",
+        });
+    });
+
+    test("inserts identified replay parts around one or two anchors and tails no-overlap parts", () => {
+        const createProjection = (
+            parts: readonly {
+                readonly kind: "thinking";
+                readonly sourceKey: string;
+                readonly status: "running";
+                readonly text: string;
+            }[]
+        ) => ({
+            continuity: "complete" as const,
+            hasUnprojectedActivity: false,
+            message: {
+                attachments: [],
+                id: `external:${sessionKey}:provider-anchors`,
+                parts,
+                role: "assistant" as const,
+                sequence: 1,
+                sessionKey,
+            },
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            projectionTruncated: true,
+            providerRunId: "provider-anchors",
+            source: "provider-runtime" as const,
+            updatedAtMs: occurredAtMs,
+        });
+        const keys = (store: ReturnType<typeof createChatRuntimeStore>) =>
+            store.state.sessions[sessionKey]?.externalRuns[
+                "provider-anchors"
+            ]?.message.parts.map((candidate) =>
+                candidate.kind === "thinking" ? candidate.text : candidate.kind
+            );
+
+        const successorOnly = createChatRuntimeStore();
+        successorOnly.installExternalRuns(sessionKey, [
+            createProjection([providerAnchorPart("A"), providerAnchorPart("C")]),
+        ]);
+        successorOnly.installExternalRuns(sessionKey, [
+            createProjection([providerAnchorPart("B"), providerAnchorPart("C")]),
+        ]);
+        expect(keys(successorOnly)).toEqual(["A", "B", "C"]);
+
+        const twoAnchors = createChatRuntimeStore();
+        twoAnchors.installExternalRuns(sessionKey, [
+            createProjection([providerAnchorPart("A"), providerAnchorPart("C")]),
+        ]);
+        twoAnchors.installExternalRuns(sessionKey, [
+            createProjection([
+                providerAnchorPart("A"),
+                providerAnchorPart("B"),
+                providerAnchorPart("C"),
+            ]),
+        ]);
+        expect(keys(twoAnchors)).toEqual(["A", "B", "C"]);
+
+        const noOverlap = createChatRuntimeStore();
+        noOverlap.installExternalRuns(sessionKey, [
+            createProjection([providerAnchorPart("A"), providerAnchorPart("C")]),
+        ]);
+        noOverlap.installExternalRuns(sessionKey, [
+            createProjection([providerAnchorPart("D"), providerAnchorPart("E")]),
+        ]);
+        expect(keys(noOverlap)).toEqual(["A", "C", "D", "E"]);
     });
 
     test("accepts a lower authoritative reset cursor and ignores stale merge snapshots", () => {

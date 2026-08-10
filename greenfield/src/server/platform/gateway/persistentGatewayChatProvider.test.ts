@@ -1524,7 +1524,7 @@ describe("persistent Gateway chat provider", () => {
         expect(projected).toEqual([]);
     });
 
-    test("projects pinned shared-sequence assistant and chat events with overlap-safe modes", async () => {
+    test("projects agent snapshots and genuine chat suffixes onto one assistant family", async () => {
         const harness = createHarness({});
         const projected: unknown[] = [];
         await harness.provider.subscribeChat({
@@ -1560,7 +1560,7 @@ describe("persistent Gateway chat provider", () => {
             {
                 event: "chat",
                 payload: {
-                    deltaText: "Checking cancellation.",
+                    deltaText: " Confirmed.",
                     runId: "cancelled-run",
                     seq: 2,
                     sessionKey,
@@ -1620,17 +1620,19 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 1,
                 sessionKey,
                 stream: "assistant",
+                streamId: "assistant",
                 text: "Checking cancellation.",
             },
             {
                 kind: "delta",
-                mode: "merge",
+                mode: "append",
                 providerRunId: "cancelled-run",
                 providerSequence: 2,
                 receivedAtMs: 2,
                 sessionKey,
                 stream: "assistant",
-                text: "Checking cancellation.",
+                streamId: "assistant",
+                text: " Confirmed.",
             },
             {
                 kind: "delta",
@@ -1640,16 +1642,18 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 3,
                 sessionKey,
                 stream: "assistant",
+                streamId: "assistant",
                 text: "Running the fixture tool.",
             },
             {
                 kind: "delta",
-                mode: "merge",
+                mode: "append",
                 providerRunId: "completed-run",
                 providerSequence: 5,
                 receivedAtMs: 4,
                 sessionKey,
                 stream: "assistant",
+                streamId: "assistant",
                 text: "Fixture complete.",
             },
             {
@@ -1695,9 +1699,16 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: seq,
             });
 
-        await deliver({ text: "Inspecting" }, 1);
-        await deliver({ text: "Inspecting context" }, 2);
-        await deliver({ text: "Inspecting context" }, 3);
+        await deliver(
+            {
+                delta: "must-not-project",
+                isReasoningSnapshot: true,
+                text: "Inspecting",
+            },
+            1
+        );
+        await deliver({ isReasoningSnapshot: true, text: "Inspecting context" }, 2);
+        await deliver({ isReasoningSnapshot: true, text: "Inspecting context" }, 3);
         await deliver({ delta: "." }, 4);
         await deliver({ replace: true, text: "Final thought" }, 5);
 
@@ -1762,6 +1773,7 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 1,
                 sessionKey,
                 stream: "thinking",
+                streamId: "agent:commentary",
                 text: "Inspecting",
             },
             {
@@ -1772,6 +1784,7 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 2,
                 sessionKey,
                 stream: "thinking",
+                streamId: "agent:commentary",
                 text: " context",
             },
             {
@@ -1782,6 +1795,7 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 3,
                 sessionKey,
                 stream: "thinking",
+                streamId: "agent:commentary",
                 text: "Checked context",
             },
             {
@@ -1792,6 +1806,7 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 4,
                 sessionKey,
                 stream: "assistant",
+                streamId: "assistant",
                 text: "Finished.",
             },
             {
@@ -1802,6 +1817,7 @@ describe("persistent Gateway chat provider", () => {
                 receivedAtMs: 5,
                 sessionKey,
                 stream: "assistant",
+                streamId: "assistant",
                 text: "Finished without an explicit phase.",
             },
         ]);
@@ -1826,6 +1842,7 @@ describe("persistent Gateway chat provider", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        itemId: "preamble-1",
                         kind: "preamble",
                         phase: "update",
                         progressText: "Checking the live session.",
@@ -1847,11 +1864,66 @@ describe("persistent Gateway chat provider", () => {
                 providerRunId: "codex-preamble-run",
                 providerSequence: 1,
                 receivedAtMs: 2,
+                segmentId: "agent:preamble:preamble-1",
                 sessionKey,
                 stream: "thinking",
+                streamId: "agent:preamble",
                 text: "Checking the live session.",
             },
         ]);
+    });
+
+    test("normalizes standard Codex and suppressed message presentation items to provider noops", async () => {
+        const harness = createHarness({});
+        const projected: unknown[] = [];
+        await harness.provider.subscribeChat({
+            onEvent: (event) => {
+                projected.push(event);
+            },
+            onGap: () => {},
+            onReconciliationRequired: () => {},
+            runWatermarks: [],
+            sessionKey,
+        });
+
+        const itemKinds = ["command", "analysis", "tool", "message"] as const;
+        for (const [index, kind] of itemKinds.entries()) {
+            await harness.deliverChat({
+                connectionGeneration: 1,
+                frame: {
+                    event: "agent",
+                    payload: {
+                        data: {
+                            itemId: `codex-item-${index}`,
+                            kind,
+                            phase: index === 0 ? "start" : "end",
+                            ...(kind === "message"
+                                ? { suppressChannelProgress: true }
+                                : {}),
+                            title: kind,
+                        },
+                        runId: "codex-standard-items",
+                        seq: index + 1,
+                        sessionKey,
+                        stream: "item",
+                        ts: index + 1,
+                    },
+                },
+                receivedAtMs: index + 10,
+            });
+        }
+
+        expect(projected).toEqual(
+            itemKinds.map((_, index) => ({
+                kind: "noop",
+                providerRunId: "codex-standard-items",
+                providerSequence: index + 1,
+                reason: "ignored",
+                receivedAtMs: index + 10,
+                sessionKey,
+            }))
+        );
+        expect(JSON.stringify(projected)).not.toMatch(/command|analysis|tool|message/u);
     });
 
     test("turns domain-invalid deltas into a reconciliation boundary without advancing events", async () => {

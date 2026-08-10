@@ -111,8 +111,12 @@ export type ChatProviderEvent =
           providerRunId: string;
           providerSequence: number;
           receivedAtMs: number;
+          /** Stable identity for one provider-owned cumulative item segment. */
+          segmentId?: string;
           sessionKey: string;
           stream: "assistant" | "thinking";
+          /** Stable provider stream family used to reconcile cumulative snapshots. */
+          streamId?: string;
           text: string;
       }>
     | Readonly<{

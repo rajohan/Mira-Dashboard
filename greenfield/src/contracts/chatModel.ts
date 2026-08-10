@@ -97,6 +97,14 @@ export const chatRuntimeEventSequenceSchema = v.pipe(
 const chatProviderSequenceSchema = positiveSafeIntegerSchema(
     "Chat provider sequence is invalid"
 );
+const chatProjectionStreamIdSchema = boundedControlSafeTextSchema(
+    512,
+    "Chat projection stream id is invalid"
+);
+const chatProjectionSegmentIdSchema = boundedControlSafeTextSchema(
+    512,
+    "Chat projection segment id is invalid"
+);
 
 function boundedChatTextSchema(maximumCodeUnits: number, message: string) {
     return v.pipe(
@@ -558,12 +566,16 @@ export type ChatRuntimeEvent = v.InferOutput<typeof chatRuntimeEventSchema>;
 const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
     v.strictObject({
         kind: v.literal("assistant"),
+        segmentId: v.optional(chatProjectionSegmentIdSchema),
         sequence: chatRuntimeEventSequenceSchema,
+        streamId: v.optional(chatProjectionStreamIdSchema),
         text: chatMessageTextSchema,
     }),
     v.strictObject({
         kind: v.literal("thinking"),
+        segmentId: v.optional(chatProjectionSegmentIdSchema),
         sequence: chatRuntimeEventSequenceSchema,
+        streamId: v.optional(chatProjectionStreamIdSchema),
         text: chatMessageTextSchema,
     }),
     v.strictObject({
@@ -696,6 +708,19 @@ const chatExternalAbortBoundarySchema = v.strictObject({
     settlement: v.picklist(["not-aborted", "pending", "unknown"]),
 });
 
+export const chatExternalStreamResetMaximum = 8;
+const chatExternalStreamResetSchema = v.strictObject({
+    resetId: chatProjectionSegmentIdSchema,
+    streamId: chatProjectionStreamIdSchema,
+});
+const chatExternalStreamResetsSchema = v.pipe(
+    v.array(chatExternalStreamResetSchema),
+    v.maxLength(
+        chatExternalStreamResetMaximum,
+        "External chat stream reset count is outside its budget"
+    )
+);
+
 /** Honest provider-origin projection with no fabricated local actor or UUID admission. */
 const chatExternalRunObjectSchema = v.strictObject({
     /** Server-owned observation fence for one exact provider abort attempt. */
@@ -720,6 +745,8 @@ const chatExternalRunObjectSchema = v.strictObject({
     providerRunId: chatProviderRunIdSchema,
     sessionKey: gatewaySessionKeySchema,
     source: v.picklist(["provider-in-flight", "provider-runtime"]),
+    /** Latest authoritative replacement watermark for each provider stream. */
+    streamResets: v.optional(chatExternalStreamResetsSchema),
     /** Assistant-only compatibility projection used by bounded response fallback. */
     text: chatMessageTextSchema,
     updatedAtMs: timestampMillisecondsSchema("External chat run timestamp is invalid"),

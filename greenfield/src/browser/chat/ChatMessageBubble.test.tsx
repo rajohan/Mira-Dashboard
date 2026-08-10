@@ -192,6 +192,49 @@ describe("chat message bubble", () => {
         expect(within(tool).queryByText("running")).toBeNull();
     });
 
+    test("derives tool descriptions only from valid structured string input", () => {
+        render(
+            <ChatMessageBubble
+                display={{ ...display, toolsExpanded: true }}
+                message={{
+                    attachments: [],
+                    id: "message-string-tool-input",
+                    parts: [
+                        {
+                            callId: "call-path",
+                            input: '{"path":"/workspace/report.txt"}',
+                            kind: "tool",
+                            name: "read_file",
+                            status: "completed",
+                        },
+                        {
+                            callId: "call-malformed",
+                            input: "not-json",
+                            kind: "tool",
+                            name: "inspect",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const fileTool = screen.getByRole("region", {
+            name: "Read file, completed",
+        });
+        expect(within(fileTool).getByText("Description").parentElement).toHaveTextContent(
+            "/workspace/report.txt"
+        );
+        expect(
+            within(
+                screen.getByRole("region", { name: "Inspect, completed" })
+            ).queryByText("Description")
+        ).toBeNull();
+    });
+
     test("removes a tool-only message when tool visibility is disabled", () => {
         render(
             <ChatMessageBubble

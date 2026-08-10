@@ -495,12 +495,13 @@ describe("ChatService", () => {
                 for (let sequence = 1; sequence <= 5; sequence += 1) {
                     await subscription.onEvent({
                         kind: "delta",
-                        mode: "append",
+                        mode: sequence === 1 ? "replace" : "append",
                         providerRunId: `external-${runIndex}`,
                         providerSequence: sequence,
                         receivedAtMs: 1000 + runIndex * 10 + sequence,
                         sessionKey: "agent:main:main",
                         stream: "assistant",
+                        streamId: "assistant",
                         text: "😀".repeat(32 * 1024),
                     });
                 }
@@ -516,6 +517,14 @@ describe("ChatService", () => {
                     ({ projectionTruncated }) => projectionTruncated
                 )
             ).toBeTrue();
+            for (const external of runtime.externalRuns) {
+                expect(external.streamResets).toEqual([
+                    {
+                        resetId: `${external.providerRunId}:1`,
+                        streamId: "assistant",
+                    },
+                ]);
+            }
             expect(utf8ByteLength(JSON.stringify(runtime))).toBeLessThanOrEqual(
                 chatRuntimeResponseMaximumBytes
             );
@@ -589,12 +598,13 @@ describe("ChatService", () => {
             for (let sequence = 1; sequence <= 5; sequence += 1) {
                 await subscription.onEvent({
                     kind: "delta",
-                    mode: "append",
+                    mode: sequence === 1 ? "replace" : "append",
                     providerRunId: "external-multibyte",
                     providerSequence: sequence,
                     receivedAtMs: 2200 + sequence,
                     sessionKey: "agent:main:main",
                     stream: "assistant",
+                    streamId: "assistant",
                     text: "界".repeat(64 * 1024),
                 });
             }
@@ -606,6 +616,12 @@ describe("ChatService", () => {
                 hasUnprojectedActivity: true,
                 parts: [],
                 projectionTruncated: true,
+                streamResets: [
+                    {
+                        resetId: "external-multibyte:1",
+                        streamId: "assistant",
+                    },
+                ],
             });
             expect(multibyte?.text.length).toBeGreaterThan(0);
             expect(utf8ByteLength(JSON.stringify(multibyte))).toBeLessThanOrEqual(
@@ -639,15 +655,53 @@ describe("ChatService", () => {
                 sequence <= lifetimeProjectionSegments;
                 sequence += 1
             ) {
-                await subscription.onEvent({
-                    itemId: `item-${sequence}`,
-                    itemType: "progress",
-                    kind: "item",
-                    providerRunId: "external-many-parts",
-                    providerSequence: sequence,
-                    receivedAtMs: 2300 + sequence,
-                    sessionKey: "agent:main:main",
-                });
+                await subscription.onEvent(
+                    sequence <= 514
+                        ? {
+                              kind: "delta",
+                              mode: sequence === 1 ? "replace" : "merge",
+                              providerRunId: "external-many-parts",
+                              providerSequence: sequence,
+                              receivedAtMs: 2300 + sequence,
+                              segmentId: `agent:preamble:preamble-${sequence}`,
+                              sessionKey: "agent:main:main",
+                              stream: "thinking",
+                              streamId: "agent:preamble",
+                              text: `Preamble ${sequence}`,
+                          }
+                        : {
+                              itemId: `item-${sequence}`,
+                              itemType: "progress",
+                              kind: "item",
+                              providerRunId: "external-many-parts",
+                              providerSequence: sequence,
+                              receivedAtMs: 2300 + sequence,
+                              sessionKey: "agent:main:main",
+                          }
+                );
+                if (sequence === 513 || sequence === 514) {
+                    const rolloverRuntime = await service.runtime(runtimeInput());
+                    const rollover = rolloverRuntime.externalRuns.find(
+                        ({ providerRunId }) => providerRunId === "external-many-parts"
+                    );
+                    expect(rollover?.parts).toHaveLength(
+                        chatRuntimeProjectionPartsMaximum
+                    );
+                    expect(rollover?.parts?.at(0)).toMatchObject({
+                        segmentId: `agent:preamble:preamble-${sequence - 511}`,
+                        sequence: 1,
+                    });
+                    expect(rollover?.parts?.at(-1)).toMatchObject({
+                        segmentId: `agent:preamble:preamble-${sequence}`,
+                        sequence: chatRuntimeProjectionPartsMaximum,
+                    });
+                    expect(rollover?.streamResets).toEqual([
+                        {
+                            resetId: "external-many-parts:1",
+                            streamId: "agent:preamble",
+                        },
+                    ]);
+                }
             }
             await subscription.onEvent({
                 kind: "delta",
@@ -657,6 +711,7 @@ describe("ChatService", () => {
                 receivedAtMs: 2300 + lifetimeProjectionSegments + 1,
                 sessionKey: "agent:main:main",
                 stream: "assistant",
+                streamId: "assistant",
                 text: "Final response",
             });
             const manyPartsRuntime = await service.runtime(runtimeInput());
@@ -672,6 +727,7 @@ describe("ChatService", () => {
             );
             expect(manyParts?.parts?.at(-1)).toMatchObject({
                 kind: "assistant",
+                segmentId: `external-many-parts:${lifetimeProjectionSegments + 1}`,
                 text: "Final response",
             });
         } finally {
@@ -1216,6 +1272,82 @@ describe("ChatService", () => {
                 source: "provider-runtime",
                 text: "Recovered snapshot",
             });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("adopts an in-flight assistant baseline before the first cumulative live delta", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: {
+                    runId: "external-baseline",
+                    text: "Baseline answer.",
+                },
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => 1000,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const subscription = provider.requests[0]!;
+            const base = {
+                kind: "delta" as const,
+                mode: "merge" as const,
+                providerRunId: "external-baseline",
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "assistant" as const,
+                streamId: "assistant",
+            };
+            await subscription.onEvent({
+                ...base,
+                providerSequence: 1,
+                text: "Baseline answer.",
+            });
+            await subscription.onEvent({
+                ...base,
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                text: "Baseline answer. Continued.",
+            });
+
+            const baselineRuntime = await service.runtime(runtimeInput());
+            const external = baselineRuntime.externalRuns[0]!;
+            expect(external.parts).toEqual([
+                {
+                    kind: "assistant",
+                    segmentId: "external-baseline:history-assistant",
+                    sequence: 1,
+                    streamId: "assistant",
+                    text: "Baseline answer. Continued.",
+                },
+            ]);
+            expect(external.text).toBe("Baseline answer. Continued.");
         } finally {
             await service.dispose();
             database.sqlite.close(true);
@@ -2006,6 +2138,315 @@ describe("ChatService", () => {
             ]);
             const terminalRuntime = await service.runtime(runtimeInput());
             expect(terminalRuntime.externalRuns).toEqual([]);
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
+    test("keeps cumulative Codex streams ordered across noops and tool boundaries", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1000
+        );
+        const provider = providerHarness();
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            const base = {
+                providerRunId: "codex-ordered-run",
+                sessionKey: "agent:main:main",
+            } as const;
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                stream: "thinking",
+                streamId: "agent:reasoning",
+                text: "Checking workspace.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                segmentId: "agent:preamble:preamble-1",
+                stream: "thinking",
+                streamId: "agent:preamble",
+                text: "Preparing command.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "noop",
+                providerSequence: 3,
+                reason: "ignored",
+                receivedAtMs: 1003,
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-1",
+                input: '{"cmd":"pwd"}',
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                phase: "started",
+                providerSequence: 4,
+                receivedAtMs: 1004,
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-1",
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                output: "/workspace",
+                phase: "succeeded",
+                providerSequence: 5,
+                receivedAtMs: 1005,
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 6,
+                receivedAtMs: 1006,
+                stream: "thinking",
+                streamId: "agent:reasoning",
+                text: "Checking workspace. Verifying output.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 7,
+                receivedAtMs: 1007,
+                stream: "assistant",
+                streamId: "assistant",
+                text: "Before tool.",
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-2",
+                input: '{"cmd":"bun test"}',
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                phase: "started",
+                providerSequence: 8,
+                receivedAtMs: 1008,
+            });
+            await subscription.onEvent({
+                ...base,
+                callId: "command-2",
+                isError: false,
+                kind: "tool",
+                name: "bash",
+                output: "1 pass",
+                phase: "succeeded",
+                providerSequence: 9,
+                receivedAtMs: 1009,
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 10,
+                receivedAtMs: 1010,
+                stream: "assistant",
+                streamId: "assistant",
+                text: "Before tool. After tool.",
+            });
+
+            const runtime = await service.runtime(runtimeInput());
+            expect(runtime.externalRuns[0]).toMatchObject({
+                hasUnprojectedActivity: false,
+                projectionTruncated: false,
+            });
+            expect(runtime.externalRuns[0]?.parts).toEqual([
+                {
+                    kind: "thinking",
+                    segmentId: "codex-ordered-run:1",
+                    sequence: 1,
+                    streamId: "agent:reasoning",
+                    text: "Checking workspace.",
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "agent:preamble:preamble-1",
+                    sequence: 2,
+                    streamId: "agent:preamble",
+                    text: "Preparing command.",
+                },
+                {
+                    callId: "command-1",
+                    input: '{"cmd":"pwd"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "bash",
+                    output: "/workspace",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "codex-ordered-run:6",
+                    sequence: 4,
+                    streamId: "agent:reasoning",
+                    text: " Verifying output.",
+                },
+                {
+                    kind: "assistant",
+                    segmentId: "codex-ordered-run:7",
+                    sequence: 5,
+                    streamId: "assistant",
+                    text: "Before tool.",
+                },
+                {
+                    callId: "command-2",
+                    input: '{"cmd":"bun test"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "bash",
+                    output: "1 pass",
+                    phase: "succeeded",
+                    sequence: 6,
+                },
+                {
+                    kind: "assistant",
+                    segmentId: "codex-ordered-run:10",
+                    sequence: 7,
+                    streamId: "assistant",
+                    text: " After tool.",
+                },
+            ]);
+
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 11,
+                receivedAtMs: 1011,
+                segmentId: "agent:preamble:preamble-1",
+                stream: "thinking",
+                streamId: "agent:preamble",
+                text: "Preparing command. Ready.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "merge",
+                providerSequence: 12,
+                receivedAtMs: 1012,
+                segmentId: "agent:preamble:preamble-2",
+                stream: "thinking",
+                streamId: "agent:preamble",
+                text: "Preparing command. Ready.",
+            });
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "replace",
+                providerSequence: 13,
+                receivedAtMs: 1013,
+                stream: "assistant",
+                streamId: "assistant",
+                text: "Authoritative replacement.",
+            });
+
+            const replacedRuntime = await service.runtime(runtimeInput());
+            const replaced = replacedRuntime.externalRuns[0]!;
+            expect(
+                replaced.parts?.filter(
+                    (part) =>
+                        part.kind === "thinking" && part.streamId === "agent:preamble"
+                )
+            ).toEqual([
+                {
+                    kind: "thinking",
+                    segmentId: "agent:preamble:preamble-1",
+                    sequence: 2,
+                    streamId: "agent:preamble",
+                    text: "Preparing command. Ready.",
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "agent:preamble:preamble-2",
+                    sequence: 8,
+                    streamId: "agent:preamble",
+                    text: "Preparing command. Ready.",
+                },
+            ]);
+            expect(replaced.parts?.filter((part) => part.kind === "assistant")).toEqual([
+                {
+                    kind: "assistant",
+                    segmentId: "codex-ordered-run:13",
+                    sequence: 9,
+                    streamId: "assistant",
+                    text: "Authoritative replacement.",
+                },
+            ]);
+            expect(replaced.streamResets).toEqual([
+                {
+                    resetId: "codex-ordered-run:13",
+                    streamId: "assistant",
+                },
+            ]);
+            expect(replaced.parts?.filter((part) => part.kind === "tool")).toHaveLength(
+                2
+            );
+
+            await subscription.onEvent({
+                ...base,
+                kind: "delta",
+                mode: "replace",
+                providerSequence: 14,
+                receivedAtMs: 1014,
+                stream: "thinking",
+                streamId: "agent:reasoning",
+                text: "Replacement reasoning.",
+            });
+            const reasoningReplacementRuntime = await service.runtime(runtimeInput());
+            const reasoningReplaced = reasoningReplacementRuntime.externalRuns[0]!;
+            expect(
+                reasoningReplaced.parts?.filter(
+                    (part) =>
+                        part.kind === "thinking" && part.streamId === "agent:reasoning"
+                )
+            ).toEqual([
+                {
+                    kind: "thinking",
+                    segmentId: "codex-ordered-run:14",
+                    sequence: 10,
+                    streamId: "agent:reasoning",
+                    text: "Replacement reasoning.",
+                },
+            ]);
+            expect(reasoningReplaced.streamResets).toEqual([
+                {
+                    resetId: "codex-ordered-run:13",
+                    streamId: "assistant",
+                },
+                {
+                    resetId: "codex-ordered-run:14",
+                    streamId: "agent:reasoning",
+                },
+            ]);
         } finally {
             await service.dispose();
             database.sqlite.close(true);

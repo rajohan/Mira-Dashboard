@@ -38,11 +38,13 @@ function body(contents: string): ReadableStream<Uint8Array> {
 
 function fixture(
     options: {
+        readonly discardFailures?: number;
         readonly enqueue?: WorkspaceFileWriteScheduler["enqueue"];
         readonly getStatus?: WorkspaceFileWriteScheduler["getStatus"];
         readonly includeOpenClaw?: boolean;
         readonly listActiveSpoolIds?: WorkspaceFileWriteScheduler["listActiveSpoolIds"];
         readonly reader?: WorkspaceFileReader;
+        readonly reconcileEnqueue?: WorkspaceFileWriteScheduler["reconcileEnqueue"];
     } = {}
 ) {
     const parent = Fs.mkdtempSync(Path.join(Os.tmpdir(), "mira-files-service-"));
@@ -101,6 +103,14 @@ function fixture(
                 Promise.resolve({ spoolIds: [], truncated: false })
             );
         },
+        async reconcileEnqueue(command, statusActor, signal) {
+            calls.push("reconcile");
+            return (
+                (await options.reconcileEnqueue?.(command, statusActor, signal)) ?? {
+                    kind: "absent",
+                }
+            );
+        },
     };
     const reader =
         options.reader ??
@@ -138,9 +148,21 @@ function fixture(
                     : []),
             ],
         });
-    const spool = createDescriptorWorkspaceFileUploadSpool(spoolRoot, {
+    const descriptorSpool = createDescriptorWorkspaceFileUploadSpool(spoolRoot, {
         nowMs: () => now,
     });
+    let discardFailures = options.discardFailures ?? 0;
+    const spool = {
+        ...descriptorSpool,
+        discard(spoolId: string) {
+            calls.push("discard");
+            if (discardFailures > 0) {
+                discardFailures -= 1;
+                return Promise.reject(new Error("discard unavailable"));
+            }
+            return descriptorSpool.discard(spoolId);
+        },
+    };
     const service = createWorkspaceFilesService({
         generateId: () => uuid(nextId++),
         nowMs: () => now,
@@ -915,9 +937,21 @@ describe("workspace files service", () => {
         expect(Fs.existsSync(Path.join(root, "new.txt"))).toBe(false);
     });
 
-    test("never redispatches an uncertain durable enqueue and retains bytes for reconciliation", async () => {
+    test("never redispatches a failed enqueue and reclaims an authoritatively absent spool", async () => {
+        const controller = new AbortController();
+        let reconciliationCalled = false;
+        let reconciliationSignal: AbortSignal | undefined;
         const fixtureValue = fixture({
-            enqueue: () => Promise.reject(new Error("lost scheduler response")),
+            enqueue: (_command, _audit, signal) => {
+                expect(signal).toBe(controller.signal);
+                controller.abort();
+                return Promise.reject(new Error("lost scheduler response"));
+            },
+            reconcileEnqueue: (_command, _actor, signal) => {
+                reconciliationCalled = true;
+                reconciliationSignal = signal;
+                return Promise.resolve({ kind: "absent" });
+            },
         });
         const roots = await fixtureValue.service.listRoots(actor);
         const ticket = await fixtureValue.service.prepareUpload(actor, {
@@ -932,10 +966,12 @@ describe("workspace files service", () => {
                     actor,
                     ticket.ticketId,
                     body("x"),
-                    "request-uncertain"
+                    "request-uncertain",
+                    controller.signal
                 )
             )
         ).toMatchObject({ reason: "unavailable" });
+        expect(Fs.readdirSync(fixtureValue.spoolRoot)).toHaveLength(0);
         expect(await fixtureValue.service.getWriteStatus(actor, ticket.ticketId)).toEqual(
             {
                 status: "reconciliation-required",
@@ -953,7 +989,166 @@ describe("workspace files service", () => {
             )
         ).toMatchObject({ reason: "conflict" });
         expect(fixtureValue.calls.filter((call) => call === "enqueue")).toHaveLength(1);
+        expect(fixtureValue.calls.filter((call) => call === "reconcile")).toHaveLength(1);
+        expect(reconciliationCalled).toBe(true);
+        expect(reconciliationSignal).toBeUndefined();
+    });
+
+    test("retains an unknown enqueue spool until a later probe proves absence", async () => {
+        let reconciliationAttempts = 0;
+        const fixtureValue = fixture({
+            enqueue: () => Promise.reject(new Error("lost scheduler response")),
+            reconcileEnqueue: () => {
+                reconciliationAttempts += 1;
+                return reconciliationAttempts === 1
+                    ? Promise.reject(new Error("status unavailable"))
+                    : Promise.resolve({ kind: "absent" });
+            },
+        });
+        const roots = await fixtureValue.service.listRoots(actor);
+        const ticket = await fixtureValue.service.prepareUpload(actor, {
+            directoryId: roots.roots[0]!.resourceId,
+            fileName: "uncertain.txt",
+            mimeType: "text/plain",
+            sizeBytes: 1,
+        });
+
+        expect(
+            await captureFailure(() =>
+                fixtureValue.service.acceptUpload(
+                    actor,
+                    ticket.ticketId,
+                    body("x"),
+                    "request-uncertain"
+                )
+            )
+        ).toMatchObject({ reason: "unavailable" });
         expect(Fs.readdirSync(fixtureValue.spoolRoot)).toHaveLength(1);
+
+        expect(await fixtureValue.service.getWriteStatus(actor, ticket.ticketId)).toEqual(
+            {
+                status: "reconciliation-required",
+                ticketId: ticket.ticketId,
+            }
+        );
+        expect(reconciliationAttempts).toBe(2);
+        expect(Fs.readdirSync(fixtureValue.spoolRoot)).toHaveLength(0);
+    });
+
+    test("retries an absent spool discard during later status reconciliation", async () => {
+        const fixtureValue = fixture({
+            discardFailures: 1,
+            enqueue: () => Promise.reject(new Error("lost scheduler response")),
+        });
+        const roots = await fixtureValue.service.listRoots(actor);
+        const ticket = await fixtureValue.service.prepareUpload(actor, {
+            directoryId: roots.roots[0]!.resourceId,
+            fileName: "discard-retry.txt",
+            mimeType: "text/plain",
+            sizeBytes: 1,
+        });
+
+        expect(
+            await captureFailure(() =>
+                fixtureValue.service.acceptUpload(
+                    actor,
+                    ticket.ticketId,
+                    body("x"),
+                    "request-discard-retry"
+                )
+            )
+        ).toMatchObject({ reason: "unavailable" });
+        expect(Fs.readdirSync(fixtureValue.spoolRoot)).toHaveLength(1);
+        expect(fixtureValue.calls.filter((call) => call === "discard")).toHaveLength(1);
+
+        expect(await fixtureValue.service.getWriteStatus(actor, ticket.ticketId)).toEqual(
+            {
+                status: "reconciliation-required",
+                ticketId: ticket.ticketId,
+            }
+        );
+        expect(Fs.readdirSync(fixtureValue.spoolRoot)).toHaveLength(0);
+        expect(fixtureValue.calls.filter((call) => call === "discard")).toHaveLength(2);
+        expect(fixtureValue.calls.filter((call) => call === "enqueue")).toHaveLength(1);
+    });
+
+    test("retains a spool when the durable reconciliation result is malformed", async () => {
+        const fixtureValue = fixture({
+            enqueue: () => Promise.reject(new Error("lost scheduler response")),
+            reconcileEnqueue: () => Promise.resolve({ kind: "unknown" } as never),
+        });
+        const roots = await fixtureValue.service.listRoots(actor);
+        const ticket = await fixtureValue.service.prepareUpload(actor, {
+            directoryId: roots.roots[0]!.resourceId,
+            fileName: "malformed-status.txt",
+            mimeType: "text/plain",
+            sizeBytes: 1,
+        });
+
+        expect(
+            await captureFailure(() =>
+                fixtureValue.service.acceptUpload(
+                    actor,
+                    ticket.ticketId,
+                    body("x"),
+                    "request-malformed-status"
+                )
+            )
+        ).toMatchObject({ reason: "unavailable" });
+        expect(await fixtureValue.service.getWriteStatus(actor, ticket.ticketId)).toEqual(
+            {
+                status: "reconciliation-required",
+                ticketId: ticket.ticketId,
+            }
+        );
+        expect(Fs.readdirSync(fixtureValue.spoolRoot)).toHaveLength(1);
+        expect(fixtureValue.calls.filter((call) => call === "discard")).toHaveLength(0);
+        expect(fixtureValue.calls.filter((call) => call === "enqueue")).toHaveLength(1);
+    });
+
+    test("recovers a committed enqueue whose response was lost without discarding its spool", async () => {
+        const fixtureValue = fixture({
+            enqueue: () => Promise.reject(new Error("lost scheduler response")),
+            reconcileEnqueue: (command) =>
+                Promise.resolve({
+                    kind: "accepted",
+                    result: {
+                        acceptedAtMs: 1_800_000_000_000,
+                        jobRunId: "job-recovered",
+                        ticketId: command.ticketId,
+                    },
+                }),
+        });
+        const roots = await fixtureValue.service.listRoots(actor);
+        const ticket = await fixtureValue.service.prepareUpload(actor, {
+            directoryId: roots.roots[0]!.resourceId,
+            fileName: "committed.txt",
+            mimeType: "text/plain",
+            sizeBytes: 1,
+        });
+
+        expect(
+            await fixtureValue.service.acceptUpload(
+                actor,
+                ticket.ticketId,
+                body("x"),
+                "request-committed"
+            )
+        ).toEqual({
+            acceptedAtMs: 1_800_000_000_000,
+            jobRunId: "job-recovered",
+            ticketId: ticket.ticketId,
+        });
+        expect(Fs.readdirSync(fixtureValue.spoolRoot)).toHaveLength(1);
+        expect(await fixtureValue.service.getWriteStatus(actor, ticket.ticketId)).toEqual(
+            {
+                jobRunId: "job-recovered",
+                status: "accepted",
+                ticketId: ticket.ticketId,
+            }
+        );
+        expect(fixtureValue.calls.filter((call) => call === "enqueue")).toHaveLength(1);
+        expect(fixtureValue.calls.filter((call) => call === "reconcile")).toHaveLength(1);
     });
 
     test("preserves durable active uploads and performs no cleanup when reconciliation is truncated", async () => {
@@ -1042,6 +1237,16 @@ describe("workspace files service", () => {
         expect(refreshed.entries[0]?.sizeBytes).toBe(
             workspaceFileLimits.maximumDownloadBytes + 1
         );
+        expect(
+            await captureFailure(() =>
+                service.prepareWrite(actor, {
+                    expectedRevision: refreshed.entries[0]!.revision,
+                    mimeType: "text/plain",
+                    resourceId: refreshed.entries[0]!.resourceId,
+                    sizeBytes: 3,
+                })
+            )
+        ).toMatchObject({ reason: "too-large" });
         expect(
             await captureFailure(() =>
                 service.prepareContent(actor, {

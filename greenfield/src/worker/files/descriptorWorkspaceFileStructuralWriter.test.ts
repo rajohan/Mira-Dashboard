@@ -95,6 +95,58 @@ describe("descriptor workspace file structural writer", () => {
         expect(Fs.readFileSync(target, "utf8")).toBe("hello");
     });
 
+    test("revalidates root trust before root-level and nested writes", async () => {
+        const { root, spool, writer } = fixture();
+        const nestedDirectory = Path.join(root, "docs");
+        Fs.mkdirSync(nestedDirectory);
+        const rootSpoolId = "45454545-4545-4545-8545-454545454545";
+        const nestedSpoolId = "46464646-4646-4646-8646-464646464646";
+        const rootSha256 = stageUpload(spool, rootSpoolId, "root");
+        const nestedSha256 = stageUpload(spool, nestedSpoolId, "nested");
+
+        Fs.chmodSync(root, 0o777);
+        try {
+            expect(
+                await captureFailure(() =>
+                    writer.apply({
+                        fileName: "root.txt",
+                        locator: { rootId: "workspace", segments: [] },
+                        mimeType: "text/plain",
+                        operation: "create",
+                        sha256: rootSha256,
+                        sizeBytes: 4,
+                        spoolId: rootSpoolId,
+                        ticketId: "47474747-4747-4747-8747-474747474747",
+                    })
+                )
+            ).toMatchObject({ reason: "access-denied" });
+            expect(
+                await captureFailure(() =>
+                    writer.apply({
+                        fileName: "nested.txt",
+                        locator: { rootId: "workspace", segments: ["docs"] },
+                        mimeType: "text/plain",
+                        operation: "create",
+                        sha256: nestedSha256,
+                        sizeBytes: 6,
+                        spoolId: nestedSpoolId,
+                        ticketId: "48484848-4848-4848-8848-484848484848",
+                    })
+                )
+            ).toMatchObject({ reason: "access-denied" });
+        } finally {
+            Fs.chmodSync(root, 0o700);
+        }
+
+        expect(Fs.existsSync(Path.join(root, "root.txt"))).toBe(false);
+        expect(Fs.existsSync(Path.join(nestedDirectory, "nested.txt"))).toBe(false);
+        expect(
+            Fs.readdirSync(root).filter((name) => name.startsWith(".mira-files-"))
+        ).toEqual([]);
+        expect(Fs.existsSync(Path.join(spool, `${rootSpoolId}.upload`))).toBe(true);
+        expect(Fs.existsSync(Path.join(spool, `${nestedSpoolId}.upload`))).toBe(true);
+    });
+
     test("does not publish a target when the atomic create commit fails", async () => {
         const parent = Fs.mkdtempSync(Path.join(Os.tmpdir(), "mira-files-create-fault-"));
         const root = Path.join(parent, "workspace");

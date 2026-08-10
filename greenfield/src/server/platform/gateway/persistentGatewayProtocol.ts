@@ -385,6 +385,7 @@ const gatewayAgentEventDataSchema = v.pipe(
         delta: v.optional(v.unknown()),
         explanation: v.optional(v.unknown()),
         input: v.optional(v.unknown()),
+        isReasoningSnapshot: v.optional(v.unknown()),
         isError: v.optional(v.unknown()),
         item: v.optional(v.unknown()),
         itemId: v.optional(v.unknown()),
@@ -1257,7 +1258,11 @@ export function parsePersistentGatewayPrivateChatEvent(
             ? Object.freeze({ event: "chat", payload: Object.freeze(payload.output) })
             : undefined;
     }
-    if (frame.output.event === "agent") {
+    // Control-UI-visible runs are broadcast as `agent`, except tool activity:
+    // the Gateway sends that to broad session subscribers as `session.tool`.
+    // Both envelopes carry the same bounded agent payload contract, so normalize
+    // the latter before it crosses the private chat boundary.
+    if (frame.output.event === "agent" || frame.output.event === "session.tool") {
         const payload = v.safeParse(gatewayAgentEventSchema, frame.output.payload);
         if (payload.success) {
             return Object.freeze({

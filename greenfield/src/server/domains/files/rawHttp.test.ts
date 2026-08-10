@@ -96,6 +96,9 @@ function fixture(
         listActiveSpoolIds() {
             return Promise.resolve({ spoolIds: [], truncated: false });
         },
+        reconcileEnqueue() {
+            return Promise.resolve({ kind: "absent" });
+        },
         ...options.scheduler,
     };
     const service = createWorkspaceFilesService({

@@ -1,4 +1,5 @@
 {
+    "version": 1,
     "files": {
         "src/browser/security/AccountSecurityRoute.test.tsx": 11325,
         "src/browser/chat/ChatBrowser.test.tsx": 11072,
@@ -64,6 +65,7 @@
         "src/browser/chat/useChatSpeech.test.tsx": 657,
         "src/browser/logs/LogLevelFilter.test.tsx": 650,
         "src/browser/jobs/ScheduleDetailStateReplay.test.tsx": 644,
+        "src/browser/chat/ChatLiveProjection.test.tsx": 619,
         "src/browser/sessions/GatewaySessionsRoute.test.tsx": 619,
         "src/browser/monitoring/IncidentTable.test.tsx": 608,
         "src/browser/cache/CacheStatusTable.test.tsx": 605,
@@ -156,6 +158,5 @@
         "src/browser/overview/systemMetricsPresentation.test.ts": 266,
         "src/browser/chat/ChatBrowserState.test.ts": 265,
         "src/browser/chat/chatSessionPicker.test.ts": 259
-    },
-    "version": 1
+    }
 }

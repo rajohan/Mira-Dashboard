@@ -51,6 +51,7 @@ import {
     chatExternalRunsPerSessionMaximum,
     chatExternalRunFitsBudget,
     chatExternalRunSchema,
+    chatExternalStreamResetMaximum,
     chatHistoryProviderPageMaximum,
     chatHistoryResponseMaximumBytes,
     chatMessageTextMaximumCodeUnits,
@@ -409,6 +410,7 @@ function compactExternalRun(run: ChatExternalRun): ChatExternalRun {
         providerRunId: run.providerRunId,
         sessionKey: run.sessionKey,
         source: run.source,
+        ...(run.streamResets === undefined ? {} : { streamResets: run.streamResets }),
         text: "",
         updatedAtMs: run.updatedAtMs,
     });
@@ -449,6 +451,7 @@ function boundExternalRunProjection(run: ChatExternalRun): ChatExternalRun {
             providerRunId: run.providerRunId,
             sessionKey: run.sessionKey,
             source: run.source,
+            ...(run.streamResets === undefined ? {} : { streamResets: run.streamResets }),
             text: "",
             updatedAtMs: run.updatedAtMs,
         };
@@ -476,18 +479,51 @@ function boundExternalRunProjection(run: ChatExternalRun): ChatExternalRun {
     return v.parse(chatExternalRunSchema, best);
 }
 
+function externalStreamResetsAfterEvent(
+    previous: ChatExternalRun | undefined,
+    event: ChatProviderEvent
+): ChatExternalRun["streamResets"] {
+    const current = previous?.streamResets ?? [];
+    if (
+        event.kind !== "delta" ||
+        event.mode !== "replace" ||
+        event.streamId === undefined
+    ) {
+        return current.length === 0 ? undefined : current;
+    }
+    const next = {
+        resetId: `${event.providerRunId}:${event.providerSequence}`,
+        streamId: event.streamId,
+    };
+    return [...current.filter(({ streamId }) => streamId !== next.streamId), next].slice(
+        -chatExternalStreamResetMaximum
+    );
+}
+
 function mergeExternalInFlightParts(
     previous: ChatExternalRun | undefined,
+    providerRunId: string,
     text: string
 ): Readonly<{
     parts: readonly ChatRuntimeProjectionPart[];
     projectionTruncated: boolean;
 }> {
+    const baselineIdentity = {
+        segmentId: `${providerRunId}:history-assistant`,
+        streamId: "assistant",
+    } as const;
     const parts: readonly ChatRuntimeProjectionPart[] =
         previous?.parts ??
         (previous?.text === undefined || previous.text === ""
             ? []
-            : [{ kind: "assistant", sequence: 1, text: previous.text }]);
+            : [
+                  {
+                      kind: "assistant",
+                      ...baselineIdentity,
+                      sequence: 1,
+                      text: previous.text,
+                  },
+              ]);
     const wasProjectionTruncated = previous?.projectionTruncated ?? false;
 
     const renderedText = parts
@@ -507,6 +543,7 @@ function mergeExternalInFlightParts(
             ...parts,
             {
                 kind: "assistant",
+                ...baselineIdentity,
                 sequence: (parts.at(-1)?.sequence ?? 0) + 1,
                 text,
             },
@@ -544,28 +581,109 @@ function updateExternalStreamPart(
     event: Extract<ChatProviderEvent, { kind: "delta" }>
 ): readonly ChatRuntimeProjectionPart[] {
     const kind = event.stream;
-    const previous = parts.at(-1);
-    if (previous?.kind !== kind) {
+    const matchesStream = (
+        part: ChatRuntimeProjectionPart
+    ): part is Extract<ChatRuntimeProjectionPart, { kind: typeof kind }> =>
+        part.kind === kind &&
+        (event.streamId === undefined
+            ? part.streamId === undefined
+            : part.streamId === event.streamId);
+    const streamIdentity =
+        event.streamId === undefined && event.segmentId === undefined
+            ? {}
+            : {
+                  segmentId:
+                      event.segmentId ??
+                      `${event.providerRunId}:${event.providerSequence}`,
+                  ...(event.streamId === undefined ? {} : { streamId: event.streamId }),
+              };
+
+    if (event.segmentId !== undefined) {
+        const segmentIndex = parts.findIndex(
+            (part) => part.kind === kind && part.segmentId === event.segmentId
+        );
+        if (segmentIndex !== -1) {
+            const segment = parts[segmentIndex];
+            if (segment?.kind !== kind) return parts;
+            let text = event.text;
+            if (event.mode === "append") text = segment.text + event.text;
+            if (event.mode === "merge") {
+                text = mergeChatStreamText(segment.text, event.text);
+            }
+            return parts.map((part, index) =>
+                index === segmentIndex
+                    ? {
+                          ...segment,
+                          ...(event.streamId === undefined
+                              ? {}
+                              : { streamId: event.streamId }),
+                          text,
+                      }
+                    : part
+            );
+        }
+        if (event.text === "") return parts;
         return [
             ...parts,
             {
                 kind,
-                sequence: (previous?.sequence ?? 0) + 1,
+                ...streamIdentity,
+                sequence: (parts.at(-1)?.sequence ?? 0) + 1,
                 text: event.text,
             },
         ];
     }
-    let text = event.text;
-    if (event.mode === "append") text = previous.text + event.text;
-    if (event.mode === "merge") text = mergeChatStreamText(previous.text, event.text);
-    return [
-        ...parts.slice(0, -1),
-        {
-            kind,
-            sequence: previous.sequence,
-            text,
-        },
-    ];
+
+    const appendAtProviderPosition = (
+        base: readonly ChatRuntimeProjectionPart[],
+        text: string
+    ) => {
+        if (text === "") return base;
+        const previous = base.at(-1);
+        if (previous === undefined || !matchesStream(previous)) {
+            return [
+                ...base,
+                {
+                    kind,
+                    ...streamIdentity,
+                    sequence: (previous?.sequence ?? 0) + 1,
+                    text,
+                },
+            ];
+        }
+        return [
+            ...base.slice(0, -1),
+            {
+                kind,
+                ...(previous.segmentId === undefined
+                    ? streamIdentity
+                    : {
+                          segmentId: previous.segmentId,
+                          ...(previous.streamId === undefined
+                              ? {}
+                              : { streamId: previous.streamId }),
+                      }),
+                sequence: previous.sequence,
+                text: previous.text + text,
+            },
+        ];
+    };
+    if (event.mode === "append") {
+        return appendAtProviderPosition(parts, event.text);
+    }
+    if (event.mode === "merge") {
+        const renderedText = parts
+            .filter((part) => matchesStream(part))
+            .map(({ text }) => text)
+            .join("");
+        const mergedText = mergeChatStreamText(renderedText, event.text);
+        const suffix = mergedText.startsWith(renderedText)
+            ? mergedText.slice(renderedText.length)
+            : event.text;
+        return appendAtProviderPosition(parts, suffix);
+    }
+    const withoutReplacedStream = parts.filter((part) => !matchesStream(part));
+    return appendAtProviderPosition(withoutReplacedStream, event.text);
 }
 
 function updateExternalToolPart(
@@ -703,6 +821,9 @@ function budgetExternalRuns(
                 providerRunId: full.providerRunId,
                 sessionKey: full.sessionKey,
                 source: full.source,
+                ...(full.streamResets === undefined
+                    ? {}
+                    : { streamResets: full.streamResets }),
                 text: safeCodeUnitPrefix(full.text, middle),
                 updatedAtMs: full.updatedAtMs,
             });
@@ -1091,7 +1212,17 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         let text = previous?.text ?? "";
         let parts: readonly ChatRuntimeProjectionPart[] =
             previous?.parts ??
-            (text === "" ? [] : [{ kind: "assistant", sequence: 1, text }]);
+            (text === ""
+                ? []
+                : [
+                      {
+                          kind: "assistant",
+                          segmentId: `${providerRunId}:history-assistant`,
+                          sequence: 1,
+                          streamId: "assistant",
+                          text,
+                      },
+                  ]);
         const beganAfterProviderSequenceOne =
             previous === undefined && event.providerSequence > 1;
         let hasUnprojectedActivity =
@@ -1099,6 +1230,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         let projectionTruncated =
             (previous?.projectionTruncated ?? false) || beganAfterProviderSequenceOne;
         let plan = previous?.plan;
+        const streamResets = externalStreamResetsAfterEvent(previous, event);
         const previousObservationKind = this.#externalObservationKinds
             .get(event.sessionKey)
             ?.get(providerRunId);
@@ -1241,6 +1373,7 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             providerRunId,
             sessionKey: event.sessionKey,
             source: "provider-runtime" as const,
+            ...(streamResets === undefined ? {} : { streamResets }),
             text,
             updatedAtMs: Math.max(previous?.updatedAtMs ?? 0, event.receivedAtMs),
         };
@@ -1392,6 +1525,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                     ),
                     ...(previous?.parts === undefined ? {} : { parts: previous.parts }),
                     ...(previous?.plan === undefined ? {} : { plan: previous.plan }),
+                    ...(previous?.streamResets === undefined
+                        ? {}
+                        : { streamResets: previous.streamResets }),
                     providerRunId: gap.providerRunId,
                     sessionKey: gap.sessionKey,
                     source: previous?.source ?? "provider-runtime",
@@ -1746,7 +1882,11 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
         ) {
             return;
         }
-        const mergedParts = mergeExternalInFlightParts(previous, inFlightRun.text);
+        const mergedParts = mergeExternalInFlightParts(
+            previous,
+            inFlightRun.runId,
+            inFlightRun.text
+        );
         const representedSuffix =
             previous === undefined || !inFlightRun.text.startsWith(previous.text)
                 ? undefined
@@ -1788,6 +1928,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 providerRunId: inFlightRun.runId,
                 sessionKey,
                 source: previous?.source ?? "provider-in-flight",
+                ...(previous?.streamResets === undefined
+                    ? {}
+                    : { streamResets: previous.streamResets }),
                 text: inFlightRun.text,
                 projectionTruncated:
                     (previous?.projectionTruncated ?? false) ||

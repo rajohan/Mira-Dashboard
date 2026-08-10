@@ -22,6 +22,7 @@ import {
     type WorkspaceFileJobPayload,
 } from "./jobPayload.ts";
 import type {
+    WorkspaceFileEnqueueReconciliation,
     WorkspaceFileWriteAuditContext,
     WorkspaceFileWriteCommand,
     WorkspaceFileWriteScheduler,
@@ -49,10 +50,10 @@ function actorBinding(actor: WorkspaceFileWriteAuditContext["actor"]): string {
 
 function payloadFor(
     command: WorkspaceFileWriteCommand,
-    audit: WorkspaceFileWriteAuditContext
+    actor: WorkspaceFileWriteAuditContext["actor"]
 ): WorkspaceFileJobPayload {
     return parseWorkspaceFileJobPayload({
-        actorBindingSha256: actorBinding(audit.actor),
+        actorBindingSha256: actorBinding(actor),
         command,
     });
 }
@@ -111,7 +112,7 @@ export function createWorkspaceFileJobScheduler(
         ): Promise<WorkspaceFileUploadAccepted> {
             try {
                 signal?.throwIfAborted();
-                const payload = payloadFor(command, audit);
+                const payload = payloadFor(command, audit.actor);
                 const definition = actionDefinitionFor(command);
                 const enqueueSha256 = enqueueDigest(definition.actionKey, payload);
                 const replay = preflightManualEnqueue(dependencies.repository, {
@@ -260,6 +261,50 @@ export function createWorkspaceFileJobScheduler(
                 });
             } catch (error) {
                 return Promise.reject(workspaceFileError(error));
+            }
+        },
+        reconcileEnqueue(
+            command: WorkspaceFileWriteCommand,
+            actor: WorkspaceFileWriteAuditContext["actor"],
+            signal?: AbortSignal
+        ): Promise<WorkspaceFileEnqueueReconciliation> {
+            try {
+                signal?.throwIfAborted();
+                const run = dependencies.repository.findRunByIdempotency(
+                    actor.kind,
+                    actor.id,
+                    command.ticketId
+                );
+                if (run === undefined) {
+                    return Promise.resolve({ kind: "absent" as const });
+                }
+                const payload = payloadFor(command, actor);
+                const definition = actionDefinitionFor(command);
+                const matched = matchingRun(
+                    run,
+                    command.ticketId,
+                    payload.actorBindingSha256
+                );
+                if (
+                    matched === undefined ||
+                    run.enqueueSha256 !== enqueueDigest(definition.actionKey, payload)
+                ) {
+                    throw new WorkspaceFileError("unavailable");
+                }
+                return Promise.resolve({
+                    kind: "accepted" as const,
+                    result: {
+                        acceptedAtMs: getTime(matched.queuedAt),
+                        jobRunId: matched.id,
+                        ticketId: command.ticketId,
+                    },
+                });
+            } catch (error) {
+                return Promise.reject(
+                    error instanceof WorkspaceFileError
+                        ? error
+                        : new WorkspaceFileError("unavailable", error)
+                );
             }
         },
         getStatus(

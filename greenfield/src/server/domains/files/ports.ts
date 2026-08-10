@@ -142,6 +142,13 @@ export interface WorkspaceFileWriteCommand {
     readonly ticketId: string;
 }
 
+export type WorkspaceFileEnqueueReconciliation =
+    | { readonly kind: "absent" }
+    | {
+          readonly kind: "accepted";
+          readonly result: WorkspaceFileUploadAccepted;
+      };
+
 /**
  * Durable web-to-worker boundary. Implementations atomically persist the attempted audit
  * and idempotent job enqueue before returning acceptance.
@@ -161,6 +168,16 @@ export interface WorkspaceFileWriteScheduler {
         readonly spoolIds: readonly string[];
         readonly truncated: boolean;
     }>;
+    /**
+     * Linearized post-enqueue probe for one exact command. `absent` is returned only
+     * when the durable repository contains no matching idempotency row; any present
+     * but invalid or mismatched row fails closed instead.
+     */
+    readonly reconcileEnqueue: (
+        command: WorkspaceFileWriteCommand,
+        actor: WorkspaceFileWriteAuditContext["actor"],
+        signal?: AbortSignal
+    ) => Promise<WorkspaceFileEnqueueReconciliation>;
 }
 
 /** Worker-only structural writer. Web composition must never receive this port. */

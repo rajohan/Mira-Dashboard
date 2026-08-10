@@ -310,6 +310,15 @@ function validateCommand(
     return root;
 }
 
+function rootDirectoryIsSafe(root: OpenRoot, stat: Fs.BigIntStats): boolean {
+    return (
+        stat.isDirectory() &&
+        stat.dev === root.device &&
+        stat.uid === root.ownerId &&
+        (stat.mode & 0o022n) === 0n
+    );
+}
+
 async function openDirectory(
     root: OpenRoot,
     segments: readonly string[]
@@ -317,6 +326,10 @@ async function openDirectory(
     const handles: Fs.promises.FileHandle[] = [];
     let parentFd = root.fd;
     try {
+        const rootStat = Fs.fstatSync(root.fd, { bigint: true });
+        if (!rootDirectoryIsSafe(root, rootStat)) {
+            throw failure("access-denied");
+        }
         for (const segment of segments) {
             const handle = await Fs.promises.open(
                 anchoredChild(parentFd, segment),
@@ -1007,23 +1020,20 @@ export function createDescriptorWorkspaceFileStructuralWriter(
                 Fs.constants.O_RDONLY | Fs.constants.O_DIRECTORY | Fs.constants.O_NOFOLLOW
             );
             const stat = Fs.fstatSync(fd, { bigint: true });
-            if (
-                !stat.isDirectory() ||
-                stat.uid !== ownerId ||
-                (stat.mode & 0o022n) !== 0n
-            ) {
-                Fs.closeSync(fd);
-                throw new TypeError(
-                    "Workspace file writer root owner or mode is invalid"
-                );
-            }
-            roots.set(configuration.id, {
+            const root: OpenRoot = {
                 ...configuration,
                 device: stat.dev,
                 fd,
                 ownerId,
                 path: rootPath,
-            });
+            };
+            if (!rootDirectoryIsSafe(root, stat)) {
+                Fs.closeSync(fd);
+                throw new TypeError(
+                    "Workspace file writer root owner or mode is invalid"
+                );
+            }
+            roots.set(configuration.id, root);
         }
         const spoolPath = requiredDirectoryPath(
             options.spoolRoot,

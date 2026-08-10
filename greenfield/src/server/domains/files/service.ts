@@ -37,6 +37,7 @@ import type {
     WorkspaceFileReadRange,
     WorkspaceFileReadResult,
     WorkspaceFileReader,
+    WorkspaceFileSpoolReceipt,
     WorkspaceFileUploadSpool,
     WorkspaceFileWriteAuditContext,
     WorkspaceFileWriteCommand,
@@ -181,11 +182,15 @@ type UploadTicketState =
     | { readonly kind: "accepted"; readonly result: WorkspaceFileUploadAccepted }
     | { readonly kind: "prepared" }
     | { readonly kind: "receiving"; readonly spoolId: string }
-    | { readonly kind: "reconciliation-required" };
+    | {
+          readonly kind: "reconciliation-required";
+          readonly receipt?: WorkspaceFileSpoolReceipt;
+      };
 
 interface UploadTicketRecord extends ExpiringActorRecord {
     readonly command: Omit<WorkspaceFileWriteCommand, "sha256" | "spoolId">;
     readonly id: string;
+    reconciliation?: Promise<WorkspaceFileUploadAccepted | undefined>;
     state: UploadTicketState;
 }
 
@@ -808,6 +813,74 @@ export function createWorkspaceFilesService(
         });
     }
 
+    function reconcileUploadEnqueue(
+        actor: WorkspaceFileActor,
+        record: UploadTicketRecord
+    ): Promise<WorkspaceFileUploadAccepted | undefined> {
+        const state = record.state;
+        if (state.kind === "accepted") {
+            return Promise.resolve(state.result);
+        }
+        if (state.kind !== "reconciliation-required" || state.receipt === undefined) {
+            return Promise.resolve(undefined);
+        }
+        if (record.reconciliation !== undefined) return record.reconciliation;
+
+        const receipt = state.receipt;
+        const command: WorkspaceFileWriteCommand = {
+            ...record.command,
+            sha256: receipt.sha256,
+            spoolId: receipt.spoolId,
+        };
+        const reconciliation = (async () => {
+            const durable = await dependencies.scheduler.reconcileEnqueue(
+                command,
+                auditActor(actor)
+            );
+            switch (durable.kind) {
+                case "accepted": {
+                    const result = v.parse(
+                        workspaceFileUploadAcceptedSchema,
+                        durable.result
+                    );
+                    if (result.ticketId !== record.id) {
+                        throw new WorkspaceFileError("unavailable");
+                    }
+                    record.state = { kind: "accepted", result };
+                    return result;
+                }
+                case "absent": {
+                    break;
+                }
+                default: {
+                    durable satisfies never;
+                    throw new WorkspaceFileError("unavailable");
+                }
+            }
+            await dependencies.spool.discard(receipt.spoolId);
+            if (record.state === state) {
+                record.state = { kind: "reconciliation-required" };
+            }
+            return;
+        })();
+        record.reconciliation = reconciliation;
+        void reconciliation.then(
+            () => {
+                if (record.reconciliation === reconciliation) {
+                    delete record.reconciliation;
+                }
+                return;
+            },
+            () => {
+                if (record.reconciliation === reconciliation) {
+                    delete record.reconciliation;
+                }
+                return;
+            }
+        );
+        return reconciliation;
+    }
+
     return Object.freeze<WorkspaceFilesService>({
         async acceptUpload(actor, ticketId, body, requestId, signal) {
             const record = resolveUploadRecord(actor, ticketId);
@@ -836,15 +909,16 @@ export function createWorkspaceFilesService(
                 record.state = { kind: "prepared" };
                 throw workspaceFileError(error);
             }
+            const command: WorkspaceFileWriteCommand = {
+                ...record.command,
+                sha256: receipt.sha256,
+                spoolId: receipt.spoolId,
+            };
             try {
                 const result = v.parse(
                     workspaceFileUploadAcceptedSchema,
                     await dependencies.scheduler.enqueue(
-                        {
-                            ...record.command,
-                            sha256: receipt.sha256,
-                            spoolId: receipt.spoolId,
-                        },
+                        command,
                         { actor: auditActor(actor), requestId },
                         signal
                     )
@@ -855,7 +929,13 @@ export function createWorkspaceFilesService(
                 record.state = { kind: "accepted", result };
                 return result;
             } catch (error) {
-                record.state = { kind: "reconciliation-required" };
+                record.state = { kind: "reconciliation-required", receipt };
+                try {
+                    const recovered = await reconcileUploadEnqueue(actor, record);
+                    if (recovered !== undefined) return recovered;
+                } catch {
+                    // Unknown durable state retains its private spool for later polling.
+                }
                 throw workspaceFileError(error);
             }
         },
@@ -932,6 +1012,18 @@ export function createWorkspaceFilesService(
                     return { status: "pending", ticketId: parsed.ticketId };
                 }
                 case "reconciliation-required": {
+                    try {
+                        const recovered = await reconcileUploadEnqueue(actor, record);
+                        if (recovered !== undefined) {
+                            return {
+                                jobRunId: recovered.jobRunId,
+                                status: "accepted",
+                                ticketId: parsed.ticketId,
+                            };
+                        }
+                    } catch {
+                        // Reconciliation remains unknown; retaining the spool is fail-closed.
+                    }
                     return {
                         status: "reconciliation-required",
                         ticketId: parsed.ticketId,
@@ -1147,6 +1239,9 @@ export function createWorkspaceFilesService(
             }
             completeFileNode(node);
             if (!node.writable) throw new WorkspaceFileError("access-denied");
+            if (node.sizeBytes > workspaceFileLimits.maximumDownloadBytes) {
+                throw new WorkspaceFileError("too-large");
+            }
             if (
                 node.writeMaximumSizeBytes !== undefined &&
                 input.sizeBytes > node.writeMaximumSizeBytes

@@ -58,12 +58,20 @@ export interface ChatMessageAttachment {
 /** Ordered assistant prose inside one canonical message or active run. */
 export interface ChatTextPart {
     readonly kind: "text";
+    /** Stable provider segment identity used only for truncated snapshot replay. */
+    readonly sourceKey?: string;
+    /** Provider stream family used to retire replaced truncated segments. */
+    readonly sourceStreamKey?: string;
     readonly text: string;
 }
 
 /** Ordered, optionally streaming reasoning inside one active assistant run. */
 export interface ChatThinkingPart {
     readonly kind: "thinking";
+    /** Stable provider segment identity used only for truncated snapshot replay. */
+    readonly sourceKey?: string;
+    /** Provider stream family used to retire replaced truncated segments. */
+    readonly sourceStreamKey?: string;
     readonly status: "complete" | "running";
     readonly text: string;
 }

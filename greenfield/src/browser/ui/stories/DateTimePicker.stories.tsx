@@ -126,6 +126,11 @@ export const Default: Story = {
                 name: "32",
             })
         );
+        await waitFor(async () => {
+            await expect(
+                within(canvasElement.ownerDocument.body).queryByRole("listbox")
+            ).not.toBeInTheDocument();
+        });
 
         await expect(
             canvas.getByRole("button", {

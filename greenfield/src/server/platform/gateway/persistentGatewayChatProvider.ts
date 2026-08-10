@@ -886,23 +886,6 @@ function projectToolEvent(
     });
 }
 
-function projectItemEvent(
-    event: PersistentGatewayDeliveredChatEvent,
-    data: Readonly<Record<string, unknown>>
-): ChatProviderEvent {
-    const item = asRecord(data.item ?? data.payload) ?? data;
-    const itemId =
-        boundedControlString(item.id ?? item.itemId, 256) ??
-        `${event.frame.payload.runId}:${event.frame.payload.seq}`;
-    return Object.freeze({
-        ...eventBase(event),
-        itemId,
-        itemType: boundedControlString(item.type ?? item.kind, 128) ?? "item",
-        kind: "item",
-        text: boundedString(item.text, 32 * 1024),
-    });
-}
-
 function projectNoopEvent(event: PersistentGatewayDeliveredChatEvent): ChatProviderEvent {
     return Object.freeze({
         ...eventBase(event),
@@ -920,8 +903,10 @@ function projectProviderEvent(
             return Object.freeze({
                 ...eventBase(event),
                 kind: "delta",
-                mode: payload.replace === true ? "replace" : "merge",
+                mode: payload.replace === true ? "replace" : "append",
                 stream: "assistant",
+                // Agent snapshots and chat suffixes belong to one assistant lane.
+                streamId: "assistant",
                 text: projectChatDeltaText(payload.deltaText)!,
             });
         }
@@ -963,11 +948,14 @@ function projectProviderEvent(
                   kind: "delta",
                   mode,
                   stream: data.phase === "commentary" ? "thinking" : "assistant",
+                  streamId:
+                      data.phase === "commentary" ? "agent:commentary" : "assistant",
                   text,
               });
     }
     if (payload.stream === "thinking") {
-        const hasExplicitDelta = typeof data.delta === "string";
+        const isReasoningSnapshot = data.isReasoningSnapshot === true;
+        const hasExplicitDelta = !isReasoningSnapshot && typeof data.delta === "string";
         const text = projectChatDeltaText(hasExplicitDelta ? data.delta : data.text);
         if (text === undefined) return projectNoopEvent(event);
         let mode: "append" | "merge" | "replace" = "merge";
@@ -978,6 +966,7 @@ function projectProviderEvent(
             kind: "delta",
             mode,
             stream: "thinking",
+            streamId: "agent:reasoning",
             text,
         });
     }
@@ -986,16 +975,26 @@ function projectProviderEvent(
         if (data.kind === "preamble") {
             const text = projectChatDeltaText(data.progressText);
             if (text !== undefined) {
+                const item = asRecord(data.item ?? data.payload);
+                const itemId =
+                    boundedControlString(data.itemId ?? item?.id ?? item?.itemId, 256) ??
+                    `sequence-${payload.seq}`;
                 return Object.freeze({
                     ...eventBase(event),
                     kind: "delta",
                     mode: "merge",
+                    segmentId: `agent:preamble:${itemId}`,
                     stream: "thinking",
+                    streamId: "agent:preamble",
                     text,
                 });
             }
         }
-        return projectItemEvent(event, data);
+        // Standard Codex items are presentation metadata. Reasoning, assistant
+        // text, and native tool lifecycles arrive on their dedicated streams;
+        // exposing the mirrored item kind would render raw labels such as
+        // `command`, `analysis`, and `tool` beside the real activity.
+        return projectNoopEvent(event);
     }
     if (payload.stream === "plan") {
         if (data.phase !== "update") return projectNoopEvent(event);

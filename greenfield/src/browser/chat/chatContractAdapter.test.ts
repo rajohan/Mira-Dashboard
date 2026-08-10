@@ -307,7 +307,6 @@ describe("chat contract adapter", () => {
                 parts: [
                     { kind: "thinking", status: "complete" },
                     { kind: "tool", status: "completed" },
-                    { kind: "control", text: "plan: One" },
                     { kind: "text", text: "Final" },
                 ],
             },
@@ -392,7 +391,7 @@ describe("chat contract adapter", () => {
         });
     });
 
-    test("retains provider thinking and item activity while excluding provider user echoes", () => {
+    test("retains provider thinking while suppressing mirrored items and user echoes", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
             hasUnprojectedActivity: false,
@@ -437,16 +436,11 @@ describe("chat contract adapter", () => {
                 status: "running",
                 text: "Inspecting the workspace",
             },
-            {
-                kind: "control",
-                text: "progress: Read the current configuration",
-                tone: "muted",
-            },
-            { kind: "control", text: "checkpoint", tone: "muted" },
         ]);
         expect(JSON.stringify(projection.message)).not.toContain(
             "Provider-side copy of the prompt"
         );
+        expect(JSON.stringify(projection.message)).not.toMatch(/progress|checkpoint/u);
     });
 
     test("projects a complete provider plan even when unrelated activity is truncated", () => {
@@ -513,6 +507,12 @@ describe("chat contract adapter", () => {
 
         expect(projection.message.parts).toEqual([
             {
+                kind: "text",
+                sourceKey: "provider-truncated:aggregate:assistant",
+                sourceStreamKey: "provider-truncated:assistant",
+                text: "The complete accumulated assistant response.",
+            },
+            {
                 callId: "synthetic-start",
                 callIdSource: "synthetic",
                 input: '{"query":"runtime"}',
@@ -521,7 +521,6 @@ describe("chat contract adapter", () => {
                 output: "found",
                 status: "completed",
             },
-            { kind: "text", text: "The complete accumulated assistant response." },
             {
                 kind: "control",
                 text: "Some OpenClaw activity details were not returned.",

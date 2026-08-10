@@ -170,6 +170,10 @@ export interface ChatExternalRunProjection {
     readonly projectionTruncated: boolean;
     readonly providerRunId: string;
     readonly source: "provider-in-flight" | "provider-runtime";
+    readonly streamResets?: readonly Readonly<{
+        readonly resetKey: string;
+        readonly sourceStreamKey: string;
+    }>[];
     readonly updatedAtMs: number;
 }
 
@@ -297,79 +301,301 @@ function planAfterEvent(
     return run.plan;
 }
 
+function truncatedExternalPartIdentity(part: ChatMessagePart): string | undefined {
+    if (part.kind === "tool") return `tool:${part.callId}`;
+    if (
+        (part.kind === "text" || part.kind === "thinking") &&
+        part.sourceKey !== undefined
+    ) {
+        return `stream:${part.sourceKey}`;
+    }
+    return undefined;
+}
+
+function mergeMatchingTruncatedExternalPart(
+    previous: ChatMessagePart,
+    current: ChatMessagePart
+): ChatMessagePart {
+    if (
+        (previous.kind === "text" || previous.kind === "thinking") &&
+        current.kind === previous.kind
+    ) {
+        let text = current.text;
+        if (current.text.startsWith(previous.text)) text = current.text;
+        else if (previous.text.startsWith(current.text)) text = previous.text;
+        return { ...previous, ...current, text };
+    }
+    if (previous.kind === "tool" && current.kind === "tool") {
+        const previousIsTerminal =
+            previous.status === "completed" || previous.status === "failed";
+        const currentIsTerminal =
+            current.status === "completed" || current.status === "failed";
+        const retainPreviousTerminal = previousIsTerminal && !currentIsTerminal;
+        return {
+            ...previous,
+            ...current,
+            ...((current.input ?? previous.input) === undefined
+                ? {}
+                : { input: current.input ?? previous.input }),
+            ...((current.output ?? previous.output) === undefined
+                ? {}
+                : { output: current.output ?? previous.output }),
+            ...(retainPreviousTerminal
+                ? {
+                      ...(previous.error === undefined ? {} : { error: previous.error }),
+                      status: previous.status,
+                  }
+                : {}),
+        };
+    }
+    return current;
+}
+
+function isAggregateAssistantPart(
+    part: ChatMessagePart
+): part is Extract<ChatMessagePart, { kind: "text" }> {
+    return (
+        part.kind === "text" && part.sourceKey?.endsWith(":aggregate:assistant") === true
+    );
+}
+
+function identifiedAssistantPartIndexes(parts: readonly ChatMessagePart[]): number[] {
+    return parts.flatMap((part, index) =>
+        part.kind === "text" &&
+        part.sourceKey !== undefined &&
+        !isAggregateAssistantPart(part)
+            ? [index]
+            : []
+    );
+}
+
+function identifiedAssistantText(
+    parts: readonly ChatMessagePart[],
+    indexes: readonly number[]
+): string {
+    return indexes
+        .map((index) => {
+            const part = parts[index];
+            return part?.kind === "text" ? part.text : "";
+        })
+        .join("");
+}
+
+function extendLastIdentifiedAssistantPart(
+    parts: ChatMessagePart[],
+    indexes: readonly number[],
+    aggregateText: string
+): boolean {
+    const rendered = identifiedAssistantText(parts, indexes);
+    if (rendered === "" || !aggregateText.startsWith(rendered)) return false;
+    const lastIndex = indexes.at(-1);
+    const last = lastIndex === undefined ? undefined : parts[lastIndex];
+    if (lastIndex !== undefined && last?.kind === "text") {
+        parts[lastIndex] = {
+            ...last,
+            text: last.text + aggregateText.slice(rendered.length),
+        };
+    }
+    return true;
+}
+
 function mergeTruncatedExternalParts(
     known: readonly ChatMessagePart[],
-    incoming: readonly ChatMessagePart[]
+    incoming: readonly ChatMessagePart[],
+    replacedSourceStreams: ReadonlySet<string> = new Set()
 ): readonly ChatMessagePart[] {
-    const merged = [...known];
-    for (const part of incoming) {
-        if (part.kind === "control") {
-            if (
-                !merged.some(
-                    (candidate) =>
-                        candidate.kind === "control" && candidate.text === part.text
-                )
-            ) {
-                merged.push(part);
-            }
-            continue;
-        }
-        if (part.kind === "tool") {
-            const index = merged.findIndex(
-                (candidate) =>
-                    candidate.kind === "tool" && candidate.callId === part.callId
-            );
-            if (index === -1) {
-                merged.push(part);
-                continue;
-            }
-            const previous = merged[index];
-            if (previous?.kind !== "tool") continue;
-            merged[index] = {
-                ...previous,
-                ...part,
-                ...((part.input ?? previous.input) === undefined
-                    ? {}
-                    : { input: part.input ?? previous.input }),
-                ...((part.output ?? previous.output) === undefined
-                    ? {}
-                    : { output: part.output ?? previous.output }),
-            };
-            continue;
-        }
-        if (part.kind === "thinking") {
-            const knownThinking = merged
-                .filter((candidate) => candidate.kind === "thinking")
-                .map(({ text }) => text)
-                .join("");
-            const nextThinking = mergeChatStreamText(knownThinking, part.text);
-            const suffix = nextThinking.startsWith(knownThinking)
-                ? nextThinking.slice(knownThinking.length)
-                : part.text;
-            if (suffix === "") continue;
-            const index = merged.length - 1;
-            const previous = merged.at(-1);
-            if (previous?.kind !== "thinking") {
-                merged.push({ ...part, text: suffix });
-                continue;
-            }
-            merged[index] = {
-                ...part,
-                text: mergeChatStreamText(previous.text, suffix),
-            };
-            continue;
-        }
-        const knownText = merged
-            .filter((candidate) => candidate.kind === "text")
-            .map(({ text }) => text)
-            .join("");
-        const nextText = mergeChatStreamText(knownText, part.text);
-        const suffix = nextText.startsWith(knownText)
-            ? nextText.slice(knownText.length)
-            : part.text;
-        if (suffix !== "") merged.push({ kind: "text", text: suffix });
+    let candidateKnown = [...known];
+    let candidateIncoming = [...incoming];
+    if (replacedSourceStreams.size > 0) {
+        candidateKnown = candidateKnown.filter(
+            (part) =>
+                (part.kind !== "text" && part.kind !== "thinking") ||
+                part.sourceStreamKey === undefined ||
+                !replacedSourceStreams.has(part.sourceStreamKey)
+        );
     }
-    return merged;
+    const incomingRichIndexes = identifiedAssistantPartIndexes(candidateIncoming);
+    const knownRichIndexes = identifiedAssistantPartIndexes(candidateKnown);
+    const incomingAggregate = candidateIncoming.findLast((part) =>
+        isAggregateAssistantPart(part)
+    );
+    const withoutAggregate = (parts: readonly ChatMessagePart[]) =>
+        parts.filter((part) => !isAggregateAssistantPart(part));
+
+    if (incomingRichIndexes.length > 0) {
+        // The adapter emits rich assistant parts only when they cover the
+        // authoritative run.text. Missing older rich identities therefore
+        // represent replacement, not a truncated window; retain only the
+        // matching assistant identities needed for idempotent prefix replay.
+        const incomingAssistantIdentities = new Set(
+            candidateIncoming.flatMap((part) =>
+                part.kind === "text" &&
+                part.sourceKey !== undefined &&
+                !part.sourceKey.endsWith(":aggregate:assistant")
+                    ? [part.sourceKey]
+                    : []
+            )
+        );
+        candidateKnown = candidateKnown.filter(
+            (part) =>
+                part.kind !== "text" ||
+                (part.sourceKey !== undefined &&
+                    incomingAssistantIdentities.has(part.sourceKey))
+        );
+        candidateIncoming = withoutAggregate(candidateIncoming);
+    } else if (incomingAggregate !== undefined && knownRichIndexes.length > 0) {
+        const knownAssistantText = identifiedAssistantText(
+            candidateKnown,
+            knownRichIndexes
+        );
+        if (
+            extendLastIdentifiedAssistantPart(
+                candidateKnown,
+                knownRichIndexes,
+                incomingAggregate.text
+            ) ||
+            knownAssistantText.startsWith(incomingAggregate.text)
+        ) {
+            candidateKnown = withoutAggregate(candidateKnown);
+            candidateIncoming = withoutAggregate(candidateIncoming);
+        } else {
+            // The newer compact projection carries authoritative run.text. If
+            // it does not cover the retained rich lane, discard only that stale
+            // assistant lane and let incoming tool anchors place the aggregate.
+            candidateKnown = candidateKnown.filter(
+                (part) => part.kind !== "text" || part.sourceKey === undefined
+            );
+        }
+    } else if (knownRichIndexes.length > 0) {
+        candidateKnown = withoutAggregate(candidateKnown);
+    }
+    const knownParts = candidateKnown;
+    const incomingParts = candidateIncoming;
+    const streamReplay = (kind: "text" | "thinking") => {
+        const knownText = knownParts
+            .flatMap((part) =>
+                (part.kind === "text" || part.kind === "thinking") &&
+                part.kind === kind &&
+                part.sourceKey === undefined
+                    ? [part.text]
+                    : []
+            )
+            .join("");
+        const incomingText = incomingParts
+            .flatMap((part) =>
+                (part.kind === "text" || part.kind === "thinking") &&
+                part.kind === kind &&
+                part.sourceKey === undefined
+                    ? [part.text]
+                    : []
+            )
+            .join("");
+        const converged = mergeChatStreamText(knownText, incomingText);
+        let appendFrom: number | undefined = 0;
+        if (converged === knownText) appendFrom = undefined;
+        else if (incomingText.startsWith(knownText)) {
+            appendFrom = knownText.length;
+        }
+        return {
+            appendFrom,
+            offset: 0,
+        };
+    };
+    const replay = {
+        text: streamReplay("text"),
+        thinking: streamReplay("thinking"),
+    };
+    const replayedIncoming: ChatMessagePart[] = [];
+    for (const part of incomingParts) {
+        if (part.kind === "control" || part.kind === "tool") {
+            replayedIncoming.push(part);
+            continue;
+        }
+        if (part.sourceKey !== undefined) {
+            replayedIncoming.push(part);
+            continue;
+        }
+        const state = replay[part.kind];
+        const partStart = state.offset;
+        state.offset += part.text.length;
+        if (state.appendFrom === undefined || state.offset <= state.appendFrom) {
+            continue;
+        }
+        const suffix = part.text.slice(Math.max(0, state.appendFrom - partStart));
+        if (suffix === "") continue;
+        replayedIncoming.push({ ...part, text: suffix });
+    }
+
+    const merged: ChatMessagePart[] = knownParts.filter(
+        (part) => part.kind !== "control"
+    );
+    const knownIdentities = new Set(
+        merged.flatMap((part) => {
+            const identity = truncatedExternalPartIdentity(part);
+            return identity === undefined ? [] : [identity];
+        })
+    );
+    const nextKnownIdentity: (string | undefined)[] = Array.from({
+        length: replayedIncoming.length,
+    });
+    let nextIdentity: string | undefined;
+    for (let index = replayedIncoming.length - 1; index >= 0; index -= 1) {
+        nextKnownIdentity[index] = nextIdentity;
+        const identity = truncatedExternalPartIdentity(replayedIncoming[index]!);
+        if (identity !== undefined && knownIdentities.has(identity)) {
+            nextIdentity = identity;
+        }
+    }
+    let lastIncomingIndex: number | undefined;
+    for (const [incomingIndex, part] of replayedIncoming.entries()) {
+        if (part.kind === "control") continue;
+        const identity = truncatedExternalPartIdentity(part);
+        const existingIndex =
+            identity === undefined
+                ? -1
+                : merged.findIndex(
+                      (candidate) => truncatedExternalPartIdentity(candidate) === identity
+                  );
+        if (existingIndex !== -1) {
+            merged[existingIndex] = mergeMatchingTruncatedExternalPart(
+                merged[existingIndex]!,
+                part
+            );
+            lastIncomingIndex = existingIndex;
+            continue;
+        }
+        const nextIdentity = nextKnownIdentity[incomingIndex];
+        const nextIndex =
+            nextIdentity === undefined
+                ? -1
+                : merged.findIndex(
+                      (candidate) =>
+                          truncatedExternalPartIdentity(candidate) === nextIdentity
+                  );
+        let insertionIndex = nextIndex === -1 ? merged.length : nextIndex;
+        if (lastIncomingIndex !== undefined) {
+            insertionIndex = Math.min(
+                lastIncomingIndex + 1,
+                nextIndex === -1 ? Infinity : nextIndex
+            );
+        }
+        merged.splice(insertionIndex, 0, part);
+        lastIncomingIndex = insertionIndex;
+    }
+
+    const controls: ChatMessagePart[] = [];
+    for (const part of [...incomingParts, ...knownParts]) {
+        if (
+            part.kind === "control" &&
+            !controls.some(
+                (candidate) =>
+                    candidate.kind === "control" && candidate.text === part.text
+            )
+        ) {
+            controls.push(part);
+        }
+    }
+    return [...merged, ...controls];
 }
 
 function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntimeRun {
@@ -948,16 +1174,34 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                     if (!projection.projectionTruncated || existing === undefined) {
                         return [projection.providerRunId, projection] as const;
                     }
+                    const existingResetByStream = new Map(
+                        (existing.streamResets ?? []).map(
+                            ({ resetKey, sourceStreamKey }) =>
+                                [sourceStreamKey, resetKey] as const
+                        )
+                    );
+                    const newlyReplacedStreams = new Set(
+                        (projection.streamResets ?? [])
+                            .filter(
+                                ({ resetKey, sourceStreamKey }) =>
+                                    existingResetByStream.get(sourceStreamKey) !==
+                                    resetKey
+                            )
+                            .map(({ sourceStreamKey }) => sourceStreamKey)
+                    );
                     const parts = mergeTruncatedExternalParts(
                         existing.message.parts,
-                        projection.message.parts
+                        projection.message.parts,
+                        newlyReplacedStreams
                     );
+                    const streamResets = projection.streamResets ?? existing.streamResets;
                     const preserved: ChatExternalRunProjection = {
                         ...projection,
                         message: { ...projection.message, parts },
                         ...((projection.plan ?? existing.plan) === undefined
                             ? {}
                             : { plan: projection.plan ?? existing.plan }),
+                        ...(streamResets === undefined ? {} : { streamResets }),
                     };
                     return [projection.providerRunId, preserved] as const;
                 })
