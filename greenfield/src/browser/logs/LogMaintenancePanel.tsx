@@ -567,10 +567,10 @@ export function LogMaintenancePanel(properties: LogMaintenancePanelProps) {
     const [runningAction, setRunningAction] = useState<MaintenanceAction>();
     return (
         <LogMaintenancePanelContent
+            key={maintenanceActionIsLocked(properties) ? "locked" : "available"}
             {...properties}
             actionError={actionError}
             actionStatus={actionStatus}
-            key={maintenanceActionIsLocked(properties) ? "locked" : "available"}
             onActionErrorChange={setActionError}
             onActionStatusChange={setActionStatus}
             onRunningActionChange={setRunningAction}
