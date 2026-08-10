@@ -654,9 +654,6 @@ function projectMessageParts(
                     block.error,
                 32 * 1024
             );
-            if (providerName === null || providerCallId === null) {
-                return undefined;
-            }
             parts.push({
                 callId: providerCallId ?? partId,
                 ...(providerCallId === undefined ? { callIdSource: "synthetic" } : {}),
