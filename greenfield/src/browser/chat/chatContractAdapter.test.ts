@@ -381,6 +381,61 @@ describe("chat contract adapter", () => {
         });
     });
 
+    test("retains provider thinking and item activity while excluding provider user echoes", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            parts: [
+                {
+                    kind: "thinking",
+                    sequence: 1,
+                    text: "Inspecting the workspace",
+                },
+                {
+                    id: "item-with-text",
+                    kind: "item",
+                    sequence: 2,
+                    text: "Read the current configuration",
+                    type: "progress",
+                },
+                {
+                    id: "item-without-text",
+                    kind: "item",
+                    sequence: 3,
+                    type: "checkpoint",
+                },
+                {
+                    kind: "user",
+                    sequence: 4,
+                    text: "Provider-side copy of the prompt",
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId: "provider-activity",
+            sessionKey,
+            source: "provider-runtime",
+            text: "",
+            updatedAtMs: timestampMs,
+        });
+
+        expect(projection.message.parts).toEqual([
+            {
+                kind: "thinking",
+                status: "running",
+                text: "Inspecting the workspace",
+            },
+            {
+                kind: "control",
+                text: "progress: Read the current configuration",
+                tone: "muted",
+            },
+            { kind: "control", text: "checkpoint", tone: "muted" },
+        ]);
+        expect(JSON.stringify(projection.message)).not.toContain(
+            "Provider-side copy of the prompt"
+        );
+    });
+
     test("keeps truncated assistant text authoritative and folds synthetic tool lifecycle", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",

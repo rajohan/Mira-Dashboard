@@ -114,6 +114,23 @@ function projectSinglePage(messages: ChatMessage[]) {
     );
 }
 
+function chatAttachmentPart(
+    id: string,
+    mediaId: string,
+    fileName: string
+): CompleteChatParts[number] {
+    return {
+        downloadUrl: `/api/chat/media/${mediaId}?disposition=download`,
+        fileName,
+        id,
+        kind: "attachment",
+        mediaType: "text/plain",
+        renderPolicy: "bounded-text",
+        sizeBytes: 12,
+        url: `/api/chat/media/${mediaId}?disposition=preview`,
+    };
+}
+
 describe("chat view projection", () => {
     test("retains provider auto fast mode beside its effective speed", () => {
         const observedAtMs = 1_800_000_000_000;
@@ -318,6 +335,78 @@ describe("chat view projection", () => {
                 },
             ],
             role: "assistant",
+        });
+    });
+
+    test("moves unique result attachments onto the tool call without losing provider notices", () => {
+        const firstMediaId = "019fe633-9133-4ba0-8b80-809dd80dfb40";
+        const secondMediaId = "019fe633-9133-4ba0-8b80-809dd80dfb41";
+        const projected = projectSinglePage([
+            toolHistoryMessage({
+                id: "assistant-tool-message",
+                parts: [
+                    {
+                        callId: "call-with-media",
+                        id: "call-with-media",
+                        input: '{"cmd":"inspect"}',
+                        isError: false,
+                        kind: "tool",
+                        name: "functions.exec_command",
+                        phase: "started",
+                    },
+                    chatAttachmentPart("assistant-media", firstMediaId, "first.txt"),
+                ],
+                role: "assistant",
+            }),
+            toolHistoryMessage({
+                id: "tool-result-message",
+                parts: [
+                    {
+                        callId: "call-with-media",
+                        id: "tool-result",
+                        isError: false,
+                        kind: "tool",
+                        name: "functions.exec_command",
+                        output: "done",
+                        phase: "succeeded",
+                    },
+                    chatAttachmentPart("duplicate-media", firstMediaId, "first.txt"),
+                    chatAttachmentPart("new-media", secondMediaId, "second.txt"),
+                    {
+                        id: "provider-notice",
+                        kind: "control",
+                        text: "Provider retained a diagnostic notice.",
+                    },
+                ],
+                role: "tool",
+            }),
+        ]);
+
+        expect(projected).toHaveLength(2);
+        expect(projected[0]).toMatchObject({
+            attachments: [
+                { id: "assistant-media", name: "first.txt" },
+                { id: "new-media", name: "second.txt" },
+            ],
+            parts: [
+                {
+                    callId: "call-with-media",
+                    input: '{"cmd":"inspect"}',
+                    output: "done",
+                    status: "completed",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(projected[1]).toMatchObject({
+            attachments: [],
+            parts: [
+                {
+                    kind: "control",
+                    text: "Provider retained a diagnostic notice.",
+                },
+            ],
+            role: "control",
         });
     });
 

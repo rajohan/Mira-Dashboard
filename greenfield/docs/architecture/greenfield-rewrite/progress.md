@@ -1271,9 +1271,12 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   and only `LoadState` for the four fixed host units, then atomically publishes a private,
   contract-ordered policy-ID projection under project-local log-maintenance state. The web process
   has no process or rotation-state authority: it reads only that bounded `0600` projection and
-  accepts it while its worker timestamp is fresh. Missing, stale, corrupt, unsafe, aborted,
-  unloaded, or unconfigured state fails closed as unavailable, and orderly worker shutdown first
-  publishes an empty projection. The resulting Jobs run is authoritative for execution outcome.
+  accepts it while its worker timestamp is fresh. For `docker-managed`, the worker validates the
+  protected maintenance-state root and any existing bounded state file; an absent state file is
+  accepted as first-run state. Invalid managed state, stale or corrupt projections, missing or
+  unloaded host units, aborted checks, and unconfigured policies fail closed as unavailable.
+  Orderly worker shutdown first publishes an empty projection. The resulting Jobs run is
+  authoritative for execution outcome.
 - Log maintenance deliberately has two owners. Dashboard's worker implements size/cadence,
   copy-truncate or reviewed rename, compression, retention, archive-only cleanup, atomic state,
   locking, status, and dry-run mechanics for the exact reviewed Dashboard, OpenClaw, and
