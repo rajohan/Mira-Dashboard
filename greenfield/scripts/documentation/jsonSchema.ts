@@ -130,8 +130,14 @@ import {
     newestJobRunOrderIsStable,
 } from "../../src/contracts/jobs.ts";
 import {
+    logMaintenanceActiveRunIsConsistent,
+    logMaintenanceExecutionTimesAreConsistent,
+    logMaintenanceJobResultIsConsistent,
+    logMaintenanceLastRunIsConsistent,
     logLinesHaveUniqueIds,
     logMaintenancePoliciesHaveUniqueIds,
+    logMaintenanceRequestIsConsistent,
+    logMaintenanceTerminalRunIsConsistent,
     logSourcesHaveUniqueIds,
 } from "../../src/contracts/logs.ts";
 import {
@@ -261,6 +267,30 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         logMaintenancePoliciesHaveUniqueIds,
         "Live Valibot validation additionally requires every fixed log-maintenance policy ID to be unique.",
+    ],
+    [
+        logMaintenanceExecutionTimesAreConsistent,
+        "Live Valibot validation additionally requires the maintenance finish timestamp not to precede its start timestamp.",
+    ],
+    [
+        logMaintenanceActiveRunIsConsistent,
+        "Live Valibot validation additionally requires an active maintenance run to be queued or running.",
+    ],
+    [
+        logMaintenanceTerminalRunIsConsistent,
+        "Live Valibot validation additionally requires a last maintenance run to be terminal.",
+    ],
+    [
+        logMaintenanceLastRunIsConsistent,
+        "Live Valibot validation additionally permits a summary only for a successful non-dry-run maintenance result.",
+    ],
+    [
+        logMaintenanceRequestIsConsistent,
+        "Live Valibot validation additionally permits dry-run mode only for the fixed docker-managed policy.",
+    ],
+    [
+        logMaintenanceJobResultIsConsistent,
+        "Live Valibot validation additionally requires a successful durable maintenance result to agree with its fixed policy, dry-run mode, successful summary, and completion time.",
     ],
     [
         terminalPathIsCanonical,

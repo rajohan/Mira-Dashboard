@@ -3,21 +3,31 @@ import { describe, expect, jest, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
+import type { RealtimeStreamOutput } from "../../contracts/events.ts";
+import type { JobRunSummary } from "../../contracts/jobModel.ts";
+import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
+import type { JobRunDetail } from "../../contracts/jobs.ts";
 import type {
     ListLogSourcesOutput,
     LogMaintenanceStatusOutput,
     LogSnapshotOutput,
 } from "../../contracts/logs.ts";
+import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
 import { authStatusQueryKey } from "../auth/authQueries.ts";
+import {
+    ControlledDashboardRealtimeClient,
+    noOpDashboardRealtimeClient,
+} from "../test/realtime.ts";
 import { LogsBrowser } from "./LogsBrowser.tsx";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { act, render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
 const observedAtMs = 1_800_000_000_000;
+const maintenanceRunId = "019fdf70-0000-7000-8000-000000000020";
 const authenticatedStatus = Object.freeze({
     session: {
         authenticatedAtMs: observedAtMs,
@@ -108,7 +118,86 @@ function snapshot(sourceId: string): LogSnapshotOutput {
     };
 }
 
-function renderBrowser(client: DashboardTrpcClient) {
+function maintenanceRun(state: "queued" | "succeeded"): JobRunSummary {
+    const terminal = state === "succeeded";
+    return {
+        actionKey: "maintenance.rotate-logs",
+        attemptCount: terminal ? 1 : 0,
+        attemptLimit: 1,
+        availableAtMs: observedAtMs,
+        cancellationPolicy: "cooperative",
+        displayName: "Managed log maintenance dry-run",
+        eventCount: terminal ? 3 : 1,
+        ...(terminal ? { finishedAtMs: observedAtMs + 2000 } : {}),
+        ...(terminal ? { firstStartedAtMs: observedAtMs + 1000 } : {}),
+        id: maintenanceRunId,
+        ...(terminal ? { lastAttemptStartedAtMs: observedAtMs + 1000 } : {}),
+        priority: 0,
+        queuedAtMs: observedAtMs,
+        resourceClass: "host-heavy",
+        resourceKeys: ["host.logs"],
+        retrySafe: false,
+        state,
+        stateVersion: terminal ? 3 : 1,
+        timeoutMs: 300_000,
+        triggerType: "system",
+        updatedAtMs: observedAtMs + (terminal ? 2000 : 0),
+    };
+}
+
+function maintenanceRunDetail(state: "queued" | "succeeded"): JobRunDetail {
+    return {
+        events: [],
+        ...(state === "succeeded"
+            ? {
+                  result: {
+                      completedAtMs: observedAtMs + 2000,
+                      dryRun: true,
+                      policyId: "docker-managed",
+                      status: "completed",
+                      summary: {
+                          actionCounts: {
+                              compressed: 1,
+                              deleted: 2,
+                              error: 0,
+                              missing: 1,
+                              rotated: 3,
+                              skipped: 4,
+                          },
+                          checkedTargets: 11,
+                          dryRun: true,
+                          finishedAtMs: observedAtMs + 2000,
+                          ok: true,
+                          startedAtMs: observedAtMs + 1000,
+                      },
+                  },
+              }
+            : {}),
+        run: maintenanceRun(state),
+    };
+}
+
+function runChange(): RealtimeStreamOutput {
+    return {
+        data: {
+            event: {
+                entityId: maintenanceRunId,
+                entityType: "job-run",
+                occurredAtMs: observedAtMs + 2000,
+                operation: "updated",
+                payload: { id: maintenanceRunId },
+                topic: jobRealtimeTopics.runs,
+            },
+            kind: "change",
+        },
+        id: "21",
+    };
+}
+
+function renderBrowser(
+    client: DashboardTrpcClient,
+    realtimeClient = noOpDashboardRealtimeClient
+) {
     const queryClient = new QueryClient({
         defaultOptions: {
             mutations: { retry: false },
@@ -118,9 +207,11 @@ function renderBrowser(client: DashboardTrpcClient) {
     queryClient.setQueryData(authStatusQueryKey, authenticatedStatus);
     const view = render(
         <QueryClientProvider client={queryClient}>
-            <DashboardTrpcProvider client={client}>
-                <LogsBrowser />
-            </DashboardTrpcProvider>
+            <DashboardRealtimeProvider client={realtimeClient}>
+                <DashboardTrpcProvider client={client}>
+                    <LogsBrowser />
+                </DashboardTrpcProvider>
+            </DashboardRealtimeProvider>
         </QueryClientProvider>
     );
     return { queryClient, view };
@@ -146,6 +237,9 @@ describe("LogsBrowser", () => {
                     };
                     return Promise.resolve(snapshot(sourceId));
                 }
+                case "jobs.getRun": {
+                    return Promise.resolve(maintenanceRunDetail("queued"));
+                }
                 default: {
                     return Promise.reject(new Error(`Unexpected query: ${name}`));
                 }
@@ -153,7 +247,8 @@ describe("LogsBrowser", () => {
         });
         const mutation = jest.fn(() =>
             Promise.resolve({
-                jobRunId: "log-maintenance-run",
+                dryRun: false,
+                jobRunId: maintenanceRunId,
                 policyId: "docker-managed" as const,
                 queued: true as const,
             })
@@ -231,6 +326,7 @@ describe("LogsBrowser", () => {
             expect(mutation).toHaveBeenCalledWith(
                 "logs.requestMaintenance",
                 {
+                    dryRun: false,
                     idempotencyKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
                     policyId: "docker-managed",
                 },
@@ -238,7 +334,7 @@ describe("LogsBrowser", () => {
             );
             expect(
                 await screen.findByText(
-                    /was added to the queue as job log-maintenance-run/u
+                    new RegExp(`was added to the queue as job ${maintenanceRunId}`, "u")
                 )
             ).toBeVisible();
             await waitFor(() =>
@@ -246,6 +342,111 @@ describe("LogsBrowser", () => {
                     query.mock.calls.filter(([name]) => name === "logs.maintenanceStatus")
                         .length
                 ).toBeGreaterThanOrEqual(3)
+            );
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("follows a queued dry-run through realtime completion and renders its bounded summary", async () => {
+        let succeeded = false;
+        const query = jest.fn((name: string) => {
+            switch (name) {
+                case "logs.listSources": {
+                    return Promise.resolve(sourceCatalog);
+                }
+                case "logs.maintenanceStatus": {
+                    return Promise.resolve(maintenanceStatus);
+                }
+                case "logs.tail": {
+                    return Promise.resolve(snapshot("dashboard.web.stderr"));
+                }
+                case "jobs.getRun": {
+                    return Promise.resolve(
+                        maintenanceRunDetail(succeeded ? "succeeded" : "queued")
+                    );
+                }
+                default: {
+                    return Promise.reject(new Error(`Unexpected query: ${name}`));
+                }
+            }
+        });
+        const mutation = jest.fn(() =>
+            Promise.resolve({
+                dryRun: true,
+                jobRunId: maintenanceRunId,
+                policyId: "docker-managed" as const,
+                queued: true as const,
+            })
+        );
+        const realtimeClient = new ControlledDashboardRealtimeClient();
+        const { queryClient, view } = renderBrowser({ mutation, query }, realtimeClient);
+
+        try {
+            await screen.findByRole("heading", { name: "Dashboard web stderr" });
+            expect(realtimeClient.input).toEqual({
+                lastEventId: "0",
+                topics: [jobRealtimeTopics.runs],
+            });
+            const user = userEvent.setup();
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Dry run Managed application and container logs",
+                })
+            );
+            await user.click(screen.getByRole("button", { name: "Queue dry run" }));
+
+            await waitFor(() =>
+                expect(mutation).toHaveBeenCalledWith(
+                    "logs.requestMaintenance",
+                    {
+                        dryRun: true,
+                        idempotencyKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+                        policyId: "docker-managed",
+                    },
+                    expect.objectContaining({ signal: expect.any(AbortSignal) })
+                )
+            );
+            expect(
+                await screen.findByRole("status", { name: "Dry-run lifecycle" })
+            ).toHaveTextContent("queued");
+            expect(
+                screen.getByRole("button", {
+                    name: "Dry run Managed application and container logs",
+                })
+            ).toBeDisabled();
+            expect(query).toHaveBeenCalledWith(
+                "jobs.getRun",
+                { eventLimit: 100, id: maintenanceRunId },
+                expect.objectContaining({ signal: expect.any(AbortSignal) })
+            );
+            const maintenanceReadsBeforeChange = query.mock.calls.filter(
+                ([name]) => name === "logs.maintenanceStatus"
+            ).length;
+
+            succeeded = true;
+            act(() => realtimeClient.emit(runChange()));
+
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("status", { name: "Dry-run lifecycle" })
+                ).toHaveTextContent("succeeded")
+            );
+            const summary = screen.getByLabelText("Dry-run result summary");
+            expect(summary).toHaveTextContent("Checked11");
+            expect(summary).toHaveTextContent("Rotated3");
+            expect(summary).toHaveTextContent("Skipped4");
+            expect(
+                screen.getByRole("button", {
+                    name: "Dry run Managed application and container logs",
+                })
+            ).toBeEnabled();
+            await waitFor(() =>
+                expect(
+                    query.mock.calls.filter(([name]) => name === "logs.maintenanceStatus")
+                        .length
+                ).toBeGreaterThan(maintenanceReadsBeforeChange)
             );
         } finally {
             view.unmount();

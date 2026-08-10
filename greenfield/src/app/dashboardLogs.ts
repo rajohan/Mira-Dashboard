@@ -16,11 +16,12 @@ export interface DashboardLogsOptions {
     readonly database: SQLiteBunDatabase;
     readonly jobRepository: Pick<
         JobRepository,
-        "enqueueManualRun" | "findRunByIdempotency"
+        "enqueueManualRun" | "findRunByIdempotency" | "readActionPayloadRunSnapshots"
     >;
     readonly logMaintenanceRoot: string;
     readonly now?: () => Date;
     readonly onAuditSettlementFailure?: (fields: {
+        readonly dryRun: boolean;
         readonly policyId: LogMaintenancePolicyId;
         readonly settlement: "failed" | "queued";
     }) => void;

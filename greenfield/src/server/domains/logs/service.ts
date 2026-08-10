@@ -1,6 +1,8 @@
 import {
     logMaintenancePolicyIds,
     type ListLogSourcesOutput,
+    type LogMaintenanceActiveRun,
+    type LogMaintenanceLastRun,
     type LogMaintenancePolicyId,
     type LogMaintenancePolicyStatus,
     type LogMaintenanceStatusOutput,
@@ -42,6 +44,14 @@ export class LogsServiceError extends Error {
 }
 
 export interface LogMaintenanceQueuePort {
+    /** Returns active and latest terminal non-dry-run observations for fixed policies. */
+    readonly runStatuses: (signal?: AbortSignal) => Promise<
+        readonly Readonly<{
+            readonly activeRun?: LogMaintenanceActiveRun;
+            readonly lastRun?: LogMaintenanceLastRun;
+            readonly policyId: LogMaintenancePolicyId;
+        }>[]
+    >;
     /** Returns exact policies accepted by this release's durable queue. */
     readonly queueablePolicies: (
         signal?: AbortSignal
@@ -59,6 +69,7 @@ export interface LogsServiceDependencies {
     readonly maintenanceQueue: LogMaintenanceQueuePort;
     readonly now?: () => number;
     readonly onAuditSettlementFailure?: (fields: {
+        readonly dryRun: boolean;
         readonly policyId: LogMaintenancePolicyId;
         readonly settlement: "failed" | "queued";
     }) => void;
@@ -120,6 +131,7 @@ export function createLogsService({
         try {
             await auditWriter.record({
                 ...context,
+                dryRun: input.dryRun,
                 policyId: input.policyId,
                 settlement: "attempted",
             });
@@ -137,12 +149,17 @@ export function createLogsService({
         try {
             await auditWriter.record({
                 ...context,
+                dryRun: input.dryRun,
                 ...(jobRunId === undefined ? {} : { jobRunId }),
                 policyId: input.policyId,
                 settlement,
             });
         } catch {
-            onAuditSettlementFailure({ policyId: input.policyId, settlement });
+            onAuditSettlementFailure({
+                dryRun: input.dryRun,
+                policyId: input.policyId,
+                settlement,
+            });
         }
     }
 
@@ -156,16 +173,30 @@ export function createLogsService({
         },
         async maintenanceStatus(signal?: AbortSignal) {
             try {
-                const queueable = new Set(
-                    await maintenanceQueue.queueablePolicies(signal)
+                const [queueablePolicies, runStatuses] = await Promise.all([
+                    maintenanceQueue.queueablePolicies(signal),
+                    maintenanceQueue.runStatuses(signal),
+                ]);
+                const queueable = new Set(queueablePolicies);
+                const runStatusByPolicy = new Map(
+                    runStatuses.map((status) => [status.policyId, status])
                 );
                 return {
                     observedAtMs: now(),
-                    policies: logMaintenancePolicyIds.map((id) => ({
-                        id,
-                        ...policyMetadata[id],
-                        state: queueable.has(id) ? "queueable" : "unavailable",
-                    })),
+                    policies: logMaintenancePolicyIds.map((id) => {
+                        const runStatus = runStatusByPolicy.get(id);
+                        return {
+                            ...(runStatus?.activeRun === undefined
+                                ? {}
+                                : { activeRun: runStatus.activeRun }),
+                            id,
+                            ...policyMetadata[id],
+                            ...(runStatus?.lastRun === undefined
+                                ? {}
+                                : { lastRun: runStatus.lastRun }),
+                            state: queueable.has(id) ? "queueable" : "unavailable",
+                        };
+                    }),
                 };
             } catch (error) {
                 throw serviceFailure(error);
@@ -186,6 +217,7 @@ export function createLogsService({
             }
             await settle(input, auditContext, "queued", result.jobRunId);
             return {
+                dryRun: input.dryRun,
                 jobRunId: result.jobRunId,
                 policyId: input.policyId,
                 queued: true,

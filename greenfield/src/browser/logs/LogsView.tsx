@@ -1,7 +1,8 @@
-import { ArrowDown, RefreshCw, RotateCcw, Search, ShieldCheck, X } from "lucide-react";
+import { ArrowDown, RefreshCw, Search, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable log must be keyboard-focusable. */
 
+import type { JobRunDetail } from "../../contracts/jobs.ts";
 import {
     logSearchMaximumCharacters,
     type LogMaintenancePolicyId,
@@ -23,7 +24,6 @@ import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
-import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
@@ -36,7 +36,8 @@ import {
 } from "./logLevelFiltering.ts";
 import { LogLine } from "./LogLine.tsx";
 import { presentRedactedLogLine } from "./logLinePresentation.ts";
-import { logFailureMessage, logSourceGroupLabel } from "./logPresentation.ts";
+import { LogMaintenancePanel } from "./LogMaintenancePanel.tsx";
+import { logSourceGroupLabel } from "./logPresentation.ts";
 
 export interface LogsViewProps {
     readonly maintenance?: LogMaintenanceStatusOutput;
@@ -45,11 +46,16 @@ export interface LogsViewProps {
     readonly onClearSearch: () => void;
     readonly onRefresh: () => void;
     readonly onRequestMaintenance: (
-        policyId: LogMaintenancePolicyId
+        policyId: LogMaintenancePolicyId,
+        dryRun: boolean
     ) => Promise<RequestLogMaintenanceOutput>;
     readonly onSearch: (query: string) => void;
     readonly onSelectSource: (sourceId: string) => void;
     readonly refreshing?: boolean;
+    readonly requestedRun?: JobRunDetail;
+    readonly requestedRunError?: string;
+    readonly requestedRunLoading?: boolean;
+    readonly requestedRunRequest?: RequestLogMaintenanceOutput;
     readonly searchQuery?: string;
     readonly selectedSourceId?: string;
     readonly snapshot?: LogSnapshotOutput;
@@ -215,6 +221,10 @@ export function LogsView({
     onSearch,
     onSelectSource,
     refreshing = false,
+    requestedRun,
+    requestedRunError,
+    requestedRunLoading = false,
+    requestedRunRequest,
     searchQuery,
     selectedSourceId,
     snapshot,
@@ -222,38 +232,14 @@ export function LogsView({
     snapshotLoading = false,
     sources,
 }: LogsViewProps) {
-    const [actionError, setActionError] = useState<string>();
-    const [actionStatus, setActionStatus] = useState<string>();
-    const [confirmPolicyId, setConfirmPolicyId] = useState<LogMaintenancePolicyId>();
-    const [runningPolicyId, setRunningPolicyId] = useState<LogMaintenancePolicyId>();
     const [searchDraft, setSearchDraft] = useState(searchQuery ?? "");
     const [activeLevels, setActiveLevels] =
         useState<ReadonlySet<FilterableLogLevel>>(allLogLevels);
     const selectedSource = sources.find(({ id }) => id === selectedSourceId);
-    const confirmedPolicy = maintenance?.policies.find(
-        ({ id }) => id === confirmPolicyId
-    );
 
     function submitSearch() {
         const query = searchDraft.trim();
         if (query.length > 0) onSearch(query);
-    }
-
-    async function runMaintenance(policyId: LogMaintenancePolicyId) {
-        setActionError(undefined);
-        setActionStatus(undefined);
-        setRunningPolicyId(policyId);
-        try {
-            const result = await onRequestMaintenance(policyId);
-            setConfirmPolicyId(undefined);
-            setActionStatus(
-                `${confirmedPolicy?.label ?? "Log maintenance"} was added to the queue as job ${result.jobRunId}.`
-            );
-        } catch (error) {
-            setActionError(logFailureMessage(error));
-        } finally {
-            setRunningPolicyId(undefined);
-        }
     }
 
     let snapshotContent: ReactNode;
@@ -275,12 +261,27 @@ export function LogsView({
         );
     }
 
+    const maintenancePanel = (
+        <LogMaintenancePanel
+            maintenance={maintenance}
+            maintenanceError={maintenanceError}
+            maintenanceLoading={maintenanceLoading}
+            onRequestMaintenance={onRequestMaintenance}
+            requestedRun={requestedRun}
+            requestedRunError={requestedRunError}
+            requestedRunLoading={requestedRunLoading}
+            requestedRunRequest={requestedRunRequest}
+        />
+    );
     if (sources.length === 0) {
         return (
-            <EmptyState
-                description="Add a log source to the Dashboard configuration to view it here."
-                title="No log sources"
-            />
+            <div className="space-y-6">
+                <EmptyState
+                    description="Add a log source to the Dashboard configuration to view it here."
+                    title="No log sources"
+                />
+                {maintenancePanel}
+            </div>
         );
     }
 
@@ -430,112 +431,7 @@ export function LogsView({
                 {snapshotContent}
             </Card>
 
-            <Card aria-labelledby="log-maintenance-heading">
-                <div className="flex items-start gap-3">
-                    <Icon className="mt-0.5 shrink-0" icon={ShieldCheck} tone="accent" />
-                    <div>
-                        <Heading id="log-maintenance-heading" level={2} size="subsection">
-                            Log maintenance
-                        </Heading>
-                        <Text className="mt-1" tone="muted">
-                            Dashboard rotates application and container logs. System log
-                            cleanup uses the four configured Ubuntu cleanup jobs.
-                        </Text>
-                    </div>
-                </div>
-                <Alert className="mt-4" focusOnError={false} message={maintenanceError} />
-                <Alert
-                    className="mt-4"
-                    focusOnError={false}
-                    message={actionError}
-                    onDismiss={() => setActionError(undefined)}
-                />
-                <Alert
-                    className="mt-4"
-                    focusOnError={false}
-                    message={actionStatus}
-                    onDismiss={() => setActionStatus(undefined)}
-                    variant="success"
-                />
-                {maintenanceLoading && maintenance === undefined ? (
-                    <LoadingState label="Checking log maintenance options…" />
-                ) : (
-                    <ul className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {(maintenance?.policies ?? []).map((policy) => (
-                            <li
-                                className="border-primary-700 bg-primary-950/45 rounded-lg border p-4"
-                                key={policy.id}
-                            >
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <p className="text-primary-100 font-medium">
-                                            {policy.label}
-                                        </p>
-                                        <div className="mt-2 flex gap-2">
-                                            <Badge>
-                                                {policy.scope === "docker"
-                                                    ? "Apps and containers"
-                                                    : "System"}
-                                            </Badge>
-                                            <Badge
-                                                variant={
-                                                    policy.state === "queueable"
-                                                        ? "success"
-                                                        : "danger"
-                                                }
-                                            >
-                                                {policy.state === "queueable"
-                                                    ? "Ready"
-                                                    : "Unavailable"}
-                                            </Badge>
-                                        </div>
-                                    </div>
-                                    <Button
-                                        aria-label={`Run ${policy.label}`}
-                                        disabled={policy.state !== "queueable"}
-                                        onClick={() => setConfirmPolicyId(policy.id)}
-                                        size="sm"
-                                        variant="secondary"
-                                    >
-                                        <Icon icon={RotateCcw} size="sm" tone="inherit" />
-                                        Run
-                                    </Button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </Card>
-
-            <Modal
-                description="This adds the configured cleanup job to the queue. You must have verified your identity recently with multi-factor authentication."
-                dismissible={runningPolicyId === undefined}
-                onClose={() => setConfirmPolicyId(undefined)}
-                open={confirmedPolicy !== undefined}
-                size="sm"
-                title={`Run ${confirmedPolicy?.label ?? "log maintenance"}?`}
-            >
-                <div className="flex justify-end gap-2">
-                    <Button
-                        disabled={runningPolicyId !== undefined}
-                        onClick={() => setConfirmPolicyId(undefined)}
-                        variant="secondary"
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        busy={runningPolicyId !== undefined}
-                        busyLabel="Adding log maintenance to the queue…"
-                        onClick={() => {
-                            if (confirmedPolicy !== undefined) {
-                                void runMaintenance(confirmedPolicy.id);
-                            }
-                        }}
-                    >
-                        Add to queue
-                    </Button>
-                </div>
-            </Modal>
+            {maintenancePanel}
         </div>
     );
 }

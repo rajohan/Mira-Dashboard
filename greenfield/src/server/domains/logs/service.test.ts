@@ -12,6 +12,7 @@ import { createLogsService, LogsServiceError } from "./service.ts";
 const digest = "a".repeat(64);
 const jobRunId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 const input: RequestLogMaintenanceInput = {
+    dryRun: false,
     idempotencyKey: "log-maintenance:019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
     policyId: "host-rsyslog",
 };
@@ -81,6 +82,7 @@ function dependencies(
                     options.enqueueFailure
                         ? Promise.reject(new Error("private queue failure"))
                         : Promise.resolve({ jobRunId }),
+                runStatuses: () => Promise.resolve([]),
             },
             now: () => 200,
             onAuditSettlementFailure: ({ settlement }) => settlements.push(settlement),
@@ -112,16 +114,58 @@ describe("logs service", () => {
         );
     });
 
+    test("projects an active run without hiding the latest terminal run", async () => {
+        const fixture = dependencies();
+        const service = createLogsService({
+            ...fixture.service,
+            auditWriter: { record: () => Promise.resolve() },
+            catalog: {
+                list: () => Promise.resolve({ observedAtMs: 1, sources: [] }),
+                resolve: () => Promise.resolve(undefined),
+            },
+            maintenanceQueue: {
+                queueablePolicies: () => Promise.resolve(["host-rsyslog"]),
+                enqueue: () => Promise.resolve({ jobRunId }),
+                runStatuses: () =>
+                    Promise.resolve([
+                        {
+                            activeRun: { id: "active", state: "running" },
+                            lastRun: {
+                                run: { id: "terminal", state: "succeeded" },
+                            },
+                            policyId: "host-rsyslog",
+                        },
+                    ] as never),
+            },
+            reader: {
+                search: () => Promise.reject(new Error("unused")),
+                tail: () => Promise.reject(new Error("unused")),
+            },
+        });
+
+        const status = await service.maintenanceStatus();
+        expect(status.policies.find(({ id }) => id === "host-rsyslog")).toMatchObject({
+            activeRun: { id: "active", state: "running" },
+            lastRun: { run: { id: "terminal", state: "succeeded" } },
+        });
+    });
+
     test("durably records attempted before worker queue dispatch and a sanitized settlement", async () => {
         const fixture = dependencies();
         expect(await fixture.service.requestMaintenance(input, auditContext)).toEqual({
+            dryRun: false,
             jobRunId,
             policyId: "host-rsyslog",
             queued: true,
         });
         expect(fixture.auditEvents).toMatchObject([
-            { policyId: "host-rsyslog", settlement: "attempted" },
-            { jobRunId, policyId: "host-rsyslog", settlement: "queued" },
+            { dryRun: false, policyId: "host-rsyslog", settlement: "attempted" },
+            {
+                dryRun: false,
+                jobRunId,
+                policyId: "host-rsyslog",
+                settlement: "queued",
+            },
         ]);
     });
 
@@ -140,6 +184,7 @@ describe("logs service", () => {
                     enqueued = true;
                     return Promise.resolve({ jobRunId });
                 },
+                runStatuses: () => Promise.resolve([]),
             },
             reader: {
                 search: () => Promise.reject(new Error("unused")),

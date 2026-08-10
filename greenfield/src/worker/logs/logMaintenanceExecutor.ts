@@ -1,9 +1,13 @@
 import {
     logMaintenancePolicyIds,
+    type LogMaintenanceExecutionSummary,
     type LogMaintenancePolicyId,
 } from "../../contracts/logs.ts";
 import type { FixedSystemLogrotateBroker } from "./fixedSystemLogrotateBroker.ts";
-import type { ManagedLogRotationEngine } from "./managedLogRotation.ts";
+import type {
+    ManagedLogRotationEngine,
+    ManagedLogRotationSummary,
+} from "./managedLogRotation.ts";
 
 export interface LogMaintenanceExecutor {
     readonly availablePolicies: (
@@ -11,12 +15,37 @@ export interface LogMaintenanceExecutor {
     ) => Promise<readonly LogMaintenancePolicyId[]>;
     readonly run: (
         policyId: LogMaintenancePolicyId,
+        dryRun: boolean,
         signal?: AbortSignal
-    ) => Promise<void>;
+    ) => Promise<LogMaintenanceExecutionSummary | void>;
 }
 
 function executionFailure(): Error {
     return new Error("Fixed log maintenance execution failed");
+}
+
+function projectManagedSummary(
+    summary: ManagedLogRotationSummary
+): LogMaintenanceExecutionSummary {
+    const actionCounts: LogMaintenanceExecutionSummary["actionCounts"] = {
+        compressed: 0,
+        deleted: 0,
+        error: 0,
+        missing: 0,
+        rotated: 0,
+        skipped: 0,
+    };
+    for (const { action } of summary.results) {
+        actionCounts[action] += 1;
+    }
+    return Object.freeze({
+        actionCounts: Object.freeze(actionCounts),
+        checkedTargets: summary.checkedTargets,
+        dryRun: summary.dryRun,
+        finishedAtMs: summary.finishedAtMs,
+        ok: summary.ok,
+        startedAtMs: summary.startedAtMs,
+    });
 }
 
 /**
@@ -42,15 +71,21 @@ export function createLogMaintenanceExecutor(options: {
             const available = new Set<LogMaintenancePolicyId>([...managed, ...system]);
             return logMaintenancePolicyIds.filter((policyId) => available.has(policyId));
         },
-        async run(policyId: LogMaintenancePolicyId, signal?: AbortSignal) {
+        async run(
+            policyId: LogMaintenancePolicyId,
+            dryRun: boolean,
+            signal?: AbortSignal
+        ) {
             try {
                 if (signal?.aborted === true) throw executionFailure();
                 if (policyId === "docker-managed") {
-                    const result = await options.managed.run({ signal });
+                    const result = await options.managed.run({ dryRun, signal });
                     if (!result.ok) throw executionFailure();
-                    return;
+                    return projectManagedSummary(result);
                 }
+                if (dryRun) throw executionFailure();
                 await options.system.run(policyId, signal);
+                return;
             } catch {
                 throw executionFailure();
             }

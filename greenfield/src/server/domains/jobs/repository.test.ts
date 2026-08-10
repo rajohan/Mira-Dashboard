@@ -2798,4 +2798,109 @@ describe("durable jobs repository", () => {
             database.sqlite.close(true);
         }
     });
+
+    test("reads bounded active and terminal action-payload runs from one snapshot", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const realPayload = '{"policyId":"docker-managed"}';
+        const dryRunPayload = '{"dryRun":true,"policyId":"docker-managed"}';
+        async function enqueue(index: number, payloadJson: string) {
+            const run = queuedRun(index, {
+                actionKey: "maintenance.rotate-logs",
+                attemptLimit: 1,
+                displayName: "Managed log maintenance",
+                payloadJson,
+                requestedById: "system.logs-service",
+                requestedByKind: "system",
+                resourceClass: "host-heavy",
+                resourceKeysJson: '["host.logs"]',
+                retrySafe: false,
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+                triggerType: "system",
+            });
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(run),
+                run,
+            });
+            return run;
+        }
+        try {
+            const firstReal = await enqueue(80, realPayload);
+            await repository.cancelRun({
+                actor: { id: "system.logs-service", kind: "system" },
+                at: new Date(2000),
+                id: firstReal.id,
+                sideEffectsForRun: () => noSideEffects,
+                terminalCode: "logs/maintenance-cancelled",
+                terminalMessage: "Log maintenance was cancelled.",
+            });
+            const latestTerminalReal = await enqueue(81, realPayload);
+            await repository.cancelRun({
+                actor: { id: "system.logs-service", kind: "system" },
+                at: new Date(3000),
+                id: latestTerminalReal.id,
+                sideEffectsForRun: () => noSideEffects,
+                terminalCode: "logs/maintenance-cancelled",
+                terminalMessage: "Log maintenance was cancelled.",
+            });
+            const dryRun = await enqueue(82, dryRunPayload);
+            const activeReal = await enqueue(83, realPayload);
+
+            const snapshots = repository.readActionPayloadRunSnapshots({
+                actionKey: "maintenance.rotate-logs",
+                payloadJsons: [realPayload, dryRunPayload],
+            });
+            expect(snapshots).toMatchObject([
+                {
+                    activeRun: { id: activeReal.id, state: "queued" },
+                    lastRun: { id: latestTerminalReal.id, state: "cancelled" },
+                    payloadJson: realPayload,
+                },
+                {
+                    activeRun: { id: dryRun.id, state: "queued" },
+                    payloadJson: dryRunPayload,
+                },
+            ]);
+            expect(snapshots[1]?.lastRun).toBeUndefined();
+            expect(
+                repository.readActionPayloadRunSnapshots({
+                    actionKey: "system.worker-smoke",
+                    payloadJsons: [realPayload],
+                })
+            ).toEqual([{ payloadJson: realPayload }]);
+
+            const invalidReads = [
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: [],
+                    }),
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: [realPayload, realPayload],
+                    }),
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: ["not-json"],
+                    }),
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: Array.from({ length: 33 }, (_, index) =>
+                            JSON.stringify({ index })
+                        ),
+                    }),
+            ];
+            for (const read of invalidReads) expect(read).toThrow();
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
 });

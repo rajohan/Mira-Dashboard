@@ -2,7 +2,9 @@ import { Effect } from "effect";
 import * as v from "valibot";
 
 import {
+    logMaintenanceJobResultSchema,
     type LogMaintenancePolicyId,
+    type LogMaintenanceExecutionSummary,
     logMaintenancePolicyIdSchema,
 } from "../../../contracts/logs.ts";
 import type { JsonObject } from "../../../shared/json.ts";
@@ -25,18 +27,16 @@ import {
 
 const emptyPayloadSchema = v.strictObject({});
 const systemHostActionPayloadSchema = v.strictObject({ key: v.literal("system.host") });
-const logMaintenanceActionPayloadSchema = v.strictObject({
-    policyId: logMaintenancePolicyIdSchema,
-});
-const logMaintenanceResultSchema = v.strictObject({
-    completedAtMs: v.pipe(
-        v.number("Log maintenance completion timestamp is invalid"),
-        v.safeInteger("Log maintenance completion timestamp is invalid"),
-        v.minValue(0, "Log maintenance completion timestamp is invalid")
-    ),
-    policyId: logMaintenancePolicyIdSchema,
-    status: v.literal("completed"),
-});
+const logMaintenanceActionPayloadSchema = v.pipe(
+    v.strictObject({
+        dryRun: v.optional(v.boolean("Log maintenance mode is invalid"), false),
+        policyId: logMaintenancePolicyIdSchema,
+    }),
+    v.check(
+        ({ dryRun, policyId }) => !dryRun || policyId === "docker-managed",
+        "Dry-run is available only for managed application and container logs"
+    )
+);
 const smokeResultSchema = v.strictObject({
     checkedAtMs: v.pipe(
         v.number("Worker smoke timestamp is invalid"),
@@ -72,8 +72,9 @@ interface JobActionExecutorEntry {
 export interface LogMaintenanceExecutionPort {
     readonly run: (
         policyId: LogMaintenancePolicyId,
+        dryRun: boolean,
         signal?: AbortSignal
-    ) => Promise<void>;
+    ) => Promise<LogMaintenanceExecutionSummary | void>;
 }
 
 /** Worker-only structural authority; web composition receives only its durable queue. */
@@ -190,12 +191,17 @@ export function createLogMaintenanceJobExecutor(
         Effect.tryPromise({
             catch: () => new Error("Log maintenance action failed"),
             try: async (signal) => {
-                const { policyId } = v.parse(logMaintenanceActionPayloadSchema, payload);
-                await maintenance.run(policyId, signal);
-                return v.parse(logMaintenanceResultSchema, {
+                const { dryRun, policyId } = v.parse(
+                    logMaintenanceActionPayloadSchema,
+                    payload
+                );
+                const summary = await maintenance.run(policyId, dryRun, signal);
+                return v.parse(logMaintenanceJobResultSchema, {
                     completedAtMs: context.nowMs(),
+                    dryRun,
                     policyId,
                     status: "completed",
+                    ...(summary === undefined ? {} : { summary }),
                 });
             },
         });

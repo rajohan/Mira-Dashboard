@@ -15,6 +15,7 @@ export interface LogMaintenanceAuditContext {
 }
 
 export interface LogMaintenanceAuditEvent extends LogMaintenanceAuditContext {
+    readonly dryRun: boolean;
     readonly jobRunId?: string;
     readonly policyId: LogMaintenancePolicyId;
     readonly settlement: "attempted" | "failed" | "queued";
@@ -52,7 +53,9 @@ export function createSqliteLogMaintenanceAuditWriter({
     return Object.freeze({
         record(input: LogMaintenanceAuditEvent) {
             const event = createSecurityAuditEvent({
-                action: "logs.maintenance.request",
+                action: input.dryRun
+                    ? "logs.maintenance.dry-run.request"
+                    : "logs.maintenance.request",
                 actor: input.actor,
                 id: generateId(),
                 metadata: {

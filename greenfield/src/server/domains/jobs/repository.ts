@@ -21,6 +21,7 @@ import * as v from "valibot";
 
 import {
     jobActionKeySchema,
+    jobPayloadSchema,
     jobRunEventMaximum,
     jobRunEventMessageMaximumBytes,
     jobRunPayloadEventMaximum,
@@ -162,6 +163,18 @@ export interface ListActiveActionPayloadsInput {
 export interface ActiveActionPayloadPage {
     readonly payloads: readonly string[];
     readonly truncated: boolean;
+}
+
+export interface ReadActionPayloadRunSnapshotsInput {
+    readonly actionKey: string;
+    readonly payloadJsons: readonly string[];
+}
+
+/** Latest active and terminal runs for one exact canonical action payload. */
+export interface ActionPayloadRunSnapshot {
+    readonly activeRun?: JobRunRecord;
+    readonly lastRun?: JobRunRecord;
+    readonly payloadJson: string;
 }
 
 export interface ReadQueueStateInput {
@@ -451,6 +464,9 @@ export interface JobRepositoryReader {
     listScheduleRuns(input: ListScheduleRunsInput): JobRunRecord[];
     listSchedules(input: ListSchedulesInput): ScheduleRecordWithRelations[];
     readClaimCancellation(input: ClaimFenceInput): JobClaimCancellation;
+    readActionPayloadRunSnapshots(
+        input: ReadActionPayloadRunSnapshotsInput
+    ): readonly ActionPayloadRunSnapshot[];
     readQueueState(input: ReadQueueStateInput): JobQueueState;
     readWorkerControl(): JobWorkerControlRecord;
 }
@@ -495,12 +511,14 @@ export interface JobRepository extends JobRepositoryReader {
 const claimCandidateMaximum = 32;
 const recoveryBatchMaximum = 32;
 const activeActionPayloadMaximum = 256;
-const terminalRunStates = new Set<JobRunState>([
+const actionPayloadRunSnapshotMaximum = 32;
+const terminalRunStateList = [
     "cancelled",
     "failed",
     "succeeded",
     "timed-out",
-]);
+] as const satisfies readonly JobRunState[];
+const terminalRunStates = new Set<JobRunState>(terminalRunStateList);
 
 function requiredRow<T>(row: T | undefined, operation: string): T {
     if (row === undefined) {
@@ -765,6 +783,52 @@ class DrizzleJobReader implements JobRepositoryReader {
             payloads: rows.slice(0, input.limit).map(({ payloadJson }) => payloadJson),
             truncated: rows.length > input.limit,
         };
+    }
+
+    /**
+     * Executes every bounded payload lookup inside this reader's one deferred snapshot.
+     * @returns Input-ordered active and terminal observations for each payload.
+     */
+    public readActionPayloadRunSnapshots(
+        input: ReadActionPayloadRunSnapshotsInput
+    ): readonly ActionPayloadRunSnapshot[] {
+        const actionKey = v.parse(jobActionKeySchema, input.actionKey);
+        assertLimit(
+            input.payloadJsons.length,
+            actionPayloadRunSnapshotMaximum,
+            "action payload run snapshot"
+        );
+        const payloadJsons = input.payloadJsons.map((payloadJson) =>
+            JSON.stringify(v.parse(jobPayloadSchema, parseJsonText(payloadJson)))
+        );
+        if (new Set(payloadJsons).size !== payloadJsons.length) {
+            throw new TypeError(
+                "Jobs repository action payload run snapshots must be unique"
+            );
+        }
+        return payloadJsons.map((payloadJson) => {
+            const baseCondition = and(
+                eq(jobRuns.actionKey, actionKey),
+                eq(jobRuns.payloadJson, payloadJson)
+            );
+            const activeRow = this.database
+                .select()
+                .from(jobRuns)
+                .where(and(baseCondition, inArray(jobRuns.state, ["queued", "running"])))
+                .orderBy(desc(jobRuns.queuedAt), desc(jobRuns.id))
+                .get();
+            const lastRow = this.database
+                .select()
+                .from(jobRuns)
+                .where(and(baseCondition, inArray(jobRuns.state, terminalRunStateList)))
+                .orderBy(desc(jobRuns.queuedAt), desc(jobRuns.id))
+                .get();
+            return {
+                ...(activeRow === undefined ? {} : { activeRun: parseRun(activeRow) }),
+                ...(lastRow === undefined ? {} : { lastRun: parseRun(lastRow) }),
+                payloadJson,
+            };
+        });
     }
 
     public findRunDetail(input: ListJobRunEventsInput): JobRunDetailRecord | undefined {
@@ -2571,6 +2635,8 @@ export function createJobRepository(
             read((reader) => reader.listSchedules(input)),
         readClaimCancellation: (input: ClaimFenceInput) =>
             read((reader) => reader.readClaimCancellation(input)),
+        readActionPayloadRunSnapshots: (input: ReadActionPayloadRunSnapshotsInput) =>
+            read((reader) => reader.readActionPayloadRunSnapshots(input)),
         readQueueState: (input: ReadQueueStateInput) =>
             read((reader) => reader.readQueueState(input)),
         readWorkerControl: () => read((reader) => reader.readWorkerControl()),

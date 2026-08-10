@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
+import { QueryClient } from "@tanstack/react-query";
+
+import { jobRunDetailQueryKey } from "../jobs/jobQueries.ts";
 import type { LogClient } from "./logClient.ts";
-import { logSnapshotQueryOptions } from "./logQueries.ts";
+import {
+    logMaintenanceQueryKey,
+    logMaintenanceRealtimeFallbackRefreshIntervalMs,
+    logSnapshotQueryOptions,
+    refreshLogMaintenanceQueries,
+} from "./logQueries.ts";
 
 const client = Object.freeze({}) as LogClient;
 
@@ -32,5 +40,22 @@ describe("log snapshot query identity", () => {
         expect(sourceA.placeholderData).toBeUndefined();
         expect(sourceB.placeholderData).toBeUndefined();
         expect(search.placeholderData).toBeUndefined();
+    });
+
+    test("invalidates maintenance and one followed run with a 30-second fallback", async () => {
+        const queryClient = new QueryClient();
+        const runId = "019fdf70-0000-7000-8000-000000000020";
+        const runKey = jobRunDetailQueryKey(runId);
+        queryClient.setQueryData(logMaintenanceQueryKey, { policies: [] });
+        queryClient.setQueryData(runKey, { run: { id: runId } });
+
+        await refreshLogMaintenanceQueries(queryClient, runId);
+
+        expect(logMaintenanceRealtimeFallbackRefreshIntervalMs).toBe(30_000);
+        expect(
+            queryClient.getQueryState(logMaintenanceQueryKey)?.isInvalidated
+        ).toBeTrue();
+        expect(queryClient.getQueryState(runKey)?.isInvalidated).toBeTrue();
+        queryClient.clear();
     });
 });

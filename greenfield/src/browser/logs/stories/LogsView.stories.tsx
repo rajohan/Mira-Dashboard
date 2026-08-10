@@ -153,6 +153,7 @@ const meta = {
         onRefresh: fn(),
         onRequestMaintenance: fn(() =>
             Promise.resolve({
+                dryRun: false,
                 jobRunId: "log-maintenance-run",
                 policyId: "docker-managed" as const,
                 queued: true as const,

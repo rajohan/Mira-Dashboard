@@ -2,6 +2,9 @@
   "$id": "urn:mira-dashboard:logs.requestMaintenance.output",
   "type": "object",
   "properties": {
+    "dryRun": {
+      "type": "boolean"
+    },
     "jobRunId": {
       "type": "string",
       "minLength": 36,
@@ -24,6 +27,7 @@
     }
   },
   "required": [
+    "dryRun",
     "jobRunId",
     "policyId",
     "queued"

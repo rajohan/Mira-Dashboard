@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, jest, test } from "bun:test";
 
+import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import type {
+    LogMaintenancePolicyId,
     LogMaintenanceStatusOutput,
     LogSnapshotOutput,
     LogSource,
@@ -146,6 +148,7 @@ function properties() {
         onRefresh: jest.fn(),
         onRequestMaintenance: jest.fn(() =>
             Promise.resolve({
+                dryRun: false,
                 jobRunId: "log-maintenance-run",
                 policyId: "docker-managed" as const,
                 queued: true as const,
@@ -156,6 +159,37 @@ function properties() {
         selectedSourceId: sources[0]!.id,
         snapshot,
         sources,
+    };
+}
+
+function maintenanceRun(
+    state: "queued" | "succeeded",
+    id: string,
+    timestampMs: number
+): JobRunSummary {
+    const started = state === "succeeded";
+    return {
+        actionKey: "maintenance.rotate-logs",
+        attemptCount: started ? 1 : 0,
+        attemptLimit: 1,
+        availableAtMs: timestampMs,
+        cancellationPolicy: "cooperative",
+        displayName: "Managed log maintenance",
+        eventCount: started ? 3 : 1,
+        ...(started ? { finishedAtMs: timestampMs + 2000 } : {}),
+        ...(started ? { firstStartedAtMs: timestampMs + 1000 } : {}),
+        id,
+        ...(started ? { lastAttemptStartedAtMs: timestampMs + 1000 } : {}),
+        priority: 0,
+        queuedAtMs: timestampMs,
+        resourceClass: "host-heavy",
+        resourceKeys: ["host.logs"],
+        retrySafe: false,
+        state,
+        stateVersion: started ? 3 : 1,
+        timeoutMs: 300_000,
+        triggerType: "system",
+        updatedAtMs: timestampMs + (started ? 2000 : 0),
     };
 }
 
@@ -411,11 +445,216 @@ describe("LogsView", () => {
         await user.click(within(dialog).getByRole("button", { name: "Add to queue" }));
 
         await waitFor(() =>
-            expect(props.onRequestMaintenance).toHaveBeenCalledWith("docker-managed")
+            expect(props.onRequestMaintenance).toHaveBeenCalledWith(
+                "docker-managed",
+                false
+            )
         );
         expect(
             await screen.findByText(/was added to the queue as job log-maintenance-run/u)
         ).toBeTruthy();
+    });
+
+    test("confirms the docker-only dry-run separately and announces its queued job", async () => {
+        const props = {
+            ...properties(),
+            onRequestMaintenance: jest.fn(
+                (policyId: LogMaintenancePolicyId, dryRun: boolean) =>
+                    Promise.resolve({
+                        dryRun,
+                        jobRunId: "dry-run-job",
+                        policyId,
+                        queued: true as const,
+                    })
+            ),
+        };
+        const user = userEvent.setup();
+        render(<LogsView {...props} />);
+
+        expect(screen.queryByRole("button", { name: /Dry run Host/u })).toBeNull();
+        await user.click(
+            screen.getByRole("button", {
+                name: "Dry run Managed application and container logs",
+            })
+        );
+        const dialog = screen.getByRole("dialog", {
+            name: "Dry run Managed application and container logs?",
+        });
+        expect(dialog).toHaveTextContent("read-only preview");
+        await user.click(within(dialog).getByRole("button", { name: "Queue dry run" }));
+
+        await waitFor(() =>
+            expect(props.onRequestMaintenance).toHaveBeenCalledWith(
+                "docker-managed",
+                true
+            )
+        );
+        expect(
+            await screen.findByText(/Dry run was added to the queue as job dry-run-job/u)
+        ).toBeVisible();
+    });
+
+    test("presents active lifecycle and the last terminal bounded summary", () => {
+        const activeRun = maintenanceRun(
+            "queued",
+            "019fdf70-0000-7000-8000-000000000010",
+            1_800_000_002_000
+        );
+        const lastRun = maintenanceRun(
+            "succeeded",
+            "019fdf70-0000-7000-8000-000000000011",
+            1_800_000_000_000
+        );
+        const lifecycle: LogMaintenanceStatusOutput = {
+            ...maintenance,
+            policies: maintenance.policies.map((policy) => {
+                if (policy.id === "docker-managed") {
+                    return {
+                        ...policy,
+                        activeRun,
+                        lastRun: {
+                            run: lastRun,
+                            summary: {
+                                actionCounts: {
+                                    compressed: 2,
+                                    deleted: 1,
+                                    error: 0,
+                                    missing: 0,
+                                    rotated: 3,
+                                    skipped: 1,
+                                },
+                                checkedTargets: 7,
+                                dryRun: false,
+                                finishedAtMs: 1_800_000_002_000,
+                                ok: true,
+                                startedAtMs: 1_800_000_001_000,
+                            },
+                        },
+                    };
+                }
+                return policy.id === "host-alternatives"
+                    ? { ...policy, state: "queueable" as const }
+                    : policy;
+            }),
+        };
+        render(<LogsView {...properties()} maintenance={lifecycle} />);
+
+        expect(
+            screen.getByRole("status", {
+                name: "Active maintenance run for Managed application and container logs",
+            })
+        ).toHaveTextContent("queued");
+        expect(
+            screen.getByLabelText(
+                "Last maintenance run for Managed application and container logs"
+            )
+        ).toHaveTextContent("succeeded");
+        const summary = screen.getByLabelText(
+            "Managed application and container logs last-run summary"
+        );
+        expect(summary).toHaveTextContent("Checked7");
+        expect(summary).toHaveTextContent("Rotated3");
+        expect(
+            screen.getByRole("button", {
+                name: "Run Managed application and container logs",
+            })
+        ).toBeDisabled();
+        expect(
+            screen.getByRole("button", {
+                name: "Dry run Managed application and container logs",
+            })
+        ).toBeDisabled();
+        expect(
+            screen.getByRole("button", { name: "Run Host alternatives log" })
+        ).toBeDisabled();
+    });
+
+    test("keeps maintenance available when there are no configured log sources", () => {
+        render(
+            <LogsView
+                {...properties()}
+                selectedSourceId={undefined}
+                snapshot={undefined}
+                sources={[]}
+            />
+        );
+
+        expect(screen.getByRole("heading", { name: "No log sources" })).toBeVisible();
+        expect(screen.getByRole("heading", { name: "Log maintenance" })).toBeVisible();
+        expect(
+            screen.getByRole("button", {
+                name: "Run Managed application and container logs",
+            })
+        ).toBeEnabled();
+    });
+
+    test("locks every policy for a requested active run but recovers after detail errors and terminal state", () => {
+        const runId = "019fdf70-0000-7000-8000-000000000012";
+        const requestedRunRequest = {
+            dryRun: true,
+            jobRunId: runId,
+            policyId: "docker-managed" as const,
+            queued: true as const,
+        };
+        const queueableMaintenance: LogMaintenanceStatusOutput = {
+            ...maintenance,
+            policies: maintenance.policies.map((policy) => ({
+                ...policy,
+                state: "queueable" as const,
+            })),
+        };
+        const pendingProperties = {
+            ...properties(),
+            maintenance: queueableMaintenance,
+            requestedRunLoading: true,
+            requestedRunRequest,
+        };
+        const rendered = render(<LogsView {...pendingProperties} />);
+        const dockerRun = screen.getByRole("button", {
+            name: "Run Managed application and container logs",
+        });
+        const hostRun = screen.getByRole("button", {
+            name: "Run Host alternatives log",
+        });
+
+        expect(dockerRun).toBeDisabled();
+        expect(hostRun).toBeDisabled();
+
+        rendered.rerender(
+            <LogsView
+                {...pendingProperties}
+                requestedRunError="Durable job status is temporarily unavailable."
+                requestedRunLoading={false}
+            />
+        );
+        expect(dockerRun).toBeEnabled();
+        expect(hostRun).toBeEnabled();
+
+        rendered.rerender(
+            <LogsView
+                {...pendingProperties}
+                requestedRun={{
+                    events: [],
+                    run: maintenanceRun("queued", runId, 1_800_000_003_000),
+                }}
+                requestedRunLoading={false}
+            />
+        );
+        expect(dockerRun).toBeDisabled();
+        expect(hostRun).toBeDisabled();
+
+        rendered.rerender(
+            <LogsView
+                {...pendingProperties}
+                requestedRun={{
+                    events: [],
+                    run: maintenanceRun("succeeded", runId, 1_800_000_003_000),
+                }}
+                requestedRunLoading={false}
+            />
+        );
+        expect(dockerRun).toBeEnabled();
+        expect(hostRun).toBeEnabled();
     });
 
     test("keeps unavailable sources and policies visible but disabled", () => {

@@ -785,7 +785,7 @@
             "purpose": "Reads log rotation status.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["logs.maintenanceStatus"],
                 "phase": "phase-5"
@@ -1684,9 +1684,9 @@
             "purpose": "Queues and observes log rotation dry-run.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["logMaintenance.dryRun"],
+                "names": ["jobs.getRun", "logs.requestMaintenance"],
                 "phase": "phase-5"
             }
         },

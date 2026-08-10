@@ -1,15 +1,21 @@
 import * as v from "valibot";
 
 import {
+    logMaintenanceActiveRunSchema,
+    logMaintenanceJobResultSchema,
+    logMaintenanceLastRunSchema,
     logMaintenancePolicyIds,
     requestLogMaintenanceInputSchema,
+    type LogMaintenanceActiveRun,
+    type LogMaintenanceLastRun,
     type LogMaintenancePolicyId,
     type RequestLogMaintenanceInput,
 } from "../../../contracts/logs.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import { findJobActionDefinition, logMaintenanceJobActionKey } from "./actionRegistry.ts";
 import { preflightManualEnqueue } from "./manualEnqueue.ts";
-import type { JobRepository } from "./repository.ts";
+import { toJobRunResult, toJobRunSummary } from "./records.ts";
+import type { ActionPayloadRunSnapshot, JobRepository } from "./repository.ts";
 import { createJobMutationSideEffects } from "./sideEffects.ts";
 
 const queueActor = Object.freeze({
@@ -25,12 +31,22 @@ export interface LogMaintenanceJobQueueDependencies {
     ) => Promise<readonly LogMaintenancePolicyId[]>;
     readonly generateId?: () => string;
     readonly nowMs?: () => number;
-    readonly repository: Pick<JobRepository, "enqueueManualRun" | "findRunByIdempotency">;
+    readonly repository: Pick<
+        JobRepository,
+        "enqueueManualRun" | "findRunByIdempotency" | "readActionPayloadRunSnapshots"
+    >;
     readonly wakeEventPump?: () => Promise<void> | void;
 }
 
 /** Web-safe durable queue surface. It accepts policy identities, never paths. */
 export interface LogMaintenanceJobQueue {
+    readonly runStatuses: (signal?: AbortSignal) => Promise<
+        readonly Readonly<{
+            readonly activeRun?: LogMaintenanceActiveRun;
+            readonly lastRun?: LogMaintenanceLastRun;
+            readonly policyId: LogMaintenancePolicyId;
+        }>[]
+    >;
     readonly queueablePolicies: (
         signal?: AbortSignal
     ) => Promise<readonly LogMaintenancePolicyId[]>;
@@ -53,14 +69,75 @@ function requireActive(signal: AbortSignal | undefined): void {
     if (signal?.aborted === true) throw queueFailure();
 }
 
-function enqueueDigest(policyId: LogMaintenancePolicyId): string {
+function actionPayload(input: Pick<RequestLogMaintenanceInput, "dryRun" | "policyId">) {
+    return input.dryRun
+        ? Object.freeze({ dryRun: true as const, policyId: input.policyId })
+        : Object.freeze({ policyId: input.policyId });
+}
+
+const realPolicyPayloads = Object.freeze(
+    logMaintenancePolicyIds.map((policyId) =>
+        Object.freeze({
+            payloadJson: JSON.stringify(actionPayload({ dryRun: false, policyId })),
+            policyId,
+        })
+    )
+);
+
+function enqueueDigest(input: RequestLogMaintenanceInput): string {
     return sha256Hex(
         JSON.stringify({
             actionKey: logMaintenanceJobActionKey,
-            payload: { policyId },
+            payload: actionPayload(input),
             version: 1,
         })
     );
+}
+
+function lastRun(
+    record: NonNullable<ActionPayloadRunSnapshot["lastRun"]>,
+    policyId: LogMaintenancePolicyId
+): LogMaintenanceLastRun {
+    const rawResult = toJobRunResult(record);
+    const parsedResult =
+        rawResult === undefined
+            ? undefined
+            : v.safeParse(logMaintenanceJobResultSchema, rawResult);
+    const summary =
+        parsedResult?.success === true &&
+        parsedResult.output.policyId === policyId &&
+        !parsedResult.output.dryRun &&
+        parsedResult.output.summary?.dryRun === false
+            ? parsedResult.output.summary
+            : undefined;
+    return v.parse(logMaintenanceLastRunSchema, {
+        run: toJobRunSummary(record),
+        ...(summary === undefined ? {} : { summary }),
+    });
+}
+
+function runStatus(
+    snapshot: ActionPayloadRunSnapshot,
+    policyId: LogMaintenancePolicyId
+): Readonly<{
+    readonly activeRun?: LogMaintenanceActiveRun;
+    readonly lastRun?: LogMaintenanceLastRun;
+    readonly policyId: LogMaintenancePolicyId;
+}> {
+    return Object.freeze({
+        ...(snapshot.activeRun === undefined
+            ? {}
+            : {
+                  activeRun: v.parse(
+                      logMaintenanceActiveRunSchema,
+                      toJobRunSummary(snapshot.activeRun)
+                  ),
+              }),
+        ...(snapshot.lastRun === undefined
+            ? {}
+            : { lastRun: lastRun(snapshot.lastRun, policyId) }),
+        policyId,
+    });
 }
 
 /**
@@ -93,6 +170,37 @@ export function createLogMaintenanceJobQueue(
     }
 
     return Object.freeze({
+        runStatuses(signal?: AbortSignal) {
+            try {
+                requireActive(signal);
+                const snapshots = dependencies.repository.readActionPayloadRunSnapshots({
+                    actionKey: logMaintenanceJobActionKey,
+                    payloadJsons: realPolicyPayloads.map(
+                        ({ payloadJson }) => payloadJson
+                    ),
+                });
+                const snapshotsByPayload = new Map(
+                    snapshots.map((snapshot) => [snapshot.payloadJson, snapshot])
+                );
+                if (
+                    snapshots.length !== realPolicyPayloads.length ||
+                    snapshotsByPayload.size !== realPolicyPayloads.length
+                ) {
+                    throw queueFailure();
+                }
+                const statuses = realPolicyPayloads.map(({ payloadJson, policyId }) => {
+                    const snapshot = snapshotsByPayload.get(payloadJson);
+                    if (snapshot === undefined) throw queueFailure();
+                    return runStatus(snapshot, policyId);
+                });
+                requireActive(signal);
+                return Promise.resolve(Object.freeze(statuses));
+            } catch (error) {
+                return Promise.reject(
+                    error instanceof LogMaintenanceJobQueueError ? error : queueFailure()
+                );
+            }
+        },
         queueablePolicies,
         async enqueue(input: RequestLogMaintenanceInput, signal?: AbortSignal) {
             try {
@@ -100,7 +208,8 @@ export function createLogMaintenanceJobQueue(
                 const parsed = v.parse(requestLogMaintenanceInputSchema, input);
                 const definition = findJobActionDefinition(logMaintenanceJobActionKey);
                 if (definition === undefined) throw queueFailure();
-                const enqueueSha256 = enqueueDigest(parsed.policyId);
+                const payload = actionPayload(parsed);
+                const enqueueSha256 = enqueueDigest(parsed);
                 const replay = preflightManualEnqueue(dependencies.repository, {
                     enqueueSha256,
                     idempotencyKey: parsed.idempotencyKey,
@@ -123,7 +232,10 @@ export function createLogMaintenanceJobQueue(
                     action: "logs.maintenance.enqueue",
                     actor: queueActor,
                     auditId: generateId(),
-                    metadata: { policyId: parsed.policyId },
+                    metadata: {
+                        ...(parsed.dryRun ? { dryRun: true } : {}),
+                        policyId: parsed.policyId,
+                    },
                     occurredAt: at,
                     outcome: "accepted",
                     realtime: { id: runId, kind: "run", operation: "created" },
@@ -150,7 +262,9 @@ export function createLogMaintenanceJobQueue(
                         cancelRequestedAt: null,
                         cancelRequestedById: null,
                         cancelRequestedByKind: null,
-                        displayName: definition.displayName,
+                        displayName: parsed.dryRun
+                            ? "Managed log maintenance dry-run"
+                            : definition.displayName,
                         enqueueSha256,
                         finishedAt: null,
                         firstStartedAt: null,
@@ -161,7 +275,7 @@ export function createLogMaintenanceJobQueue(
                         leaseExpiresAt: null,
                         leaseOwnerId: null,
                         leaseToken: null,
-                        payloadJson: JSON.stringify({ policyId: parsed.policyId }),
+                        payloadJson: JSON.stringify(payload),
                         priority: definition.priority,
                         queuedAt: at,
                         requestedById: queueActor.id,
