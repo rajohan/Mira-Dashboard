@@ -426,6 +426,11 @@ export type LogMaintenanceActiveRun = NonNullable<
     LogMaintenancePolicyStatus["activeRun"]
 >;
 export type LogMaintenanceLastRun = NonNullable<LogMaintenancePolicyStatus["lastRun"]>;
+export type LogMaintenanceRunStatus = Readonly<{
+    readonly activeRun?: LogMaintenanceActiveRun;
+    readonly lastRun?: LogMaintenanceLastRun;
+    readonly policyId: LogMaintenancePolicyId;
+}>;
 export type LogMaintenanceStatusOutput = v.InferOutput<
     typeof logMaintenanceStatusOutputSchema
 >;

@@ -16,6 +16,7 @@ import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
+import { LoadingDots } from "../ui/LoadingDots.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
 import {
     chatAttachmentTypeLabel,
@@ -27,6 +28,7 @@ import {
     chatMessageHasVisibleContent,
     visibleChatMessageParts,
 } from "./chatMessageVisibility.ts";
+import { toolDescription, toolDisplayName } from "./chatToolPresentation.ts";
 import type {
     ChatDisplayMessage,
     ChatDisplaySettings,
@@ -47,43 +49,6 @@ function safeDetail(value: unknown): string | undefined {
     } catch {
         return "Detail could not be displayed.";
     }
-}
-
-function toolDisplayName(name: string): string {
-    const unqualified = name.startsWith("functions.")
-        ? name.slice("functions.".length)
-        : name;
-    const normalized = ["bash", "exec", "exec_command"].includes(unqualified)
-        ? "bash"
-        : unqualified;
-    const words = normalized.replaceAll(/[_-]/gu, " ").replaceAll(/\s+/gu, " ").trim();
-    return words === "" ? "Tool" : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
-}
-
-function toolDescription(part: ChatToolPart): string | undefined {
-    let candidate = part.input;
-    if (typeof candidate === "string") {
-        try {
-            candidate = JSON.parse(candidate) as unknown;
-        } catch {
-            return undefined;
-        }
-    }
-    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
-        return undefined;
-    }
-    const input = candidate as Readonly<Record<string, unknown>>;
-    let command: string | undefined;
-    if (typeof input.command === "string") command = input.command;
-    else if (typeof input.cmd === "string") command = input.cmd;
-    if (command !== undefined) {
-        let workingDirectory: string | undefined;
-        if (typeof input.workdir === "string") workingDirectory = input.workdir;
-        else if (typeof input.cwd === "string") workingDirectory = input.cwd;
-        const directoryName = workingDirectory?.split(/[\\/]/u).findLast(Boolean);
-        return directoryName === undefined ? command : `${command} (${directoryName})`;
-    }
-    return typeof input.path === "string" ? input.path : undefined;
 }
 
 function ToolDetailSection({
@@ -147,7 +112,14 @@ function ToolPart({ expanded, part }: ToolPartProps) {
                     size="sm"
                     tone={part.status === "failed" ? "danger" : "inherit"}
                 />
-                <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{label}</span>
+                    {description !== undefined && (
+                        <span className="text-primary-300 mt-0.5 block truncate text-[11px] font-normal">
+                            {description}
+                        </span>
+                    )}
+                </span>
                 <span className="text-primary-400 capitalize">{part.status}</span>
                 <Icon
                     className={cn(
@@ -525,6 +497,21 @@ export function ChatMessageBubble({
                                 );
                             }
                             if (part.kind === "control") {
+                                if (part.activity !== undefined) {
+                                    return (
+                                        <output
+                                            aria-label={part.text}
+                                            className="bg-primary-800 text-primary-200 block rounded-lg px-3 py-2 text-xs"
+                                            key={`control:${index}`}
+                                        >
+                                            {part.activity === "running" ? (
+                                                <LoadingDots label={`${part.text}…`} />
+                                            ) : (
+                                                part.text
+                                            )}
+                                        </output>
+                                    );
+                                }
                                 return (
                                     <p
                                         className={cn(

@@ -1,3 +1,4 @@
+import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
@@ -286,15 +287,22 @@ function expectUsesIndexWithoutTemporarySort(
     database: TestDatabase,
     query: string,
     indexName: string,
-    parameter?: string,
-    requiredDetail?: string
+    parameters: SQLQueryBindings[] = [],
+    requiredDetail?: string,
+    allowIndexScan = false
 ): void {
     const statement = `EXPLAIN QUERY PLAN ${query}`;
-    const plan =
-        parameter === undefined
-            ? database.sqlite.query<QueryPlanRow, []>(statement).all()
-            : database.sqlite.query<QueryPlanRow, [string]>(statement).all(parameter);
+    const plan = database.sqlite
+        .query<QueryPlanRow, SQLQueryBindings[]>(statement)
+        .all(...parameters);
     expect(plan.some(({ detail }) => detail.includes(indexName))).toBeTrue();
+    expect(
+        plan.some(({ detail }) =>
+            allowIndexScan
+                ? detail.startsWith("SCAN job_runs") && !detail.includes("USING")
+                : detail.startsWith("SCAN job_runs")
+        )
+    ).toBeFalse();
     expect(plan.some(({ detail }) => detail.includes("USE TEMP B-TREE"))).toBeFalse();
     if (requiredDetail !== undefined) {
         expect(plan.some(({ detail }) => detail.includes(requiredDetail))).toBeTrue();
@@ -2065,7 +2073,7 @@ describe("jobs baseline schema", () => {
                  ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
                  LIMIT 32`,
                 "job_runs_claim_idx",
-                undefined,
+                [],
                 "id>?"
             );
             expectUsesIndexWithoutTemporarySort(
@@ -2076,7 +2084,7 @@ describe("jobs baseline schema", () => {
                  ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
                  LIMIT 32`,
                 "job_runs_claim_idx",
-                undefined,
+                [],
                 "queued_at>?"
             );
             expectUsesIndexWithoutTemporarySort(
@@ -2087,7 +2095,7 @@ describe("jobs baseline schema", () => {
                  ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
                  LIMIT 32`,
                 "job_runs_claim_idx",
-                undefined,
+                [],
                 "priority<?"
             );
             expectUsesIndexWithoutTemporarySort(
@@ -2098,13 +2106,16 @@ describe("jobs baseline schema", () => {
                  ORDER BY available_at ASC, priority DESC, queued_at ASC, id ASC
                  LIMIT 32`,
                 "job_runs_claim_idx",
-                undefined,
+                [],
                 "available_at>? AND available_at<?"
             );
             expectUsesIndexWithoutTemporarySort(
                 database,
                 "SELECT id FROM job_runs ORDER BY queued_at DESC, id DESC LIMIT 50",
-                "job_runs_queued_id_idx"
+                "job_runs_queued_id_idx",
+                [],
+                undefined,
+                true
             );
             expectUsesIndexWithoutTemporarySort(
                 database,
@@ -2113,77 +2124,43 @@ describe("jobs baseline schema", () => {
                  ORDER BY queued_at DESC, id DESC LIMIT 50`,
                 "job_runs_schedule_queued_id_idx"
             );
-            const maintenanceParameters = [
-                "maintenance.rotate-logs",
-                '{"policyId":"docker-managed"}',
-            ] as const;
-            const activeMaintenancePlan = database.sqlite
-                .query<QueryPlanRow, [string, string]>(
-                    `EXPLAIN QUERY PLAN
-                     SELECT id FROM job_runs
-                     WHERE action_key = ? AND payload_json = ?
-                       AND state IN ('queued', 'running')
-                     ORDER BY state DESC, queued_at DESC, id DESC LIMIT 1`
-                )
-                .all(...maintenanceParameters);
-            expect(
-                activeMaintenancePlan.some(({ detail }) =>
-                    detail.includes("job_runs_action_payload_active_idx")
-                )
-            ).toBeTrue();
-            expect(
-                activeMaintenancePlan.some(({ detail }) =>
-                    detail.includes("action_key=? AND payload_json=? AND state=?")
-                )
-            ).toBeTrue();
-            expect(
-                activeMaintenancePlan.some(
-                    ({ detail }) =>
-                        detail.includes("SCAN job_runs") ||
-                        detail.includes("USE TEMP B-TREE")
-                )
-            ).toBeFalse();
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE action_key = ? AND payload_json = ?
+                   AND state IN ('queued', 'running')
+                 ORDER BY state DESC, queued_at DESC, id DESC LIMIT 1`,
+                "job_runs_action_active_idx",
+                ["maintenance.rotate-logs", '{"policyId":"docker-managed"}'],
+                "action_key=? AND state=?"
+            );
             expectUsesIndexWithoutTemporarySort(
                 database,
                 `SELECT id FROM job_runs
                  WHERE action_key = ? AND state IN ('queued', 'running') LIMIT 1`,
-                "job_runs_action_payload_active_idx",
-                "maintenance.rotate-logs",
+                "job_runs_action_active_idx",
+                ["maintenance.rotate-logs"],
                 "action_key=?"
             );
-            const terminalMaintenancePlan = database.sqlite
-                .query<QueryPlanRow, [string, string]>(
-                    `EXPLAIN QUERY PLAN
-                     SELECT id FROM job_runs
-                     WHERE action_key = ? AND payload_json = ?
-                       AND state IN ('cancelled', 'failed', 'succeeded', 'timed-out')
-                     ORDER BY queued_at DESC, id DESC LIMIT 1`
-                )
-                .all(...maintenanceParameters);
-            expect(
-                terminalMaintenancePlan.some(({ detail }) =>
-                    detail.includes("job_runs_action_payload_terminal_idx")
-                )
-            ).toBeTrue();
-            expect(
-                terminalMaintenancePlan.some(({ detail }) =>
-                    detail.includes("action_key=? AND payload_json=?")
-                )
-            ).toBeTrue();
-            expect(
-                terminalMaintenancePlan.some(
-                    ({ detail }) =>
-                        detail.includes("SCAN job_runs") ||
-                        detail.includes("USE TEMP B-TREE")
-                )
-            ).toBeFalse();
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE action_key = 'maintenance.rotate-logs'
+                   AND length(CAST(payload_json AS BLOB)) <= 128
+                   AND payload_json = ?
+                   AND state IN ('cancelled', 'failed', 'succeeded', 'timed-out')
+                 ORDER BY queued_at DESC, id DESC LIMIT 1`,
+                "job_runs_action_payload_terminal_idx",
+                ['{"policyId":"docker-managed"}'],
+                "action_key=? AND payload_json=?"
+            );
             expectUsesIndexWithoutTemporarySort(
                 database,
                 `SELECT id FROM job_runs
                  WHERE state = 'running' AND lease_owner_id = ?
                  ORDER BY id`,
                 "job_runs_running_owner_id_idx",
-                uuid(50)
+                [uuid(50)]
             );
             expectUsesIndexWithoutTemporarySort(
                 database,
@@ -2200,7 +2177,7 @@ describe("jobs baseline schema", () => {
                        (900, 'system.worker-smoke-001')
                  ORDER BY next_run_at ASC, id ASC LIMIT 32`,
                 "scheduled_jobs_due_idx",
-                undefined,
+                [],
                 "(next_run_at,id)>(?,?)"
             );
             expectUsesIndexWithoutTemporarySort(

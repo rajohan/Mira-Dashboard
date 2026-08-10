@@ -68,6 +68,7 @@ interface FollowFixtureProps {
     readonly onItemsAppended?: NonNullable<
         ComponentProps<typeof Virtualizer>["followToEnd"]
     >["onItemsAppended"];
+    readonly rowHeights?: Readonly<Record<string, number>>;
     readonly scopeKey?: string;
     readonly withNestedScrollRegion?: boolean;
 }
@@ -77,6 +78,7 @@ function FollowFixture({
     items,
     layoutRevision = 1,
     onItemsAppended,
+    rowHeights,
     scopeKey = "first",
     withNestedScrollRegion = false,
 }: FollowFixtureProps) {
@@ -104,6 +106,12 @@ function FollowFixture({
                     <button onClick={virtualization.followToEnd?.follow} type="button">
                         Follow latest
                     </button>
+                    <button
+                        onClick={virtualization.followToEnd?.notifyDynamicContentChange}
+                        type="button"
+                    >
+                        Remeasure content
+                    </button>
                     <div
                         aria-label="Virtual messages"
                         ref={virtualization.scrollContainerRef}
@@ -124,10 +132,12 @@ function FollowFixture({
                             {virtualization.virtualItems.map((item) => (
                                 <div
                                     data-index={item.index}
+                                    data-start={item.start}
                                     key={item.key}
                                     ref={virtualization.measureElement}
                                     style={{
-                                        height: 100,
+                                        height:
+                                            rowHeights?.[items[item.index] ?? ""] ?? 100,
                                         position: "absolute",
                                         transform: `translateY(${item.start}px)`,
                                     }}
@@ -817,6 +827,94 @@ describe("shared virtualizer follow-to-end controller", () => {
             ControlledResizeObserver.instances.clear();
             setControlledResizeObserver(undefined);
         }
+    });
+
+    test("preserves an earlier measured row across later layout and content changes", async () => {
+        const items = Array.from({ length: 10 }, (_, index) => `item-${index}`);
+        let scrollHeight = 1300;
+        const rendered = render(
+            <FollowFixture items={items} rowHeights={{ "item-0": 400 }} />
+        );
+        const log = screen.getByRole("log", { name: "Virtual messages" });
+        setScrollGeometry(log, { clientHeight: 200, scrollHeight: () => scrollHeight });
+
+        await flushAnimationFrames();
+        fireEvent.wheel(log, { deltaY: -100 });
+        act(() => {
+            log.scrollTop = 0;
+            fireEvent.scroll(log);
+        });
+        await flushAnimationFrames();
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-total-size",
+            "1300"
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Follow latest" }));
+        await flushAnimationFrames();
+        act(() => {
+            fireEvent.scroll(log);
+        });
+        await flushAnimationFrames();
+        expect(screen.queryByText("item-0")).not.toBeInTheDocument();
+
+        fireEvent.wheel(log, { deltaY: -100 });
+        act(() => {
+            log.scrollTop = 900;
+            fireEvent.scroll(log);
+        });
+        await flushAnimationFrames();
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "false"
+        );
+
+        scrollHeight = 1350;
+        rendered.rerender(
+            <FollowFixture
+                items={items}
+                layoutRevision={2}
+                rowHeights={{ "item-0": 400, "item-9": 150 }}
+            />
+        );
+        await flushAnimationFrames();
+
+        const precedingRow = screen.getByText("item-8");
+        const changedRow = screen.getByText("item-9");
+        expect(precedingRow.dataset.start).toBe("1100");
+        expect(changedRow.dataset.start).toBe("1200");
+        expect(Number(changedRow.dataset.start)).toBe(
+            Number(precedingRow.dataset.start) + precedingRow.offsetHeight
+        );
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-total-size",
+            "1350"
+        );
+        expect(log.scrollTop).toBe(900);
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-following",
+            "false"
+        );
+
+        scrollHeight = 1375;
+        rendered.rerender(
+            <FollowFixture
+                items={items}
+                layoutRevision={2}
+                rowHeights={{ "item-0": 400, "item-9": 175 }}
+            />
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Remeasure content" }));
+        await flushAnimationFrames();
+
+        expect(screen.getByText("item-8").dataset.start).toBe("1100");
+        expect(screen.getByText("item-9").dataset.start).toBe("1200");
+        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
+            "data-total-size",
+            "1375"
+        );
+        expect(log.scrollTop).toBe(900);
+        act(() => rendered.unmount());
     });
 
     test("completes a scrollbar gesture released outside the scroll container", async () => {

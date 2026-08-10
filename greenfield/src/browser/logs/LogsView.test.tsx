@@ -290,9 +290,14 @@ describe("LogsView", () => {
         const revokeObjectUrl = jest.fn();
         const createDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
         const revokeDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+        let activatedDownload: HTMLAnchorElement | undefined;
         const click = jest
             .spyOn(HTMLAnchorElement.prototype, "click")
-            .mockImplementation(() => {});
+            .mockImplementation(() => {
+                activatedDownload =
+                    document.body.querySelector<HTMLAnchorElement>("a[download]") ??
+                    undefined;
+            });
         Object.defineProperties(URL, {
             createObjectURL: { configurable: true, value: createObjectUrl },
             revokeObjectURL: { configurable: true, value: revokeObjectUrl },
@@ -307,9 +312,6 @@ describe("LogsView", () => {
             expect(await exportedBlobs[0]?.text()).toBe(
                 snapshot.lines.map(({ line }) => line).join("\n")
             );
-            const activatedDownload = click.mock.contexts[0] as
-                | HTMLAnchorElement
-                | undefined;
             expect(activatedDownload?.download).toBe(
                 `mira-dashboard-${snapshot.sourceId}-${snapshot.revision.slice(0, 12)}.log`
             );
@@ -335,9 +337,7 @@ describe("LogsView", () => {
         const rendered = render(<LogsView {...properties()} />);
         const user = userEvent.setup();
 
-        await user.click(
-            screen.getByRole("button", { name: "Clear current log buffer" })
-        );
+        await user.click(screen.getByRole("button", { name: "Clear buffer" }));
         expect(
             screen.getByRole("heading", { name: "Current log buffer cleared" })
         ).toBeVisible();
@@ -376,9 +376,7 @@ describe("LogsView", () => {
                 name: "No log lines at the selected levels",
             })
         ).toBeVisible();
-        const clearBuffer = screen.getByRole("button", {
-            name: "Clear current log buffer",
-        });
+        const clearBuffer = screen.getByRole("button", { name: "Clear buffer" });
         expect(clearBuffer).toBeEnabled();
 
         await user.click(clearBuffer);

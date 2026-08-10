@@ -43,6 +43,7 @@ describe("log maintenance operation audit", () => {
             await writer.record({
                 ...context,
                 dryRun: true,
+                jobRunId: "019fc968-1a9b-7770-8f1b-d5b863b0e7b5",
                 settlement: "queued",
             });
             const rows = database.orm
@@ -56,6 +57,7 @@ describe("log maintenance operation audit", () => {
                     action: "logs.maintenance.request",
                     metadataJson: '{"settlement":"attempted"}',
                     outcome: "attempted",
+                    requestId: "request-1",
                     targetId: "docker-managed",
                     targetType: "log-maintenance-policy",
                 },
@@ -63,6 +65,9 @@ describe("log maintenance operation audit", () => {
                     action: "logs.maintenance.dry-run.request",
                     metadataJson: '{"settlement":"succeeded"}',
                     outcome: "succeeded",
+                    requestId: "request-1",
+                    targetId: "019fc968-1a9b-7770-8f1b-d5b863b0e7b5",
+                    targetType: "job-run",
                 },
             ]);
         } finally {

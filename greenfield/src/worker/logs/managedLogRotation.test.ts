@@ -467,6 +467,52 @@ describe("managed log rotation engine", () => {
         expect(await pathExists(manifest.lockPath)).toBe(false);
     });
 
+    test("settles a pending epoch when the source disappears before recovery", async () => {
+        const base = await fixture();
+        const sourceId = "dashboard.web.stdout";
+        const source = path.join(base.logDirectory, "web-stdout.log");
+        await writeFile(source, "pending bytes\n", { mode: 0o600 });
+        const manifest = {
+            ...base.manifest,
+            fileTargets: [fileTarget(source, { id: sourceId, maximumSizeBytes: 1 })],
+        };
+        const { probe, reader } = createLogAccess(base);
+
+        const interrupted = await createManagedLogRotationEngine({
+            manifest,
+            testHooks: {
+                afterCopyTruncateMarkedRotating() {
+                    throw new Error("simulated shutdown");
+                },
+            },
+        }).run();
+        expect(interrupted).toMatchObject({ ok: false });
+        const rotatingProjection = await readEpochProjection(base.stateDirectory);
+        const pendingEpoch = rotatingProjection.entries[0]?.epoch;
+        expect(rotatingProjection).toMatchObject({
+            entries: [{ epoch: pendingEpoch, sourceId, state: "rotating" }],
+            version: 1,
+        });
+        await rm(source);
+
+        const recovered = await createManagedLogRotationEngine({ manifest }).run();
+        expect(recovered).toMatchObject({ ok: true });
+        expect(recovered.results).toContainEqual({
+            action: "missing",
+            reason: "missing",
+            targetId: sourceId,
+        });
+        expect(await readEpochProjection(base.stateDirectory)).toMatchObject({
+            entries: [{ epoch: pendingEpoch, sourceId, state: "committed" }],
+            version: 1,
+        });
+        expect(await probe.epoch(sourceId)).toBe(pendingEpoch);
+
+        await writeFile(source, "replacement\n", { mode: 0o600 });
+        const replacement = await reader.tail({ limit: 10, sourceId });
+        expect(replacement.lines[0]?.line).toBe("replacement");
+    });
+
     test.each([
         { name: "empty source", regrowth: "" },
         { name: "small exact-prefix regrowth", regrowth: "same line\n" },
@@ -617,7 +663,8 @@ describe("managed log rotation engine", () => {
         );
         await writeFile(epochPath, "not-json\n", { mode: 0o600 });
 
-        expect(createManagedLogRotationEngine({ manifest }).run()).rejects.toThrow(
+        await expectRejection(
+            createManagedLogRotationEngine({ manifest }).run(),
             "Managed log maintenance failed"
         );
         expect(await readFile(source, "utf8")).toBe("oversize\n");
@@ -637,7 +684,8 @@ describe("managed log rotation engine", () => {
             })}\n`,
             { mode: 0o600 }
         );
-        expect(createManagedLogRotationEngine({ manifest }).run()).rejects.toThrow(
+        await expectRejection(
+            createManagedLogRotationEngine({ manifest }).run(),
             "Managed log maintenance failed"
         );
         expect(await readFile(source, "utf8")).toBe("oversize\n");

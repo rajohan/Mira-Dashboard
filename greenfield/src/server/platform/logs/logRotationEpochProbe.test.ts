@@ -46,6 +46,17 @@ async function writeProjection(
     );
 }
 
+async function expectUnavailable(operation: Promise<unknown>): Promise<void> {
+    try {
+        await operation;
+    } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe("Log rotation epoch is unavailable");
+        return;
+    }
+    throw new Error("Expected epoch probe to reject");
+}
+
 afterEach(async () => {
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
 });
@@ -129,8 +140,20 @@ describe("worker-owned log rotation epoch probe", () => {
             mode: 0o600,
         });
 
-        expect(probe.epoch("dashboard.web.stdout")).rejects.toThrow(
-            "Log rotation epoch is unavailable"
-        );
+        await expectUnavailable(probe.epoch("dashboard.web.stdout"));
+
+        await writeProjection(projectionPath, [
+            {
+                epoch,
+                sourceId: "dashboard.web.stdout",
+                state: "committed",
+            },
+            {
+                epoch: otherEpoch,
+                sourceId: "dashboard.a.stdout",
+                state: "committed",
+            },
+        ]);
+        await expectUnavailable(probe.epoch("dashboard.web.stdout"));
     });
 });

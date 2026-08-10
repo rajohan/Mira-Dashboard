@@ -132,7 +132,7 @@ function sensitiveValueEnd(value: string, start: number, secret: string): number
     }
     if (consumesCompleteUnquotedValue(secret)) return value.length;
     let index = start;
-    while (index < value.length && !/[\r\n,;}&\]]/u.test(value[index]!)) {
+    while (index < value.length && !isSafeValueDelimiter(value[index]!)) {
         index += 1;
     }
     return index;

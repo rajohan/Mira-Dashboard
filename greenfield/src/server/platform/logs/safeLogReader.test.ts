@@ -328,8 +328,9 @@ describe("safe named log reader", () => {
             reader.tail({ limit: 10, sourceId: "dashboard.web.stdout" })
         );
         expect(error.reason).toBe("unavailable");
-        expect(JSON.stringify(error)).not.toContain("corrupt marker content");
-        expect(JSON.stringify(error)).not.toContain(root);
+        const exposed = `${error.message}\n${error.stack ?? ""}\n${JSON.stringify(error)}`;
+        expect(exposed).not.toContain("corrupt marker content");
+        expect(exposed).not.toContain(root);
     });
 
     test("changes line identity when rotation replaces the source inode", async () => {

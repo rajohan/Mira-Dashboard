@@ -265,7 +265,6 @@ function LogSnapshot({
                     Export
                 </Button>
                 <Button
-                    aria-label="Clear current log buffer"
                     disabled={unclearedLines.length === 0}
                     onClick={() => {
                         setClearedLineIds(new Set(snapshot.lines.map(({ id }) => id)));

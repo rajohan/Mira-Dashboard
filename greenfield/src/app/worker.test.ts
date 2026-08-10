@@ -119,7 +119,7 @@ function processFixture(
     });
     const logMaintenance = Object.freeze({
         availablePolicies: () => Promise.resolve(["docker-managed" as const]),
-        run: () => Promise.resolve(),
+        run: () => Promise.resolve(undefined),
     });
     const runtime: DashboardWorkerRuntime = Object.freeze({
         completion,

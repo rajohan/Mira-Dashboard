@@ -886,6 +886,41 @@ function projectToolEvent(
     });
 }
 
+function projectCompactionEvent(
+    event: PersistentGatewayDeliveredChatEvent,
+    data: Readonly<Record<string, unknown>>
+): ChatProviderEvent {
+    const phase = boundedControlString(data.phase, 16);
+    if (
+        (data.completed !== undefined && typeof data.completed !== "boolean") ||
+        (data.willRetry !== undefined && typeof data.willRetry !== "boolean")
+    ) {
+        throw new ChatProviderEventReconciliationRequiredError();
+    }
+    if (phase === "start" || (phase === "end" && data.willRetry === true)) {
+        return Object.freeze({
+            ...eventBase(event),
+            kind: "compaction",
+            phase: "active",
+        });
+    }
+    if (phase === "end" && data.completed === true && data.willRetry !== true) {
+        return Object.freeze({
+            ...eventBase(event),
+            kind: "compaction",
+            phase: "complete",
+        });
+    }
+    if (phase === "end") {
+        return Object.freeze({
+            ...eventBase(event),
+            kind: "compaction",
+            phase: "inactive",
+        });
+    }
+    return projectNoopEvent(event);
+}
+
 function projectNoopEvent(event: PersistentGatewayDeliveredChatEvent): ChatProviderEvent {
     return Object.freeze({
         ...eventBase(event),
@@ -935,6 +970,9 @@ function projectProviderEvent(
 
     const payload = event.frame.payload;
     const data = payload.data;
+    if (payload.stream === "compaction") {
+        return projectCompactionEvent(event, data);
+    }
     if (payload.stream === "assistant") {
         const hasExplicitDelta = typeof data.delta === "string";
         const text = projectChatDeltaText(hasExplicitDelta ? data.delta : data.text);

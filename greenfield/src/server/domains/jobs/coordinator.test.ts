@@ -40,7 +40,7 @@ import {
 import { createJobRealtimeSideEffects } from "./sideEffects.ts";
 
 const findJobWorkerAction = createJobWorkerActionResolver({
-    run: () => Promise.resolve(),
+    run: () => Promise.resolve(undefined),
 });
 
 const releaseId = "a".repeat(40);
@@ -1395,6 +1395,9 @@ describe("durable job worker coordinator", () => {
         );
         if (definition === undefined)
             throw new Error("Missing log-maintenance definition");
+        if (definition.defaultSchedule.kind !== "interval") {
+            throw new Error("Expected an interval log-maintenance cadence");
+        }
         const schedule = intervalSchedule({
             actionKey: definition.actionKey,
             actionPayloadJson: JSON.stringify(definition.actionPayload),
@@ -1402,10 +1405,7 @@ describe("durable job worker coordinator", () => {
             cancellationPolicy: definition.cancellationPolicy,
             description: definition.description,
             id: definition.scheduleId,
-            intervalMs:
-                definition.defaultSchedule.kind === "interval"
-                    ? definition.defaultSchedule.intervalMs
-                    : null,
+            intervalMs: definition.defaultSchedule.intervalMs,
             name: definition.displayName,
             priority: definition.priority,
             resourceClass: definition.resourceClass,

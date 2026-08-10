@@ -2447,6 +2447,74 @@ describe("ChatService", () => {
                     streamId: "agent:reasoning",
                 },
             ]);
+
+            await subscription.onEvent({
+                ...base,
+                kind: "compaction",
+                phase: "active",
+                providerSequence: 15,
+                receivedAtMs: 1015,
+            });
+            let compactionRuntime = await service.runtime(runtimeInput());
+            let compaction = compactionRuntime.externalRuns[0]!.parts?.find(
+                (part) => part.kind === "item" && part.type === "compaction"
+            );
+            expect(compaction).toEqual({
+                id: "compaction:codex-ordered-run",
+                kind: "item",
+                occurredAtMs: 1015,
+                sequence: 11,
+                text: "Compacting context",
+                type: "compaction",
+            });
+
+            await subscription.onEvent({
+                ...base,
+                kind: "compaction",
+                phase: "active",
+                providerSequence: 16,
+                receivedAtMs: 1016,
+            });
+            compactionRuntime = await service.runtime(runtimeInput());
+            compaction = compactionRuntime.externalRuns[0]!.parts?.find(
+                (part) => part.kind === "item" && part.type === "compaction"
+            );
+            expect(compaction).toMatchObject({
+                occurredAtMs: 1016,
+                sequence: 11,
+                text: "Compacting context",
+            });
+
+            await subscription.onEvent({
+                ...base,
+                kind: "compaction",
+                phase: "complete",
+                providerSequence: 17,
+                receivedAtMs: 1017,
+            });
+            compactionRuntime = await service.runtime(runtimeInput());
+            compaction = compactionRuntime.externalRuns[0]!.parts?.find(
+                (part) => part.kind === "item" && part.type === "compaction"
+            );
+            expect(compaction).toMatchObject({
+                occurredAtMs: 1017,
+                sequence: 11,
+                text: "Context compacted",
+            });
+
+            await subscription.onEvent({
+                ...base,
+                kind: "compaction",
+                phase: "inactive",
+                providerSequence: 18,
+                receivedAtMs: 1018,
+            });
+            compactionRuntime = await service.runtime(runtimeInput());
+            expect(
+                compactionRuntime.externalRuns[0]!.parts?.find(
+                    (part) => part.kind === "item" && part.type === "compaction"
+                )
+            ).toBeUndefined();
         } finally {
             await service.dispose();
             database.sqlite.close(true);

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import type { JobRunSummary } from "../../../contracts/jobModel.ts";
 import type {
     LogMaintenancePolicyId,
     RequestLogMaintenanceInput,
@@ -24,6 +25,33 @@ const auditContext = {
     },
     requestId: "request-1",
 };
+
+function maintenanceRun(id: string, state: "running" | "succeeded"): JobRunSummary {
+    const terminal = state === "succeeded";
+    return {
+        actionKey: "maintenance.rotate-logs",
+        attemptCount: 1,
+        attemptLimit: 1,
+        availableAtMs: 100,
+        cancellationPolicy: "cooperative",
+        displayName: "Managed log maintenance",
+        eventCount: terminal ? 3 : 2,
+        ...(terminal ? { finishedAtMs: 300 } : {}),
+        firstStartedAtMs: 200,
+        id,
+        lastAttemptStartedAtMs: 200,
+        priority: 0,
+        queuedAtMs: 100,
+        resourceClass: "host-heavy",
+        resourceKeys: ["host.logs"],
+        retrySafe: false,
+        state,
+        stateVersion: terminal ? 3 : 2,
+        timeoutMs: 300_000,
+        triggerType: "system",
+        updatedAtMs: terminal ? 300 : 200,
+    };
+}
 
 function dependencies(
     options: {
@@ -116,9 +144,9 @@ describe("logs service", () => {
     });
 
     test("projects an active run without hiding the latest terminal run", async () => {
-        const fixture = dependencies();
+        const activeRunId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b5";
+        const terminalRunId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b6";
         const service = createLogsService({
-            ...fixture.service,
             auditWriter: { record: () => Promise.resolve() },
             catalog: {
                 list: () => Promise.resolve({ observedAtMs: 1, sources: [] }),
@@ -130,13 +158,13 @@ describe("logs service", () => {
                 runStatuses: () =>
                     Promise.resolve([
                         {
-                            activeRun: { id: "active", state: "running" },
+                            activeRun: maintenanceRun(activeRunId, "running"),
                             lastRun: {
-                                run: { id: "terminal", state: "succeeded" },
+                                run: maintenanceRun(terminalRunId, "succeeded"),
                             },
                             policyId: "host-rsyslog",
                         },
-                    ] as never),
+                    ]),
             },
             reader: {
                 search: () => Promise.reject(new Error("unused")),
@@ -146,8 +174,8 @@ describe("logs service", () => {
 
         const status = await service.maintenanceStatus();
         expect(status.policies.find(({ id }) => id === "host-rsyslog")).toMatchObject({
-            activeRun: { id: "active", state: "running" },
-            lastRun: { run: { id: "terminal", state: "succeeded" } },
+            activeRun: { id: activeRunId, state: "running" },
+            lastRun: { run: { id: terminalRunId, state: "succeeded" } },
         });
     });
 
@@ -163,6 +191,7 @@ describe("logs service", () => {
             { dryRun: false, policyId: "host-rsyslog", settlement: "attempted" },
             {
                 dryRun: false,
+                jobRunId,
                 policyId: "host-rsyslog",
                 settlement: "queued",
             },

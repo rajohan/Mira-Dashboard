@@ -8,7 +8,6 @@ import {
     logMaintenanceQueryOptions,
     logMaintenanceQueryKey,
     logMaintenanceRefreshIntervalMs,
-    logMaintenanceRealtimeFallbackRefreshIntervalMs,
     logSnapshotQueryOptions,
     refreshLogMaintenanceQueries,
 } from "./logQueries.ts";
@@ -53,7 +52,7 @@ describe("log snapshot query identity", () => {
         expect(options.refetchIntervalInBackground).toBeFalse();
     });
 
-    test("invalidates maintenance and one followed run with a 30-second fallback", async () => {
+    test("invalidates maintenance and one followed run", async () => {
         const queryClient = new QueryClient();
         const runId = "019fdf70-0000-7000-8000-000000000020";
         const runKey = jobRunDetailQueryKey(runId);
@@ -62,7 +61,6 @@ describe("log snapshot query identity", () => {
 
         await refreshLogMaintenanceQueries(queryClient, runId);
 
-        expect(logMaintenanceRealtimeFallbackRefreshIntervalMs).toBe(30_000);
         expect(
             queryClient.getQueryState(logMaintenanceQueryKey)?.isInvalidated
         ).toBeTrue();

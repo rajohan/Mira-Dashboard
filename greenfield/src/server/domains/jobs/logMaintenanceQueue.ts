@@ -6,9 +6,9 @@ import {
     logMaintenanceLastRunSchema,
     logMaintenancePolicyIds,
     requestLogMaintenanceInputSchema,
-    type LogMaintenanceActiveRun,
     type LogMaintenanceLastRun,
     type LogMaintenancePolicyId,
+    type LogMaintenanceRunStatus,
     type RequestLogMaintenanceInput,
 } from "../../../contracts/logs.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
@@ -40,13 +40,9 @@ export interface LogMaintenanceJobQueueDependencies {
 
 /** Web-safe durable queue surface. It accepts policy identities, never paths. */
 export interface LogMaintenanceJobQueue {
-    readonly runStatuses: (signal?: AbortSignal) => Promise<
-        readonly Readonly<{
-            readonly activeRun?: LogMaintenanceActiveRun;
-            readonly lastRun?: LogMaintenanceLastRun;
-            readonly policyId: LogMaintenancePolicyId;
-        }>[]
-    >;
+    readonly runStatuses: (
+        signal?: AbortSignal
+    ) => Promise<readonly LogMaintenanceRunStatus[]>;
     readonly queueablePolicies: (
         signal?: AbortSignal
     ) => Promise<readonly LogMaintenancePolicyId[]>;
@@ -123,11 +119,7 @@ function runStatus(
     snapshot: ActionPayloadRunSnapshot,
     policyId: LogMaintenancePolicyId,
     activeRecord = snapshot.activeRun
-): Readonly<{
-    readonly activeRun?: LogMaintenanceActiveRun;
-    readonly lastRun?: LogMaintenanceLastRun;
-    readonly policyId: LogMaintenancePolicyId;
-}> {
+): LogMaintenanceRunStatus {
     return Object.freeze({
         ...(activeRecord === undefined
             ? {}
@@ -213,6 +205,8 @@ export function createLogMaintenanceJobQueue(
                 const statuses = realPolicyPayloads.map(({ payloadJson, policyId }) => {
                     const snapshot = snapshotsByPayload.get(payloadJson);
                     if (snapshot === undefined) throw queueFailure();
+                    // A managed dry run shares the active single-flight slot, while
+                    // terminal status intentionally reports only real maintenance.
                     return runStatus(
                         snapshot,
                         policyId,

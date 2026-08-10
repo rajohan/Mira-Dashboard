@@ -21,7 +21,10 @@ import {
     ControlledDashboardRealtimeClient,
     noOpDashboardRealtimeClient,
 } from "../test/realtime.ts";
-import { logMaintenanceQueryKey } from "./logQueries.ts";
+import {
+    logMaintenanceQueryKey,
+    logMaintenanceRealtimeFallbackRefreshIntervalMs,
+} from "./logQueries.ts";
 import { LogsBrowser } from "./LogsBrowser.tsx";
 
 const { act, render, screen, waitFor } = await import("@testing-library/react");
@@ -491,6 +494,61 @@ describe("LogsBrowser", () => {
         }
     });
 
+    test("starts the maintenance fallback cadence when realtime becomes unavailable", async () => {
+        const query = jest.fn((name: string) => {
+            switch (name) {
+                case "logs.listSources": {
+                    return Promise.resolve(sourceCatalog);
+                }
+                case "logs.maintenanceStatus": {
+                    return Promise.resolve(maintenanceStatus);
+                }
+                case "logs.tail": {
+                    return Promise.resolve(snapshot("dashboard.web.stderr"));
+                }
+                default: {
+                    return Promise.reject(new Error(`Unexpected query: ${name}`));
+                }
+            }
+        });
+        const realtimeClient = new ControlledDashboardRealtimeClient();
+        const setInterval = jest.spyOn(globalThis, "setInterval");
+
+        try {
+            const { queryClient, view } = renderBrowser(
+                {
+                    mutation: () => Promise.reject(new Error("Unexpected mutation")),
+                    query,
+                },
+                realtimeClient
+            );
+
+            try {
+                await screen.findByRole("heading", { name: "Dashboard web stderr" });
+                const intervalCallsBeforeFailure = setInterval.mock.calls.length;
+
+                act(() => realtimeClient.fail());
+
+                await waitFor(() =>
+                    expect(
+                        setInterval.mock.calls
+                            .slice(intervalCallsBeforeFailure)
+                            .some(
+                                ([, delay]) =>
+                                    delay ===
+                                    logMaintenanceRealtimeFallbackRefreshIntervalMs
+                            )
+                    ).toBeTrue()
+                );
+            } finally {
+                view.unmount();
+                queryClient.clear();
+            }
+        } finally {
+            setInterval.mockRestore();
+        }
+    });
+
     test("takes the inactivity baseline from cache after the maintenance mutation resolves", async () => {
         const requestedRun = {
             dryRun: true,
@@ -599,7 +657,6 @@ describe("LogsBrowser", () => {
     });
 
     test("fails maintenance controls closed while the authority query is offline-paused", async () => {
-        onlineManager.setOnline(false);
         const query = jest.fn((name: string) => {
             if (name === "logs.maintenanceStatus") {
                 return Promise.resolve(maintenanceStatus);
@@ -610,28 +667,32 @@ describe("LogsBrowser", () => {
             mutation: () => Promise.reject(new Error("Unexpected mutation")),
             query,
         } as unknown as DashboardTrpcClient;
-        const { queryClient, view } = renderBrowser(
-            client,
-            noOpDashboardRealtimeClient,
-            (cache) => {
-                cache.setQueryData(logMaintenanceQueryKey, maintenanceStatus, {
-                    updatedAt: Date.now() - 11_000,
-                });
-            }
-        );
-
         try {
-            expect(
-                await screen.findByRole("button", {
-                    name: "Run Managed application and container logs",
-                })
-            ).toBeDisabled();
-            expect(
-                screen.getByText("Maintenance status is temporarily unavailable.")
-            ).toBeVisible();
+            onlineManager.setOnline(false);
+            const { queryClient, view } = renderBrowser(
+                client,
+                noOpDashboardRealtimeClient,
+                (cache) => {
+                    cache.setQueryData(logMaintenanceQueryKey, maintenanceStatus, {
+                        updatedAt: Date.now() - 11_000,
+                    });
+                }
+            );
+
+            try {
+                expect(
+                    await screen.findByRole("button", {
+                        name: "Run Managed application and container logs",
+                    })
+                ).toBeDisabled();
+                expect(
+                    screen.getByText("Maintenance status is temporarily unavailable.")
+                ).toBeVisible();
+            } finally {
+                view.unmount();
+                queryClient.clear();
+            }
         } finally {
-            view.unmount();
-            queryClient.clear();
             onlineManager.setOnline(true);
         }
     });

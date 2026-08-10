@@ -17,7 +17,7 @@ export interface LogMaintenanceExecutor {
         policyId: LogMaintenancePolicyId,
         dryRun: boolean,
         signal?: AbortSignal
-    ) => Promise<LogMaintenanceExecutionSummary | void>;
+    ) => Promise<LogMaintenanceExecutionSummary | undefined>;
 }
 
 function executionFailure(): Error {

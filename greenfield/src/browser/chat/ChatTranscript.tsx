@@ -9,6 +9,11 @@ import { LoadingState } from "../ui/LoadingState.tsx";
 import { Virtualizer, type VirtualizerItemsAppendedEvent } from "../ui/Virtualizer.tsx";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
 import { visibleChatTranscriptMessages } from "./chatMessageVisibility.ts";
+import {
+    activeCompactionMaximumAgeMs,
+    completedCompactionMaximumAgeMs,
+    projectChatTranscriptMessages,
+} from "./chatTranscriptProjection.ts";
 import type {
     ChatDisplayMessage,
     ChatDisplaySettings,
@@ -56,7 +61,10 @@ function messageRevision(message: ChatDisplayMessage): number {
                 `${part.kind}|${part.kind === "thinking" ? part.status : ""}|${part.text}`
             );
         } else if (part.kind === "control") {
-            hash = hashRevisionPart(hash, `${part.kind}|${part.tone}|${part.text}`);
+            hash = hashRevisionPart(
+                hash,
+                `${part.kind}|${part.tone}|${part.activity ?? ""}|${part.text}`
+            );
         } else {
             hash = hashRevisionPart(
                 hash,
@@ -147,9 +155,20 @@ export function ChatTranscript({
     const [notice, setNotice] = useState<ChatTranscriptNotice>(() =>
         emptyTranscriptNotice(sessionKey)
     );
+    const [nowMs, setNowMs] = useState(() => Date.now());
     const currentNotice =
         notice.sessionKey === sessionKey ? notice : emptyTranscriptNotice(sessionKey);
-    const visibleMessages = visibleChatTranscriptMessages(messages, display, readAloud);
+    const transcriptMessages = projectChatTranscriptMessages(
+        messages,
+        activeRunIds,
+        sessionKey,
+        nowMs
+    );
+    const visibleMessages = visibleChatTranscriptMessages(
+        transcriptMessages,
+        display,
+        readAloud
+    );
     const stopReadAloud = useEffectEvent(() => onStopReadAloud?.());
     const stopActiveReadAloud = useEffectEvent(() => {
         if (readAloud?.phase !== "idle") stopReadAloud();
@@ -196,6 +215,37 @@ export function ChatTranscript({
     }
 
     useEffect(() => () => stopActiveReadAloud(), [sessionKey]);
+    useEffect(() => {
+        const timeout = globalThis.setTimeout(() => setNowMs(Date.now()), 0);
+        return () => globalThis.clearTimeout(timeout);
+    }, [messages]);
+    useEffect(() => {
+        const currentTimeMs = Date.now();
+        const nextExpiry = messages
+            .flatMap((message) =>
+                message.timestampMs === undefined
+                    ? []
+                    : message.parts.flatMap((part) => {
+                          if (part.kind !== "control" || part.activity === undefined) {
+                              return [];
+                          }
+                          return [
+                              message.timestampMs! +
+                                  (part.activity === "running"
+                                      ? activeCompactionMaximumAgeMs
+                                      : completedCompactionMaximumAgeMs),
+                          ];
+                      })
+            )
+            .filter((expiry) => expiry > currentTimeMs)
+            .toSorted((left, right) => left - right)[0];
+        if (nextExpiry === undefined) return;
+        const timeout = globalThis.setTimeout(
+            () => setNowMs(Date.now()),
+            Math.max(0, nextExpiry - currentTimeMs)
+        );
+        return () => globalThis.clearTimeout(timeout);
+    }, [messages, nowMs]);
 
     if (visibleMessages.length === 0 && initialLoading) {
         return (

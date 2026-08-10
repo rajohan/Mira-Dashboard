@@ -187,71 +187,75 @@ describe("production systemd unit installation", () => {
         installationLifecycleTestTimeoutMs
     );
 
-    test("rejects an untrusted destination and a destination identity swap", async () => {
-        const fixture = await installationFixture();
-        await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
-            const paths = await prepareProductionDeliveryDirectories(fixture.state);
-            const runtime = await installProductionRuntime(
-                lease,
-                paths,
-                runtimeIdentity,
-                {
-                    probeRuntime: () => Promise.resolve(runtimeIdentity),
-                    sourceExecutable: fixture.runtimeSource,
-                }
-            );
-            const release = await publishProductionRelease(
-                lease,
-                paths,
-                fixture.sourceRelease,
-                runtime.identity
-            );
-            const dependencies = {
-                execute: () => Promise.resolve(successfulSystemctl()),
-                homeDirectory: fixture.homeDirectory,
-                userUnitDirectory: fixture.userUnitDirectory,
-            };
-            await installPublishedProductionSystemdUnits(
-                lease,
-                paths,
-                release,
-                dependencies
-            );
-            const webUnit = path.join(
-                fixture.userUnitDirectory,
-                "mira-dashboard-web.service"
-            );
-            const displaced = `${webUnit}.displaced`;
-            const swapFailure = await rejectionError(
-                installPublishedProductionSystemdUnits(lease, paths, release, {
-                    ...dependencies,
-                    filesystemTestHooks: {
-                        async beforeRename(fileName) {
-                            if (fileName !== "mira-dashboard-web.service") return;
-                            await rename(webUnit, displaced);
-                            await symlink(displaced, webUnit);
-                        },
-                    },
-                })
-            );
-            expect(swapFailure.message).toBe(
-                "Production systemd unit installation failed"
-            );
-
-            await chmod(fixture.userUnitDirectory, 0o733);
-            const permissionFailure = await rejectionError(
-                installPublishedProductionSystemdUnits(
+    test(
+        "rejects an untrusted destination and a destination identity swap",
+        async () => {
+            const fixture = await installationFixture();
+            await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
+                const paths = await prepareProductionDeliveryDirectories(fixture.state);
+                const runtime = await installProductionRuntime(
+                    lease,
+                    paths,
+                    runtimeIdentity,
+                    {
+                        probeRuntime: () => Promise.resolve(runtimeIdentity),
+                        sourceExecutable: fixture.runtimeSource,
+                    }
+                );
+                const release = await publishProductionRelease(
+                    lease,
+                    paths,
+                    fixture.sourceRelease,
+                    runtime.identity
+                );
+                const dependencies = {
+                    execute: () => Promise.resolve(successfulSystemctl()),
+                    homeDirectory: fixture.homeDirectory,
+                    userUnitDirectory: fixture.userUnitDirectory,
+                };
+                await installPublishedProductionSystemdUnits(
                     lease,
                     paths,
                     release,
                     dependencies
-                )
-            );
-            expect(permissionFailure.message).toBe(
-                "Production systemd unit installation failed"
-            );
-        });
-    });
+                );
+                const webUnit = path.join(
+                    fixture.userUnitDirectory,
+                    "mira-dashboard-web.service"
+                );
+                const displaced = `${webUnit}.displaced`;
+                const swapFailure = await rejectionError(
+                    installPublishedProductionSystemdUnits(lease, paths, release, {
+                        ...dependencies,
+                        filesystemTestHooks: {
+                            async beforeRename(fileName) {
+                                if (fileName !== "mira-dashboard-web.service") return;
+                                await rename(webUnit, displaced);
+                                await symlink(displaced, webUnit);
+                            },
+                        },
+                    })
+                );
+                expect(swapFailure.message).toBe(
+                    "Production systemd unit installation failed"
+                );
+
+                await chmod(fixture.userUnitDirectory, 0o733);
+                const permissionFailure = await rejectionError(
+                    installPublishedProductionSystemdUnits(
+                        lease,
+                        paths,
+                        release,
+                        dependencies
+                    )
+                );
+                expect(permissionFailure.message).toBe(
+                    "Production systemd unit installation failed"
+                );
+            });
+        },
+        installationLifecycleTestTimeoutMs
+    );
 
     test("parses only the exact project, release, runtime, and user-unit arguments", () => {
         const homeDirectory = "/home/dashboard";

@@ -246,6 +246,15 @@ function providerEventRunId(event: ChatProviderEvent): string {
 
 function providerEventDraft(event: ChatProviderEvent): ChatRuntimeEventDraft {
     switch (event.kind) {
+        case "compaction": {
+            return {
+                kind: "provider-noop",
+                occurredAtMs: event.receivedAtMs,
+                providerSequenceEnd: event.providerSequence,
+                providerSequenceStart: event.providerSequence,
+                reason: "ignored",
+            };
+        }
         case "delta": {
             return {
                 kind: event.stream,
@@ -728,7 +737,8 @@ function updateExternalToolPart(
 
 function updateExternalItemPart(
     parts: readonly ChatRuntimeProjectionPart[],
-    event: Extract<ChatProviderEvent, { kind: "item" }>
+    event: Extract<ChatProviderEvent, { kind: "item" }>,
+    occurredAtMs?: number
 ): readonly ChatRuntimeProjectionPart[] {
     const index = parts.findIndex(
         (part) => part.kind === "item" && part.id === event.itemId
@@ -739,12 +749,34 @@ function updateExternalItemPart(
     const projection: ChatRuntimeProjectionPart = {
         id: event.itemId,
         kind: "item",
+        ...(occurredAtMs === undefined ? {} : { occurredAtMs }),
         sequence: previousItem?.sequence ?? (parts.at(-1)?.sequence ?? 0) + 1,
         ...(text === undefined ? {} : { text }),
         type: previousItem?.type ?? event.itemType,
     };
     if (index === -1) return [...parts, projection];
     return parts.map((part, partIndex) => (partIndex === index ? projection : part));
+}
+
+function updateExternalCompactionPart(
+    parts: readonly ChatRuntimeProjectionPart[],
+    event: Extract<ChatProviderEvent, { kind: "compaction" }>
+): readonly ChatRuntimeProjectionPart[] {
+    const itemId = `compaction:${event.providerRunId}`;
+    if (event.phase === "inactive") {
+        return parts.filter((part) => part.kind !== "item" || part.id !== itemId);
+    }
+    return updateExternalItemPart(
+        parts,
+        {
+            ...event,
+            itemId,
+            itemType: "compaction",
+            kind: "item",
+            text: event.phase === "active" ? "Compacting context" : "Context compacted",
+        },
+        event.receivedAtMs
+    );
 }
 
 function runtimeWithExternalRuns(
@@ -1293,7 +1325,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
                 signalHistoryCatchUp = true;
             }
         }
-        if (event.kind === "delta" && event.stream === "assistant") {
+        if (event.kind === "compaction") {
+            parts = updateExternalCompactionPart(parts, event);
+        } else if (event.kind === "delta" && event.stream === "assistant") {
             if (!suppressAssistantAppend) {
                 const projectedEvent =
                     assistantAppendText === event.text

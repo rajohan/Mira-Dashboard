@@ -36,7 +36,7 @@ const successfulExecutor = () => Effect.succeed({});
 describe("worker-only job executor registry", () => {
     test("matches every pure definition with one exact executor", () => {
         const findAction = createJobWorkerActionResolver({
-            run: () => Promise.resolve(),
+            run: () => Promise.resolve(undefined),
         });
         expect(findAction("system.worker-smoke")).toBeDefined();
         expect(findAction("cache.refresh.system-host")).toBeDefined();
@@ -149,7 +149,7 @@ describe("worker-only job executor registry", () => {
         expect(
             Effect.runPromise(
                 createLogMaintenanceJobExecutor({
-                    run: () => Promise.resolve(),
+                    run: () => Promise.resolve(undefined),
                 })(executionContext([]), { policyId: "docker-managed" })
             )
         ).rejects.toBeInstanceOf(Error);
@@ -224,7 +224,7 @@ describe("worker-only job executor registry", () => {
         ]);
 
         const findAction = createJobWorkerActionResolver(
-            { run: () => Promise.resolve() },
+            { run: () => Promise.resolve(undefined) },
             writer
         );
         expect(findAction("workspace-files.apply-write")).toBeDefined();

@@ -74,7 +74,7 @@ export interface LogMaintenanceExecutionPort {
         policyId: LogMaintenancePolicyId,
         dryRun: boolean,
         signal?: AbortSignal
-    ) => Promise<LogMaintenanceExecutionSummary | void>;
+    ) => Promise<LogMaintenanceExecutionSummary | undefined>;
 }
 
 /** Worker-only structural authority; web composition receives only its durable queue. */

@@ -180,6 +180,22 @@ function purePrependCount(
         : 0;
 }
 
+function remeasureMountedItems<TItemElement extends Element>(
+    virtualizer: TanStackVirtualizer<HTMLDivElement, TItemElement>
+): void {
+    // A full measure() drops cached sizes for offscreen predecessors. Read only
+    // the mounted virtual window so live row changes preserve those measurements.
+    const sizeProperty = virtualizer.options.horizontal ? "offsetWidth" : "offsetHeight";
+    for (const item of virtualizer.getVirtualItems()) {
+        const element = virtualizer.elementsCache.get(item.key);
+        if (element === undefined || !element.isConnected) continue;
+        virtualizer.resizeItem(
+            item.index,
+            (element as unknown as HTMLElement)[sizeProperty]
+        );
+    }
+}
+
 function useFollowToEndController<TItemElement extends Element>({
     count,
     estimateSize,
@@ -303,7 +319,7 @@ function useFollowToEndController<TItemElement extends Element>({
     }
 
     function notifyDynamicContentChange(): void {
-        virtualizer.measure();
+        remeasureMountedItems(virtualizer);
         scheduleFollow(true);
     }
 
@@ -451,7 +467,7 @@ function useFollowToEndController<TItemElement extends Element>({
                 previousScrollTop.current = element.scrollTop;
             }
         }
-        if (layoutChanged && !keysChanged) virtualizer.measure();
+        if (layoutChanged && !keysChanged) remeasureMountedItems(virtualizer);
         if (followingReference.current && (keysChanged || layoutChanged)) {
             scheduleFollow(true, oldKeys.length === 0);
         }

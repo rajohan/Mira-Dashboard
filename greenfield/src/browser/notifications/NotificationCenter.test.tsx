@@ -279,14 +279,14 @@ describe("Notification center", () => {
 
             await waitFor(() => {
                 expect(
-                    screen.queryByRole("button", { name: /Notifications,/u })
-                ).toBeNull();
+                    screen.getByRole("button", { name: "Notifications, 1 unread" })
+                ).toBe(trigger);
+                expect(trigger).toHaveAttribute("aria-expanded", "true");
                 expect(
-                    screen.queryByRole("heading", { level: 2, name: "Notifications" })
-                ).toBeNull();
-                expect(harness.realtimeClient.activeSubscriptionCount).toBe(0);
+                    screen.getByRole("heading", { level: 2, name: "Notifications" })
+                ).toBeVisible();
+                expect(harness.realtimeClient.activeSubscriptionCount).toBe(1);
             });
-            expect(trigger.isConnected).toBeTrue();
 
             await act(async () => {
                 sameIdentityStatus.resolve(status);
@@ -312,11 +312,13 @@ describe("Notification center", () => {
                     staleTime: 0,
                 });
             });
-            await waitFor(() =>
+            await waitFor(() => {
                 expect(
-                    screen.queryByRole("button", { name: /Notifications,/u })
-                ).toBeNull()
-            );
+                    screen.getByRole("button", { name: "Notifications, 1 unread" })
+                ).toBe(trigger);
+                expect(trigger).toHaveAttribute("aria-expanded", "true");
+                expect(harness.realtimeClient.activeSubscriptionCount).toBe(1);
+            });
             await act(async () => {
                 changedIdentityStatus.resolve({
                     ...status,
@@ -329,6 +331,59 @@ describe("Notification center", () => {
             expect(harness.realtimeClient.activeSubscriptionCount).toBe(0);
         } finally {
             await harness.cleanup();
+        }
+    });
+
+    test("fails closed when a background authentication check fails", async () => {
+        const status = authenticatedStatus();
+        const transport = new NotificationCenterTransport({
+            notifications: [],
+            readCount: 0,
+            unreadCount: 0,
+        });
+        const harness = renderCenter(transport, status);
+        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+            const { trigger } = await openNotificationCenter();
+            const failedStatus = Promise.withResolvers<AuthStatus>();
+            let failedCheck: Promise<AuthStatus> = Promise.resolve(status);
+            act(() => {
+                failedCheck = harness.queryClient.fetchQuery<AuthStatus>({
+                    queryFn: () => failedStatus.promise,
+                    queryKey: authStatusQueryKey,
+                    staleTime: 0,
+                });
+            });
+
+            await waitFor(() => {
+                expect(
+                    screen.getByRole("button", { name: "Notifications, none unread" })
+                ).toBe(trigger);
+                expect(trigger).toHaveAttribute("aria-expanded", "true");
+                expect(harness.realtimeClient.activeSubscriptionCount).toBe(1);
+            });
+
+            await act(async () => {
+                failedStatus.reject(new TypeError("authentication unavailable"));
+                await failedCheck.catch(() => null);
+            });
+            expect(harness.queryClient.getQueryData<AuthStatus>(authStatusQueryKey)).toBe(
+                status
+            );
+            expect(
+                harness.queryClient.getQueryState<AuthStatus>(authStatusQueryKey)?.status
+            ).toBe("error");
+            await waitFor(() => {
+                expect(
+                    screen.queryByRole("button", { name: /Notifications,/u })
+                ).toBeNull();
+                expect(trigger.isConnected).toBeFalse();
+                expect(harness.realtimeClient.activeSubscriptionCount).toBe(0);
+            });
+        } finally {
+            await harness.cleanup();
+            consoleError.mockRestore();
         }
     });
 

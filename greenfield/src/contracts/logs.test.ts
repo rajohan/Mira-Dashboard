@@ -272,6 +272,18 @@ describe("log contracts", () => {
         expect(
             v.safeParse(logMaintenanceJobResultSchema, {
                 ...result,
+                dryRun: true,
+            }).success
+        ).toBe(false);
+        expect(
+            v.safeParse(logMaintenanceJobResultSchema, {
+                ...result,
+                summary: { ...summary, dryRun: true },
+            }).success
+        ).toBe(false);
+        expect(
+            v.safeParse(logMaintenanceJobResultSchema, {
+                ...result,
                 summary: undefined,
             }).success
         ).toBe(false);

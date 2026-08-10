@@ -382,6 +382,7 @@ const gatewayAgentEventDataSchema = v.pipe(
     v.object({
         args: v.optional(v.unknown()),
         callId: v.optional(v.unknown()),
+        completed: v.optional(v.unknown()),
         delta: v.optional(v.unknown()),
         explanation: v.optional(v.unknown()),
         input: v.optional(v.unknown()),
@@ -405,6 +406,7 @@ const gatewayAgentEventDataSchema = v.pipe(
         toolCallId: v.optional(v.unknown()),
         toolName: v.optional(v.unknown()),
         type: v.optional(v.unknown()),
+        willRetry: v.optional(v.unknown()),
     }),
     v.check(
         (data) =>
@@ -414,6 +416,7 @@ const gatewayAgentEventDataSchema = v.pipe(
 );
 const gatewaySupportedAgentStreams = Object.freeze([
     "assistant",
+    "compaction",
     "thinking",
     "tool",
     "item",
@@ -751,6 +754,7 @@ export interface PersistentGatewayAgentEvent {
     readonly sessionKey: string;
     readonly stream:
         | "assistant"
+        | "compaction"
         | "thinking"
         | "tool"
         | "item"
@@ -1265,9 +1269,33 @@ export function parsePersistentGatewayPrivateChatEvent(
     if (frame.output.event === "agent" || frame.output.event === "session.tool") {
         const payload = v.safeParse(gatewayAgentEventSchema, frame.output.payload);
         if (payload.success) {
+            const projectedPayload =
+                payload.output.stream === "compaction"
+                    ? {
+                          ...payload.output,
+                          data: {
+                              ...(payload.output.data.completed === undefined
+                                  ? {}
+                                  : {
+                                        completed: payload.output.data.completed,
+                                    }),
+                              ...(payload.output.data.phase === undefined
+                                  ? {}
+                                  : { phase: payload.output.data.phase }),
+                              ...(payload.output.data.willRetry === undefined
+                                  ? {}
+                                  : {
+                                        willRetry: payload.output.data.willRetry,
+                                    }),
+                          },
+                      }
+                    : payload.output;
             return Object.freeze({
                 event: "agent",
-                payload: Object.freeze(payload.output),
+                payload: Object.freeze({
+                    ...projectedPayload,
+                    data: Object.freeze(projectedPayload.data),
+                }),
             });
         }
         const unsupported = v.safeParse(

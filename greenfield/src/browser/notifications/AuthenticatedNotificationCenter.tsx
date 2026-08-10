@@ -1,4 +1,4 @@
-import { Activity, useState } from "react";
+import { useState } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { useObservedQueryState } from "../api/useObservedQueryState.ts";
@@ -17,6 +17,7 @@ export function AuthenticatedNotificationCenter() {
             : undefined;
     const verificationSettled =
         authentication?.status === "success" && authentication.fetchStatus === "idle";
+    const verificationFailed = authentication?.status === "error";
     const [releasedIdentity, setReleasedIdentity] = useState<string>();
 
     if (
@@ -27,15 +28,15 @@ export function AuthenticatedNotificationCenter() {
         setReleasedIdentity(authenticatedIdentity);
     }
 
-    if (releasedIdentity === undefined || authenticatedIdentity !== releasedIdentity) {
+    if (
+        verificationFailed ||
+        releasedIdentity === undefined ||
+        authenticatedIdentity !== releasedIdentity
+    ) {
         return null;
     }
-    return (
-        <Activity
-            mode={verificationSettled ? "visible" : "hidden"}
-            name="authenticated-notifications"
-        >
-            <NotificationCenter />
-        </Activity>
-    );
+
+    // A route-level background check keeps the previously verified identity current.
+    // A failed check or resolved identity change still removes this private subtree.
+    return <NotificationCenter />;
 }

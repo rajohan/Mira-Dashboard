@@ -791,6 +791,36 @@ describe("persistent Gateway protocol-v4 boundary", () => {
                 event: "agent",
                 payload: {
                     data: {
+                        args: { secret: "must-not-cross" },
+                        completed: true,
+                        phase: "end",
+                        privateDetail: "must-not-cross",
+                        willRetry: false,
+                    },
+                    runId: "provider-run-compaction",
+                    seq: 5,
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                    ts: 1003,
+                },
+                type: "event",
+            })
+        ).toEqual({
+            event: "agent",
+            payload: {
+                data: { completed: true, phase: "end", willRetry: false },
+                runId: "provider-run-compaction",
+                seq: 5,
+                sessionKey: "agent:main:main",
+                stream: "compaction",
+                ts: 1003,
+            },
+        });
+        expect(
+            parsePersistentGatewayPrivateChatEvent({
+                event: "agent",
+                payload: {
+                    data: {
                         isReasoningSnapshot: true,
                         text: "Cumulative reasoning",
                     },

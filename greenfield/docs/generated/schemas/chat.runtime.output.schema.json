@@ -290,6 +290,11 @@
                     "kind": {
                       "const": "item"
                     },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
                     "sequence": {
                       "type": "integer",
                       "minimum": 1,
@@ -1509,6 +1514,11 @@
                     },
                     "kind": {
                       "const": "item"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
                     },
                     "sequence": {
                       "type": "integer",

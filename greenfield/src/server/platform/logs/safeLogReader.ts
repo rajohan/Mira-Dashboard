@@ -234,8 +234,8 @@ function createSourceReadCoordinator() {
         const predecessor = pending.get(sourceId) ?? Promise.resolve();
         const completion = Promise.withResolvers<void>();
         pending.set(sourceId, completion.promise);
-        await predecessor;
         try {
+            await predecessor;
             return await operation();
         } finally {
             completion.resolve();

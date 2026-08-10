@@ -2,11 +2,14 @@ import { describe, expect, jest, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 
+import type { AuthStatus } from "../contracts/auth.ts";
+import { deriveGatewaySessionStats } from "../contracts/gatewaySessions.ts";
 import { createDashboardQueryClient } from "./api/queryClient.ts";
 import { createDashboardTrpcClient } from "./api/trpcClient.ts";
 import { DashboardBrowserApplication } from "./application.tsx";
 import { authStatusQueryKey } from "./auth/authQueries.ts";
 import { createDashboardBrowserCollections } from "./data/dashboardCollections.ts";
+import { jobQueueSummaryQueryKey } from "./jobs/jobQueries.ts";
 import { notificationLatestQueryKey } from "./notifications/notificationQueries.ts";
 import { createDashboardRouter } from "./router.tsx";
 import type { DashboardWebAuthnClient } from "./security/webauthn/webauthnClient.ts";
@@ -244,6 +247,271 @@ describe("Dashboard browser application", () => {
                 await screen.findByRole("heading", { level: 1, name: "Sign in" })
             ).toBeTruthy();
         } finally {
+            view.unmount();
+            await collections.cleanup();
+            queryClient.clear();
+            readinessFetch.mockRestore();
+        }
+    });
+
+    test("keeps authenticated header controls mounted across route verification", async () => {
+        const timestampMs = Date.now();
+        const authentication: Extract<AuthStatus, { state: "authenticated" }> = {
+            session: {
+                authenticatedAtMs: timestampMs,
+                authMethod: "password",
+                createdAtMs: timestampMs,
+                expiresAtMs: timestampMs + 86_400_000,
+                id: "a".repeat(32),
+                isCurrent: true,
+                lastSeenAtMs: timestampMs,
+                userAgent: "Dashboard navigation test",
+            },
+            state: "authenticated",
+            user: {
+                id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                username: "operator",
+            },
+        };
+        const secondAuthenticationCheck = Promise.withResolvers<AuthStatus>();
+        let authenticationCalls = 0;
+        let deferAuthenticationChecks = false;
+        let gatewayStatusCalls = 0;
+        let notificationCalls = 0;
+        let workerStatusCalls = 0;
+        const queryClient = createDashboardQueryClient();
+        const router = createDashboardRouter(
+            createMemoryHistory({ initialEntries: ["/agents"] })
+        );
+        const readinessFetch = jest
+            .spyOn(globalThis, "fetch")
+            .mockResolvedValue(Response.json({ status: "ready" }));
+        const trpcClient = createDashboardTrpcClient({
+            mutation(path) {
+                return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+            },
+            query(path) {
+                switch (path) {
+                    case "auth.status": {
+                        authenticationCalls += 1;
+                        return deferAuthenticationChecks
+                            ? secondAuthenticationCheck.promise
+                            : Promise.resolve(authentication);
+                    }
+                    case "agents.getConfiguration": {
+                        return Promise.resolve({ agents: [] });
+                    }
+                    case "agents.listStatuses": {
+                        return Promise.resolve({ statuses: [] });
+                    }
+                    case "agents.listTaskHistory": {
+                        return Promise.resolve({ runs: [] });
+                    }
+                    case "gateway.connection.get": {
+                        gatewayStatusCalls += 1;
+                        return Promise.resolve({
+                            checkedAtMs: timestampMs,
+                            connectedAtMs: timestampMs,
+                            connectionGeneration: 1,
+                            freshness: "fresh" as const,
+                            lastActivityAtMs: timestampMs,
+                            phase: "connected" as const,
+                            reconnectAttempt: 0,
+                        });
+                    }
+                    case "gatewaySessions.list": {
+                        return Promise.resolve({
+                            filter: "ALL" as const,
+                            projectionTruncated: false,
+                            sessions: [],
+                            source: {
+                                checkedAtMs: timestampMs,
+                                connection: "connected" as const,
+                                freshness: "fresh" as const,
+                                observedAtMs: timestampMs,
+                            },
+                            stats: deriveGatewaySessionStats([], timestampMs),
+                        });
+                    }
+                    case "jobs.listRuns": {
+                        workerStatusCalls += 1;
+                        return Promise.resolve({
+                            runs: [],
+                            summary: {
+                                activeResourceClasses: [],
+                                control: {
+                                    claimingPaused: false,
+                                    updatedAtMs: timestampMs,
+                                    version: 1,
+                                },
+                                stateCounts: {
+                                    cancelled: 0,
+                                    failed: 0,
+                                    queued: 0,
+                                    running: 0,
+                                    succeeded: 0,
+                                    "timed-out": 0,
+                                },
+                                workers: [],
+                            },
+                        });
+                    }
+                    case "notifications.list": {
+                        notificationCalls += 1;
+                        return Promise.resolve({
+                            notifications: [],
+                            readCount: 0,
+                            unreadCount: 0,
+                        });
+                    }
+                    default: {
+                        return Promise.reject(new TypeError(`Unexpected query: ${path}`));
+                    }
+                }
+            },
+        });
+        const collections = createDashboardBrowserCollections(queryClient, trpcClient);
+        const view = render(
+            <DashboardBrowserApplication
+                collections={collections}
+                queryClient={queryClient}
+                realtimeClient={noOpDashboardRealtimeClient}
+                router={router}
+                trpcClient={trpcClient}
+                webAuthnClient={unexpectedWebAuthnClient}
+            />
+        );
+
+        try {
+            expect(
+                await screen.findByRole("heading", { level: 1, name: "Agents" })
+            ).toBeVisible();
+            const logoutButton = screen.getByRole("button", { name: "Log out" });
+            const statusButton = screen.getByRole("button", {
+                name: /^System status:/u,
+            });
+            const notificationButton = await screen.findByRole("button", {
+                name: "Notifications, none unread",
+            });
+            await userEvent.click(notificationButton);
+            const notificationHeading = await screen.findByRole("heading", {
+                level: 2,
+                name: "Notifications",
+            });
+            const authenticationCallsBeforeNavigation = authenticationCalls;
+            const gatewayStatusCallsBeforeNavigation = gatewayStatusCalls;
+            const notificationCallsBeforeNavigation = notificationCalls;
+            const readinessCallsBeforeNavigation = readinessFetch.mock.calls.length;
+            const workerStatusCallsBeforeNavigation = workerStatusCalls;
+            deferAuthenticationChecks = true;
+
+            await act(async () => {
+                await router.navigate({ to: "/sessions" });
+            });
+            await waitFor(() =>
+                expect(authenticationCalls).toBeGreaterThan(
+                    authenticationCallsBeforeNavigation
+                )
+            );
+
+            expect(router.state.location.pathname).toBe("/sessions");
+            expect(screen.getByRole("button", { name: "Log out" })).toBe(logoutButton);
+            expect(screen.getByRole("button", { name: /^System status:/u })).toBe(
+                statusButton
+            );
+            expect(
+                screen.getByRole("button", { name: "Notifications, none unread" })
+            ).toBe(notificationButton);
+            expect(notificationButton).toBeVisible();
+            expect(notificationButton).toHaveAttribute("aria-expanded", "true");
+            expect(notificationHeading).toBeVisible();
+            expect(gatewayStatusCalls).toBe(gatewayStatusCallsBeforeNavigation);
+            expect(notificationCalls).toBe(notificationCallsBeforeNavigation);
+            expect(readinessFetch).toHaveBeenCalledTimes(readinessCallsBeforeNavigation);
+            expect(workerStatusCalls).toBe(workerStatusCallsBeforeNavigation);
+
+            await act(async () => {
+                secondAuthenticationCheck.resolve(authentication);
+                await secondAuthenticationCheck.promise;
+            });
+            expect(
+                await screen.findByRole("heading", { level: 1, name: "Sessions" })
+            ).toBeVisible();
+            expect(screen.getByRole("button", { name: "Log out" })).toBe(logoutButton);
+            expect(screen.getByRole("button", { name: /^System status:/u })).toBe(
+                statusButton
+            );
+            expect(
+                screen.getByRole("button", { name: "Notifications, none unread" })
+            ).toBe(notificationButton);
+            expect(notificationButton).toHaveAttribute("aria-expanded", "true");
+            expect(notificationHeading).toBeVisible();
+            expect(gatewayStatusCalls).toBe(gatewayStatusCallsBeforeNavigation);
+            expect(notificationCalls).toBe(notificationCallsBeforeNavigation);
+            expect(readinessFetch).toHaveBeenCalledTimes(readinessCallsBeforeNavigation);
+            expect(workerStatusCalls).toBe(workerStatusCallsBeforeNavigation);
+
+            act(() => {
+                queryClient.setQueryData(jobQueueSummaryQueryKey, {
+                    runs: [],
+                    summary: {
+                        activeResourceClasses: [],
+                        control: {
+                            claimingPaused: false,
+                            updatedAtMs: timestampMs,
+                            version: 2,
+                        },
+                        stateCounts: {
+                            cancelled: 0,
+                            failed: 0,
+                            queued: 0,
+                            running: 0,
+                            succeeded: 0,
+                            "timed-out": 0,
+                        },
+                        workers: [
+                            {
+                                activeRunCount: 0,
+                                capacity: 1,
+                                heartbeatAtMs: timestampMs,
+                                id: "019fe300-0000-7000-8000-000000000001",
+                                releaseId: "a".repeat(40),
+                                startedAtMs: timestampMs,
+                                state: "online" as const,
+                            },
+                        ],
+                    },
+                });
+                queryClient.setQueryData(notificationLatestQueryKey, {
+                    notifications: [],
+                    readCount: 4,
+                    unreadCount: 2,
+                });
+            });
+            await waitFor(() => {
+                expect(statusButton).toHaveAttribute(
+                    "aria-label",
+                    "System status: all systems online. Open details"
+                );
+                expect(notificationButton).toHaveAttribute(
+                    "aria-label",
+                    "Notifications, 2 unread"
+                );
+                expect(notificationHeading.nextElementSibling).toHaveTextContent(
+                    "2 unread · 4 read"
+                );
+            });
+            expect(screen.getByRole("button", { name: "Log out" })).toBe(logoutButton);
+            expect(
+                screen.getByRole("button", {
+                    name: "System status: all systems online. Open details",
+                })
+            ).toBe(statusButton);
+            expect(screen.getByRole("button", { name: "Notifications, 2 unread" })).toBe(
+                notificationButton
+            );
+        } finally {
+            secondAuthenticationCheck.resolve(authentication);
             view.unmount();
             await collections.cleanup();
             queryClient.clear();

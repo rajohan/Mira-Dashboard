@@ -3007,6 +3007,12 @@ describe("durable jobs repository", () => {
                     payloadJsons: [" ".repeat(65_537)],
                 })
             ).toThrow("outside its budget");
+            expect(() =>
+                repository.readActionPayloadRunSnapshots({
+                    actionKey: "maintenance.rotate-logs",
+                    payloadJsons: [JSON.stringify({ value: "x".repeat(128) })],
+                })
+            ).toThrow("outside its status budget");
         } finally {
             database.sqlite.close(true);
         }

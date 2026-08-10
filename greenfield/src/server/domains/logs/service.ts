@@ -1,10 +1,9 @@
 import {
     logMaintenancePolicyIds,
     type ListLogSourcesOutput,
-    type LogMaintenanceActiveRun,
-    type LogMaintenanceLastRun,
     type LogMaintenancePolicyId,
     type LogMaintenancePolicyStatus,
+    type LogMaintenanceRunStatus,
     type LogMaintenanceStatusOutput,
     type LogSnapshotOutput,
     type RequestLogMaintenanceInput,
@@ -17,6 +16,7 @@ import { SafeLogReaderError } from "../../platform/logs/safeLogReader.ts";
 import type { LogSourceCatalog } from "../../platform/logs/sourceCatalog.ts";
 import type {
     LogMaintenanceAuditContext,
+    LogMaintenanceAuditEvent,
     LogMaintenanceAuditWriter,
 } from "./operationAudit.ts";
 
@@ -45,13 +45,9 @@ export class LogsServiceError extends Error {
 
 export interface LogMaintenanceQueuePort {
     /** Returns active and latest terminal non-dry-run observations for fixed policies. */
-    readonly runStatuses: (signal?: AbortSignal) => Promise<
-        readonly Readonly<{
-            readonly activeRun?: LogMaintenanceActiveRun;
-            readonly lastRun?: LogMaintenanceLastRun;
-            readonly policyId: LogMaintenancePolicyId;
-        }>[]
-    >;
+    readonly runStatuses: (
+        signal?: AbortSignal
+    ) => Promise<readonly LogMaintenanceRunStatus[]>;
     /** Returns exact policies accepted by this release's durable queue. */
     readonly queueablePolicies: (
         signal?: AbortSignal
@@ -143,20 +139,32 @@ export function createLogsService({
     async function settle(
         input: RequestLogMaintenanceInput,
         context: LogMaintenanceAuditContext,
-        settlement: "failed" | "queued"
+        settlement:
+            | { readonly kind: "failed" }
+            | { readonly jobRunId: string; readonly kind: "queued" }
     ): Promise<void> {
         try {
-            await auditWriter.record({
-                ...context,
-                dryRun: input.dryRun,
-                policyId: input.policyId,
-                settlement,
-            });
+            const event: LogMaintenanceAuditEvent =
+                settlement.kind === "queued"
+                    ? {
+                          ...context,
+                          dryRun: input.dryRun,
+                          jobRunId: settlement.jobRunId,
+                          policyId: input.policyId,
+                          settlement: "queued",
+                      }
+                    : {
+                          ...context,
+                          dryRun: input.dryRun,
+                          policyId: input.policyId,
+                          settlement: "failed",
+                      };
+            await auditWriter.record(event);
         } catch {
             onAuditSettlementFailure({
                 dryRun: input.dryRun,
                 policyId: input.policyId,
-                settlement,
+                settlement: settlement.kind,
             });
         }
     }
@@ -210,10 +218,13 @@ export function createLogsService({
             try {
                 result = await maintenanceQueue.enqueue(input, signal);
             } catch (error) {
-                await settle(input, auditContext, "failed");
+                await settle(input, auditContext, { kind: "failed" });
                 throw serviceFailure(error);
             }
-            await settle(input, auditContext, "queued");
+            await settle(input, auditContext, {
+                jobRunId: result.jobRunId,
+                kind: "queued",
+            });
             return {
                 dryRun: input.dryRun,
                 jobRunId: result.jobRunId,

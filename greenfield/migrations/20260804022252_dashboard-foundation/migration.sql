@@ -1110,8 +1110,8 @@ CREATE INDEX `job_run_events_occurred_run_sequence_idx` ON `job_run_events` (`oc
 CREATE UNIQUE INDEX `job_runs_idempotency_unique` ON `job_runs` (`requested_by_kind`,`requested_by_id`,`idempotency_key`);--> statement-breakpoint
 CREATE INDEX `job_runs_claim_idx` ON `job_runs` ("available_at" asc,"priority" desc,"queued_at" asc,"id" asc) WHERE "job_runs"."state" = 'queued';--> statement-breakpoint
 CREATE UNIQUE INDEX `job_runs_one_active_schedule_idx` ON `job_runs` (`scheduled_job_id`) WHERE "job_runs"."scheduled_job_id" IS NOT NULL AND "job_runs"."state" IN ('queued', 'running');--> statement-breakpoint
-CREATE INDEX `job_runs_action_payload_active_idx` ON `job_runs` (`action_key`,`payload_json`,"state" desc,"queued_at" desc,"id" desc) WHERE "job_runs"."state" IN ('queued', 'running');--> statement-breakpoint
-CREATE INDEX `job_runs_action_payload_terminal_idx` ON `job_runs` (`action_key`,`payload_json`,"queued_at" desc,"id" desc) WHERE "job_runs"."state" IN ('cancelled', 'failed', 'succeeded', 'timed-out');--> statement-breakpoint
+CREATE INDEX `job_runs_action_active_idx` ON `job_runs` (`action_key`,"state" desc,"queued_at" desc,"id" desc) WHERE "job_runs"."state" IN ('queued', 'running');--> statement-breakpoint
+CREATE INDEX `job_runs_action_payload_terminal_idx` ON `job_runs` (`action_key`,`payload_json`,"queued_at" desc,"id" desc) WHERE "job_runs"."action_key" = 'maintenance.rotate-logs' AND length(CAST("job_runs"."payload_json" AS BLOB)) <= 128 AND "job_runs"."state" IN ('cancelled', 'failed', 'succeeded', 'timed-out');--> statement-breakpoint
 CREATE INDEX `job_runs_queued_id_idx` ON `job_runs` (`queued_at`,`id`);--> statement-breakpoint
 CREATE INDEX `job_runs_schedule_queued_id_idx` ON `job_runs` (`scheduled_job_id`,`queued_at`,`id`);--> statement-breakpoint
 CREATE INDEX `job_runs_running_lease_idx` ON `job_runs` (`lease_expires_at`,`id`) WHERE "job_runs"."state" = 'running';--> statement-breakpoint

@@ -125,6 +125,7 @@ describe("security audit lifecycle", () => {
             await writer.record({
                 actor,
                 dryRun: false,
+                jobRunId: "019fc968-1a9b-7770-8f1b-d5b863b0e7b5",
                 policyId: "host-rsyslog",
                 requestId,
                 settlement: "queued",
@@ -153,8 +154,8 @@ describe("security audit lifecycle", () => {
                 outcome: "succeeded",
                 requestId,
                 target: {
-                    id: "host-rsyslog",
-                    type: "log-maintenance-policy",
+                    id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b5",
+                    type: "job-run",
                 },
             });
         } finally {

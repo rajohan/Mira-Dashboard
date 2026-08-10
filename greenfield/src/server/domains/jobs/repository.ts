@@ -47,6 +47,10 @@ import {
 } from "../../../contracts/schedules.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import {
+    logMaintenanceJobActionKey,
+    logMaintenanceJobPayloadIndexMaximumBytes,
+} from "../../../shared/logMaintenanceUnits.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import { auditEvents } from "../../database/schema/auditEvents.ts";
 import { jobDisableIntents } from "../../database/schema/jobDisableIntents.ts";
@@ -515,12 +519,23 @@ const claimCandidateMaximum = 32;
 const recoveryBatchMaximum = 32;
 const activeActionPayloadMaximum = 256;
 const actionPayloadRunSnapshotMaximum = 32;
+const activeRunStateList = [
+    "queued",
+    "running",
+] as const satisfies readonly JobRunState[];
 const terminalRunStateList = [
     "cancelled",
     "failed",
     "succeeded",
     "timed-out",
 ] as const satisfies readonly JobRunState[];
+// SQLite partial-index matching requires the same literal state predicates as the DDL.
+function literalStateList(states: readonly JobRunState[]): SQL {
+    return sql.raw(states.map((state) => `'${state}'`).join(", "));
+}
+const activeStateFilter = sql`${jobRuns.state} IN (${literalStateList(activeRunStateList)})`;
+const terminalStateFilter = sql`${jobRuns.state} IN (${literalStateList(terminalRunStateList)})`;
+const logMaintenanceSnapshotScopeFilter = sql`${jobRuns.actionKey} = ${sql.raw(`'${logMaintenanceJobActionKey}'`)} AND length(CAST(${jobRuns.payloadJson} AS BLOB)) <= ${sql.raw(String(logMaintenanceJobPayloadIndexMaximumBytes))}`;
 const terminalRunStates = new Set<JobRunState>(terminalRunStateList);
 
 function requiredRow<T>(row: T | undefined, operation: string): T {
@@ -779,7 +794,7 @@ class DrizzleJobReader implements JobRepositoryReader {
                     inArray(jobRuns.state, ["queued", "running"])
                 )
             )
-            .orderBy(asc(jobRuns.queuedAt), asc(jobRuns.id))
+            .orderBy(desc(jobRuns.state), desc(jobRuns.queuedAt), desc(jobRuns.id))
             .limit(input.limit + 1)
             .all();
         return {
@@ -801,13 +816,25 @@ class DrizzleJobReader implements JobRepositoryReader {
             actionPayloadRunSnapshotMaximum,
             "action payload run snapshot"
         );
+        const usesMaintenanceStatusIndex = actionKey === logMaintenanceJobActionKey;
         const payloadJsons = input.payloadJsons.map((payloadJson) => {
             if (utf8ByteLength(payloadJson) > jobPayloadMaximumBytes) {
                 throw new TypeError(
                     "Jobs repository action payload is outside its budget"
                 );
             }
-            return JSON.stringify(v.parse(jobPayloadSchema, parseJsonText(payloadJson)));
+            const canonical = JSON.stringify(
+                v.parse(jobPayloadSchema, parseJsonText(payloadJson))
+            );
+            if (
+                usesMaintenanceStatusIndex &&
+                utf8ByteLength(canonical) > logMaintenanceJobPayloadIndexMaximumBytes
+            ) {
+                throw new TypeError(
+                    "Jobs repository log-maintenance payload is outside its status budget"
+                );
+            }
+            return canonical;
         });
         if (new Set(payloadJsons).size !== payloadJsons.length) {
             throw new TypeError(
@@ -815,14 +842,17 @@ class DrizzleJobReader implements JobRepositoryReader {
             );
         }
         return payloadJsons.map((payloadJson) => {
-            const baseCondition = and(
-                eq(jobRuns.actionKey, actionKey),
-                eq(jobRuns.payloadJson, payloadJson)
-            );
+            const actionCondition = eq(jobRuns.actionKey, actionKey);
             const activeRow = this.database
                 .select()
                 .from(jobRuns)
-                .where(and(baseCondition, sql`${jobRuns.state} IN ('queued', 'running')`))
+                .where(
+                    and(
+                        actionCondition,
+                        eq(jobRuns.payloadJson, payloadJson),
+                        activeStateFilter
+                    )
+                )
                 .orderBy(desc(jobRuns.state), desc(jobRuns.queuedAt), desc(jobRuns.id))
                 .get();
             const lastRow = this.database
@@ -830,8 +860,11 @@ class DrizzleJobReader implements JobRepositoryReader {
                 .from(jobRuns)
                 .where(
                     and(
-                        baseCondition,
-                        sql`${jobRuns.state} IN ('cancelled', 'failed', 'succeeded', 'timed-out')`
+                        usesMaintenanceStatusIndex
+                            ? logMaintenanceSnapshotScopeFilter
+                            : actionCondition,
+                        eq(jobRuns.payloadJson, payloadJson),
+                        terminalStateFilter
                     )
                 )
                 .orderBy(desc(jobRuns.queuedAt), desc(jobRuns.id))
@@ -1322,12 +1355,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
             const active = this.#transaction
                 .select()
                 .from(jobRuns)
-                .where(
-                    and(
-                        eq(jobRuns.actionKey, run.actionKey),
-                        sql`${jobRuns.state} IN ('queued', 'running')`
-                    )
-                )
+                .where(and(eq(jobRuns.actionKey, run.actionKey), activeStateFilter))
                 .get();
             if (active !== undefined) return { kind: "active", run: parseRun(active) };
         }
@@ -1488,10 +1516,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 .select()
                 .from(jobRuns)
                 .where(
-                    and(
-                        eq(jobRuns.actionKey, validatedRun.actionKey),
-                        sql`${jobRuns.state} IN ('queued', 'running')`
-                    )
+                    and(eq(jobRuns.actionKey, validatedRun.actionKey), activeStateFilter)
                 )
                 .get();
             if (activeActionRun !== undefined) {

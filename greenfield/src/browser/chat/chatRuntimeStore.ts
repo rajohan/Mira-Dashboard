@@ -164,17 +164,29 @@ export interface ChatExternalRunProjection {
     readonly continuity: "complete" | "interrupted";
     readonly hasUnprojectedActivity: boolean;
     readonly message: ChatDisplayMessage;
+    /** Consecutive authoritative inventories that omitted this still-retained run. */
+    readonly omissionCount?: number;
     readonly observationEpoch: number;
     readonly observedAtMs: number;
     readonly plan?: ChatActivePlanView;
     readonly projectionTruncated: boolean;
     readonly providerRunId: string;
+    /** Provider-ordered assistant lanes split at steer/user boundaries. */
+    readonly segments?: readonly ChatExternalRunSegmentProjection[];
     readonly source: "provider-in-flight" | "provider-runtime";
     readonly streamResets?: readonly Readonly<{
         readonly resetKey: string;
         readonly sourceStreamKey: string;
     }>[];
     readonly updatedAtMs: number;
+}
+
+export interface ChatExternalRunSegmentProjection {
+    readonly message: ChatDisplayMessage;
+    /** Provider user text preceding this lane; used only to place an existing user row. */
+    readonly precedingUserText?: string;
+    readonly providerSequence: number;
+    readonly segmentId: string;
 }
 
 function emptySession(): ChatSessionRuntime {
@@ -303,6 +315,9 @@ function planAfterEvent(
 
 function truncatedExternalPartIdentity(part: ChatMessagePart): string | undefined {
     if (part.kind === "tool") return `tool:${part.callId}`;
+    if (part.kind === "control" && part.activity !== undefined) {
+        return "activity:compaction";
+    }
     if (
         (part.kind === "text" || part.kind === "thinking") &&
         part.sourceKey !== undefined
@@ -527,7 +542,7 @@ function mergeTruncatedExternalParts(
     }
 
     const merged: ChatMessagePart[] = knownParts.filter(
-        (part) => part.kind !== "control"
+        (part) => part.kind !== "control" || part.activity !== undefined
     );
     const knownIdentities = new Set(
         merged.flatMap((part) => {
@@ -548,7 +563,7 @@ function mergeTruncatedExternalParts(
     }
     let lastIncomingIndex: number | undefined;
     for (const [incomingIndex, part] of replayedIncoming.entries()) {
-        if (part.kind === "control") continue;
+        if (part.kind === "control" && part.activity === undefined) continue;
         const identity = truncatedExternalPartIdentity(part);
         const existingIndex =
             identity === undefined
@@ -587,6 +602,7 @@ function mergeTruncatedExternalParts(
     for (const part of [...incomingParts, ...knownParts]) {
         if (
             part.kind === "control" &&
+            part.activity === undefined &&
             !controls.some(
                 (candidate) =>
                     candidate.kind === "control" && candidate.text === part.text
@@ -596,6 +612,164 @@ function mergeTruncatedExternalParts(
         }
     }
     return [...merged, ...controls];
+}
+
+function mergeExternalSegments(
+    known: readonly ChatExternalRunSegmentProjection[],
+    incoming: readonly ChatExternalRunSegmentProjection[],
+    replacedSourceStreams: ReadonlySet<string>
+): readonly ChatExternalRunSegmentProjection[] {
+    const merged: ChatExternalRunSegmentProjection[] = known
+        .map((segment) => {
+            const retainedParts = segment.message.parts.filter(
+                (part) =>
+                    (part.kind !== "text" && part.kind !== "thinking") ||
+                    part.sourceStreamKey === undefined ||
+                    !replacedSourceStreams.has(part.sourceStreamKey)
+            );
+            return {
+                ...segment,
+                message: { ...segment.message, parts: retainedParts },
+            };
+        })
+        .filter(
+            (segment) =>
+                segment.precedingUserText !== undefined ||
+                segment.message.parts.length > 0
+        );
+    let lastIncomingIndex: number | undefined;
+    for (const [incomingIndex, segment] of incoming.entries()) {
+        const existingIndex = merged.findIndex(
+            (candidate) => candidate.segmentId === segment.segmentId
+        );
+        if (existingIndex !== -1) {
+            const previous = merged[existingIndex]!;
+            const parts = mergeTruncatedExternalParts(
+                previous.message.parts,
+                segment.message.parts,
+                replacedSourceStreams
+            );
+            const unchanged =
+                JSON.stringify(previous.message.parts) === JSON.stringify(parts);
+            const lifecycleObservation = parts.some(
+                (part) => part.kind === "control" && part.activity !== undefined
+            );
+            merged[existingIndex] = {
+                ...previous,
+                ...segment,
+                message: {
+                    ...segment.message,
+                    parts,
+                    ...(unchanged &&
+                    !lifecycleObservation &&
+                    previous.message.timestampMs !== undefined
+                        ? { timestampMs: previous.message.timestampMs }
+                        : {}),
+                },
+            };
+            lastIncomingIndex = existingIndex;
+            continue;
+        }
+        const nextKnownId = incoming
+            .slice(incomingIndex + 1)
+            .map((candidate) => candidate.segmentId)
+            .find((segmentId) =>
+                merged.some((candidate) => candidate.segmentId === segmentId)
+            );
+        const nextKnownIndex =
+            nextKnownId === undefined
+                ? -1
+                : merged.findIndex((candidate) => candidate.segmentId === nextKnownId);
+        let insertionIndex = nextKnownIndex === -1 ? merged.length : nextKnownIndex;
+        if (lastIncomingIndex !== undefined) {
+            insertionIndex = Math.min(
+                lastIncomingIndex + 1,
+                nextKnownIndex === -1 ? Infinity : nextKnownIndex
+            );
+        }
+        merged.splice(insertionIndex, 0, segment);
+        lastIncomingIndex = insertionIndex;
+    }
+    return merged;
+}
+
+function externalSegments(
+    projection: ChatExternalRunProjection
+): readonly ChatExternalRunSegmentProjection[] {
+    return (
+        projection.segments ?? [
+            {
+                message: projection.message,
+                providerSequence: projection.message.sequence,
+                segmentId: "legacy-aggregate",
+            },
+        ]
+    );
+}
+
+function withExternalSegments(
+    projection: ChatExternalRunProjection,
+    segments: readonly ChatExternalRunSegmentProjection[]
+): ChatExternalRunProjection {
+    const message = {
+        ...projection.message,
+        parts: segments.flatMap((segment) => segment.message.parts),
+    };
+    if (
+        projection.segments === undefined &&
+        segments.length === 1 &&
+        segments[0]?.segmentId === "legacy-aggregate" &&
+        segments[0].precedingUserText === undefined
+    ) {
+        return { ...projection, message };
+    }
+    return {
+        ...projection,
+        message,
+        segments,
+    };
+}
+
+function reconcileExternalSegmentsWithAuthoritativeParts(
+    segments: readonly ChatExternalRunSegmentProjection[],
+    parts: readonly ChatMessagePart[]
+): readonly ChatExternalRunSegmentProjection[] {
+    const authoritativeByIdentity = new Map(
+        parts.flatMap((part) => {
+            const identity = truncatedExternalPartIdentity(part);
+            return identity === undefined ? [] : [[identity, part] as const];
+        })
+    );
+    return segments.flatMap((segment) => {
+        if (segment.message.parts.length === 0) return [segment];
+        const reconciled = segment.message.parts.flatMap((part) => {
+            const identity = truncatedExternalPartIdentity(part);
+            if (identity === undefined) return [part];
+            const authoritative = authoritativeByIdentity.get(identity);
+            return authoritative === undefined ? [] : [authoritative];
+        });
+        return reconciled.length === 0
+            ? []
+            : [
+                  {
+                      ...segment,
+                      message: { ...segment.message, parts: reconciled },
+                  },
+              ];
+    });
+}
+
+function trimExternalRuns(
+    runs: Readonly<Record<string, ChatExternalRunProjection>>
+): Readonly<Record<string, ChatExternalRunProjection>> {
+    return Object.fromEntries(
+        Object.entries(runs)
+            .toSorted(
+                ([leftId, left], [rightId, right]) =>
+                    right.updatedAtMs - left.updatedAtMs || leftId.localeCompare(rightId)
+            )
+            .slice(0, retainedSettledRunLimit)
+    );
 }
 
 function applyRunEvent(run: ChatRuntimeRun, event: ChatRuntimeEvent): ChatRuntimeRun {
@@ -1008,6 +1182,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
         projection: Readonly<{
             clientRunIds: readonly string[];
             idempotencyKeys: readonly string[];
+            providerRunIds?: readonly string[];
             runIds: readonly string[];
             throughCursor: number;
         }>
@@ -1028,6 +1203,10 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
             for (const runId of projection.runIds) {
                 delete runs[runId];
             }
+            const externalRuns = { ...session.externalRuns };
+            for (const providerRunId of projection.providerRunIds ?? []) {
+                delete externalRuns[providerRunId];
+            }
             return {
                 ...state,
                 sessions: {
@@ -1038,6 +1217,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                             projection.throughCursor < session.lastCursor ||
                             runsNeedReconciliation(runs),
                         optimisticSends,
+                        externalRuns,
                         runs,
                     },
                 },
@@ -1168,10 +1348,10 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
     ): void {
         this.setState((state) => {
             const session = state.sessions[sessionKey] ?? emptySession();
-            const externalRuns = Object.fromEntries(
+            const installed = Object.fromEntries(
                 projections.map((projection) => {
                     const existing = session.externalRuns[projection.providerRunId];
-                    if (!projection.projectionTruncated || existing === undefined) {
+                    if (existing === undefined) {
                         return [projection.providerRunId, projection] as const;
                     }
                     const existingResetByStream = new Map(
@@ -1189,23 +1369,52 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                             )
                             .map(({ sourceStreamKey }) => sourceStreamKey)
                     );
-                    const parts = mergeTruncatedExternalParts(
+                    const segments = mergeExternalSegments(
+                        externalSegments(existing),
+                        externalSegments(projection),
+                        newlyReplacedStreams
+                    );
+                    const authoritativeParts = mergeTruncatedExternalParts(
                         existing.message.parts,
                         projection.message.parts,
                         newlyReplacedStreams
                     );
+                    const reconciledSegments = projection.projectionTruncated
+                        ? reconcileExternalSegmentsWithAuthoritativeParts(
+                              segments,
+                              authoritativeParts
+                          )
+                        : externalSegments(projection);
                     const streamResets = projection.streamResets ?? existing.streamResets;
-                    const preserved: ChatExternalRunProjection = {
-                        ...projection,
-                        message: { ...projection.message, parts },
-                        ...((projection.plan ?? existing.plan) === undefined
-                            ? {}
-                            : { plan: projection.plan ?? existing.plan }),
-                        ...(streamResets === undefined ? {} : { streamResets }),
-                    };
+                    const plan =
+                        projection.plan ??
+                        (projection.projectionTruncated ? existing.plan : undefined);
+                    const preserved = withExternalSegments(
+                        {
+                            ...projection,
+                            omissionCount: 0,
+                            ...(plan === undefined ? {} : { plan }),
+                            ...(streamResets === undefined ? {} : { streamResets }),
+                        },
+                        reconciledSegments
+                    );
                     return [projection.providerRunId, preserved] as const;
                 })
             );
+            const omitted = Object.fromEntries(
+                Object.entries(session.externalRuns).flatMap(([providerRunId, run]) => {
+                    if (installed[providerRunId] !== undefined) return [];
+                    if (truncated) return [[providerRunId, run] as const];
+                    const omissionCount = (run.omissionCount ?? 0) + 1;
+                    return omissionCount > 1
+                        ? []
+                        : [[providerRunId, { ...run, omissionCount }] as const];
+                })
+            );
+            const externalRuns = trimExternalRuns({
+                ...omitted,
+                ...installed,
+            });
             return {
                 ...state,
                 sessions: {
@@ -1247,7 +1456,7 @@ export function chatRuntimeMessages(
     const session = state.sessions[sessionKey];
     if (session === undefined) return [];
     const optimisticSends = Object.values(session.optimisticSends);
-    const optimistic = optimisticSends.map((send): ChatDisplayMessage => ({
+    const optimisticMessage = (send: ChatOptimisticSend): ChatDisplayMessage => ({
         attachments: send.attachments.map((attachment) => ({
             id: attachment.id,
             mediaType: attachment.mediaType,
@@ -1265,7 +1474,7 @@ export function chatRuntimeMessages(
         sequence: Number.MAX_SAFE_INTEGER - 1,
         sessionKey,
         timestampMs: send.createdAtMs,
-    }));
+    });
     const optimisticRunIds = new Set(optimisticSends.map((send) => send.clientRunId));
     const runs = Object.values(session.runs).flatMap((run) => [
         ...(run.userMessage === undefined || optimisticRunIds.has(run.message.runId ?? "")
@@ -1275,9 +1484,52 @@ export function chatRuntimeMessages(
             ? []
             : [run.message]),
     ]);
-    const externalRuns = Object.values(session.externalRuns).map(
-        ({ message }) => message
-    );
+    const matchedOptimisticRunIds = new Set<string>();
+    const externalRows = Object.values(session.externalRuns)
+        .toSorted(
+            (left, right) =>
+                left.observedAtMs - right.observedAtMs ||
+                left.providerRunId.localeCompare(right.providerRunId)
+        )
+        .flatMap((run) => {
+            const messages: ChatDisplayMessage[] = [];
+            let pendingUserText: string | undefined;
+            for (const segment of externalSegments(run)) {
+                if (segment.precedingUserText !== undefined) {
+                    pendingUserText = segment.precedingUserText;
+                    const matchingSend = optimisticSends.find(
+                        (send) =>
+                            !matchedOptimisticRunIds.has(send.clientRunId) &&
+                            send.text === pendingUserText
+                    );
+                    if (matchingSend !== undefined) {
+                        matchedOptimisticRunIds.add(matchingSend.clientRunId);
+                        messages.push({
+                            ...optimisticMessage(matchingSend),
+                            providerRunId: run.providerRunId,
+                            sequence: segment.providerSequence,
+                        });
+                    }
+                }
+                if (segment.message.parts.length === 0) {
+                    if (run.segments === undefined) {
+                        messages.push(segment.message);
+                    }
+                    continue;
+                }
+                messages.push({
+                    ...segment.message,
+                    ...(pendingUserText === undefined
+                        ? {}
+                        : { precedingUserTextAnchor: pendingUserText }),
+                });
+                pendingUserText = undefined;
+            }
+            return messages;
+        });
+    const optimistic = optimisticSends
+        .filter((send) => !matchedOptimisticRunIds.has(send.clientRunId))
+        .map((send) => optimisticMessage(send));
     const externalTruncation: readonly ChatDisplayMessage[] =
         session.externalRunsTruncated
             ? [
@@ -1297,8 +1549,14 @@ export function chatRuntimeMessages(
                   },
               ]
             : [];
-    return [...optimistic, ...runs, ...externalRuns, ...externalTruncation].toSorted(
+    return [...optimistic, ...runs, ...externalRows, ...externalTruncation].toSorted(
         (left, right) => {
+            const sameExternalRun =
+                left.providerRunId !== undefined &&
+                left.providerRunId === right.providerRunId;
+            if (sameExternalRun) {
+                return left.sequence - right.sequence || left.id.localeCompare(right.id);
+            }
             const leftUsesFallback = left.timestampMs === undefined;
             const rightUsesFallback = right.timestampMs === undefined;
             if (leftUsesFallback !== rightUsesFallback) {

@@ -6037,10 +6037,6 @@
           "isExpression": false
         },
         {
-          "value": "payload_json",
-          "isExpression": false
-        },
-        {
           "value": "\"state\" desc",
           "isExpression": true
         },
@@ -6056,7 +6052,7 @@
       "isUnique": false,
       "where": "\"job_runs\".\"state\" IN ('queued', 'running')",
       "origin": "manual",
-      "name": "job_runs_action_payload_active_idx",
+      "name": "job_runs_action_active_idx",
       "entityType": "indexes",
       "table": "job_runs"
     },
@@ -6080,7 +6076,7 @@
         }
       ],
       "isUnique": false,
-      "where": "\"job_runs\".\"state\" IN ('cancelled', 'failed', 'succeeded', 'timed-out')",
+      "where": "\"job_runs\".\"action_key\" = 'maintenance.rotate-logs' AND length(CAST(\"job_runs\".\"payload_json\" AS BLOB)) <= 128 AND \"job_runs\".\"state\" IN ('cancelled', 'failed', 'succeeded', 'timed-out')",
       "origin": "manual",
       "name": "job_runs_action_payload_terminal_idx",
       "entityType": "indexes",

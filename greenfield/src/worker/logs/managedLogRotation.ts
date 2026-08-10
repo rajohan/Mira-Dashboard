@@ -557,6 +557,9 @@ async function processFileTarget(
         throw sanitizedFailure();
     }
     if (file === undefined) {
+        if (recoveringCopyTruncate && !dryRun) {
+            await publishCopyTruncateEpochState("committed");
+        }
         return {
             result: { action: "missing", reason: "missing", targetId: target.id },
             retentionDeleted: 0,

@@ -29,7 +29,7 @@ const baseRuntimeOptions = {
         stateDirectory: "/srv/mira-dashboard/state",
     },
     logMaintenance: Object.freeze({
-        run: () => Promise.resolve(),
+        run: () => Promise.resolve(undefined),
     }),
     pid: 123,
     releaseId: "a".repeat(40),

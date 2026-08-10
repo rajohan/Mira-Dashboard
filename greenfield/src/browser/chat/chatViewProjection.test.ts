@@ -937,4 +937,112 @@ describe("chat view projection", () => {
             mergeChatMessages(canonical, runtime, new Set()).map(({ id }) => id)
         ).toEqual(["message-1", "message-2", "runtime-1", "runtime-2"]);
     });
+
+    test("anchors repeated same-text steers to the exact provider run", () => {
+        const canonicalUser = (id: string, providerRunId: string, sequence: number) => ({
+            attachments: [],
+            id,
+            parts: [{ kind: "text" as const, text: "Continue" }],
+            providerRunId,
+            role: "user" as const,
+            sequence,
+            sessionKey,
+        });
+        const external = (
+            id: string,
+            sequence: number,
+            precedingUserTextAnchor?: string
+        ) => ({
+            attachments: [],
+            id,
+            parts: [{ kind: "thinking" as const, status: "running" as const, text: id }],
+            ...(precedingUserTextAnchor === undefined ? {} : { precedingUserTextAnchor }),
+            providerRunId: "provider-current",
+            role: "assistant" as const,
+            sequence,
+            sessionKey,
+        });
+        const activityBeforeId = "external:provider-current:segment:activity-before";
+        const activityAfterId = "external:provider-current:segment:activity-after";
+        const merged = mergeChatMessages(
+            [
+                canonicalUser("older-same-text", "provider-older", 1),
+                canonicalUser("current-steer", "provider-current", 3),
+            ],
+            [external(activityBeforeId, 2), external(activityAfterId, 4, "Continue")],
+            new Set()
+        );
+
+        expect(merged.map(({ id }) => id)).toEqual([
+            "older-same-text",
+            activityBeforeId,
+            "current-steer",
+            activityAfterId,
+        ]);
+    });
+
+    test("retires every external segment only when canonical assistant coverage arrives", () => {
+        const runtime = [
+            {
+                attachments: [],
+                id: "external:provider:segment:thinking",
+                parts: [
+                    {
+                        kind: "thinking" as const,
+                        status: "running" as const,
+                        text: "Working",
+                    },
+                ],
+                providerRunId: "provider-covered",
+                role: "assistant" as const,
+                sequence: 1,
+                sessionKey,
+            },
+            {
+                attachments: [],
+                id: "external:provider:segment:tool",
+                parts: [
+                    {
+                        callId: "call-1",
+                        kind: "tool" as const,
+                        name: "bash",
+                        status: "completed" as const,
+                    },
+                ],
+                providerRunId: "provider-covered",
+                role: "assistant" as const,
+                sequence: 2,
+                sessionKey,
+            },
+        ];
+        const canonicalUser = {
+            attachments: [],
+            id: "canonical-user",
+            parts: [{ kind: "text" as const, text: "Prompt" }],
+            providerRunId: "provider-covered",
+            role: "user" as const,
+            sequence: 1,
+            sessionKey,
+        };
+        expect(
+            mergeChatMessages([canonicalUser], runtime, new Set()).map(({ id }) => id)
+        ).toContain("external:provider:segment:tool");
+
+        expect(
+            mergeChatMessages(
+                [
+                    canonicalUser,
+                    {
+                        ...canonicalUser,
+                        id: "canonical-assistant",
+                        parts: [{ kind: "text" as const, text: "Done" }],
+                        role: "assistant" as const,
+                        sequence: 2,
+                    },
+                ],
+                runtime,
+                new Set()
+            ).map(({ id }) => id)
+        ).toEqual(["canonical-user", "canonical-assistant"]);
+    });
 });

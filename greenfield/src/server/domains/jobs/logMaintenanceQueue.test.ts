@@ -434,8 +434,12 @@ describe("log-maintenance durable queue adapter", () => {
             ok: true,
         });
 
+        const succeededRun = fixture.runs[firstIndex];
+        if (succeededRun === undefined) {
+            throw new Error("Missing succeeded fixture run");
+        }
         fixture.runs[firstIndex] = {
-            ...fixture.runs[firstIndex],
+            ...succeededRun,
             resultJson: '{"unexpected":true}',
         };
         const updatedStatuses = await queue.runStatuses();
