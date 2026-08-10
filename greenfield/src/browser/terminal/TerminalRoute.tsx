@@ -28,7 +28,7 @@ export function TerminalPageLayout({ children }: TerminalPageLayoutProps) {
                     title="Terminal"
                 />
             </div>
-            <div className="mt-5 flex min-h-0 flex-1 flex-col">{children}</div>
+            <div className="mt-8 flex min-h-0 flex-1 flex-col">{children}</div>
         </div>
     );
 }

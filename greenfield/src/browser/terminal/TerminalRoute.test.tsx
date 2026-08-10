@@ -31,6 +31,6 @@ test("terminal page uses the shared page container without shrinking its workspa
         ])
     );
     expect(canvas.parentElement?.className.split(" ")).toEqual(
-        expect.arrayContaining(["min-h-0", "flex-1", "flex-col"])
+        expect.arrayContaining(["mt-8", "min-h-0", "flex-1", "flex-col"])
     );
 });
