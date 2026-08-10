@@ -16,7 +16,6 @@ export interface LogMaintenanceAuditContext {
 
 export interface LogMaintenanceAuditEvent extends LogMaintenanceAuditContext {
     readonly dryRun: boolean;
-    readonly jobRunId?: string;
     readonly policyId: LogMaintenancePolicyId;
     readonly settlement: "attempted" | "failed" | "queued";
 }
@@ -59,7 +58,6 @@ export function createSqliteLogMaintenanceAuditWriter({
                 actor: input.actor,
                 id: generateId(),
                 metadata: {
-                    ...(input.jobRunId === undefined ? {} : { jobRunId: input.jobRunId }),
                     settlement: classifiedSettlement(input.settlement),
                 },
                 occurredAt: clock(),

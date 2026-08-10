@@ -131,9 +131,12 @@ import {
 } from "../../src/contracts/jobs.ts";
 import {
     logMaintenanceActiveRunIsConsistent,
+    logMaintenanceExecutionOutcomeIsConsistent,
     logMaintenanceExecutionTimesAreConsistent,
     logMaintenanceJobResultIsConsistent,
     logMaintenanceLastRunIsConsistent,
+    logMaintenanceOutputIsConsistent,
+    logMaintenancePolicyStatusIsConsistent,
     logLinesHaveUniqueIds,
     logMaintenancePoliciesHaveUniqueIds,
     logMaintenanceRequestIsConsistent,
@@ -273,6 +276,10 @@ const runtimeCheckComments = new Map<unknown, string>([
         "Live Valibot validation additionally requires the maintenance finish timestamp not to precede its start timestamp.",
     ],
     [
+        logMaintenanceExecutionOutcomeIsConsistent,
+        "Live Valibot validation additionally requires a reported successful maintenance execution to contain no failed actions.",
+    ],
+    [
         logMaintenanceActiveRunIsConsistent,
         "Live Valibot validation additionally requires an active maintenance run to be queued or running.",
     ],
@@ -282,11 +289,19 @@ const runtimeCheckComments = new Map<unknown, string>([
     ],
     [
         logMaintenanceLastRunIsConsistent,
-        "Live Valibot validation additionally permits a summary only for a successful non-dry-run maintenance result.",
+        "Live Valibot validation additionally permits a summary only for a successful non-dry-run maintenance result whose summary reports success.",
+    ],
+    [
+        logMaintenancePolicyStatusIsConsistent,
+        "Live Valibot validation additionally requires each maintenance status to agree with its fixed policy scope, maintenance action identity, and docker-only summary authority.",
     ],
     [
         logMaintenanceRequestIsConsistent,
         "Live Valibot validation additionally permits dry-run mode only for the fixed docker-managed policy.",
+    ],
+    [
+        logMaintenanceOutputIsConsistent,
+        "Live Valibot validation additionally permits a queued dry-run result only for the fixed docker-managed policy.",
     ],
     [
         logMaintenanceJobResultIsConsistent,

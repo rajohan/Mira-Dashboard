@@ -486,19 +486,24 @@ describe("Dashboard workspace operations composition", () => {
             chmod(dashboardLogsRoot, 0o700),
             chmod(logMaintenanceRoot, 0o700),
         ]);
-        let repositoryCalls = 0;
+        let repositoryReadCalls = 0;
+        let repositoryUnsafeCalls = 0;
         let settlementFailures = 0;
         const jobRepository: Pick<
             JobRepository,
-            "enqueueManualRun" | "findRunByIdempotency"
+            "enqueueManualRun" | "findRunByIdempotency" | "readActionPayloadRunSnapshots"
         > = {
             enqueueManualRun: () => {
-                repositoryCalls += 1;
+                repositoryUnsafeCalls += 1;
                 throw new Error("Read-only composition must not enqueue");
             },
             findRunByIdempotency: () => {
-                repositoryCalls += 1;
-                throw new Error("Read-only composition must not query jobs");
+                repositoryUnsafeCalls += 1;
+                throw new Error("Read-only composition must not replay an enqueue");
+            },
+            readActionPayloadRunSnapshots: ({ payloadJsons }) => {
+                repositoryReadCalls += 1;
+                return payloadJsons.map((payloadJson) => ({ payloadJson }));
             },
         };
 
@@ -543,7 +548,8 @@ describe("Dashboard workspace operations composition", () => {
             expect(
                 maintenance.policies.every(({ state }) => state === "unavailable")
             ).toBe(true);
-            expect(repositoryCalls).toBe(0);
+            expect(repositoryReadCalls).toBe(1);
+            expect(repositoryUnsafeCalls).toBe(0);
             expect(settlementFailures).toBe(0);
         } finally {
             await Promise.all([

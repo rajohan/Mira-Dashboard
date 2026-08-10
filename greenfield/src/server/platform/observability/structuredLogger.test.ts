@@ -230,6 +230,7 @@ test("records only fixed log-maintenance audit settlement fields", () => {
         component: "logs-maintenance-audit",
         event: "logs.maintenance.audit_settlement_failed",
         fields: {
+            dryRun: true,
             kind: "logs-maintenance-audit-settlement",
             policyId: "docker-managed",
             settlement: "queued",
@@ -241,6 +242,7 @@ test("records only fixed log-maintenance audit settlement fields", () => {
         component: "logs-maintenance-audit",
         event: "logs.maintenance.audit_settlement_failed",
         fields: {
+            dryRun: true,
             policyId: "docker-managed",
             settlement: "queued",
         },

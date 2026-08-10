@@ -30,7 +30,7 @@ function dependencies(
         readonly auditEvents?: LogMaintenanceAuditEvent[];
         readonly auditFailure?: "attempted" | "queued";
         readonly enqueueFailure?: boolean;
-        readonly settlements?: string[];
+        readonly settlements?: Array<{ dryRun: boolean; settlement: string }>;
     } = {}
 ) {
     const auditEvents = options.auditEvents ?? [];
@@ -85,7 +85,8 @@ function dependencies(
                 runStatuses: () => Promise.resolve([]),
             },
             now: () => 200,
-            onAuditSettlementFailure: ({ settlement }) => settlements.push(settlement),
+            onAuditSettlementFailure: ({ dryRun, settlement }) =>
+                settlements.push({ dryRun, settlement }),
             reader,
         }),
         settlements,
@@ -162,7 +163,6 @@ describe("logs service", () => {
             { dryRun: false, policyId: "host-rsyslog", settlement: "attempted" },
             {
                 dryRun: false,
-                jobRunId,
                 policyId: "host-rsyslog",
                 settlement: "queued",
             },
@@ -206,7 +206,26 @@ describe("logs service", () => {
         ).toMatchObject({
             queued: true,
         });
-        expect(fixture.settlements).toEqual(["queued"]);
+        expect(fixture.settlements).toEqual([{ dryRun: false, settlement: "queued" }]);
+    });
+
+    test("preserves dry-run identity in audit settlement fallback", async () => {
+        const fixture = dependencies({ auditFailure: "queued" });
+        expect(
+            await fixture.service.requestMaintenance(
+                {
+                    dryRun: true,
+                    idempotencyKey:
+                        "log-maintenance:019fc968-1a9b-7770-8f1b-d5b863b0e7b5",
+                    policyId: "docker-managed",
+                },
+                auditContext
+            )
+        ).toMatchObject({ dryRun: true, policyId: "docker-managed", queued: true });
+        expect(fixture.auditEvents).toMatchObject([
+            { dryRun: true, policyId: "docker-managed", settlement: "attempted" },
+        ]);
+        expect(fixture.settlements).toEqual([{ dryRun: true, settlement: "queued" }]);
     });
 
     test("sanitizes queue failures after recording a failed terminal outcome", async () => {

@@ -1388,6 +1388,48 @@ describe("durable job worker coordinator", () => {
         });
     });
 
+    test("requests global admission for the managed log-maintenance schedule", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const definition = jobActionDefinitions.find(
+            ({ actionKey }) => actionKey === "maintenance.rotate-logs"
+        );
+        if (definition === undefined)
+            throw new Error("Missing log-maintenance definition");
+        const schedule = intervalSchedule({
+            actionKey: definition.actionKey,
+            actionPayloadJson: JSON.stringify(definition.actionPayload),
+            attemptLimit: definition.attemptLimit,
+            cancellationPolicy: definition.cancellationPolicy,
+            description: definition.description,
+            id: definition.scheduleId,
+            intervalMs:
+                definition.defaultSchedule.kind === "interval"
+                    ? definition.defaultSchedule.intervalMs
+                    : null,
+            name: definition.displayName,
+            priority: definition.priority,
+            resourceClass: definition.resourceClass,
+            resourceKeysJson: JSON.stringify(definition.resourceKeys),
+            retrySafe: definition.retrySafe,
+            timeoutMs: definition.timeoutMs,
+        });
+        const fixture = repositoryFixture({ dueSchedules: [schedule] });
+        const baseOptions = coordinatorOptions(fixture.repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...baseOptions,
+            actionDefinitions: [definition],
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.enqueues.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.enqueues[0]).toMatchObject({
+            rejectWhenActionActive: true,
+            scheduleId: definition.scheduleId,
+        });
+    });
+
     test("pages past active schedules across bounded polling passes", async () => {
         const workerId = Bun.randomUUIDv7();
         const dueAt = new Date(at.getTime() - 30_000);

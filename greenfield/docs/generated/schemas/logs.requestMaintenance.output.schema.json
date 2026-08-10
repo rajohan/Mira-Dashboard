@@ -33,5 +33,6 @@
     "queued"
   ],
   "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally permits a queued dry-run result only for the fixed docker-managed policy.",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

@@ -1,4 +1,4 @@
-import { FlaskConical, RotateCcw, ShieldCheck } from "lucide-react";
+import { FlaskConical, RefreshCw, RotateCcw, ShieldCheck } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import * as v from "valibot";
 
@@ -34,12 +34,15 @@ export interface LogMaintenancePanelProps {
     readonly maintenance?: LogMaintenanceStatusOutput;
     readonly maintenanceError?: string;
     readonly maintenanceLoading?: boolean;
+    readonly maintenanceRefreshing?: boolean;
+    readonly onRefresh: () => void;
     readonly onRequestMaintenance: (
         policyId: LogMaintenancePolicyId,
         dryRun: boolean
     ) => Promise<RequestLogMaintenanceOutput>;
     readonly requestedRun?: JobRunDetail;
     readonly requestedRunError?: string;
+    readonly requestedRunInactiveConfirmed?: boolean;
     readonly requestedRunLoading?: boolean;
     readonly requestedRunRequest?: RequestLogMaintenanceOutput;
 }
@@ -117,6 +120,17 @@ function MaintenanceSummary({
     );
 }
 
+const unverifiedMaintenanceResultMessage =
+    "The durable maintenance result could not be verified. Lifecycle status remains visible, but result details are hidden.";
+
+function policyResultWarning(policy: LogMaintenancePolicyStatus): string | undefined {
+    return policy.id === "docker-managed" &&
+        policy.lastRun?.run.state === "succeeded" &&
+        policy.lastRun.summary === undefined
+        ? unverifiedMaintenanceResultMessage
+        : undefined;
+}
+
 function PolicyRunHistory({
     policy,
 }: Readonly<{ readonly policy: LogMaintenancePolicyStatus }>) {
@@ -157,30 +171,47 @@ function PolicyRunHistory({
                             summary={policy.lastRun.summary}
                         />
                     )}
+                    <Alert
+                        className="mt-3"
+                        focusOnError={false}
+                        message={policyResultWarning(policy)}
+                    />
                 </div>
             )}
         </div>
     );
 }
 
-function requestedMaintenanceSummary(
+interface RequestedMaintenanceResultProjection {
+    readonly summary?: LogMaintenanceExecutionSummary;
+    readonly warning?: string;
+}
+
+function projectRequestedMaintenanceResult(
     request: RequestLogMaintenanceOutput | undefined,
     detail: JobRunDetail | undefined
-): LogMaintenanceExecutionSummary | undefined {
+): RequestedMaintenanceResultProjection {
     if (
         request === undefined ||
         detail === undefined ||
-        detail.run.id !== request.jobRunId ||
-        detail.result === undefined
+        detail.run.id !== request.jobRunId
     ) {
-        return undefined;
+        return {};
+    }
+    if (detail.result === undefined) {
+        return request.policyId === "docker-managed" && detail.run.state === "succeeded"
+            ? { warning: unverifiedMaintenanceResultMessage }
+            : {};
     }
     const parsed = v.safeParse(logMaintenanceJobResultSchema, detail.result);
-    return parsed.success &&
-        parsed.output.policyId === request.policyId &&
-        parsed.output.dryRun === request.dryRun
-        ? parsed.output.summary
-        : undefined;
+    if (
+        !parsed.success ||
+        parsed.output.policyId !== request.policyId ||
+        parsed.output.dryRun !== request.dryRun
+    ) {
+        return { warning: unverifiedMaintenanceResultMessage };
+    }
+    return { summary: parsed.output.summary };
 }
 
 function RequestedRunStatus({
@@ -194,7 +225,7 @@ function RequestedRunStatus({
     readonly loading: boolean;
     readonly request: RequestLogMaintenanceOutput;
 }>) {
-    const summary = requestedMaintenanceSummary(request, detail);
+    const result = projectRequestedMaintenanceResult(request, detail);
     const title = request.dryRun ? "Requested dry run" : "Requested maintenance run";
     let content: ReactNode;
     if (loading && detail === undefined) {
@@ -225,12 +256,13 @@ function RequestedRunStatus({
                         {detail.run.terminalMessage}
                     </Text>
                 )}
-                {summary === undefined ? null : (
+                {result.summary === undefined ? null : (
                     <MaintenanceSummary
                         label={`${request.dryRun ? "Dry-run" : "Maintenance"} result summary`}
-                        summary={summary}
+                        summary={result.summary}
                     />
                 )}
+                <Alert className="mt-3" focusOnError={false} message={result.warning} />
             </div>
         );
     }
@@ -251,85 +283,135 @@ function RequestedRunStatus({
     );
 }
 
-/**
- * Renders fixed-policy controls with durable lifecycle and bounded result status.
- * @returns Accessible maintenance policy cards, confirmations, and job observations.
- */
-export function LogMaintenancePanel({
+function maintenanceActionIsLocked({
     maintenance,
     maintenanceError,
-    maintenanceLoading = false,
-    onRequestMaintenance,
     requestedRun,
-    requestedRunError,
-    requestedRunLoading = false,
+    requestedRunInactiveConfirmed,
     requestedRunRequest,
-}: LogMaintenancePanelProps) {
-    const [actionError, setActionError] = useState<string>();
-    const [actionStatus, setActionStatus] = useState<string>();
+}: LogMaintenancePanelProps): boolean {
+    const requestedRunMatches =
+        requestedRunRequest !== undefined &&
+        requestedRun?.run.id === requestedRunRequest.jobRunId;
+    const requestedRunActive =
+        requestedRunMatches &&
+        (requestedRun.run.state === "queued" || requestedRun.run.state === "running");
+    const requestedRunTerminal = requestedRunMatches && !requestedRunActive;
+    const requestedRunPending =
+        requestedRunInactiveConfirmed !== true &&
+        (requestedRunActive ||
+            (requestedRunRequest !== undefined && !requestedRunTerminal));
+    return (
+        maintenanceError !== undefined ||
+        requestedRunPending ||
+        (maintenance?.policies.some(({ activeRun }) => activeRun !== undefined) ?? false)
+    );
+}
+
+interface LogMaintenancePanelContentProps extends LogMaintenancePanelProps {
+    readonly actionError?: string;
+    readonly actionStatus?: string;
+    readonly onActionErrorChange: (error: string | undefined) => void;
+    readonly onActionStatusChange: (status: string | undefined) => void;
+    readonly onRunningActionChange: (action: MaintenanceAction | undefined) => void;
+    readonly runningAction?: MaintenanceAction;
+}
+
+function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps) {
+    const {
+        actionError,
+        actionStatus,
+        maintenance,
+        maintenanceError,
+        maintenanceLoading = false,
+        maintenanceRefreshing = false,
+        onActionErrorChange,
+        onActionStatusChange,
+        onRefresh,
+        onRequestMaintenance,
+        onRunningActionChange,
+        requestedRun,
+        requestedRunError,
+        requestedRunLoading = false,
+        requestedRunRequest,
+        runningAction,
+    } = properties;
     const [confirmedAction, setConfirmedAction] = useState<MaintenanceAction>();
-    const [runningAction, setRunningAction] = useState<MaintenanceAction>();
+    const externalActionLock = maintenanceActionIsLocked(properties);
     const confirmedPolicy = maintenance?.policies.find(
         ({ id }) => id === confirmedAction?.policyId
     );
+    const confirmationOpen =
+        confirmedPolicy !== undefined &&
+        confirmedPolicy.state === "queueable" &&
+        confirmedAction !== undefined &&
+        !externalActionLock;
 
     function confirmAction(action: MaintenanceAction): void {
-        setActionError(undefined);
-        setActionStatus(undefined);
+        onActionErrorChange(undefined);
+        onActionStatusChange(undefined);
         setConfirmedAction(action);
     }
 
     async function runMaintenance(action: MaintenanceAction): Promise<void> {
-        setActionError(undefined);
-        setActionStatus(undefined);
-        setRunningAction(action);
+        onActionErrorChange(undefined);
+        onActionStatusChange(undefined);
+        onRunningActionChange(action);
         try {
             const result = await onRequestMaintenance(action.policyId, action.dryRun);
             setConfirmedAction(undefined);
-            setActionStatus(
+            onActionStatusChange(
                 `${result.dryRun ? "Dry run" : (confirmedPolicy?.label ?? "Log maintenance")} was added to the queue as job ${result.jobRunId}.`
             );
         } catch (error) {
-            setActionError(logFailureMessage(error));
+            onActionErrorChange(logFailureMessage(error));
         } finally {
-            setRunningAction(undefined);
+            onRunningActionChange(undefined);
         }
     }
 
     const actionLabel = confirmedAction?.dryRun ? "Dry run" : "Run";
     const actionBusy = runningAction !== undefined;
-    const requestedRunPending =
-        requestedRunRequest !== undefined &&
-        (requestedRunLoading ||
-            (requestedRun?.run.id === requestedRunRequest.jobRunId &&
-                (requestedRun.run.state === "queued" ||
-                    requestedRun.run.state === "running")));
-    const globalMaintenanceActive =
-        (maintenance?.policies.some(({ activeRun }) => activeRun !== undefined) ??
-            false) ||
-        requestedRunPending;
 
     return (
         <Card aria-labelledby="log-maintenance-heading">
-            <div className="flex items-start gap-3">
-                <Icon className="mt-0.5 shrink-0" icon={ShieldCheck} tone="accent" />
-                <div>
-                    <Heading id="log-maintenance-heading" level={2} size="subsection">
-                        Log maintenance
-                    </Heading>
-                    <Text className="mt-1" tone="muted">
-                        Dashboard rotates application and container logs. System log
-                        cleanup uses the four configured Ubuntu cleanup jobs.
-                    </Text>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-3">
+                    <Icon className="mt-0.5 shrink-0" icon={ShieldCheck} tone="accent" />
+                    <div>
+                        <Heading id="log-maintenance-heading" level={2} size="subsection">
+                            Log maintenance
+                        </Heading>
+                        <Text className="mt-1" tone="muted">
+                            Dashboard rotates application and container logs. System log
+                            cleanup uses the four configured Ubuntu cleanup jobs.
+                        </Text>
+                    </div>
                 </div>
+                <Button
+                    busy={maintenanceRefreshing}
+                    busyLabel="Refreshing maintenance…"
+                    className="shrink-0"
+                    onClick={onRefresh}
+                    size="sm"
+                    variant="secondary"
+                >
+                    <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                    Refresh maintenance
+                </Button>
             </div>
             <Alert className="mt-4" focusOnError={false} message={maintenanceError} />
             <Alert
                 className="mt-4"
                 focusOnError={false}
                 message={actionStatus}
-                onDismiss={() => setActionStatus(undefined)}
+                onDismiss={() => onActionStatusChange(undefined)}
                 variant="success"
+            />
+            <Alert
+                className="mt-4"
+                message={actionError}
+                onDismiss={() => onActionErrorChange(undefined)}
             />
             {requestedRunRequest === undefined ? null : (
                 <RequestedRunStatus
@@ -347,7 +429,7 @@ export function LogMaintenancePanel({
                         const disabled =
                             actionBusy ||
                             policy.state !== "queueable" ||
-                            globalMaintenanceActive;
+                            externalActionLock;
                         return (
                             <li
                                 className="border-primary-700 bg-primary-950/45 rounded-lg border p-4"
@@ -426,56 +508,73 @@ export function LogMaintenancePanel({
                 </ul>
             )}
 
-            <Modal
-                description={
-                    confirmedAction?.dryRun === true
-                        ? "This queues a read-only preview of the managed cleanup policy. It reports planned actions without rotating, compressing, or deleting logs. You must have verified your identity recently with multi-factor authentication."
-                        : "This adds the configured cleanup job to the queue. You must have verified your identity recently with multi-factor authentication."
-                }
-                dismissible={!actionBusy}
-                onClose={() => {
-                    setActionError(undefined);
-                    setConfirmedAction(undefined);
-                }}
-                open={confirmedPolicy !== undefined && confirmedAction !== undefined}
-                size="sm"
-                title={`${actionLabel} ${confirmedPolicy?.label ?? "log maintenance"}?`}
-            >
-                <Alert
-                    className="mb-4"
-                    message={actionError}
-                    onDismiss={() => setActionError(undefined)}
-                />
-                <div className="flex justify-end gap-2">
-                    <Button
-                        disabled={actionBusy}
-                        onClick={() => {
-                            setActionError(undefined);
-                            setConfirmedAction(undefined);
-                        }}
-                        variant="secondary"
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        busy={actionBusy}
-                        busyLabel={
-                            confirmedAction?.dryRun === true
-                                ? "Adding dry run to the queue…"
-                                : "Adding log maintenance to the queue…"
-                        }
-                        onClick={() => {
-                            if (confirmedAction !== undefined) {
-                                void runMaintenance(confirmedAction);
+            {confirmationOpen && (
+                <Modal
+                    description={
+                        confirmedAction.dryRun
+                            ? "This queues a read-only preview of the managed cleanup policy. It reports planned actions without rotating, compressing, or deleting logs. You must have verified your identity recently with multi-factor authentication."
+                            : "This adds the configured cleanup job to the queue. You must have verified your identity recently with multi-factor authentication."
+                    }
+                    dismissible={!actionBusy}
+                    onClose={() => {
+                        onActionErrorChange(undefined);
+                        setConfirmedAction(undefined);
+                    }}
+                    open
+                    size="sm"
+                    title={`${actionLabel} ${confirmedPolicy.label}?`}
+                >
+                    <div className="flex justify-end gap-2">
+                        <Button
+                            disabled={actionBusy}
+                            onClick={() => {
+                                onActionErrorChange(undefined);
+                                setConfirmedAction(undefined);
+                            }}
+                            variant="secondary"
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            busy={actionBusy}
+                            busyLabel={
+                                confirmedAction.dryRun
+                                    ? "Adding dry run to the queue…"
+                                    : "Adding log maintenance to the queue…"
                             }
-                        }}
-                    >
-                        {confirmedAction?.dryRun === true
-                            ? "Queue dry run"
-                            : "Add to queue"}
-                    </Button>
-                </div>
-            </Modal>
+                            disabled={
+                                externalActionLock ||
+                                confirmedPolicy.state !== "queueable"
+                            }
+                            onClick={() => void runMaintenance(confirmedAction)}
+                        >
+                            {confirmedAction.dryRun ? "Queue dry run" : "Add to queue"}
+                        </Button>
+                    </div>
+                </Modal>
+            )}
         </Card>
+    );
+}
+
+/**
+ * Renders fixed-policy controls with durable lifecycle and bounded result status.
+ * @returns Accessible maintenance policy cards, confirmations, and job observations.
+ */
+export function LogMaintenancePanel(properties: LogMaintenancePanelProps) {
+    const [actionError, setActionError] = useState<string>();
+    const [actionStatus, setActionStatus] = useState<string>();
+    const [runningAction, setRunningAction] = useState<MaintenanceAction>();
+    return (
+        <LogMaintenancePanelContent
+            {...properties}
+            actionError={actionError}
+            actionStatus={actionStatus}
+            key={maintenanceActionIsLocked(properties) ? "locked" : "available"}
+            onActionErrorChange={setActionError}
+            onActionStatusChange={setActionStatus}
+            onRunningActionChange={setRunningAction}
+            runningAction={runningAction}
+        />
     );
 }

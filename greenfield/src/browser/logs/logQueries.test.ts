@@ -5,7 +5,9 @@ import { QueryClient } from "@tanstack/react-query";
 import { jobRunDetailQueryKey } from "../jobs/jobQueries.ts";
 import type { LogClient } from "./logClient.ts";
 import {
+    logMaintenanceQueryOptions,
     logMaintenanceQueryKey,
+    logMaintenanceRefreshIntervalMs,
     logMaintenanceRealtimeFallbackRefreshIntervalMs,
     logSnapshotQueryOptions,
     refreshLogMaintenanceQueries,
@@ -17,18 +19,19 @@ describe("log snapshot query identity", () => {
     test("never carries rows across source or search query keys", () => {
         const sourceA = logSnapshotQueryOptions(
             client,
-            { mode: "tail", sourceId: "dashboard.web.stdout" },
+            { limit: 100, mode: "tail", sourceId: "dashboard.web.stdout" },
             true
         );
         const sourceB = logSnapshotQueryOptions(
             client,
-            { mode: "tail", sourceId: "openclaw.20260809" },
+            { limit: 200, mode: "tail", sourceId: "openclaw.20260809" },
             true
         );
         const search = logSnapshotQueryOptions(
             client,
             {
                 mode: "search",
+                limit: 500,
                 query: "worker",
                 sourceId: "openclaw.20260809",
             },
@@ -40,6 +43,14 @@ describe("log snapshot query identity", () => {
         expect(sourceA.placeholderData).toBeUndefined();
         expect(sourceB.placeholderData).toBeUndefined();
         expect(search.placeholderData).toBeUndefined();
+    });
+
+    test("polls maintenance availability every 15 seconds even while realtime is healthy", () => {
+        const options = logMaintenanceQueryOptions(client);
+
+        expect(logMaintenanceRefreshIntervalMs).toBe(15_000);
+        expect(options.refetchInterval).toBe(logMaintenanceRefreshIntervalMs);
+        expect(options.refetchIntervalInBackground).toBeFalse();
     });
 
     test("invalidates maintenance and one followed run with a 30-second fallback", async () => {

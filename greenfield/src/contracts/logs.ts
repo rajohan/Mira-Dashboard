@@ -189,11 +189,22 @@ export function logMaintenanceExecutionTimesAreConsistent(
     return summary.finishedAtMs >= summary.startedAtMs;
 }
 
+/** @returns Whether one reported successful execution has no failed actions. */
+export function logMaintenanceExecutionOutcomeIsConsistent(
+    summary: LogMaintenanceExecutionSummaryValue
+): boolean {
+    return !summary.ok || summary.actionCounts.error === 0;
+}
+
 export const logMaintenanceExecutionSummarySchema = v.pipe(
     logMaintenanceExecutionSummaryObjectSchema,
     v.check(
         logMaintenanceExecutionTimesAreConsistent,
         "Log maintenance timestamps are inconsistent"
+    ),
+    v.check(
+        logMaintenanceExecutionOutcomeIsConsistent,
+        "Successful log maintenance cannot report failed actions"
     )
 );
 
@@ -239,7 +250,7 @@ export function logMaintenanceLastRunIsConsistent(
 ): boolean {
     return (
         value.summary === undefined ||
-        (value.run.state === "succeeded" && !value.summary.dryRun)
+        (value.run.state === "succeeded" && !value.summary.dryRun && value.summary.ok)
     );
 }
 
@@ -251,7 +262,7 @@ export const logMaintenanceLastRunSchema = v.pipe(
     )
 );
 
-export const logMaintenancePolicyStatusSchema = v.strictObject({
+const logMaintenancePolicyStatusObjectSchema = v.strictObject({
     activeRun: v.optional(logMaintenanceActiveRunSchema),
     id: logMaintenancePolicyIdSchema,
     label: boundedControlSafeTextSchema(128, "Log maintenance policy label is invalid"),
@@ -259,6 +270,33 @@ export const logMaintenancePolicyStatusSchema = v.strictObject({
     scope: v.picklist(["docker", "host"], "Log maintenance scope is invalid"),
     state: v.picklist(["queueable", "unavailable"], "Log maintenance state is invalid"),
 });
+
+type LogMaintenancePolicyStatusValue = v.InferOutput<
+    typeof logMaintenancePolicyStatusObjectSchema
+>;
+
+/** @returns Whether one status agrees with its fixed policy, scope, and job identity. */
+export function logMaintenancePolicyStatusIsConsistent(
+    status: LogMaintenancePolicyStatusValue
+): boolean {
+    const managed = status.id === "docker-managed";
+    return (
+        status.scope === (managed ? "docker" : "host") &&
+        (status.activeRun === undefined ||
+            status.activeRun.actionKey === "maintenance.rotate-logs") &&
+        (status.lastRun === undefined ||
+            (status.lastRun.run.actionKey === "maintenance.rotate-logs" &&
+                (status.lastRun.summary === undefined || managed)))
+    );
+}
+
+export const logMaintenancePolicyStatusSchema = v.pipe(
+    logMaintenancePolicyStatusObjectSchema,
+    v.check(
+        logMaintenancePolicyStatusIsConsistent,
+        "Log maintenance policy status is inconsistent"
+    )
+);
 
 /**
  * Applies runtime-only fixed-policy identity uniqueness validation.
@@ -311,12 +349,31 @@ export const requestLogMaintenanceInputSchema = v.pipe(
     )
 );
 
-export const requestLogMaintenanceOutputSchema = v.strictObject({
+const requestLogMaintenanceOutputObjectSchema = v.strictObject({
     dryRun: v.boolean("Log maintenance mode is invalid"),
     jobRunId: jobRunIdSchema,
     policyId: logMaintenancePolicyIdSchema,
     queued: v.literal(true),
 });
+
+type RequestLogMaintenanceOutputValue = v.InferOutput<
+    typeof requestLogMaintenanceOutputObjectSchema
+>;
+
+/** @returns Whether a queued result preserves the fixed dry-run policy boundary. */
+export function logMaintenanceOutputIsConsistent(
+    output: RequestLogMaintenanceOutputValue
+): boolean {
+    return !output.dryRun || output.policyId === "docker-managed";
+}
+
+export const requestLogMaintenanceOutputSchema = v.pipe(
+    requestLogMaintenanceOutputObjectSchema,
+    v.check(
+        logMaintenanceOutputIsConsistent,
+        "Dry-run is available only for managed application and container logs"
+    )
+);
 
 const logMaintenanceJobResultObjectSchema = v.strictObject({
     completedAtMs: timestampMillisecondsSchema(
@@ -337,7 +394,7 @@ export function logMaintenanceJobResultIsConsistent(
     result: LogMaintenanceJobResultValue
 ): boolean {
     if (result.dryRun && result.policyId !== "docker-managed") return false;
-    if (result.summary === undefined) return true;
+    if (result.summary === undefined) return result.policyId !== "docker-managed";
     return (
         result.policyId === "docker-managed" &&
         result.summary.dryRun === result.dryRun &&
@@ -453,7 +510,8 @@ export const logProcedureContracts = [
         name: "logs.maintenanceStatus",
         output: logMaintenanceStatusOutputSchema,
         outputSchemaId: "logs.maintenanceStatus.output",
-        summary: "Reports which reviewed fixed log-maintenance policies can be queued.",
+        summary:
+            "Reports reviewed policy queueability plus active and latest terminal maintenance runs.",
         transport: logQueryTransport,
     },
     {

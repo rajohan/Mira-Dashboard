@@ -628,12 +628,13 @@ export async function createDashboardServer(
                       jobRepository,
                       logMaintenanceRoot: options.dashboardLogMaintenanceRoot,
                       ...(domainNow === undefined ? {} : { now: domainNow }),
-                      onAuditSettlementFailure: ({ policyId, settlement }) =>
+                      onAuditSettlementFailure: ({ dryRun, policyId, settlement }) =>
                           options.applicationRuntime.logger.error({
                               component: "logs-maintenance-audit",
                               event: "logs.maintenance.audit_settlement_failed",
                               fields: {
                                   kind: "logs-maintenance-audit-settlement",
+                                  dryRun,
                                   policyId,
                                   settlement,
                               },

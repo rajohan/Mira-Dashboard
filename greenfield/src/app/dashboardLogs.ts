@@ -7,6 +7,7 @@ import type { JobRepository } from "../server/domains/jobs/repository.ts";
 import { createSqliteLogMaintenanceAuditWriter } from "../server/domains/logs/operationAudit.ts";
 import { createLogsService, type LogsService } from "../server/domains/logs/service.ts";
 import { createLogMaintenanceAvailabilityProbe } from "../server/platform/logs/logMaintenanceAvailability.ts";
+import { createLogRotationEpochProbe } from "../server/platform/logs/logRotationEpochProbe.ts";
 import { createSafeLogReader } from "../server/platform/logs/safeLogReader.ts";
 import { createLogSourceCatalog } from "../server/platform/logs/sourceCatalog.ts";
 
@@ -64,6 +65,12 @@ export function createDashboardLogsService(options: DashboardLogsOptions): LogsS
             : {
                   onAuditSettlementFailure: options.onAuditSettlementFailure,
               }),
-        reader: createSafeLogReader(catalog, nowMs),
+        reader: createSafeLogReader(
+            catalog,
+            nowMs,
+            createLogRotationEpochProbe({
+                logMaintenanceRoot: options.logMaintenanceRoot,
+            })
+        ),
     });
 }

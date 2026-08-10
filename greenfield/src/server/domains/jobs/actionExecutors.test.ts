@@ -145,6 +145,36 @@ describe("worker-only job executor registry", () => {
             )
         ).rejects.toBeInstanceOf(Error);
         expect(calls).toHaveLength(2);
+
+        expect(
+            Effect.runPromise(
+                createLogMaintenanceJobExecutor({
+                    run: () => Promise.resolve(),
+                })(executionContext([]), { policyId: "docker-managed" })
+            )
+        ).rejects.toBeInstanceOf(Error);
+        expect(
+            Effect.runPromise(
+                createLogMaintenanceJobExecutor({
+                    run: () =>
+                        Promise.resolve({
+                            actionCounts: {
+                                compressed: 0,
+                                deleted: 0,
+                                error: 0,
+                                missing: 0,
+                                rotated: 1,
+                                skipped: 0,
+                            },
+                            checkedTargets: 1,
+                            dryRun: false,
+                            finishedAtMs: 4900,
+                            ok: true,
+                            startedAtMs: 4800,
+                        }),
+                })(executionContext([]), { policyId: "host-rsyslog" })
+            )
+        ).rejects.toBeInstanceOf(Error);
     });
 
     test("keeps the dynamic workspace write executor worker-only and path-free", async () => {

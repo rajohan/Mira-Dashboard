@@ -151,6 +151,7 @@ const meta = {
         maintenance,
         onClearSearch: fn(),
         onRefresh: fn(),
+        onRefreshMaintenance: fn(),
         onRequestMaintenance: fn(() =>
             Promise.resolve({
                 dryRun: false,
@@ -161,6 +162,8 @@ const meta = {
         ),
         onSearch: fn(),
         onSelectSource: fn(),
+        onRowCountChange: fn(),
+        rowCount: 200,
         selectedSourceId: sources[0]!.id,
         snapshot,
         sources,

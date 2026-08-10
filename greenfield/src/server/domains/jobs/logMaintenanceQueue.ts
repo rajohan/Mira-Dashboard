@@ -83,6 +83,9 @@ const realPolicyPayloads = Object.freeze(
         })
     )
 );
+const managedDryRunPayloadJson = JSON.stringify(
+    actionPayload({ dryRun: true, policyId: "docker-managed" })
+);
 
 function enqueueDigest(input: RequestLogMaintenanceInput): string {
     return sha256Hex(
@@ -118,19 +121,20 @@ function lastRun(
 
 function runStatus(
     snapshot: ActionPayloadRunSnapshot,
-    policyId: LogMaintenancePolicyId
+    policyId: LogMaintenancePolicyId,
+    activeRecord = snapshot.activeRun
 ): Readonly<{
     readonly activeRun?: LogMaintenanceActiveRun;
     readonly lastRun?: LogMaintenanceLastRun;
     readonly policyId: LogMaintenancePolicyId;
 }> {
     return Object.freeze({
-        ...(snapshot.activeRun === undefined
+        ...(activeRecord === undefined
             ? {}
             : {
                   activeRun: v.parse(
                       logMaintenanceActiveRunSchema,
-                      toJobRunSummary(snapshot.activeRun)
+                      toJobRunSummary(activeRecord)
                   ),
               }),
         ...(snapshot.lastRun === undefined
@@ -138,6 +142,19 @@ function runStatus(
             : { lastRun: lastRun(snapshot.lastRun, policyId) }),
         policyId,
     });
+}
+
+function preferredActiveRun(
+    ...records: readonly (ActionPayloadRunSnapshot["activeRun"] | undefined)[]
+): ActionPayloadRunSnapshot["activeRun"] | undefined {
+    return records
+        .filter((record) => record !== undefined)
+        .toSorted(
+            (left, right) =>
+                Number(right.state === "running") - Number(left.state === "running") ||
+                right.queuedAt.getTime() - left.queuedAt.getTime() ||
+                right.id.localeCompare(left.id)
+        )[0];
 }
 
 /**
@@ -175,23 +192,37 @@ export function createLogMaintenanceJobQueue(
                 requireActive(signal);
                 const snapshots = dependencies.repository.readActionPayloadRunSnapshots({
                     actionKey: logMaintenanceJobActionKey,
-                    payloadJsons: realPolicyPayloads.map(
-                        ({ payloadJson }) => payloadJson
-                    ),
+                    payloadJsons: [
+                        ...realPolicyPayloads.map(({ payloadJson }) => payloadJson),
+                        managedDryRunPayloadJson,
+                    ],
                 });
                 const snapshotsByPayload = new Map(
                     snapshots.map((snapshot) => [snapshot.payloadJson, snapshot])
                 );
                 if (
-                    snapshots.length !== realPolicyPayloads.length ||
-                    snapshotsByPayload.size !== realPolicyPayloads.length
+                    snapshots.length !== realPolicyPayloads.length + 1 ||
+                    snapshotsByPayload.size !== realPolicyPayloads.length + 1
                 ) {
                     throw queueFailure();
                 }
+                const managedDryRunSnapshot = snapshotsByPayload.get(
+                    managedDryRunPayloadJson
+                );
+                if (managedDryRunSnapshot === undefined) throw queueFailure();
                 const statuses = realPolicyPayloads.map(({ payloadJson, policyId }) => {
                     const snapshot = snapshotsByPayload.get(payloadJson);
                     if (snapshot === undefined) throw queueFailure();
-                    return runStatus(snapshot, policyId);
+                    return runStatus(
+                        snapshot,
+                        policyId,
+                        policyId === "docker-managed"
+                            ? preferredActiveRun(
+                                  snapshot.activeRun,
+                                  managedDryRunSnapshot.activeRun
+                              )
+                            : snapshot.activeRun
+                    );
                 });
                 requireActive(signal);
                 return Promise.resolve(Object.freeze(statuses));
@@ -254,6 +285,7 @@ export function createLogMaintenanceJobQueue(
                         sequence: 1,
                         workerInstanceId: null,
                     },
+                    rejectWhenActionActive: true,
                     run: {
                         actionKey: definition.actionKey,
                         attemptLimit: definition.attemptLimit,

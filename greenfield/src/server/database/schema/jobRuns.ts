@@ -206,6 +206,20 @@ export const jobRuns = sqliteTable(
             .where(
                 sql`${table.scheduledJobId} IS NOT NULL AND ${table.state} IN ('queued', 'running')`
             ),
+        index("job_runs_action_payload_active_idx")
+            .on(
+                table.actionKey,
+                table.payloadJson,
+                desc(table.state),
+                desc(table.queuedAt),
+                desc(table.id)
+            )
+            .where(sql`${table.state} IN ('queued', 'running')`),
+        index("job_runs_action_payload_terminal_idx")
+            .on(table.actionKey, table.payloadJson, desc(table.queuedAt), desc(table.id))
+            .where(
+                sql`${table.state} IN ('cancelled', 'failed', 'succeeded', 'timed-out')`
+            ),
         index("job_runs_queued_id_idx").on(table.queuedAt, table.id),
         index("job_runs_schedule_queued_id_idx").on(
             table.scheduledJobId,

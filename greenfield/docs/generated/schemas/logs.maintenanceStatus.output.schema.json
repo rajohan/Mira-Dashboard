@@ -531,14 +531,14 @@
                   "startedAtMs"
                 ],
                 "additionalProperties": false,
-                "$comment": "Live Valibot validation additionally requires the maintenance finish timestamp not to precede its start timestamp."
+                "$comment": "Live Valibot validation additionally requires the maintenance finish timestamp not to precede its start timestamp. Live Valibot validation additionally requires a reported successful maintenance execution to contain no failed actions."
               }
             },
             "required": [
               "run"
             ],
             "additionalProperties": false,
-            "$comment": "Live Valibot validation additionally permits a summary only for a successful non-dry-run maintenance result."
+            "$comment": "Live Valibot validation additionally permits a summary only for a successful non-dry-run maintenance result whose summary reports success."
           },
           "scope": {
             "enum": [
@@ -561,7 +561,8 @@
           "scope",
           "state"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$comment": "Live Valibot validation additionally requires each maintenance status to agree with its fixed policy scope, maintenance action identity, and docker-only summary authority."
       },
       "minItems": 5,
       "maxItems": 5,

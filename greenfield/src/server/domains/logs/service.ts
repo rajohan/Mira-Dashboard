@@ -143,14 +143,12 @@ export function createLogsService({
     async function settle(
         input: RequestLogMaintenanceInput,
         context: LogMaintenanceAuditContext,
-        settlement: "failed" | "queued",
-        jobRunId?: string
+        settlement: "failed" | "queued"
     ): Promise<void> {
         try {
             await auditWriter.record({
                 ...context,
                 dryRun: input.dryRun,
-                ...(jobRunId === undefined ? {} : { jobRunId }),
                 policyId: input.policyId,
                 settlement,
             });
@@ -215,7 +213,7 @@ export function createLogsService({
                 await settle(input, auditContext, "failed");
                 throw serviceFailure(error);
             }
-            await settle(input, auditContext, "queued", result.jobRunId);
+            await settle(input, auditContext, "queued");
             return {
                 dryRun: input.dryRun,
                 jobRunId: result.jobRunId,

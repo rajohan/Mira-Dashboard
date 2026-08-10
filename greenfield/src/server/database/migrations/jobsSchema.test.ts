@@ -2113,6 +2113,70 @@ describe("jobs baseline schema", () => {
                  ORDER BY queued_at DESC, id DESC LIMIT 50`,
                 "job_runs_schedule_queued_id_idx"
             );
+            const maintenanceParameters = [
+                "maintenance.rotate-logs",
+                '{"policyId":"docker-managed"}',
+            ] as const;
+            const activeMaintenancePlan = database.sqlite
+                .query<QueryPlanRow, [string, string]>(
+                    `EXPLAIN QUERY PLAN
+                     SELECT id FROM job_runs
+                     WHERE action_key = ? AND payload_json = ?
+                       AND state IN ('queued', 'running')
+                     ORDER BY state DESC, queued_at DESC, id DESC LIMIT 1`
+                )
+                .all(...maintenanceParameters);
+            expect(
+                activeMaintenancePlan.some(({ detail }) =>
+                    detail.includes("job_runs_action_payload_active_idx")
+                )
+            ).toBeTrue();
+            expect(
+                activeMaintenancePlan.some(({ detail }) =>
+                    detail.includes("action_key=? AND payload_json=? AND state=?")
+                )
+            ).toBeTrue();
+            expect(
+                activeMaintenancePlan.some(
+                    ({ detail }) =>
+                        detail.includes("SCAN job_runs") ||
+                        detail.includes("USE TEMP B-TREE")
+                )
+            ).toBeFalse();
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE action_key = ? AND state IN ('queued', 'running') LIMIT 1`,
+                "job_runs_action_payload_active_idx",
+                "maintenance.rotate-logs",
+                "action_key=?"
+            );
+            const terminalMaintenancePlan = database.sqlite
+                .query<QueryPlanRow, [string, string]>(
+                    `EXPLAIN QUERY PLAN
+                     SELECT id FROM job_runs
+                     WHERE action_key = ? AND payload_json = ?
+                       AND state IN ('cancelled', 'failed', 'succeeded', 'timed-out')
+                     ORDER BY queued_at DESC, id DESC LIMIT 1`
+                )
+                .all(...maintenanceParameters);
+            expect(
+                terminalMaintenancePlan.some(({ detail }) =>
+                    detail.includes("job_runs_action_payload_terminal_idx")
+                )
+            ).toBeTrue();
+            expect(
+                terminalMaintenancePlan.some(({ detail }) =>
+                    detail.includes("action_key=? AND payload_json=?")
+                )
+            ).toBeTrue();
+            expect(
+                terminalMaintenancePlan.some(
+                    ({ detail }) =>
+                        detail.includes("SCAN job_runs") ||
+                        detail.includes("USE TEMP B-TREE")
+                )
+            ).toBeFalse();
             expectUsesIndexWithoutTemporarySort(
                 database,
                 `SELECT id FROM job_runs

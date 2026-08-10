@@ -1,5 +1,10 @@
 import path from "node:path";
 
+import {
+    logRotationEpochProjectionFileName,
+    logRotationEpochProjectionMaximumEntries,
+} from "../../shared/logRotationEpochProjection.ts";
+
 export type ManagedLogRotationStrategy = "copytruncate" | "rename";
 
 export interface ManagedLogFileTarget {
@@ -134,6 +139,9 @@ export const managedLogManifest: ManagedLogManifest = Object.freeze({
 
 /** Validates an injected worker manifest before any descriptor is opened. */
 export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
+    if (manifest.fileTargets.length > logRotationEpochProjectionMaximumEntries) {
+        throw new TypeError("Managed log manifest is invalid");
+    }
     const ids = new Set<string>();
     const paths = new Set<string>();
     for (const target of [...manifest.fileTargets, ...manifest.archiveTargets]) {
@@ -186,7 +194,10 @@ export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
     validateManifestPath(manifest.statePath);
     if (
         path.dirname(manifest.lockPath) !== path.dirname(manifest.statePath) ||
-        manifest.lockPath === manifest.statePath
+        manifest.lockPath === manifest.statePath ||
+        [manifest.lockPath, manifest.statePath].some(
+            (filePath) => path.basename(filePath) === logRotationEpochProjectionFileName
+        )
     ) {
         throw new TypeError("Managed log manifest is invalid");
     }

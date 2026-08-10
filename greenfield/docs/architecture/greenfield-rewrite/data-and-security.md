@@ -201,6 +201,8 @@ queryable lifecycle.
 | Incident notification         | unique `(incident_id, incident_generation, channel)` when incident is non-null            |
 | Queue claim                   | partial `job_runs(available_at, priority DESC, queued_at, id) WHERE state = 'queued'`     |
 | One active scheduled run      | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`          |
+| Active maintenance status     | partial `job_runs(action_key, payload_json, state DESC, queued_at DESC, id DESC)`         |
+| Terminal maintenance status   | partial `job_runs(action_key, payload_json, queued_at DESC, id DESC)`                     |
 | Worker expiry                 | `worker_instances(heartbeat_at, id)`                                                      |
 | Job timeline                  | `job_run_events(job_run_id, sequence)`                                                    |
 | Realtime catch-up             | `realtime_events(topic, id)`                                                              |

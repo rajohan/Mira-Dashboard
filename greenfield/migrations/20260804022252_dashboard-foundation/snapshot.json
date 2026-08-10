@@ -6033,6 +6033,62 @@
     {
       "columns": [
         {
+          "value": "action_key",
+          "isExpression": false
+        },
+        {
+          "value": "payload_json",
+          "isExpression": false
+        },
+        {
+          "value": "\"state\" desc",
+          "isExpression": true
+        },
+        {
+          "value": "\"queued_at\" desc",
+          "isExpression": true
+        },
+        {
+          "value": "\"id\" desc",
+          "isExpression": true
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"state\" IN ('queued', 'running')",
+      "origin": "manual",
+      "name": "job_runs_action_payload_active_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "action_key",
+          "isExpression": false
+        },
+        {
+          "value": "payload_json",
+          "isExpression": false
+        },
+        {
+          "value": "\"queued_at\" desc",
+          "isExpression": true
+        },
+        {
+          "value": "\"id\" desc",
+          "isExpression": true
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"state\" IN ('cancelled', 'failed', 'succeeded', 'timed-out')",
+      "origin": "manual",
+      "name": "job_runs_action_payload_terminal_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
           "value": "queued_at",
           "isExpression": false
         },

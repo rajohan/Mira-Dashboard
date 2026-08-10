@@ -22,7 +22,6 @@ export interface SecurityAuditMetadata {
     readonly reason?: SecurityAuditReason;
     readonly method?: "password" | "recovery" | "totp" | "webauthn";
     readonly pendingMfa?: boolean;
-    readonly jobRunId?: string;
     readonly predecessorCredentialId?: string;
     readonly removedCapabilities?: readonly ApplicationCapability[];
     readonly replacementCredentialId?: string;
@@ -94,10 +93,6 @@ export function serializeRedactedAuditMetadata(
     }
     if (typeof metadata.pendingMfa === "boolean") {
         sanitized.pendingMfa = metadata.pendingMfa;
-    }
-    const jobRunId = v.safeParse(securityRecordIdSchema, metadata.jobRunId);
-    if (jobRunId.success) {
-        sanitized.jobRunId = jobRunId.output;
     }
     const predecessorCredentialId = v.safeParse(
         securityRecordIdSchema,

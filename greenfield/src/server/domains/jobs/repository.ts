@@ -21,6 +21,7 @@ import * as v from "valibot";
 
 import {
     jobActionKeySchema,
+    jobPayloadMaximumBytes,
     jobPayloadSchema,
     jobRunEventMaximum,
     jobRunEventMessageMaximumBytes,
@@ -201,6 +202,7 @@ export interface ReconcileSchedulesInput {
 
 export interface EnqueueManualRunInput extends JobMutationSideEffects {
     readonly queuedEvent: JobRunEventInsert;
+    readonly rejectWhenActionActive?: boolean;
     readonly run: JobRunInsert;
 }
 
@@ -247,6 +249,7 @@ export interface DueScheduleEnqueueInput extends JobMutationSideEffects {
     readonly at: Date;
     readonly nextRunAt: Date;
     readonly observedNextRunAt: Date;
+    readonly rejectWhenActionActive?: boolean;
     readonly run: JobRunInsert;
     readonly scheduleId: string;
 }
@@ -798,9 +801,14 @@ class DrizzleJobReader implements JobRepositoryReader {
             actionPayloadRunSnapshotMaximum,
             "action payload run snapshot"
         );
-        const payloadJsons = input.payloadJsons.map((payloadJson) =>
-            JSON.stringify(v.parse(jobPayloadSchema, parseJsonText(payloadJson)))
-        );
+        const payloadJsons = input.payloadJsons.map((payloadJson) => {
+            if (utf8ByteLength(payloadJson) > jobPayloadMaximumBytes) {
+                throw new TypeError(
+                    "Jobs repository action payload is outside its budget"
+                );
+            }
+            return JSON.stringify(v.parse(jobPayloadSchema, parseJsonText(payloadJson)));
+        });
         if (new Set(payloadJsons).size !== payloadJsons.length) {
             throw new TypeError(
                 "Jobs repository action payload run snapshots must be unique"
@@ -814,13 +822,18 @@ class DrizzleJobReader implements JobRepositoryReader {
             const activeRow = this.database
                 .select()
                 .from(jobRuns)
-                .where(and(baseCondition, inArray(jobRuns.state, ["queued", "running"])))
-                .orderBy(desc(jobRuns.queuedAt), desc(jobRuns.id))
+                .where(and(baseCondition, sql`${jobRuns.state} IN ('queued', 'running')`))
+                .orderBy(desc(jobRuns.state), desc(jobRuns.queuedAt), desc(jobRuns.id))
                 .get();
             const lastRow = this.database
                 .select()
                 .from(jobRuns)
-                .where(and(baseCondition, inArray(jobRuns.state, terminalRunStateList)))
+                .where(
+                    and(
+                        baseCondition,
+                        sql`${jobRuns.state} IN ('cancelled', 'failed', 'succeeded', 'timed-out')`
+                    )
+                )
                 .orderBy(desc(jobRuns.queuedAt), desc(jobRuns.id))
                 .get();
             return {
@@ -1305,6 +1318,19 @@ class DrizzleJobWriter extends DrizzleJobReader {
             const active = this.findActiveRunForSchedule(run.scheduledJobId);
             if (active !== undefined) return { kind: "active", run: active };
         }
+        if (input.rejectWhenActionActive === true) {
+            const active = this.#transaction
+                .select()
+                .from(jobRuns)
+                .where(
+                    and(
+                        eq(jobRuns.actionKey, run.actionKey),
+                        sql`${jobRuns.state} IN ('queued', 'running')`
+                    )
+                )
+                .get();
+            if (active !== undefined) return { kind: "active", run: parseRun(active) };
+        }
         const inserted = this.#transaction.insert(jobRuns).values(run).returning().get();
         const record = parseRun(requiredRow(inserted, "manual run insert"));
         this.#insertSuppliedEvent(input.queuedEvent);
@@ -1457,6 +1483,21 @@ class DrizzleJobWriter extends DrizzleJobReader {
         }
         const active = this.findActiveRunForSchedule(schedule.id);
         if (active !== undefined) return { kind: "active", run: active };
+        if (input.rejectWhenActionActive === true) {
+            const activeActionRun = this.#transaction
+                .select()
+                .from(jobRuns)
+                .where(
+                    and(
+                        eq(jobRuns.actionKey, validatedRun.actionKey),
+                        sql`${jobRuns.state} IN ('queued', 'running')`
+                    )
+                )
+                .get();
+            if (activeActionRun !== undefined) {
+                return { kind: "active", run: parseRun(activeActionRun) };
+            }
+        }
         if (
             validatedRun.triggerType !== "schedule" ||
             validatedRun.scheduledJobId !== schedule.id ||

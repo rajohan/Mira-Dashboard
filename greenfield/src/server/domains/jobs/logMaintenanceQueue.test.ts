@@ -16,6 +16,16 @@ function repositoryFixture() {
     const snapshotBatches: string[][] = [];
     const repository: LogMaintenanceJobQueueDependencies["repository"] = {
         enqueueManualRun(input): Promise<EnqueueManualRunResult> {
+            if (input.rejectWhenActionActive === true) {
+                const active = runs.find(
+                    (run) =>
+                        run.actionKey === input.run.actionKey &&
+                        (run.state === "queued" || run.state === "running")
+                );
+                if (active !== undefined) {
+                    return Promise.resolve({ kind: "active", run: active });
+                }
+            }
             enqueues.push(input);
             const stored = {
                 ...input.run,
@@ -46,6 +56,8 @@ function repositoryFixture() {
                     )
                     .toSorted(
                         (left, right) =>
+                            Number(right.state === "running") -
+                                Number(left.state === "running") ||
                             right.queuedAt.getTime() - left.queuedAt.getTime() ||
                             right.id.localeCompare(left.id)
                     );
@@ -143,7 +155,17 @@ describe("log-maintenance durable queue adapter", () => {
             policyId: "host-rsyslog",
         });
         expect(fixture.snapshotBatches).toHaveLength(1);
-        expect(fixture.snapshotBatches[0]).toHaveLength(5);
+        expect(fixture.snapshotBatches[0]).toHaveLength(6);
+
+        const activeError = await queue
+            .enqueue({
+                dryRun: false,
+                idempotencyKey: idempotencyKey.replace(/1$/u, "3"),
+                policyId: "docker-managed",
+            })
+            .catch((error: unknown) => error);
+        expect(activeError).toBeInstanceOf(LogMaintenanceJobQueueError);
+        expect(fixture.enqueues).toHaveLength(1);
 
         const unavailableError = await queue
             .enqueue({ dryRun: false, idempotencyKey, policyId: "host-apport" })
@@ -244,11 +266,18 @@ describe("log-maintenance durable queue adapter", () => {
             repository: fixture.repository,
         });
 
-        await queue.enqueue({
+        const first = await queue.enqueue({
             dryRun: true,
             idempotencyKey,
             policyId: "docker-managed",
         });
+        expect(
+            await queue.enqueue({
+                dryRun: true,
+                idempotencyKey,
+                policyId: "docker-managed",
+            })
+        ).toEqual(first);
         expect(fixture.enqueues[0]?.run).toMatchObject({
             displayName: "Managed log maintenance dry-run",
             payloadJson: '{"dryRun":true,"policyId":"docker-managed"}',
@@ -256,6 +285,39 @@ describe("log-maintenance durable queue adapter", () => {
         expect(fixture.enqueues[0]?.auditEvents[0]?.metadataJson).toBe(
             '{"dryRun":true,"policyId":"docker-managed"}'
         );
+        const activeDryRunStatuses = await queue.runStatuses();
+        expect(
+            activeDryRunStatuses.find(({ policyId }) => policyId === "docker-managed")
+        ).toMatchObject({ activeRun: { id: first.jobRunId, state: "queued" } });
+
+        const dryRunIndex = fixture.runs.findIndex(({ id }) => id === first.jobRunId);
+        const dryRunRecord = fixture.runs[dryRunIndex];
+        if (dryRunRecord === undefined) throw new Error("Missing dry-run fixture run");
+        fixture.runs[dryRunIndex] = {
+            ...dryRunRecord,
+            eventCount: 2,
+            finishedAt: new Date(2000),
+            state: "cancelled",
+            stateVersion: 2,
+            terminalCode: "logs/maintenance-cancelled",
+            terminalMessage: "Log maintenance was cancelled.",
+            updatedAt: new Date(2000),
+        };
+        const terminalDryRunStatuses = await queue.runStatuses();
+        const terminalDryRunStatus = terminalDryRunStatuses.find(
+            ({ policyId }) => policyId === "docker-managed"
+        );
+        expect(terminalDryRunStatus?.activeRun).toBeUndefined();
+        expect(terminalDryRunStatus?.lastRun).toBeUndefined();
+
+        const modeMismatch = await queue
+            .enqueue({
+                dryRun: false,
+                idempotencyKey,
+                policyId: "docker-managed",
+            })
+            .catch((error: unknown) => error);
+        expect(modeMismatch).toBeInstanceOf(LogMaintenanceJobQueueError);
 
         const rejected = await queue
             .enqueue({
@@ -265,6 +327,31 @@ describe("log-maintenance durable queue adapter", () => {
             })
             .catch((error: unknown) => error);
         expect(rejected).toBeInstanceOf(LogMaintenanceJobQueueError);
+        expect(fixture.enqueues).toHaveLength(1);
+    });
+
+    test("rejects a same-key dry-run after a real managed request", async () => {
+        const fixture = repositoryFixture();
+        const queue = createLogMaintenanceJobQueue({
+            availablePolicies: () => Promise.resolve(["docker-managed"]),
+            repository: fixture.repository,
+        });
+        const reverseKey = idempotencyKey.replace(/1$/u, "4");
+
+        await queue.enqueue({
+            dryRun: false,
+            idempotencyKey: reverseKey,
+            policyId: "docker-managed",
+        });
+        const mismatch = await queue
+            .enqueue({
+                dryRun: true,
+                idempotencyKey: reverseKey,
+                policyId: "docker-managed",
+            })
+            .catch((error: unknown) => error);
+
+        expect(mismatch).toBeInstanceOf(LogMaintenanceJobQueueError);
         expect(fixture.enqueues).toHaveLength(1);
     });
 

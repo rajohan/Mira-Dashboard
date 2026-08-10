@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
+import { createSqliteLogMaintenanceAuditWriter } from "../logs/operationAudit.ts";
 import { createSecurityAuditEvent } from "./audit.ts";
 import { createSecurityAuditLifecycleService } from "./securityAuditLifecycle.ts";
 import { createSecurityAuditLifecycleRepository } from "./securityAuditLifecycleRepository.ts";
@@ -96,6 +98,65 @@ describe("security audit lifecycle", () => {
             if (secondPage.status === "listed") {
                 expect(secondPage.result.nextCursor).toBeUndefined();
             }
+        } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
+    test("lists a persisted queued log-maintenance audit", async () => {
+        const harness = await createAuthenticationLifecycleHarness();
+
+        try {
+            const created = await bootstrapAuthenticationLifecycle(harness);
+            const occurredAt = new Date("2026-08-05T08:59:30.000Z");
+            const auditId = "019fc968-1a9b-7773-8f1b-d5b863b0e7b4";
+            const requestId = "request-logs-maintenance";
+            const actor = {
+                authenticatorId: created.session.id,
+                id: created.user.id,
+                kind: "user" as const,
+            };
+            const writer = createSqliteLogMaintenanceAuditWriter({
+                clock: () => occurredAt,
+                database: harness.database.orm,
+                generateId: () => auditId,
+                writeAdmission: testImmediateDatabaseWriteAdmission,
+            });
+            await writer.record({
+                actor,
+                dryRun: false,
+                policyId: "host-rsyslog",
+                requestId,
+                settlement: "queued",
+            });
+            const service = createSecurityAuditLifecycleService({
+                now: () => now,
+                repository: createSecurityAuditLifecycleRepository(harness.database.orm),
+            });
+
+            const listed = service.listEvents(
+                {
+                    sessionId: created.session.id,
+                    userId: created.user.id,
+                },
+                { limit: 20 }
+            );
+
+            expect(listed.status).toBe("listed");
+            if (listed.status !== "listed") return;
+            expect(listed.result.events.find(({ id }) => id === auditId)).toEqual({
+                action: "logs.maintenance.request",
+                actor,
+                id: auditId,
+                metadata: { settlement: "succeeded" },
+                occurredAtMs: occurredAt.getTime(),
+                outcome: "succeeded",
+                requestId,
+                target: {
+                    id: "host-rsyslog",
+                    type: "log-maintenance-policy",
+                },
+            });
         } finally {
             harness.database.sqlite.close(true);
         }
