@@ -1,8 +1,9 @@
 import { describe, expect, jest, test } from "bun:test";
 
-import type {
-    WorkspaceFileContentTicket,
-    WorkspaceFileEntry,
+import {
+    workspaceFileLimits,
+    type WorkspaceFileContentTicket,
+    type WorkspaceFileEntry,
 } from "../../contracts/files.ts";
 import type { WorkspaceFileClient } from "./workspaceFileClient.ts";
 import {
@@ -71,6 +72,31 @@ describe("workspace file transfers", () => {
             { disposition: "preview", resourceId: entryId },
             expect.anything()
         );
+    });
+
+    test("keeps oversized text projections download-only without fetching them", async () => {
+        const oversizedTextBytes = workspaceFileLimits.maximumTextPreviewBytes + 1;
+        const largeEntry: WorkspaceFileEntry = {
+            ...entry,
+            previewKind: "download-only",
+            sizeBytes: oversizedTextBytes,
+        };
+        const ticket: WorkspaceFileContentTicket = {
+            ...contentTicket(),
+            previewKind: "download-only",
+            sizeBytes: oversizedTextBytes,
+        };
+        const fetcher = jest.fn(() => Promise.reject(new Error("must not fetch")));
+
+        const result = await prepareWorkspaceFilePreview(
+            client({ query: () => Promise.resolve(ticket) }),
+            largeEntry,
+            new AbortController().signal,
+            fetcher
+        );
+
+        expect(result).toEqual({ ticket });
+        expect(fetcher).not.toHaveBeenCalled();
     });
 
     test("prepares and accepts one exact same-origin upload", async () => {

@@ -54,6 +54,7 @@ import {
     chatHistoryProviderPageMaximum,
     chatHistoryResponseMaximumBytes,
     chatMessageTextMaximumCodeUnits,
+    chatRunEventMaximum,
     chatRuntimeProjectionPartsMaximum,
     chatRuntimeResponseMaximumBytes,
     mergeChatStreamText,
@@ -425,6 +426,69 @@ function boundExternalRunProjection(run: ChatExternalRun): ChatExternalRun {
         }
     }
     return v.parse(chatExternalRunSchema, best);
+}
+
+function mergeExternalInFlightParts(
+    previous: ChatExternalRun | undefined,
+    text: string
+): Readonly<{
+    parts: readonly ChatRuntimeProjectionPart[];
+    projectionTruncated: boolean;
+}> {
+    const parts: readonly ChatRuntimeProjectionPart[] =
+        previous?.parts ??
+        (previous?.text === undefined || previous.text === ""
+            ? []
+            : [{ kind: "assistant", sequence: 1, text: previous.text }]);
+    const wasProjectionTruncated = previous?.projectionTruncated ?? false;
+
+    const renderedText = parts
+        .filter((part) => part.kind === "assistant")
+        .map(({ text: partText }) => partText)
+        .join("");
+    if (renderedText === text) {
+        return { parts, projectionTruncated: wasProjectionTruncated };
+    }
+
+    const lastAssistantIndex = parts.findLastIndex((part) => part.kind === "assistant");
+    let merged: readonly ChatRuntimeProjectionPart[];
+    if (text === "") {
+        merged = parts.filter((part) => part.kind !== "assistant");
+    } else if (lastAssistantIndex === -1) {
+        merged = [
+            ...parts,
+            {
+                kind: "assistant",
+                sequence: (parts.at(-1)?.sequence ?? 0) + 1,
+                text,
+            },
+        ];
+    } else if (text.startsWith(renderedText)) {
+        const suffix = text.slice(renderedText.length);
+        merged = parts.map((part, index) =>
+            index === lastAssistantIndex && part.kind === "assistant"
+                ? { ...part, text: part.text + suffix }
+                : part
+        );
+    } else {
+        merged = parts
+            .filter(
+                (part, index) => part.kind !== "assistant" || index === lastAssistantIndex
+            )
+            .map((part) => (part.kind === "assistant" ? { ...part, text } : part));
+    }
+    const partsExceeded = merged.length > chatRuntimeProjectionPartsMaximum;
+    const sequenceExceeded = (merged.at(-1)?.sequence ?? 0) > chatRunEventMaximum;
+    if (!partsExceeded && !sequenceExceeded) {
+        return { parts: merged, projectionTruncated: wasProjectionTruncated };
+    }
+    const bounded = partsExceeded
+        ? merged.slice(-chatRuntimeProjectionPartsMaximum)
+        : merged;
+    return {
+        parts: bounded.map((part, index) => ({ ...part, sequence: index + 1 })),
+        projectionTruncated: wasProjectionTruncated || partsExceeded,
+    };
 }
 
 function updateExternalStreamPart(
@@ -1399,34 +1463,32 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             inFlightRun.runId
         );
         if (local !== undefined) return;
+        const previous = this.#externalRuns.get(sessionKey)?.get(inFlightRun.runId);
+        const mergedParts = mergeExternalInFlightParts(previous, inFlightRun.text);
+        const planSteps = inFlightRun.plan?.steps ?? previous?.plan?.steps;
         this.#storeExternalRun(
             boundExternalRunProjection({
-                continuity: "complete",
-                hasUnprojectedActivity: false,
-                parts:
-                    inFlightRun.text === ""
-                        ? []
-                        : [
-                              {
-                                  kind: "assistant",
-                                  sequence: 1,
-                                  text: inFlightRun.text,
-                              },
-                          ],
-                ...(inFlightRun.plan === undefined
+                continuity: previous?.continuity ?? "complete",
+                hasUnprojectedActivity:
+                    (previous?.hasUnprojectedActivity ?? false) ||
+                    mergedParts.projectionTruncated,
+                parts: [...mergedParts.parts],
+                ...(planSteps === undefined
                     ? {}
                     : {
                           plan: {
                               phase: "update",
-                              steps: [...inFlightRun.plan.steps],
+                              steps: [...planSteps],
                           },
                       }),
                 providerRunId: inFlightRun.runId,
                 sessionKey,
-                source: "provider-in-flight",
+                source: previous?.source ?? "provider-in-flight",
                 text: inFlightRun.text,
-                projectionTruncated: false,
-                updatedAtMs: this.#nowMs(),
+                projectionTruncated:
+                    (previous?.projectionTruncated ?? false) ||
+                    mergedParts.projectionTruncated,
+                updatedAtMs: Math.max(previous?.updatedAtMs ?? 0, this.#nowMs()),
             })
         );
         await this.#repository.signalRuntimeChanged();

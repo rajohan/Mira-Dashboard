@@ -40,6 +40,7 @@ const terminalSocketPathPattern = /^\/api\/terminal\/sessions\/([0-9a-f-]{36})\/
 const terminalWebSocketKeyPattern = /^[A-Za-z0-9+/]{22}==$/u;
 const terminalAuthenticationCheckMaximumIntervalMs = 30_000;
 const terminalAuthenticationRevalidationTimeoutMs = 5000;
+const terminalControlFlushTimeoutMs = 5000;
 const terminalSocketIdleTimeoutSeconds = 60;
 const terminalPendingInputMaximumFrames =
     terminalSocketBufferedMaximumBytes / terminalClientMessageMaximumBytes;
@@ -84,6 +85,12 @@ interface PendingTerminalSocketMessage {
     readonly bytes: number;
     readonly data: string | Uint8Array;
     readonly kind: "binary" | "text";
+}
+
+interface PendingTerminalSocketClose {
+    readonly code: number;
+    readonly reason: string;
+    timer?: TerminalSocketTimer;
 }
 
 interface ActiveTerminalAuthentication {
@@ -342,6 +349,7 @@ export class TerminalSocketConnection {
     #peer?: TerminalSocketPeer;
     #pending: PendingTerminalSocketMessage[] = [];
     #pendingBytes = 0;
+    #pendingClose?: PendingTerminalSocketClose;
     #pendingInput: Uint8Array[] = [];
     #pendingInputBytes = 0;
     #relay?: TerminalBrokerRelay;
@@ -395,7 +403,7 @@ export class TerminalSocketConnection {
     }
 
     message(message: string | Uint8Array): void {
-        if (this.#finalized) return;
+        if (this.#finalized || this.#pendingClose !== undefined) return;
         if (typeof message !== "string") {
             if (
                 message.byteLength === 0 ||
@@ -472,6 +480,13 @@ export class TerminalSocketConnection {
         if (this.#finalized) return;
         this.#outputBackpressured = false;
         this.#flushPending();
+        if (this.#finalized) return;
+        if (this.#pendingClose !== undefined) {
+            if (!this.#outputBackpressured && this.#pending.length === 0) {
+                this.#completePendingClose();
+            }
+            return;
+        }
         if (!this.#outputBackpressured && this.#pending.length === 0) {
             this.#relay?.resumeOutput();
         }
@@ -481,6 +496,7 @@ export class TerminalSocketConnection {
         if (this.#finalized) return;
         this.#finalized = true;
         this.#cancelAuthenticationCheck();
+        this.#cancelPendingClose();
         this.#clearPending();
         this.#relay?.detach();
         this.#relay = undefined;
@@ -495,6 +511,7 @@ export class TerminalSocketConnection {
         if (this.#finalized) return;
         this.#finalized = true;
         this.#cancelAuthenticationCheck();
+        this.#cancelPendingClose();
         this.#clearPending();
         this.#relay?.terminate();
         this.#relay = undefined;
@@ -505,6 +522,7 @@ export class TerminalSocketConnection {
         if (this.#finalized) return;
         this.#finalized = true;
         this.#cancelAuthenticationCheck();
+        this.#cancelPendingClose();
         this.#clearPending();
         this.#relay?.terminate();
         this.#relay = undefined;
@@ -513,7 +531,7 @@ export class TerminalSocketConnection {
     }
 
     #inputDrained(): void {
-        if (this.#finalized) return;
+        if (this.#finalized || this.#pendingClose !== undefined) return;
         this.#inputBackpressured = false;
         while (
             !this.#finalized &&
@@ -544,8 +562,13 @@ export class TerminalSocketConnection {
 
     #brokerClosed(): void {
         if (this.#finalized) return;
+        if (this.#pendingClose !== undefined) {
+            this.#relay = undefined;
+            return;
+        }
         this.#finalized = true;
         this.#cancelAuthenticationCheck();
+        this.#cancelPendingClose();
         this.#clearPending();
         this.#relay = undefined;
         this.#peer?.close(1011, "Terminal unavailable");
@@ -553,7 +576,13 @@ export class TerminalSocketConnection {
     }
 
     #brokerControl(event: TerminalBrokerRelayControl): void {
-        if (this.#finalized || event.type === "input-drain") return;
+        if (
+            this.#finalized ||
+            this.#pendingClose !== undefined ||
+            event.type === "input-drain"
+        ) {
+            return;
+        }
         if (event.type === "ready") {
             if (event.session.sessionId !== this.#sessionId) {
                 this.#unavailableClose();
@@ -576,27 +605,35 @@ export class TerminalSocketConnection {
             return;
         }
         if (event.type === "exit") {
-            this.#sendControl({
-                endedAtMs: safeNow(this.#nowMs),
-                exitCode: event.exitCode,
-                reason: event.reason,
-                sessionId: this.#sessionId,
-                ...(event.signalCode === null ? {} : { signal: event.signalCode }),
-                type: "exit",
-            });
-            this.#finalizeWithoutRelayTermination(1000, "Terminal ended");
+            this.#beginPendingClose(
+                {
+                    endedAtMs: safeNow(this.#nowMs),
+                    exitCode: event.exitCode,
+                    reason: event.reason,
+                    sessionId: this.#sessionId,
+                    ...(event.signalCode === null ? {} : { signal: event.signalCode }),
+                    type: "exit",
+                },
+                1000,
+                "Terminal ended"
+            );
             return;
         }
-        this.#sendControl({
-            code: event.reason === "backpressure" ? "capacity" : "session-ended",
-            message: "Terminal session ended",
-            type: "error",
-        });
-        this.#finalizeWithoutRelayTermination(1000, "Terminal ended");
+        this.#beginPendingClose(
+            {
+                code: event.reason === "backpressure" ? "capacity" : "session-ended",
+                message: "Terminal session ended",
+                type: "error",
+            },
+            1000,
+            "Terminal ended"
+        );
     }
 
     #brokerOutput(sequence: number, data: Uint8Array): "accepted" | "backpressured" {
-        if (this.#finalized) return "backpressured";
+        if (this.#finalized || this.#pendingClose !== undefined) {
+            return "backpressured";
+        }
         let frame: Uint8Array;
         try {
             frame = encodeOutput(sequence, data);
@@ -628,7 +665,11 @@ export class TerminalSocketConnection {
             this.#unavailableClose();
             return "backpressured";
         }
-        if (this.#peer === undefined || this.#pending.length > 0) {
+        if (
+            this.#peer === undefined ||
+            this.#outputBackpressured ||
+            this.#pending.length > 0
+        ) {
             if (this.#pendingBytes + message.bytes > terminalSocketBufferedMaximumBytes) {
                 this.#unavailableClose();
                 return "backpressured";
@@ -677,6 +718,10 @@ export class TerminalSocketConnection {
     #clearPending(): void {
         this.#pending = [];
         this.#pendingBytes = 0;
+        this.#clearPendingInput();
+    }
+
+    #clearPendingInput(): void {
         this.#pendingInput = [];
         this.#pendingInputBytes = 0;
         this.#inputBackpressured = false;
@@ -686,6 +731,7 @@ export class TerminalSocketConnection {
         if (this.#finalized) return;
         this.#finalized = true;
         this.#cancelAuthenticationCheck();
+        this.#cancelPendingClose();
         this.#clearPending();
         this.#relay?.terminate();
         this.#relay = undefined;
@@ -697,6 +743,7 @@ export class TerminalSocketConnection {
         if (this.#finalized) return;
         this.#finalized = true;
         this.#cancelAuthenticationCheck();
+        this.#cancelPendingClose();
         this.#clearPending();
         this.#relay?.terminate();
         this.#relay = undefined;
@@ -708,10 +755,50 @@ export class TerminalSocketConnection {
         this.#policyClose(1011, "Terminal unavailable");
     }
 
+    #beginPendingClose(
+        message: TerminalServerMessage,
+        code: number,
+        reason: string
+    ): void {
+        if (this.#finalized || this.#pendingClose !== undefined) return;
+        const pendingClose: PendingTerminalSocketClose = { code, reason };
+        this.#pendingClose = pendingClose;
+        this.#cancelAuthenticationCheck();
+        this.#clearPendingInput();
+        this.#sendControl(message);
+        if (this.#finalized || this.#pendingClose !== pendingClose) return;
+        if (
+            this.#peer === undefined ||
+            (!this.#outputBackpressured && this.#pending.length === 0)
+        ) {
+            this.#completePendingClose();
+            return;
+        }
+        const timer = this.#scheduler.schedule(() => {
+            if (this.#pendingClose === pendingClose && !this.#finalized) {
+                this.#policyClose(1011, "Terminal unavailable");
+            }
+        }, terminalControlFlushTimeoutMs);
+        if (this.#pendingClose === pendingClose) pendingClose.timer = timer;
+        else timer.cancel();
+    }
+
+    #completePendingClose(): void {
+        const pendingClose = this.#pendingClose;
+        if (pendingClose === undefined || this.#finalized) return;
+        this.#finalizeWithoutRelayTermination(pendingClose.code, pendingClose.reason);
+    }
+
+    #cancelPendingClose(): void {
+        this.#pendingClose?.timer?.cancel();
+        this.#pendingClose = undefined;
+    }
+
     #finalizeWithoutRelayTermination(code: number, reason: string): void {
         if (this.#finalized) return;
         this.#finalized = true;
         this.#cancelAuthenticationCheck();
+        this.#cancelPendingClose();
         this.#relay = undefined;
         this.#clearPending();
         this.#peer?.close(code, reason);
@@ -725,7 +812,7 @@ export class TerminalSocketConnection {
     }
 
     #scheduleAuthenticationCheck(): void {
-        if (this.#finalized) return;
+        if (this.#finalized || this.#pendingClose !== undefined) return;
         let delayMs: number;
         try {
             delayMs = Math.max(
@@ -746,7 +833,7 @@ export class TerminalSocketConnection {
     }
 
     async #revalidateAuthentication(): Promise<void> {
-        if (this.#finalized) return;
+        if (this.#finalized || this.#pendingClose !== undefined) return;
         const timeout = AbortSignal.timeout(terminalAuthenticationRevalidationTimeoutMs);
         const signal = AbortSignal.any([this.#authenticationController.signal, timeout]);
         try {
@@ -782,6 +869,7 @@ export class TerminalSocketConnection {
     }
 
     #authenticationLost(): void {
+        if (this.#pendingClose !== undefined) return;
         this.#policyClose(1008, "Terminal authentication expired");
     }
 }

@@ -657,6 +657,266 @@ describe("ChatService", () => {
         }
     });
 
+    test("merges in-flight history snapshots without replacing live external detail", async () => {
+        const database = await openFreshMigratedDatabase();
+        let clock = 1000;
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => clock
+        );
+        let includeSnapshotPlan = true;
+        let snapshotText = "Snapshot answer";
+        const provider = providerHarness({
+            history: async () => ({
+                hasMore: false,
+                inFlightRun: {
+                    ...(includeSnapshotPlan
+                        ? {
+                              plan: {
+                                  steps: [
+                                      {
+                                          status: "in_progress" as const,
+                                          text: "Snapshot plan",
+                                      },
+                                  ],
+                              },
+                          }
+                        : {}),
+                    runId: "external-refresh",
+                    text: snapshotText,
+                },
+                messages: [],
+            }),
+        });
+        const service = createChatService({
+            attachmentConsumer: {
+                reserve: async () => {
+                    throw new Error("Attachment reservation is not used by this test");
+                },
+            },
+            attachmentPreparer: inertAttachmentPreparer(),
+            nowMs: () => clock,
+            provider: provider.provider,
+            repository,
+        });
+        try {
+            await service.runtime(runtimeInput());
+            const subscription = provider.requests[0]!;
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-refresh",
+                providerSequence: 1,
+                receivedAtMs: 1001,
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+                text: "Private reasoning",
+            });
+            await subscription.onEvent({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                input: '{"query":"history"}',
+                isError: false,
+                kind: "tool",
+                name: "search",
+                nameSource: "synthetic",
+                phase: "started",
+                providerRunId: "external-refresh",
+                providerSequence: 2,
+                receivedAtMs: 1002,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                callId: "synthetic-call",
+                callIdSource: "synthetic",
+                isError: false,
+                kind: "tool",
+                name: "search",
+                nameSource: "synthetic",
+                output: "Found",
+                phase: "succeeded",
+                providerRunId: "external-refresh",
+                providerSequence: 3,
+                receivedAtMs: 1003,
+                sessionKey: "agent:main:main",
+            });
+            await subscription.onEvent({
+                itemId: "item-1",
+                itemType: "progress",
+                kind: "item",
+                providerRunId: "external-refresh",
+                providerSequence: 4,
+                receivedAtMs: 1004,
+                sessionKey: "agent:main:main",
+                text: "Checked history",
+            });
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-refresh",
+                providerSequence: 5,
+                receivedAtMs: 1005,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: "Answer",
+            });
+            await subscription.onEvent({
+                kind: "plan",
+                phase: "update",
+                providerRunId: "external-refresh",
+                providerSequence: 6,
+                receivedAtMs: 1006,
+                sessionKey: "agent:main:main",
+                steps: [{ status: "pending", text: "Live plan" }],
+            });
+
+            clock = 2000;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const refreshedRuntime = await service.runtime(runtimeInput());
+            const refreshed = refreshedRuntime.externalRuns[0]!;
+            expect(refreshed).toMatchObject({
+                plan: {
+                    phase: "update",
+                    steps: [{ status: "in_progress", text: "Snapshot plan" }],
+                },
+                providerRunId: "external-refresh",
+                source: "provider-runtime",
+                text: "Snapshot answer",
+                updatedAtMs: 2000,
+            });
+            expect(refreshed.parts).toEqual([
+                { kind: "thinking", sequence: 1, text: "Private reasoning" },
+                {
+                    callId: "synthetic-call",
+                    callIdSource: "synthetic",
+                    input: '{"query":"history"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "search",
+                    nameSource: "synthetic",
+                    output: "Found",
+                    phase: "succeeded",
+                    sequence: 2,
+                },
+                {
+                    id: "item-1",
+                    kind: "item",
+                    sequence: 3,
+                    text: "Checked history",
+                    type: "progress",
+                },
+                { kind: "assistant", sequence: 4, text: "Snapshot answer" },
+            ]);
+
+            await subscription.onEvent({
+                kind: "delta",
+                mode: "append",
+                providerRunId: "external-refresh",
+                providerSequence: 7,
+                receivedAtMs: 2001,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                text: " continued",
+            });
+            await subscription.onEvent({
+                itemId: "item-2",
+                itemType: "progress",
+                kind: "item",
+                providerRunId: "external-refresh",
+                providerSequence: 8,
+                receivedAtMs: 2002,
+                sessionKey: "agent:main:main",
+                text: "Continued",
+            });
+            const continuedRuntime = await service.runtime(runtimeInput());
+            const continued = continuedRuntime.externalRuns[0]!;
+            expect(continued.text).toBe("Snapshot answer continued");
+            expect(continued.parts?.slice(-2)).toEqual([
+                {
+                    kind: "assistant",
+                    sequence: 4,
+                    text: "Snapshot answer continued",
+                },
+                {
+                    id: "item-2",
+                    kind: "item",
+                    sequence: 5,
+                    text: "Continued",
+                    type: "progress",
+                },
+            ]);
+
+            includeSnapshotPlan = false;
+            snapshotText = "Snapshot answer continued";
+            clock = 3000;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const withoutSnapshotPlanRuntime = await service.runtime(runtimeInput());
+            const withoutSnapshotPlan = withoutSnapshotPlanRuntime.externalRuns[0]!;
+            expect(withoutSnapshotPlan.plan).toEqual({
+                phase: "update",
+                steps: [{ status: "in_progress", text: "Snapshot plan" }],
+            });
+            expect(withoutSnapshotPlan.parts).toEqual(continued.parts);
+
+            for (let index = 0; index < 5; index += 1) {
+                await subscription.onEvent({
+                    kind: "delta",
+                    mode: "append",
+                    providerRunId: "external-refresh",
+                    providerSequence: 9 + index,
+                    receivedAtMs: 3001 + index,
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                    text: "界".repeat(64 * 1024),
+                });
+            }
+            const truncatedRuntime = await service.runtime(runtimeInput());
+            expect(truncatedRuntime.externalRuns[0]).toMatchObject({
+                parts: [],
+                projectionTruncated: true,
+                providerRunId: "external-refresh",
+            });
+
+            snapshotText = "Recovered snapshot";
+            clock = 4000;
+            await service.history({
+                cursor: "0",
+                limit: 50,
+                sessionKey: "agent:main:main",
+            });
+            const recoveredRuntime = await service.runtime(runtimeInput());
+            expect(recoveredRuntime.externalRuns[0]).toMatchObject({
+                parts: [
+                    {
+                        kind: "assistant",
+                        sequence: 1,
+                        text: "Recovered snapshot",
+                    },
+                ],
+                plan: {
+                    phase: "update",
+                    steps: [{ status: "in_progress", text: "Snapshot plan" }],
+                },
+                projectionTruncated: true,
+                source: "provider-runtime",
+                text: "Recovered snapshot",
+            });
+        } finally {
+            await service.dispose();
+            database.sqlite.close(true);
+        }
+    });
+
     test("bounds a multibyte provider in-flight projection before runtime validation", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createChatRepository(

@@ -443,12 +443,21 @@ function matchesOldIdentity(
     expected: WorkspaceFileReplaceFingerprint
 ): boolean {
     return (
-        stat.dev.toString() === expected.dev &&
-        stat.ino.toString() === expected.ino &&
-        stat.mode.toString() === expected.mode &&
-        stat.nlink.toString() === expected.nlink &&
-        stat.uid.toString() === expected.uid &&
-        stat.gid.toString() === expected.gid &&
+        matchesOldInode(stat, expected) &&
+        stat.size.toString() === expected.size &&
+        stat.mtimeNs.toString() === expected.mtimeNs &&
+        stat.ctimeNs.toString() === expected.ctimeNs
+    );
+}
+
+function matchesExchangedOldIdentity(
+    stat: Fs.BigIntStats,
+    expected: WorkspaceFileReplaceFingerprint
+): boolean {
+    // RENAME_EXCHANGE changes ctime; this matcher is only for the old inode after
+    // the staged target has already been installed in its directory slot.
+    return (
+        matchesOldInode(stat, expected) &&
         stat.size.toString() === expected.size &&
         stat.mtimeNs.toString() === expected.mtimeNs
     );
@@ -693,6 +702,17 @@ function childMatchesOld(
     );
 }
 
+function childMatchesExchangedOld(
+    child: HashedChild | undefined,
+    intent: WorkspaceFileReplaceIntent
+): boolean {
+    return (
+        child !== undefined &&
+        matchesExchangedOldIdentity(child.stat, intent.old) &&
+        sameDigest(child.sha256, intent.old.sha256)
+    );
+}
+
 function childMatchesStage(
     child: HashedChild | undefined,
     intent: WorkspaceFileReplaceIntent
@@ -740,7 +760,7 @@ async function recoverWorkspaceFileReplacement(
         if (childMatchesStage(target, intent)) {
             if (target === undefined) throw failure("unavailable");
             if (temporary === undefined) return target.stat;
-            if (childMatchesOld(temporary, intent)) {
+            if (childMatchesExchangedOld(temporary, intent)) {
                 await unlinkExactChild(directory, temporaryName, temporary.stat);
                 return target.stat;
             }

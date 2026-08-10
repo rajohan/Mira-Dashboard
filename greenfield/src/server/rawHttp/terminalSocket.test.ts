@@ -680,12 +680,18 @@ describe("terminal WebSocket raw boundary", () => {
         const peer = peerFixture({ binaryStatuses: [-1] });
         upgrade.data?.open(peer.peer);
         expect(relay.calls).not.toContain("resume-output");
+        expect(peer.binary).toHaveLength(1);
+        expect(broker.callbacks?.onOutput(2, Uint8Array.from([1, 2, 3]))).toBe(
+            "accepted"
+        );
+        expect(peer.binary).toHaveLength(1);
 
         upgrade.data?.drain();
         expect(relay.calls).toContain("resume-output");
+        expect(peer.binary).toHaveLength(2);
         expect(
             broker.callbacks?.onOutput(
-                2,
+                3,
                 new Uint8Array(terminalServerMessageMaximumBytes)
             )
         ).toBe("accepted");
@@ -694,6 +700,157 @@ describe("terminal WebSocket raw boundary", () => {
         );
         expect(peer.closed).toHaveLength(0);
         boundary.shutdown();
+    });
+
+    test("flushes terminal exit after backpressure and a broker close", async () => {
+        const authentication = Promise.withResolvers<AuthenticationResolution>();
+        const scheduled: Array<{
+            readonly callback: () => void;
+            cancelled: boolean;
+            readonly delayMs: number;
+        }> = [];
+        const relay = relayFixture();
+        const broker = brokerFixture(relay.relay);
+        const boundary = createTerminalSocketBoundary({
+            authenticateCredential: () =>
+                authenticatedResolution({ revalidate: () => authentication.promise }),
+            authenticationLifecycle: authenticationLifecycle(),
+            broker: broker.broker,
+            nowMs: () => nowMs,
+            scheduler: {
+                schedule(callback, delayMs) {
+                    const entry = { callback, cancelled: false, delayMs };
+                    scheduled.push(entry);
+                    return {
+                        cancel() {
+                            entry.cancelled = true;
+                        },
+                    };
+                },
+            },
+        });
+        const upgrade = upgradeFixture();
+        await boundary.handle(request(), terminalUrl(), upgrade);
+        const peer = peerFixture({ binaryStatuses: [-1] });
+        upgrade.data?.open(peer.peer);
+        scheduled[0]?.callback();
+        await settleMicrotasks();
+
+        broker.callbacks?.onControl({
+            exitCode: 0,
+            reason: "exited",
+            signalCode: null,
+            type: "exit",
+        });
+        broker.callbacks?.onClose();
+        const relayCallsAtExit = [...relay.calls];
+        expect(broker.callbacks?.onOutput(2, Uint8Array.from([4, 5, 6]))).toBe(
+            "backpressured"
+        );
+        broker.callbacks?.onControl({ reason: "runtime-limit", type: "closed" });
+        upgrade.data?.message(Uint8Array.from([7, 8, 9]));
+        upgrade.data?.message(JSON.stringify({ nonce: 9, type: "ping" }));
+        await settleMicrotasks();
+
+        expect(relay.calls).toEqual(relayCallsAtExit);
+        expect(peer.closed).toHaveLength(0);
+        expect(peer.text).toHaveLength(1);
+        expect(JSON.parse(peer.text[0] ?? "null")).toMatchObject({ type: "ready" });
+        const flushTimer = scheduled.find(({ delayMs }) => delayMs === 5000);
+        expect(flushTimer).toBeDefined();
+
+        upgrade.data?.drain();
+
+        expect(peer.text).toHaveLength(2);
+        expect(JSON.parse(peer.text[1] ?? "null")).toMatchObject({ type: "exit" });
+        expect(peer.closed).toEqual([{ code: 1000, reason: "Terminal ended" }]);
+        expect(flushTimer?.cancelled).toBeTrue();
+        expect(relay.calls).not.toContain("terminate");
+        broker.callbacks?.onClose();
+        upgrade.data?.drain();
+        flushTimer?.callback();
+        expect(peer.closed).toHaveLength(1);
+        authentication.resolve(authenticatedResolution());
+    });
+
+    test("flushes a terminal broker error before closing a backpressured socket", async () => {
+        const relay = relayFixture();
+        const broker = brokerFixture(relay.relay);
+        const boundary = createTerminalSocketBoundary({
+            authenticateCredential: () => authenticatedResolution(),
+            authenticationLifecycle: authenticationLifecycle(),
+            broker: broker.broker,
+            nowMs: () => nowMs,
+        });
+        const upgrade = upgradeFixture();
+        await boundary.handle(request(), terminalUrl(), upgrade);
+        const peer = peerFixture({ binaryStatuses: [-1] });
+        upgrade.data?.open(peer.peer);
+
+        broker.callbacks?.onControl({ reason: "backpressure", type: "closed" });
+        broker.callbacks?.onClose();
+        expect(peer.closed).toHaveLength(0);
+
+        upgrade.data?.drain();
+
+        expect(JSON.parse(peer.text.at(-1) ?? "null")).toEqual({
+            code: "capacity",
+            message: "Terminal session ended",
+            type: "error",
+        });
+        expect(peer.closed).toEqual([{ code: 1000, reason: "Terminal ended" }]);
+    });
+
+    test("fails the transport when the terminal close frame cannot drain in time", async () => {
+        const scheduled: Array<{
+            readonly callback: () => void;
+            cancelled: boolean;
+            readonly delayMs: number;
+        }> = [];
+        const relay = relayFixture();
+        const broker = brokerFixture(relay.relay);
+        const boundary = createTerminalSocketBoundary({
+            authenticateCredential: () => authenticatedResolution(),
+            authenticationLifecycle: authenticationLifecycle(),
+            broker: broker.broker,
+            nowMs: () => nowMs,
+            scheduler: {
+                schedule(callback, delayMs) {
+                    const entry = { callback, cancelled: false, delayMs };
+                    scheduled.push(entry);
+                    return {
+                        cancel() {
+                            entry.cancelled = true;
+                        },
+                    };
+                },
+            },
+        });
+        const upgrade = upgradeFixture();
+        await boundary.handle(request(), terminalUrl(), upgrade);
+        const peer = peerFixture({ binaryStatuses: [-1] });
+        upgrade.data?.open(peer.peer);
+
+        broker.callbacks?.onControl({
+            exitCode: 0,
+            reason: "exited",
+            signalCode: null,
+            type: "exit",
+        });
+        const flushTimer = scheduled.find(({ delayMs }) => delayMs === 5000);
+        expect(flushTimer).toBeDefined();
+        expect(peer.closed).toHaveLength(0);
+
+        flushTimer?.callback();
+
+        expect(peer.text).toHaveLength(1);
+        expect(JSON.parse(peer.text[0] ?? "null")).toMatchObject({ type: "ready" });
+        expect(peer.closed).toEqual([{ code: 1011, reason: "Terminal unavailable" }]);
+        expect(relay.calls).toContain("terminate");
+        broker.callbacks?.onClose();
+        upgrade.data?.drain();
+        flushTimer?.callback();
+        expect(peer.closed).toHaveLength(1);
     });
 
     test("bounds worker output queued before Bun opens the socket", async () => {

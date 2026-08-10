@@ -359,7 +359,8 @@ function isUtf8Text(bytes: Uint8Array): boolean {
 
 function contentPresentation(
     name: string,
-    bytes: Uint8Array
+    bytes: Uint8Array,
+    sizeBytes: number
 ): { readonly mimeType: string; readonly previewKind: WorkspaceFilePreviewKind } {
     const extension = Path.extname(name).toLowerCase();
     if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
@@ -398,20 +399,25 @@ function contentPresentation(
         return { mimeType: "audio/wav", previewKind: "audio" };
     }
     if (isUtf8Text(bytes)) {
-        if (extension === ".svg" || extension === ".html") {
-            return { mimeType: "text/plain", previewKind: "text" };
-        }
+        const mimeType =
+            extension === ".svg" || extension === ".html"
+                ? "text/plain"
+                : (mimeTypesByExtension.get(extension) ?? "text/plain");
         return {
-            mimeType:
-                mimeTypesByExtension.get(extension) ??
-                (textExtensions.has(extension) ? "text/plain" : "text/plain"),
-            previewKind: "text",
+            mimeType,
+            previewKind:
+                sizeBytes > workspaceFileLimits.maximumTextPreviewBytes
+                    ? "download-only"
+                    : "text",
         };
     }
     return { mimeType: "application/octet-stream", previewKind: "download-only" };
 }
 
-function extensionPresentation(name: string): {
+function extensionPresentation(
+    name: string,
+    sizeBytes: number
+): {
     readonly mimeType?: string;
     readonly previewKind?: WorkspaceFilePreviewKind;
 } {
@@ -425,10 +431,22 @@ function extensionPresentation(name: string): {
     }
     if (mimeType === "application/pdf") return { mimeType, previewKind: "pdf" };
     if (mimeType?.startsWith("text/") === true || mimeType === "application/json") {
-        return { mimeType, previewKind: "text" };
+        return {
+            mimeType,
+            previewKind:
+                sizeBytes > workspaceFileLimits.maximumTextPreviewBytes
+                    ? "download-only"
+                    : "text",
+        };
     }
     if (textExtensions.has(extension)) {
-        return { mimeType: "text/plain", previewKind: "text" };
+        return {
+            mimeType: "text/plain",
+            previewKind:
+                sizeBytes > workspaceFileLimits.maximumTextPreviewBytes
+                    ? "download-only"
+                    : "text",
+        };
     }
     return {};
 }
@@ -622,9 +640,10 @@ function openedFilePresentation(
     const fileName = locator.segments.at(-1);
     if (fileName === undefined) throw new WorkspaceFileError("not-file");
     const redacted = stableManifestBytes(locator, root, fd, stat, signal);
-    const bytes = redacted ?? readPrefix(fd, numberSize(stat));
+    const sizeBytes = redacted?.byteLength ?? numberSize(stat);
+    const bytes = redacted ?? readPrefix(fd, sizeBytes);
     return {
-        ...contentPresentation(fileName, bytes),
+        ...contentPresentation(fileName, bytes, sizeBytes),
         ...(redacted === undefined ? {} : { sizeBytes: redacted.byteLength }),
     };
 }
@@ -653,7 +672,7 @@ async function inspectChild(
             manifestEntry(root, locator.segments)?.contentPolicy ===
                 "redacted-config-json"
                 ? openedFilePresentation(locator, root, handle.fd, stat, signal)
-                : extensionPresentation(name);
+                : extensionPresentation(name, numberSize(stat));
         return nodeFromStat(locator, name, root, stat, presentation);
     } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
@@ -966,7 +985,7 @@ export function createDescriptorWorkspaceFileReader(
                         Math.min(redactedBytes.length, contentSniffBytes)
                     );
                 }
-                const presentation = contentPresentation(fileName, prefix);
+                const presentation = contentPresentation(fileName, prefix, sizeBytes);
                 return {
                     bytes,
                     fileName,

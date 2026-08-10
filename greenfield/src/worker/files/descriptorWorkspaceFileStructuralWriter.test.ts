@@ -327,6 +327,72 @@ describe("descriptor workspace file structural writer", () => {
         expect(Fs.existsSync(Path.join(spool, `${spoolId}.replace-settled`))).toBe(false);
     });
 
+    test("rejects crash recovery after ctime-only target drift", async () => {
+        const parent = Fs.mkdtempSync(
+            Path.join(Os.tmpdir(), "mira-files-ctime-recovery-")
+        );
+        const root = Path.join(parent, "workspace");
+        const spool = Path.join(parent, "spool");
+        Fs.mkdirSync(root, { mode: 0o700 });
+        Fs.mkdirSync(spool, { mode: 0o700 });
+        directories.push(parent);
+        const target = Path.join(root, "note.txt");
+        Fs.writeFileSync(target, "old");
+        Fs.chmodSync(target, 0o640);
+        const original = Fs.statSync(target, { bigint: true });
+        const spoolId = "24242424-2424-4424-8424-242424242424";
+        const command: WorkerWorkspaceFileWriteCommand = {
+            expectedRevision: replacementRevision(root, "note.txt"),
+            fileName: "note.txt",
+            locator: { rootId: "workspace", segments: ["note.txt"] },
+            mimeType: "text/plain",
+            operation: "replace",
+            sha256: stageUpload(spool, spoolId, "replacement"),
+            sizeBytes: 11,
+            spoolId,
+            ticketId: "25252525-2525-4525-8525-252525252525",
+        };
+        const interruptedWriter = createDescriptorWorkspaceFileStructuralWriter({
+            renameExchange() {
+                Fs.chmodSync(target, 0o600);
+                Fs.chmodSync(target, 0o640);
+                throw Object.assign(new Error("injected pre-exchange crash"), {
+                    code: "EIO",
+                });
+            },
+            roots: [{ id: "workspace", path: root, writable: true }],
+            spoolRoot: spool,
+        });
+        writers.push(interruptedWriter);
+
+        expect(
+            await captureFailure(() => interruptedWriter.apply(command))
+        ).toMatchObject({ reason: "unavailable" });
+        const drifted = Fs.statSync(target, { bigint: true });
+        expect(drifted.ctimeNs).not.toBe(original.ctimeNs);
+        expect(drifted.mode).toBe(original.mode);
+        expect(drifted.mtimeNs).toBe(original.mtimeNs);
+        expect(Fs.readFileSync(target, "utf8")).toBe("old");
+
+        interruptedWriter.dispose();
+        writers.splice(writers.indexOf(interruptedWriter), 1);
+        const recoveredWriter = createDescriptorWorkspaceFileStructuralWriter({
+            roots: [{ id: "workspace", path: root, writable: true }],
+            spoolRoot: spool,
+        });
+        writers.push(recoveredWriter);
+
+        expect(await captureFailure(() => recoveredWriter.apply(command))).toMatchObject({
+            reason: "conflict",
+        });
+        expect(Fs.readFileSync(target, "utf8")).toBe("old");
+        expect(replacementRevision(root, "note.txt")).not.toBe(command.expectedRevision);
+        expect(Fs.existsSync(Path.join(spool, `${spoolId}.replace-intent`))).toBe(false);
+        expect(
+            Fs.readdirSync(root).filter((name) => name.startsWith(".mira-files-"))
+        ).toHaveLength(0);
+    });
+
     test("reclaims every durably settled replacement intent before capacity is reused", async () => {
         const { root, spool, writer } = fixture();
         const target = Path.join(root, "note.txt");

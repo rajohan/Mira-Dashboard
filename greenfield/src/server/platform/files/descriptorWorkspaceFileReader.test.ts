@@ -3,6 +3,7 @@ import Fs from "node:fs";
 import Os from "node:os";
 import Path from "node:path";
 
+import { workspaceFileLimits } from "../../../contracts/files.ts";
 import { CONFIG_REDACTION_SENTINEL } from "../../../shared/configRedaction.ts";
 import { WorkspaceFileError } from "../../domains/files/errors.ts";
 import type { WorkspaceFileReader } from "../../domains/files/ports.ts";
@@ -308,6 +309,66 @@ describe("descriptor workspace file reader", () => {
             .read(locator, described.revision, undefined)
             .catch((error: unknown) => error);
         expect(reason(caught)).toBe("conflict");
+    });
+
+    test("projects oversized UTF-8 and redacted text as download-only", async () => {
+        const { reader, root } = fixture();
+        const oversizedSize = workspaceFileLimits.maximumTextPreviewBytes + 1;
+        const oversized = "a".repeat(oversizedSize);
+        Fs.writeFileSync(Path.join(root, "oversized.txt"), oversized);
+        const locator = {
+            rootId: "workspace",
+            segments: ["oversized.txt"],
+        } as const;
+        const described = await reader.describe(locator);
+        expect(described).toMatchObject({
+            mimeType: "text/plain",
+            previewKind: "download-only",
+            sizeBytes: oversizedSize,
+        });
+        const listing = await reader.list({ rootId: "workspace", segments: [] });
+        expect(
+            listing.entries.find(({ name }) => name === "oversized.txt")
+        ).toMatchObject({
+            previewKind: "download-only",
+            sizeBytes: oversizedSize,
+        });
+        const result = await reader.read(locator, described.revision, undefined);
+        expect(result).toMatchObject({
+            previewKind: "download-only",
+            sizeBytes: oversizedSize,
+        });
+
+        const openClaw = openClawFixture();
+        const secrets = Object.fromEntries(
+            Array.from({ length: 60_000 }, (_, index) => [`token${index}`, ""])
+        );
+        const raw = JSON.stringify(secrets);
+        expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(
+            workspaceFileLimits.maximumTextPreviewBytes
+        );
+        const configPath = Path.join(openClaw.root, "openclaw.json");
+        Fs.writeFileSync(configPath, raw);
+        Fs.chmodSync(configPath, 0o600);
+        const configLocator = {
+            rootId: "openclaw-config",
+            segments: ["openclaw.json"],
+        } as const;
+        const redacted = await openClaw.reader.describe(configLocator);
+        expect(redacted.previewKind).toBe("download-only");
+        if (redacted.sizeBytes === undefined) {
+            throw new TypeError("Expected redacted file size");
+        }
+        expect(redacted.sizeBytes).toBeGreaterThan(
+            workspaceFileLimits.maximumTextPreviewBytes
+        );
+        const redactedResult = await openClaw.reader.read(
+            configLocator,
+            redacted.revision,
+            undefined
+        );
+        expect(redactedResult.previewKind).toBe("download-only");
+        expect(redactedResult.sizeBytes).toBe(redacted.sizeBytes);
     });
 
     test("does not follow a selected file after it is replaced by a symlink", async () => {
