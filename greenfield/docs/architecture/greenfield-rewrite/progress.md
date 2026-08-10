@@ -1274,9 +1274,10 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 - Logs exposes a path-free catalog for exact Dashboard files, exact host text logs, and bounded
   dated OpenClaw files. Descriptor reads enforce owner, mode, link, type, size, and partial-read
   checks before centralized secret redaction; stable line identities derive only from redacted
-  text. Tail and search remain bounded and browser-session-only. The `/logs` route retains validated
-  data through safe failures and queues only fixed reviewed maintenance policy IDs after recent
-  MFA, durable audit, and job admission. The worker periodically probes its managed rotation engine
+  text. Tail and search remain bounded and browser-session-only. The `/logs` route hides cached
+  snapshots after source-availability or read-refresh failures rather than rendering or exporting
+  stale lines, and queues only fixed reviewed maintenance policy IDs after recent MFA, durable
+  audit, and job admission. The worker periodically probes its managed rotation engine
   and only `LoadState` for the four fixed host units, then atomically publishes a private,
   contract-ordered policy-ID projection under project-local log-maintenance state. The web process
   has no process or rotation-state authority: it reads only that bounded `0600` projection and
@@ -1324,6 +1325,13 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   locks all policies while the shared `host.logs` resource is active, follows the requested run
   through realtime invalidation with a bounded polling fallback, and renders only the validated
   terminal summary. Failed detail reads recover without leaving the controls permanently locked.
+- Credential redaction consumes complete scalar, structured, malformed, authorization, and cookie
+  values before search matching. Search inspects at most 4,000 newest physical lines per request,
+  and line identities use framed, redacted generation tuples. Managed copy-truncate publishes a
+  source-specific `rotating` marker before truncation and commits the pending epoch only after file
+  sync; a fresh worker instance safely completes interrupted pre-truncate, empty, and below-threshold
+  regrowth cases while web reads remain fail-closed. Queued maintenance audit rows retain only the
+  public policy target, request identity, and classified settlement metadata.
 - The reviewed `/logs` route plus legacy maintenance status, managed dry-run, and real-run
   operations are now recorded as implemented. `/files`, Docker control, database, Moltbook,
   settings, GitHub, delivery, backup, and the aggregate Phase 5 exit gate remain open.
